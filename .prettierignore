@@ -6,3 +6,7 @@ pnpm-lock.yaml
 playwright-report
 test-results
 *.min.js
+
+# milestone-1 extension code: moved byte-identical, not reformatted here.
+# The TS migration (later wave) brings it onto the shared Prettier config.
+apps/extension/

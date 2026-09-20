@@ -57,7 +57,10 @@ export type LoginResponse = z.infer<typeof loginResponseSchema>;
 
 export const mfaVerifyRequestSchema = z.object({
   mfaTicket: z.string().min(1),
-  code: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code').or(z.string().min(8).max(64)), // digit code or recovery code
+  code: z
+    .string()
+    .regex(/^\d{6}$/, 'Enter the 6-digit code')
+    .or(z.string().min(8).max(64)), // digit code or recovery code
 });
 export type MfaVerifyRequest = z.infer<typeof mfaVerifyRequestSchema>;
 

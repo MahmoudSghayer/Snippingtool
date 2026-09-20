@@ -1,9 +1,10 @@
 import { z } from 'zod';
 
 import { FEATURE_KEYS } from '../constants/plans.js';
+
 import { deviceFingerprintSchema } from './auth.js';
-import { licenseDtoSchema, subscriptionDtoSchema } from './subscriptions.js';
 import { userSettingsSchema } from './settings.js';
+import { licenseDtoSchema, subscriptionDtoSchema } from './subscriptions.js';
 
 /** `POST /extension/bootstrap` — called once on startup (and after login).
  * Returns everything the background service worker needs to decide "am I
