@@ -1,0 +1,27 @@
+{
+  "name": "@sl/config",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared TypeScript / ESLint / Prettier configuration for The Sniper's Ledger monorepo.",
+  "exports": {
+    "./tsconfig.base.json": "./tsconfig.base.json",
+    "./tsconfig.node.json": "./tsconfig.node.json",
+    "./tsconfig.web.json": "./tsconfig.web.json",
+    "./eslint-preset": "./eslint-preset.js",
+    "./prettier": "./prettier.js"
+  },
+  "files": [
+    "tsconfig.base.json",
+    "tsconfig.node.json",
+    "tsconfig.web.json",
+    "eslint-preset.js",
+    "prettier.js"
+  ],
+  "scripts": {
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "echo \"@sl/config: config-only package, nothing to typecheck\"",
+    "build": "echo \"@sl/config: config-only package, nothing to build\"",
+    "test": "echo \"@sl/config: config-only package, nothing to test\""
+  }
+}

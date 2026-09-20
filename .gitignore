@@ -1,4 +1,29 @@
+# dependencies
 node_modules/
+
+# build outputs
 dist/
+build/
+.turbo/
 *.zip
+
+# test / coverage
+coverage/
+playwright-report/
+test-results/
+
+# env
+.env
+.env.*
+!.env.example
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# editors / OS
 .DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea/
