@@ -10,7 +10,12 @@ import { Redis } from 'ioredis';
 
 import 'dotenv/config';
 
-const TEST_REDIS_DB = 15;
+// Mirrors plugins/redis.ts's REDIS_TEST_DB (config/env.ts, default 15) —
+// this file runs outside buildApp()/loadEnv(), so it reads process.env
+// directly rather than fastify.config, but must land on the exact same
+// logical DB plugins/redis.ts will connect every test file's app.redis to,
+// or the FLUSHDB below isolates nothing.
+const TEST_REDIS_DB = Number(process.env.REDIS_TEST_DB ?? 15);
 
 export default async function setup() {
   process.env.NODE_ENV ??= 'test';
