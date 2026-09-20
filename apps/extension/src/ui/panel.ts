@@ -213,10 +213,24 @@ export function createPanel(doc: Document = document): Panel {
       }
       el.removeAttribute('hidden');
       const max = Math.max(...prices, 1);
-      el.innerHTML = prices
-        .slice(-40)
-        .map((p) => `<i style="height:${Math.max(8, Math.round((p / max) * 100))}%" title="${coins(p)}"></i>`)
-        .join('');
+      // DOM construction, not innerHTML (docs/09-security.md "XSS"): `prices`
+      // ultimately traces back to adapter.ts's passive observation of the EA
+      // page's own JS objects — untrusted input as far as this file is
+      // concerned, even though today it's always numeric. Building nodes and
+      // setting `.style.height`/`.title` directly means a malformed/hostile
+      // value can only fail `Math.max`/`Math.round` (rendering as `NaN%`,
+      // clamped to 8% by the `Math.max(8, …)` below since `Math.max(8, NaN)`
+      // is `NaN`… so also guard the final value), never get parsed as markup.
+      el.replaceChildren(
+        ...prices.slice(-40).map((p) => {
+          const bar = doc.createElement('i');
+          const pct = Math.round((p / max) * 100);
+          const heightPct = Number.isFinite(pct) ? Math.max(8, pct) : 8;
+          bar.style.height = `${heightPct}%`;
+          bar.title = coins(p);
+          return bar;
+        }),
+      );
     },
 
     setSessionPnl(pnl) {
@@ -247,13 +261,23 @@ export function createPanel(doc: Document = document): Panel {
         return;
       }
       sec.removeAttribute('hidden');
-      list.innerHTML = candidates
-        .slice(0, 5)
-        .map(
-          (c) =>
-            `<div class="rankrow"><span>#${c.resourceId} @ ${coins(c.price)}</span><span class="ev">EV ${c.ev >= 0 ? '+' : ''}${coins(c.ev)}</span></div>`,
-        )
-        .join('');
+      // DOM construction, not innerHTML — same reasoning as setSparkline
+      // above: `candidates` traces back to observed EA market data, treated
+      // as untrusted even though it's numeric today. `.textContent` can
+      // never be parsed as markup regardless of what ends up in it.
+      list.replaceChildren(
+        ...candidates.slice(0, 5).map((c) => {
+          const row = doc.createElement('div');
+          row.className = 'rankrow';
+          const left = doc.createElement('span');
+          left.textContent = `#${c.resourceId} @ ${coins(c.price)}`;
+          const right = doc.createElement('span');
+          right.className = 'ev';
+          right.textContent = `EV ${c.ev >= 0 ? '+' : ''}${coins(c.ev)}`;
+          row.append(left, right);
+          return row;
+        }),
+      );
     },
 
     destroy() {

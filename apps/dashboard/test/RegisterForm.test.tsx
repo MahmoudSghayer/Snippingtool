@@ -1,10 +1,10 @@
 import { zodResolver } from '@hookform/resolvers/zod';
+import { Button, FormField, Input, PasswordInput } from '@sl/ui';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useForm } from 'react-hook-form';
 import { describe, expect, it, vi } from 'vitest';
 
-import { Button, FormField, Input, PasswordInput } from '@sl/ui';
 
 import { registerFormSchema } from '@/pages/auth/RegisterPage.js';
 

@@ -142,5 +142,11 @@ describe('admin-toggles module: kill-switch fan-out to online users', () => {
 
     userA.socket.close();
     userB.socket.close();
+    // Give the sockets' 'close' handlers (modules/ws/index.ts's fire-and-
+    // forget markOffline()) a moment to finish their Redis calls before
+    // afterAll() disconnects app.redis — otherwise those in-flight calls
+    // reject with "Connection is closed" as unhandled rejections once this
+    // is the last (only) test in the file.
+    await new Promise((resolve) => setTimeout(resolve, 200));
   });
 });

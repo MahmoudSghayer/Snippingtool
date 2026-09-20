@@ -17,6 +17,7 @@ import { z } from 'zod';
 
 
 import { newId } from '../../lib/ids.js';
+import { INGEST_RATE_LIMIT } from '../../lib/rate-limit-tiers.js';
 
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
@@ -36,6 +37,7 @@ export default fp(
       '/api/v1/activity/batch',
       {
         onRequest: [fastify.authenticate],
+        config: { rateLimit: INGEST_RATE_LIMIT },
         schema: { tags: ['activity'], body: activityIngestBatchSchema, response: { 200: z.object({ accepted: z.number(), deduped: z.number() }) } },
       },
       async (request) => {

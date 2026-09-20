@@ -16,17 +16,21 @@ export const RISK_EVENT_KINDS = [
 ] as const;
 export type RiskEventKind = (typeof RISK_EVENT_KINDS)[number];
 
-export const riskBudgetEventSchema = z.object({
-  deviceId: z.string().uuid(),
-  sessionId: z.string().uuid(),
-  kind: z.enum(RISK_EVENT_KINDS),
-  value: z.number(),
-  threshold: z.number(),
-  occurredAt: z.string().datetime(),
-});
+export const riskBudgetEventSchema = z
+  .object({
+    deviceId: z.string().uuid(),
+    sessionId: z.string().uuid(),
+    kind: z.enum(RISK_EVENT_KINDS),
+    value: z.number(),
+    threshold: z.number(),
+    occurredAt: z.string().datetime(),
+  })
+  .strict();
 export type RiskBudgetEvent = z.infer<typeof riskBudgetEventSchema>;
 
-export const reportRiskBudgetEventsRequestSchema = z.object({
-  events: z.array(riskBudgetEventSchema).min(1).max(200),
-});
+export const reportRiskBudgetEventsRequestSchema = z
+  .object({
+    events: z.array(riskBudgetEventSchema).min(1).max(200),
+  })
+  .strict();
 export type ReportRiskBudgetEventsRequest = z.infer<typeof reportRiskBudgetEventsRequestSchema>;

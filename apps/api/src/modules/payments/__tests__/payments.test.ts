@@ -15,8 +15,10 @@ import { buildApp } from '../../../app.js';
 import { hashSecret } from '../../../lib/crypto.js';
 import { newId } from '../../../lib/ids.js';
 import { reseedPlans } from '../../../test/reseed-reference-data.js';
-import { createCheckoutSession } from '../service.js';
+import { createCheckoutSession, createPortalSession } from '../service.js';
 import { receiveWebhookEvent } from '../webhooks.js';
+
+const LIVE_SUBSCRIPTION_STATUSES = ['trialing', 'active', 'past_due', 'suspended', 'lifetime'];
 
 import type { StripeConfig } from '../stripe-config.js';
 import type { FastifyInstance } from 'fastify';
@@ -318,5 +320,170 @@ describe('payments module', () => {
     expect(suspendAudit).toBeTruthy();
     expect(suspendAudit!.actorType).toBe('system');
     expect(suspendAudit!.actorId).toBeNull();
+  });
+
+  // ---------------------------------------------------------------------
+  // Atomic trial->paid upgrade (checkout.session.completed while trialing)
+  // ---------------------------------------------------------------------
+
+  async function seedTrialingSubscription(app: FastifyInstance, userId: string) {
+    const trialPlan = await app.db.query.plans.findFirst({ where: eq(plans.code, 'trial') });
+    const [trialSub] = await app.db
+      .insert(subscriptions)
+      .values({
+        id: newId(),
+        userId,
+        planId: trialPlan!.id,
+        status: 'trialing',
+        currentPeriodStart: new Date(),
+        currentPeriodEnd: null,
+        trialEndsAt: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000),
+        cancelAtPeriodEnd: false,
+        autoRenew: false,
+        source: 'manual',
+      })
+      .returning();
+    const [trialLicense] = await app.db
+      .insert(licenses)
+      .values({
+        id: newId(),
+        subscriptionId: trialSub!.id,
+        userId,
+        keyHash: `hash_${newId()}`,
+        keyPrefix: 'SL-TRIL',
+        status: 'active',
+        maxDevices: 1,
+        expiresAt: trialSub!.trialEndsAt,
+      })
+      .returning();
+    return { trialSub: trialSub!, trialLicense: trialLicense! };
+  }
+
+  function trialUpgradeEvent(eventId: string, userId: string): Stripe.Event {
+    return {
+      id: eventId,
+      type: 'checkout.session.completed',
+      data: {
+        object: {
+          id: `cs_${eventId}`,
+          mode: 'subscription',
+          amount_total: 999,
+          currency: 'usd',
+          customer: 'cus_trial_upgrade_shared',
+          subscription: `sub_${eventId}`,
+          metadata: { userId, planCode: 'pro', couponId: '', couponCode: '' },
+        },
+      },
+    } as unknown as Stripe.Event;
+  }
+
+  it('checkout.session.completed for a user with a live trial ends the trial atomically, activates the paid plan, and issues exactly one live subscription + license', async () => {
+    const userId = await createVerifiedUser(app, 'trial-upgrade@example.com');
+    const proPlan = await app.db.query.plans.findFirst({ where: eq(plans.code, 'pro') });
+    const { trialSub, trialLicense } = await seedTrialingSubscription(app, userId);
+
+    const result = await receiveWebhookEvent(app.db, app.redis, makeFakeStripe(), trialUpgradeEvent('evt_trial_upgrade_1', userId));
+    expect(result.alreadyProcessed).toBe(false);
+
+    const allSubs = await app.db.query.subscriptions.findMany({ where: eq(subscriptions.userId, userId) });
+    expect(allSubs).toHaveLength(2); // the original trial row + the new paid row
+
+    const trialAfter = allSubs.find((s) => s.id === trialSub.id)!;
+    expect(trialAfter.status).toBe('canceled');
+    expect(trialAfter.trialEndsAt).toBeNull();
+    expect(trialAfter.endedAt).toBeTruthy();
+
+    const paidSub = allSubs.find((s) => s.id !== trialSub.id)!;
+    expect(paidSub.status).toBe('active');
+    expect(paidSub.planId).toBe(proPlan!.id);
+
+    // Exactly one LIVE subscription — the trial row no longer counts.
+    const liveSubs = allSubs.filter((s) => LIVE_SUBSCRIPTION_STATUSES.includes(s.status));
+    expect(liveSubs).toHaveLength(1);
+    expect(liveSubs[0]!.id).toBe(paidSub.id);
+
+    const trialLicenseAfter = await app.db.query.licenses.findFirst({ where: eq(licenses.id, trialLicense.id) });
+    expect(trialLicenseAfter!.status).toBe('revoked');
+    expect(trialLicenseAfter!.revokedReason).toBe('upgraded_to_paid');
+
+    const paidLicense = await app.db.query.licenses.findFirst({ where: eq(licenses.subscriptionId, paidSub.id) });
+    expect(paidLicense).toBeTruthy();
+    expect(paidLicense!.status).toBe('active');
+
+    const userAfter = await app.db.query.users.findFirst({ where: eq(users.id, userId) });
+    expect(userAfter!.stripeCustomerId).toBe('cus_trial_upgrade_shared');
+  });
+
+  it('duplicate delivery of the same trial-upgrade checkout event stays idempotent', async () => {
+    const userId = await createVerifiedUser(app, 'trial-upgrade-dup@example.com');
+    const { trialSub } = await seedTrialingSubscription(app, userId);
+    const event = trialUpgradeEvent('evt_trial_upgrade_dup_1', userId);
+
+    const first = await receiveWebhookEvent(app.db, app.redis, makeFakeStripe(), event);
+    expect(first.alreadyProcessed).toBe(false);
+    const second = await receiveWebhookEvent(app.db, app.redis, makeFakeStripe(), event);
+    expect(second.alreadyProcessed).toBe(true);
+
+    const allSubs = await app.db.query.subscriptions.findMany({ where: eq(subscriptions.userId, userId) });
+    expect(allSubs).toHaveLength(2); // still just the ended trial + the one paid row, not a second paid row
+
+    const liveSubs = allSubs.filter((s) => LIVE_SUBSCRIPTION_STATUSES.includes(s.status));
+    expect(liveSubs).toHaveLength(1);
+
+    const trialAfter = allSubs.find((s) => s.id === trialSub.id)!;
+    expect(trialAfter.status).toBe('canceled');
+
+    const licenseRows = await app.db.query.licenses.findMany({ where: eq(licenses.userId, userId) });
+    expect(licenseRows.filter((l) => l.status === 'active')).toHaveLength(1);
+  });
+
+  // ---------------------------------------------------------------------
+  // Customer Portal: stripe_customer_id lookup-first, email fallback +
+  // persistence (docs/05-subscriptions.md §5, migrations/0025)
+  // ---------------------------------------------------------------------
+
+  it('createPortalSession looks up by stripe_customer_id first, skipping the email lookup entirely', async () => {
+    const userId = await createVerifiedUser(app, 'portal-has-customer@example.com');
+    await app.db.update(users).set({ stripeCustomerId: 'cus_already_known' }).where(eq(users.id, userId));
+
+    let listCalls = 0;
+    const stripe = makeFakeStripe({
+      customers: { list: async () => { listCalls += 1; return { data: [] }; }, create: async () => ({ id: 'cus_should_not_be_created' }) },
+      billingPortal: { sessions: { create: async (params: { customer: string }) => ({ url: `https://billing.stripe.com/session/${params.customer}` }) } },
+    });
+
+    const result = await createPortalSession(stripe, app.db, {
+      userId,
+      email: 'portal-has-customer@example.com',
+      stripeCustomerId: 'cus_already_known',
+      returnUrl: 'https://app.example.com/account',
+    });
+
+    expect(listCalls).toBe(0);
+    expect(result.portalUrl).toBe('https://billing.stripe.com/session/cus_already_known');
+  });
+
+  it('createPortalSession falls back to an email lookup when stripe_customer_id is null, and persists what it finds', async () => {
+    const userId = await createVerifiedUser(app, 'portal-no-customer@example.com');
+
+    const stripe = makeFakeStripe({
+      customers: {
+        list: async () => ({ data: [{ id: 'cus_found_by_email' }] }),
+        create: async () => ({ id: 'cus_should_not_be_created' }),
+      },
+      billingPortal: { sessions: { create: async (params: { customer: string }) => ({ url: `https://billing.stripe.com/session/${params.customer}` }) } },
+    });
+
+    const result = await createPortalSession(stripe, app.db, {
+      userId,
+      email: 'portal-no-customer@example.com',
+      stripeCustomerId: null,
+      returnUrl: 'https://app.example.com/account',
+    });
+
+    expect(result.portalUrl).toBe('https://billing.stripe.com/session/cus_found_by_email');
+
+    const userAfter = await app.db.query.users.findFirst({ where: eq(users.id, userId) });
+    expect(userAfter!.stripeCustomerId).toBe('cus_found_by_email');
   });
 });

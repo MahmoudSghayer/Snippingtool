@@ -122,7 +122,6 @@ const indexRoute = createRoute({
 
 const adminLayoutRoute = createRoute({
   getParentRoute: () => appLayoutRoute,
-  id: 'admin',
   path: '/admin',
   beforeLoad: () => {
     if (useAuthStore.getState().admin === null) {

@@ -2,13 +2,16 @@
 // (happy path + trial-abuse protection via email and via device
 // fingerprint), POST /subscriptions/cancel, POST /subscriptions/resume.
 
-import { flags } from '@sl/db';
+import { flags, users } from '@sl/db';
 import { resetDatabase } from '@sl/db/test-utils';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { buildApp } from '../../../app.js';
+import { hashSecret } from '../../../lib/crypto.js';
+import { newId } from '../../../lib/ids.js';
 import { reseedPlans } from '../../../test/reseed-reference-data.js';
+import { startTrial } from '../service.js';
 
 import type { FastifyInstance } from 'fastify';
 
@@ -200,6 +203,61 @@ describe('subscriptions module', () => {
     const flagRows = await app.db.query.flags.findMany({ where: eq(flags.userId, secondUserId) });
     expect(flagRows).toHaveLength(1);
     expect((flagRows[0]!.evidence as Record<string, unknown>).detectors).toContain('device');
+  });
+
+  it('trial abuse: denies a trial when the requester already shares a stripe_customer_id with another account that has had a trial (4th vector)', async () => {
+    // userA: a real trial via the HTTP route, then a persisted
+    // stripe_customer_id (order doesn't matter for userA — its token is
+    // never reused afterwards, so bumping row_version via the UPDATE below
+    // has no effect on this test).
+    const ipA = nextIp();
+    const tokenA = await registerVerifyLogin('stripe-customer-a@example.com', ipA, 'fp-stripecust-a-00000001');
+    const userAId = (await app.db.query.users.findFirst({ where: eq(users.email, 'stripe-customer-a@example.com') }))!.id;
+    const startA = await app.inject({
+      method: 'POST',
+      url: '/api/v1/subscriptions/trial',
+      remoteAddress: ipA,
+      headers: { authorization: `Bearer ${tokenA}` },
+    });
+    expect(startA.statusCode).toBe(201);
+    await app.db.update(users).set({ stripeCustomerId: 'cus_shared_between_accounts' }).where(eq(users.id, userAId));
+
+    // userB: a second, otherwise-unrelated account (different email/device/
+    // IP — nothing else overlaps). Its own users.stripe_customer_id can
+    // never actually equal userA's at rest (users_stripe_customer_id_unique
+    // is a real uniqueness constraint: migrations/0025, packages/db/test
+    // verifies the collision is rejected) — by design, at most one live
+    // user ever legitimately holds a given Stripe customer id. This test
+    // therefore calls `startTrial` directly with that id, the same
+    // service-level pattern payments/__tests__/payments.test.ts uses for
+    // createCheckoutSession/receiveWebhookEvent, standing in for "userB's
+    // own stripe_customer_id field happened to already equal userA's" (an
+    // edge case the DB constraint makes rare but not impossible to reach in
+    // application code — e.g. a review of pending Stripe writes, or a data
+    // fix — which is exactly the defense-in-depth this vector is for).
+    const userBId = newId();
+    await app.db.insert(users).values({
+      id: userBId,
+      email: 'stripe-customer-b@example.com',
+      passwordHash: await hashSecret('irrelevant-password-123'),
+      emailVerifiedAt: new Date(),
+    });
+
+    const result = await startTrial(app.db, app.redis, {
+      userId: userBId,
+      email: 'stripe-customer-b@example.com',
+      fingerprintHash: null,
+      ip: null,
+      stripeCustomerId: 'cus_shared_between_accounts',
+    });
+    expect(result.blocked).toBe(true);
+    if (result.blocked) {
+      expect(result.matches.map((m) => m.detector)).toContain('stripe_customer');
+    }
+
+    const flagRows = await app.db.query.flags.findMany({ where: eq(flags.userId, userBId) });
+    expect(flagRows).toHaveLength(1);
+    expect((flagRows[0]!.evidence as Record<string, unknown>).detectors).toContain('stripe_customer');
   });
 
   it('does NOT flag two different accounts sharing an IP/device when only one ever had a trial (false-positive avoidance)', async () => {

@@ -68,7 +68,7 @@ export const checkoutRequestSchema = z.object({
   successUrl: z.string().url(),
   cancelUrl: z.string().url(),
   couponCode: z.string().min(1).max(40).optional(),
-});
+}).strict();
 export type CheckoutRequest = z.infer<typeof checkoutRequestSchema>;
 
 export const checkoutResponseSchema = z.object({
@@ -100,7 +100,7 @@ export const adminGrantSubscriptionRequestSchema = z.object({
   planCode: z.enum(PLAN_CODES),
   periodDays: z.number().int().positive().nullable(), // null for lifetime plans
   reason: z.string().min(1).max(1000),
-});
+}).strict();
 export type AdminGrantSubscriptionRequest = z.infer<typeof adminGrantSubscriptionRequestSchema>;
 
 export const COUPON_TYPES = ['percent', 'fixed', 'free_days', 'lifetime'] as const;
@@ -118,7 +118,7 @@ export const createCouponRequestSchema = z.object({
   maxRedemptions: z.number().int().positive().nullable(),
   expiresAt: z.string().datetime().nullable(),
   reason: z.string().min(1).max(1000),
-});
+}).strict();
 export type CreateCouponRequest = z.infer<typeof createCouponRequestSchema>;
 
 export const updateCouponRequestSchema = z.object({
@@ -126,7 +126,7 @@ export const updateCouponRequestSchema = z.object({
   maxRedemptions: z.number().int().positive().nullable().optional(),
   expiresAt: z.string().datetime().nullable().optional(),
   reason: z.string().min(1).max(1000),
-});
+}).strict();
 export type UpdateCouponRequest = z.infer<typeof updateCouponRequestSchema>;
 
 export const couponDtoSchema = z.object({
@@ -148,7 +148,7 @@ export type CouponDto = z.infer<typeof couponDtoSchema>;
 export const couponValidateRequestSchema = z.object({
   code: z.string().min(1).max(40),
   planCode: z.enum(PLAN_CODES),
-});
+}).strict();
 export type CouponValidateRequest = z.infer<typeof couponValidateRequestSchema>;
 
 /** `POST /coupons/validate` response. `discountPreview` is a human-readable
@@ -184,7 +184,7 @@ export const planCreateRequestSchema = z.object({
   stripePriceId: z.string().min(1).max(200).nullable().optional(),
   sortOrder: z.number().int().default(0),
   reason: z.string().min(1).max(1000),
-});
+}).strict();
 export type PlanCreateRequest = z.infer<typeof planCreateRequestSchema>;
 
 export const planUpdateRequestSchema = z.object({
@@ -197,7 +197,7 @@ export const planUpdateRequestSchema = z.object({
   isActive: z.boolean().optional(),
   sortOrder: z.number().int().optional(),
   reason: z.string().min(1).max(1000),
-});
+}).strict();
 export type PlanUpdateRequest = z.infer<typeof planUpdateRequestSchema>;
 
 // ---------------------------------------------------------------------------
@@ -229,16 +229,20 @@ export const entitlementSnapshotSchema = z.object({
 });
 export type EntitlementSnapshotDto = z.infer<typeof entitlementSnapshotSchema>;
 
-export const licenseValidateRequestSchema = z.object({
-  licenseKey: z.string().min(1).max(40),
-  device: z.object({
-    fingerprint: z.string().min(16).max(256),
-    name: z.string().min(1).max(120).optional(),
-    browser: z.string().min(1).max(60).optional(),
-    os: z.string().min(1).max(60).optional(),
-    extensionVersion: z.string().min(1).max(30).optional(),
-  }),
-});
+export const licenseValidateRequestSchema = z
+  .object({
+    licenseKey: z.string().min(1).max(40),
+    device: z
+      .object({
+        fingerprint: z.string().min(16).max(256),
+        name: z.string().min(1).max(120).optional(),
+        browser: z.string().min(1).max(60).optional(),
+        os: z.string().min(1).max(60).optional(),
+        extensionVersion: z.string().min(1).max(30).optional(),
+      })
+      .strict(),
+  })
+  .strict();
 export type LicenseValidateRequest = z.infer<typeof licenseValidateRequestSchema>;
 
 export const licenseValidateResponseSchema = z.object({
@@ -261,22 +265,22 @@ export type RegenerateLicenseResponse = z.infer<typeof regenerateLicenseResponse
 export const adminExtendSubscriptionRequestSchema = z.object({
   periodDays: z.number().int().positive(),
   reason: z.string().min(1).max(1000),
-});
+}).strict();
 export type AdminExtendSubscriptionRequest = z.infer<typeof adminExtendSubscriptionRequestSchema>;
 
 export const adminSuspendSubscriptionRequestSchema = z.object({
   reason: z.string().min(1).max(1000),
-});
+}).strict();
 export type AdminSuspendSubscriptionRequest = z.infer<typeof adminSuspendSubscriptionRequestSchema>;
 
 export const adminCancelSubscriptionRequestSchema = z.object({
   reason: z.string().min(1).max(1000),
   immediate: z.boolean().default(false),
-});
+}).strict();
 export type AdminCancelSubscriptionRequest = z.infer<typeof adminCancelSubscriptionRequestSchema>;
 
 export const adminDeviceLimitOverrideRequestSchema = z.object({
   maxDevices: z.number().int().min(1).max(10),
   reason: z.string().min(1).max(1000),
-});
+}).strict();
 export type AdminDeviceLimitOverrideRequest = z.infer<typeof adminDeviceLimitOverrideRequestSchema>;

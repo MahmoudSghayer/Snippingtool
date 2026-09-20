@@ -21,6 +21,7 @@ import { recordAudit } from '../../lib/audit.js';
 import { AppErrors } from '../../lib/errors.js';
 import { newId } from '../../lib/ids.js';
 import { decodeCursor, encodeCursor } from '../../lib/pagination.js';
+import { ADMIN_RATE_LIMIT } from '../../lib/rate-limit-tiers.js';
 import { publishToUser } from '../../ws/publish.js';
 import { revokeAllUserSessions, bumpUserVersion } from '../auth/repo.js';
 
@@ -145,6 +146,7 @@ export default fp(
       '/api/v1/admin/users/:id',
       {
         onRequest: [fastify.requirePermission('users.write')],
+        config: { rateLimit: ADMIN_RATE_LIMIT },
         schema: { tags: ['admin'], params: z.object({ id: z.string().uuid() }), body: updateProfileRequestSchema, response: { 200: userDtoSchema } },
       },
       async (request) => {
@@ -168,6 +170,7 @@ export default fp(
       '/api/v1/admin/users/:id/suspend',
       {
         onRequest: [fastify.requirePermission('users.suspend')],
+        config: { rateLimit: ADMIN_RATE_LIMIT },
         schema: { tags: ['admin'], params: z.object({ id: z.string().uuid() }), body: adminSuspendUserRequestSchema, response: { 200: userDtoSchema } },
       },
       async (request) => {
@@ -189,6 +192,7 @@ export default fp(
       '/api/v1/admin/users/:id/unsuspend',
       {
         onRequest: [fastify.requirePermission('users.suspend')],
+        config: { rateLimit: ADMIN_RATE_LIMIT },
         schema: { tags: ['admin'], params: z.object({ id: z.string().uuid() }), body: z.object({ reason: z.string().min(1).max(1000) }), response: { 200: userDtoSchema } },
       },
       async (request) => {
@@ -208,6 +212,7 @@ export default fp(
       '/api/v1/admin/users/:id/reset-password',
       {
         onRequest: [fastify.requirePermission('users.reset_password')],
+        config: { rateLimit: ADMIN_RATE_LIMIT },
         schema: { tags: ['admin'], params: z.object({ id: z.string().uuid() }), body: z.object({ reason: z.string().min(1).max(1000) }), response: { 200: z.object({ sent: z.literal(true) }) } },
       },
       async (request) => {
@@ -239,6 +244,7 @@ export default fp(
       '/api/v1/admin/users/:id/force-logout',
       {
         onRequest: [fastify.requirePermission('users.force_logout')],
+        config: { rateLimit: ADMIN_RATE_LIMIT },
         schema: { tags: ['admin'], params: z.object({ id: z.string().uuid() }), body: z.object({ reason: z.string().min(1).max(1000) }), response: { 200: z.object({ ok: z.literal(true) }) } },
       },
       async (request) => {

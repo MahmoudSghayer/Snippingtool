@@ -11,6 +11,8 @@ import { sql } from 'drizzle-orm';
 import fp from 'fastify-plugin';
 import { z } from 'zod';
 
+import { HEALTH_EXEMPT_ROUTE_CONFIG } from '../../lib/rate-limit-tiers.js';
+
 import type { FastifyInstance } from 'fastify';
 
 export default fp(
@@ -24,13 +26,17 @@ export default fp(
 
     fastify.get(
       '/health/live',
-      { schema: { tags: ['health'], response: { 200: z.object({ status: z.literal('ok') }) } } },
+      {
+        config: HEALTH_EXEMPT_ROUTE_CONFIG,
+        schema: { tags: ['health'], response: { 200: z.object({ status: z.literal('ok') }) } },
+      },
       async () => ({ status: 'ok' as const }),
     );
 
     fastify.get(
       '/health/ready',
       {
+        config: HEALTH_EXEMPT_ROUTE_CONFIG,
         schema: {
           tags: ['health'],
           response: {

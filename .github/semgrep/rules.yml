@@ -40,8 +40,6 @@ rules:
       - metavariable-regex:
           metavariable: $VAR
           regex: (?i)(secret|password|apikey|api_key|privatekey|private_key)
-      - metavariable-comparison:
-          comparison: len(str(value)) > 8
 
   - id: no-hardcoded-secret-property
     languages: [typescript, javascript]
@@ -55,8 +53,6 @@ rules:
       - metavariable-regex:
           metavariable: $KEY
           regex: (?i)(secret|password|apikey|api_key|privatekey|private_key)
-      - metavariable-comparison:
-          comparison: len(str(value)) > 8
 
   - id: no-disabled-tls-verification
     languages: [typescript, javascript]

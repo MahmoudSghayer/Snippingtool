@@ -27,14 +27,18 @@ export type BanDto = z.infer<typeof banDtoSchema>;
 /** Reuses `adminBanUserRequestSchema` from `schemas/users.ts` so
  * `/admin/users/:id/ban` (core `admin-users` module) and `/admin/bans`
  * (this module) accept the exact same request shape. */
-export const createBanRequestSchema = adminBanUserRequestSchema.extend({
-  userId: z.string().uuid().optional(), // required when type = 'account', ignored otherwise
-});
+export const createBanRequestSchema = adminBanUserRequestSchema
+  .extend({
+    userId: z.string().uuid().optional(), // required when type = 'account', ignored otherwise
+  })
+  .strict();
 export type CreateBanRequest = z.infer<typeof createBanRequestSchema>;
 
-export const liftBanRequestSchema = z.object({
-  reason: z.string().min(1).max(1000),
-});
+export const liftBanRequestSchema = z
+  .object({
+    reason: z.string().min(1).max(1000),
+  })
+  .strict();
 export type LiftBanRequest = z.infer<typeof liftBanRequestSchema>;
 
 /** What a login/auth check gets back from `checkBans()` — the auth module's
@@ -70,16 +74,20 @@ export const flagDtoSchema = z.object({
 });
 export type FlagDto = z.infer<typeof flagDtoSchema>;
 
-export const adminFlagListQuerySchema = z.object({
-  status: z.enum(FLAG_STATUSES).optional(),
-  kind: z.enum(FLAG_KINDS).optional(),
-  severity: z.enum(FLAG_SEVERITIES).optional(),
-  userId: z.string().uuid().optional(),
-});
+export const adminFlagListQuerySchema = z
+  .object({
+    status: z.enum(FLAG_STATUSES).optional(),
+    kind: z.enum(FLAG_KINDS).optional(),
+    severity: z.enum(FLAG_SEVERITIES).optional(),
+    userId: z.string().uuid().optional(),
+  })
+  .strict();
 export type AdminFlagListQuery = z.infer<typeof adminFlagListQuerySchema>;
 
-export const reviewFlagRequestSchema = z.object({
-  status: z.enum(['reviewed', 'dismissed']),
-  reason: z.string().min(1).max(1000),
-});
+export const reviewFlagRequestSchema = z
+  .object({
+    status: z.enum(['reviewed', 'dismissed']),
+    reason: z.string().min(1).max(1000),
+  })
+  .strict();
 export type ReviewFlagRequest = z.infer<typeof reviewFlagRequestSchema>;

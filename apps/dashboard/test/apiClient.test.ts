@@ -13,24 +13,29 @@ describe('api client CSRF + 401 handling', () => {
   beforeEach(() => {
     document.cookie = 'sl_csrf=test-csrf-token; path=/';
     fetchMock = vi.fn(async () => new Response(JSON.stringify({}), { status: 200, headers: { 'Content-Type': 'application/json' } }));
-    vi.stubGlobal('fetch', fetchMock);
   });
 
   afterEach(() => {
     document.cookie = 'sl_csrf=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
-    vi.unstubAllGlobals();
     setUnauthorizedHandler(() => {});
   });
 
+  // `fetch` is passed per-call (openapi-fetch's own override hook) rather
+  // than stubbed globally: `api` is a module-level singleton created once at
+  // import time, before any test's `beforeEach` runs, and openapi-fetch
+  // resolves `globalThis.fetch` at client-creation time — a later
+  // `vi.stubGlobal('fetch', ...)` in this file was confirmed (during
+  // authoring) to arrive too late to be seen by that already-created client.
+
   it('attaches the x-csrf-token header on a mutating request', async () => {
-    await api.POST('/api/v1/auth/logout', { body: {} });
+    await api.POST('/api/v1/auth/logout', { body: {}, fetch: fetchMock });
     expect(fetchMock).toHaveBeenCalledOnce();
     const request = fetchMock.mock.calls[0]![0] as Request;
     expect(request.headers.get('x-csrf-token')).toBe('test-csrf-token');
   });
 
   it('does not attach x-csrf-token on a GET request', async () => {
-    await api.GET('/api/v1/users/me');
+    await api.GET('/api/v1/users/me', { fetch: fetchMock });
     const request = fetchMock.mock.calls[0]![0] as Request;
     expect(request.headers.get('x-csrf-token')).toBeNull();
   });
@@ -39,7 +44,7 @@ describe('api client CSRF + 401 handling', () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ code: 'AUTH_TOKEN_EXPIRED', message: 'expired' }), { status: 401 }));
     const handler = vi.fn();
     setUnauthorizedHandler(handler);
-    await api.GET('/api/v1/users/me');
+    await api.GET('/api/v1/users/me', { fetch: fetchMock });
     expect(handler).toHaveBeenCalledOnce();
   });
 
@@ -49,6 +54,7 @@ describe('api client CSRF + 401 handling', () => {
     setUnauthorizedHandler(handler);
     await api.POST('/api/v1/auth/login', {
       body: { email: 'a@example.com', password: 'x', device: { fingerprint: 'a'.repeat(20) } },
+      fetch: fetchMock,
     });
     expect(handler).not.toHaveBeenCalled();
   });

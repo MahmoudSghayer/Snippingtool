@@ -13,7 +13,7 @@ import {
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 
-import { verifySecret, hashSecret, randomToken, fastHash, encryptTotpSecret, decryptTotpSecret } from '../../lib/crypto.js';
+import { verifySecret, hashSecret, randomToken, fastHash, encryptTotpSecret, decryptTotpSecret, reencryptTotpSecret } from '../../lib/crypto.js';
 import { findOrRegisterDevice } from '../../lib/devices.js';
 import { AppErrors } from '../../lib/errors.js';
 import { recordSuspiciousIpIfAny, upsertIpActivity } from '../../lib/ip-activity.js';
@@ -279,7 +279,8 @@ export async function mfaVerify(
     throw AppErrors.tokenInvalid('Too many attempts. Please log in again.');
   }
 
-  const secret = decryptTotpSecret(Buffer.from(user.totpSecretEnc), ctx.cookieSecret);
+  const secretBlob = Buffer.from(user.totpSecretEnc);
+  const secret = decryptTotpSecret(secretBlob, ctx.cookieSecret);
   let valid = /^\d{6}$/.test(input.code) && verifyTotpCode(secret, input.code);
 
   if (!valid) {
@@ -288,8 +289,27 @@ export async function mfaVerify(
 
   if (!valid) throw AppErrors.mfaInvalid();
 
+  // Key rotation (docs/09-security.md "Key rotation"): opportunistically
+  // migrate this row onto the current active key id on a successful read —
+  // a no-op (same bytes back) unless an operator has rotated
+  // TOTP_ENCRYPTION_ACTIVE_KEY_ID since this row was last written.
+  await maybeReencryptTotpSecret(ctx, user.id, secretBlob);
+
   await ctx.redis.del(verifyTicketKey(input.mfaTicket), attemptsKey);
   return completeLogin(ctx, user, pending.device, pending.ip, pending.userAgent);
+}
+
+/** See `reencryptTotpSecret` in lib/crypto.ts. Best-effort — never blocks or
+ * fails the login/disable flow it's called from. */
+async function maybeReencryptTotpSecret(ctx: AuthContext, userId: string, blob: Buffer): Promise<void> {
+  try {
+    const rotated = reencryptTotpSecret(blob, ctx.cookieSecret);
+    if (!rotated.equals(blob)) {
+      await ctx.db.update(users).set({ totpSecretEnc: rotated }).where(eq(users.id, userId));
+    }
+  } catch (err) {
+    ctx.log?.warn({ err }, 'TOTP secret key-rotation re-encrypt failed (non-fatal)');
+  }
 }
 
 async function tryConsumeRecoveryCode(db: Database, userId: string, code: string): Promise<boolean> {

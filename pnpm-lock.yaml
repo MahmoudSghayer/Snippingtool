@@ -399,6 +399,9 @@ importers:
       otplib:
         specifier: ^12.0.1
         version: 12.0.1
+      postgres:
+        specifier: ^3.4.5
+        version: 3.4.9
       tailwindcss:
         specifier: ^4.0.0
         version: 4.3.3

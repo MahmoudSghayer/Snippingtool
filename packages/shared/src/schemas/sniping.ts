@@ -19,20 +19,24 @@ export type SnipeOutcome = (typeof SNIPE_OUTCOMES)[number];
  * `engine/autobuyer.ts` after `adapter.act()` returns (or after the governor
  * blocks the attempt). Never includes listing details beyond the ids/prices
  * the user already saw in the app's own UI. */
-export const snipingAttemptSchema = z.object({
-  resourceId: z.number().int().positive(),
-  tradeId: z.string().min(1).max(64).optional(), // absent when blocked pre-attempt
-  targetPrice: z.number().int().min(0),
-  listedPrice: z.number().int().min(0).nullable(),
-  outcome: z.enum(SNIPE_OUTCOMES),
-  latencyMs: z.number().int().min(0).nullable(),
-  errorCode: z.string().min(1).max(80).nullable(),
-  occurredAt: z.string().datetime(),
-  deviceId: z.string().uuid(),
-});
+export const snipingAttemptSchema = z
+  .object({
+    resourceId: z.number().int().positive(),
+    tradeId: z.string().min(1).max(64).optional(), // absent when blocked pre-attempt
+    targetPrice: z.number().int().min(0),
+    listedPrice: z.number().int().min(0).nullable(),
+    outcome: z.enum(SNIPE_OUTCOMES),
+    latencyMs: z.number().int().min(0).nullable(),
+    errorCode: z.string().min(1).max(80).nullable(),
+    occurredAt: z.string().datetime(),
+    deviceId: z.string().uuid(),
+  })
+  .strict();
 export type SnipingAttempt = z.infer<typeof snipingAttemptSchema>;
 
-export const reportSnipingAttemptsRequestSchema = z.object({
-  attempts: z.array(snipingAttemptSchema).min(1).max(200),
-});
+export const reportSnipingAttemptsRequestSchema = z
+  .object({
+    attempts: z.array(snipingAttemptSchema).min(1).max(200),
+  })
+  .strict();
 export type ReportSnipingAttemptsRequest = z.infer<typeof reportSnipingAttemptsRequestSchema>;

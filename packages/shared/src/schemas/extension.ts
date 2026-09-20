@@ -10,11 +10,13 @@ import { licenseDtoSchema, subscriptionDtoSchema } from './subscriptions.js';
  * Returns everything the background service worker needs to decide "am I
  * allowed to run" without another round trip: entitlements, feature flags,
  * and the user's settings document. */
-export const bootstrapRequestSchema = z.object({
-  device: deviceFingerprintSchema,
-  extensionVersion: z.string().min(1).max(30),
-  buildTarget: z.enum(['ledger', 'ledger-auto']),
-});
+export const bootstrapRequestSchema = z
+  .object({
+    device: deviceFingerprintSchema,
+    extensionVersion: z.string().min(1).max(30),
+    buildTarget: z.enum(['ledger', 'ledger-auto']),
+  })
+  .strict();
 export type BootstrapRequest = z.infer<typeof bootstrapRequestSchema>;
 
 export const bootstrapResponseSchema = z.object({
@@ -36,11 +38,13 @@ export type BootstrapResponse = z.infer<typeof bootstrapResponseSchema>;
 /** `POST /extension/heartbeat` — every 10 minutes via an MV3 `alarms` tick
  * (never a `setInterval` in the service worker). Cheap refresh of the same
  * shape bootstrap returns, plus lets the server push a kill switch. */
-export const heartbeatRequestSchema = z.object({
-  deviceId: z.string().uuid(),
-  extensionVersion: z.string().min(1).max(30),
-  engineState: z.enum(['idle', 'running', 'paused', 'halted']),
-});
+export const heartbeatRequestSchema = z
+  .object({
+    deviceId: z.string().uuid(),
+    extensionVersion: z.string().min(1).max(30),
+    engineState: z.enum(['idle', 'running', 'paused', 'halted']),
+  })
+  .strict();
 export type HeartbeatRequest = z.infer<typeof heartbeatRequestSchema>;
 
 export const heartbeatResponseSchema = bootstrapResponseSchema.omit({ userId: true });
@@ -50,33 +54,41 @@ export type HeartbeatResponse = z.infer<typeof heartbeatResponseSchema>;
  * (the extension simply stops sending if `telemetryOptOut` is set — this
  * endpoint is never the enforcement point, `activity`/`sniping`/`trades`
  * ingest is). Covers version/health telemetry only. */
-export const telemetryEventSchema = z.object({
-  name: z.string().min(1).max(80),
-  occurredAt: z.string().datetime(),
-  data: z.record(z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
-});
+export const telemetryEventSchema = z
+  .object({
+    name: z.string().min(1).max(80),
+    occurredAt: z.string().datetime(),
+    data: z.record(z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
+  })
+  .strict();
 export type TelemetryEvent = z.infer<typeof telemetryEventSchema>;
 
-export const telemetryFlushRequestSchema = z.object({
-  deviceId: z.string().uuid(),
-  events: z.array(telemetryEventSchema).min(1).max(500),
-});
+export const telemetryFlushRequestSchema = z
+  .object({
+    deviceId: z.string().uuid(),
+    events: z.array(telemetryEventSchema).min(1).max(500),
+  })
+  .strict();
 export type TelemetryFlushRequest = z.infer<typeof telemetryFlushRequestSchema>;
 
 /** `POST /extension/errors` — the ring-buffer flush from `lib/errors.ts`. */
-export const extensionErrorReportSchema = z.object({
-  deviceId: z.string().uuid(),
-  extensionVersion: z.string().min(1).max(30),
-  errors: z
-    .array(
-      z.object({
-        message: z.string().min(1).max(2000),
-        stack: z.string().max(8000).optional(),
-        context: z.string().min(1).max(120).optional(),
-        occurredAt: z.string().datetime(),
-      }),
-    )
-    .min(1)
-    .max(100),
-});
+export const extensionErrorReportSchema = z
+  .object({
+    deviceId: z.string().uuid(),
+    extensionVersion: z.string().min(1).max(30),
+    errors: z
+      .array(
+        z
+          .object({
+            message: z.string().min(1).max(2000),
+            stack: z.string().max(8000).optional(),
+            context: z.string().min(1).max(120).optional(),
+            occurredAt: z.string().datetime(),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(100),
+  })
+  .strict();
 export type ExtensionErrorReport = z.infer<typeof extensionErrorReportSchema>;

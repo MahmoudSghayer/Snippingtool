@@ -272,56 +272,40 @@ read-only until a fresh bootstrap/heartbeat succeeds.
 `POST /subscriptions/trial` denies a trial (`403 TRIAL_ABUSE_DETECTED`) and
 writes a `flags` row (`kind = 'trial_abuse'`, `severity` per table below,
 `evidence` = the exact match(es) that triggered the denial) whenever **any**
-of these three checks matches an existing trial within the lookback window.
-All three run on every trial request, not short-circuited at the first
+of these four checks matches an existing trial within the lookback window.
+All four run on every trial request, not short-circuited at the first
 match, so `evidence` can record every reason at once (useful for the
-abuse-review queue — a request that trips two heuristics at once is a
+abuse-review queue — a request that trips several heuristics at once is a
 stronger signal than one that trips one).
 
 | # | Check | Key | Window | Data source |
 |---|---|---|---|---|
-| 1 | **Email** | `normaliseEmailForAbuseCheck(email)` (`@sl/shared` — gmail dot/plus stripping + domain lowercasing) | unbounded (no lookback — a normalised email that has ever had a trial never gets a second one) | Every `users.email` with a subscription whose `trial_ends_at IS NOT NULL` (i.e. was, at some point, a trial), normalised in application code and compared to the requester's normalised email. No schema change was available for a dedicated normalised-email index table, so this is a scan over the (expected-small, MVP-scale) set of users who have ever trialed — see the scaling note below. |
+| 1 | **Email** | `normaliseEmailForAbuseCheck(email)` (`@sl/shared` — gmail dot/plus stripping + domain lowercasing) | unbounded (no lookback — a normalised email that has ever had a trial never gets a second one) | An indexed equality lookup against `users.email_normalised` (migrations/0025), a `GENERATED ALWAYS AS STORED` column Postgres computes and keeps in sync automatically from `email` via an IMMUTABLE SQL function (`normalise_email_for_abuse_check`) mirroring `normaliseEmailForAbuseCheck()` byte-for-byte — replacing the original scan-and-normalise-in-application-code approach (see the former "scaling note" this superseded). Joined to every subscription whose `trial_ends_at IS NOT NULL`. |
 | 2 | **Device fingerprint** | SHA-256 hash of the *authenticated request's own device* fingerprint — `request.authUser.deviceId` (set by login/registration, not resubmitted by the trial call) looked up in `devices` for its `fingerprint_hash` | 30 days | Every other `devices` row (any user) sharing that `fingerprint_hash`, joined to that user's trial-having subscriptions, `devices.first_seen_at` within 30 days |
 | 3 | **IP /24** | The request IP's `/24` (first three octets for IPv4; `/48` for IPv6, same rationale — coarse enough to catch "same household/NAT/VPN exit" without flagging an entire ISP) | 30 days | `ip_activity` (rows written by this module on every trial attempt, successful or not — `recordTrialIpActivity()`), joined to trial-having subscriptions |
-
-**Dropped from the original design (documented, not silently omitted): a
-4th "Stripe customer" check.** Neither `subscriptions` nor `payments` stores
-a `stripe_customer_id` column (only `stripe_subscription_id` /
-`provider_payment_id`), and a trial by definition never goes through Stripe
-Checkout, so there is no Stripe customer object to correlate at trial time
-in the first place. In practice the email check already covers the same
-signal Stripe-customer matching would have added (Stripe customers are
-created with the account's email). Flagged in the handoff report as a
-schema gap if a future pass wants a real fourth vector.
+| 4 | **Stripe customer** | The requester's own `users.stripe_customer_id` (migrations/0025) — `null` for most trial requests, since a trial by definition never itself goes through Stripe Checkout; this check only runs when the requesting account already has one, e.g. from an earlier, now-non-live paid subscription or an earlier Customer Portal call on this same account | unbounded (same rationale as check 1: two accounts resolving to the same live Stripe customer is never legitimate) | Every user sharing that exact `stripe_customer_id`, joined to that user's trial-having subscriptions — same false-positive guard as checks 2/3 below (only counts a *prior trial*, never a prior paid subscription) |
 
 **Severity mapping** (written to `flags.severity`): 1 match → `low`; 2
-matches → `medium`; all 3 → `critical` (skipping `high` — three independent
-signals agreeing is treated as certain, not merely likely). `abuse.scan`
-(§6) does not re-flag these — trial-time denial is synchronous and
-immediate, `abuse.scan` covers patterns that only emerge after the fact
+matches → `medium`; 3 or more → `critical` (skipping `high` — several
+independent signals agreeing is treated as certain, not merely likely).
+`abuse.scan` (§6) does not re-flag these — trial-time denial is synchronous
+and immediate, `abuse.scan` covers patterns that only emerge after the fact
 (velocity, cross-account fingerprint reuse, chargebacks).
 
-**False-positive guard:** checks 2 and 3 only count a *prior trial*, never a
-prior *paid* subscription — a shared office IP/device where one person is on
-`pro` and another starts a trial is not flagged by IP/device alone (only by
+**False-positive guard:** checks 2, 3 and 4 only count a *prior trial*,
+never a prior *paid* subscription — a shared office IP/device (or, for
+check 4, two accounts that happen to resolve to the same Stripe customer
+through an unrelated support flow) where one person is on `pro` and another
+starts a trial is not flagged by IP/device/Stripe-customer alone (only by
 check 1, email, which is a much stronger signal on its own). This is the
 "true positive vs. false-positive-avoidance" pairing the roadmap's Phase 5
 exit criteria calls for, and is covered by
-`apps/api/src/modules/subscriptions/__tests__/trial-protection.test.ts`.
+`apps/api/src/modules/subscriptions/__tests__/subscriptions.test.ts`.
 
 **Feature-toggle gate:** `trial.enabled` (`feature_toggles`, seeded `true`)
-is checked before any of the three heuristics — when off, every trial
+is checked before any of the four heuristics — when off, every trial
 request returns `403 SUBSCRIPTION_REQUIRED` regardless of history (a kill
 switch for the trial funnel entirely, independent of abuse detection).
-
-**Scaling note (check 1):** a full scan over every user who has ever had a
-trial is fine at MVP scale (the roadmap's stated target — see
-`01-architecture.md` §7) but is the one piece of this module that would
-benefit from a dedicated indexed table (e.g. `trial_attempts(normalised_email
-unique, first_user_id, first_attempted_at)`) if trial volume grows well
-beyond MVP size; that table is a `packages/db` migration, outside this
-agent's file ownership, so it is a roadmap item rather than something this
-pass adds.
 
 ---
 
@@ -379,7 +363,7 @@ so `stripe.reconcile` (§9) can find and retry it.
 
 | Stripe event | Handler action |
 |---|---|
-| `checkout.session.completed` | Look up the `plans` row by `stripe_price_id` from the session's line item. Create (or, if a trial already exists for this user, **upgrade**) the `subscriptions` row: `status = active` (or `lifetime`'s special case below), `source = 'stripe'`, `stripe_subscription_id`, `current_period_start/end` from the Stripe subscription object. **Lifetime plan exception:** if `plans.is_lifetime`, set `current_period_end = NULL`, `auto_renew = false`, `status = 'active'` (not `'lifetime'` — the DB constraint reserves that status for `source IN (manual, coupon)`, §2). Issue a license (§3) via `licenses/service.ts#issueForSubscription`. If `couponCode` was attached to the session's metadata, record the `coupon_redemptions` row and increment `coupons.redeemed_count`. Insert `payments` (status `succeeded`) + `payment_history`. Publish `subscription.changed` (§below) and a `notifications` row ("Welcome to <plan>"). |
+| `checkout.session.completed` | Look up the `plans` row by `stripe_price_id` from the session's line item. Idempotent guard: skip entirely if the user already has a live **non-trial** subscription (a duplicate/late delivery); a live **trial** is not treated as a conflict — it is the row this event upgrades (see "Atomic trial→paid" below). **Atomic trial→paid** (`apps/api/src/modules/payments/webhooks.ts#handleCheckoutCompleted`): when the user has a live `trialing` row, ending it (`status → canceled`, `ended_at = now()`, `trial_ends_at = NULL` — the CHECK constraint requires the latter) and revoking its license, creating the new `subscriptions` row (`status = active`, or `lifetime`'s special case below), issuing its license, redeeming any attached coupon, and recording the `payments` row all happen inside **one database transaction**, so a crash partway through can never leave a user with two live subscriptions, an un-ended trial, or a paid row with no license. **Lifetime plan exception:** if `plans.is_lifetime`, set `current_period_end = NULL`, `auto_renew = false`, `status = 'active'` (not `'lifetime'` — the DB constraint reserves that status for `source IN (manual, coupon)`, §2). If `session.customer` is present, persist it onto `users.stripe_customer_id` (migrations/0025, inside the same transaction) — this is what the Customer Portal lookup and the trial-abuse check 4 (§5) both read. If `couponCode` was attached to the session's metadata, record the `coupon_redemptions` row and increment `coupons.redeemed_count`. Publish `subscription.changed` (§below) and a `notifications` row ("Welcome to <plan>") after the transaction commits. |
 | `invoice.paid` | Renewal. Update the matching `subscriptions` row's `current_period_start/end` from the invoice's period, and `status`: `past_due → active` if it was in dunning, otherwise stays `active`. Insert `payments` (`succeeded`) + `payment_history`. If the subscription's license is `expired`/`revoked` from a prior lapse, re-issue (only case where a *second* license is legitimately issued for one subscription — the old one stays `revoked`, never reactivated, so a leaked old key can't come back to life). Publish `subscription.changed`. |
 | `invoice.payment_failed` | `status → past_due`. Insert `payments` (`failed`) + `payment_history`. Publish `subscription.changed` and a `notifications` row prompting the user to update their card (portal link, §10). Does **not** touch the license — a `past_due` subscription keeps its existing license valid until either `invoice.paid` recovers it or `subscriptions.expire`/`customer.subscription.deleted` ends it, matching Stripe's own dunning grace period. |
 | `customer.subscription.updated` | Generic sync for anything not covered by a more specific event above (e.g. a plan change made directly in the Stripe dashboard, proration adjustments): re-read the Stripe subscription object, map its `status`/`current_period_end`/`cancel_at_period_end` onto the local row via the same field mapping `stripe.reconcile` (§9) uses, so this handler and the nightly job share one `syncFromStripeSubscription()` function rather than two drifting implementations. |
@@ -484,7 +468,7 @@ the task brief's deliverables.
 | `POST /licenses/regenerate` | user | Revokes old, issues + returns a new key once |
 | `POST /licenses/validate` | device (license key + fingerprint, no user session) | Used by the extension |
 | `POST /payments/checkout` | user | Stripe Checkout Session |
-| `POST /payments/portal` | user | Stripe Customer Portal Session |
+| `POST /payments/portal` | user | Stripe Customer Portal Session. Looks up the Stripe customer by `users.stripe_customer_id` first, falling back to an email lookup (and persisting what it finds) only when null — §5's check 4 depends on this being populated. |
 | `GET /payments/history` | user | Paginated `payments` |
 | `POST /webhooks/stripe` | Stripe signature only | §7 |
 | `POST /coupons/validate` | user | §8 |

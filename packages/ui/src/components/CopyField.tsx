@@ -43,7 +43,9 @@ export function CopyField({ value, label, mono = true, className }: CopyFieldPro
     <div className={cn('flex flex-col gap-1', className)}>
       {label && <span className="text-xs font-medium text-[--sl-fg-muted]">{label}</span>}
       <div className="flex items-center gap-2 rounded-[--sl-radius-sm] border border-[--sl-border] bg-[--sl-ground] py-1 pl-3 pr-1.5">
-        <span className={cn('flex-1 select-all truncate text-sm text-[--sl-fg]', mono && 'font-mono tabular-nums')}>{value}</span>
+        <span data-testid="copy-field-value" className={cn('flex-1 select-all truncate text-sm text-[--sl-fg]', mono && 'font-mono tabular-nums')}>
+          {value}
+        </span>
         <IconButton
           size="sm"
           label={copied ? 'Copied' : 'Copy to clipboard'}

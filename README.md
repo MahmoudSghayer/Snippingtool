@@ -41,11 +41,12 @@ phase lands on this branch.
 | 11 Testing | Unit, integration, e2e, load, security suites | Planned | `tests/`, `docs/12-testing.md` |
 | DevOps | Docker, Compose, CI/CD, monitoring, backups, deploy guides | In progress | `infra/`, `.github/`, `docs/11-devops.md` |
 
-Known follow-ups tracked for the remaining phases: a `stripe_customer_id`
-column on users (Customer Portal lookup and a fourth trial-abuse vector), an
-atomic trial-to-paid transition through Checkout, an indexed path for the
-trial-abuse email scan, and per-user fan-out of the kill switch over
-WebSocket (today it reaches extensions through bootstrap and heartbeat).
+Follow-ups from the phase reports have been closed: users carry a
+`stripe_customer_id` (Customer Portal lookup and a fourth trial-abuse vector),
+Checkout during a live trial performs an atomic trial-to-paid transition, the
+trial-abuse email check runs on an indexed normalised-email column, the kill
+switch fans out over WebSocket to every online user, and audit-log filters
+validate UUIDs.
 
 ## What exists today
 

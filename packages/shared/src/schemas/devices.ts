@@ -22,7 +22,9 @@ export type DeviceDto = z.infer<typeof deviceDtoSchema>;
 export const registerDeviceRequestSchema = deviceFingerprintSchema;
 export type RegisterDeviceRequest = z.infer<typeof registerDeviceRequestSchema>;
 
-export const revokeDeviceRequestSchema = z.object({
-  deviceId: z.string().uuid(),
-});
+export const revokeDeviceRequestSchema = z
+  .object({
+    deviceId: z.string().uuid(),
+  })
+  .strict();
 export type RevokeDeviceRequest = z.infer<typeof revokeDeviceRequestSchema>;

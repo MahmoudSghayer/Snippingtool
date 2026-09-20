@@ -24,6 +24,7 @@ import { z } from 'zod';
 
 import { findOrRegisterDevice } from '../../lib/devices.js';
 import { newId } from '../../lib/ids.js';
+import { INGEST_RATE_LIMIT } from '../../lib/rate-limit-tiers.js';
 import { getOrCreateUserSettings } from '../../lib/settings.js';
 
 import type { FastifyInstance } from 'fastify';
@@ -176,6 +177,7 @@ export default fp(
       '/api/v1/extension/telemetry',
       {
         onRequest: [fastify.authenticate],
+        config: { rateLimit: INGEST_RATE_LIMIT },
         schema: { tags: ['extension'], body: telemetryFlushRequestSchema, response: { 200: z.object({ accepted: z.number() }) } },
       },
       async (request) => {
@@ -197,6 +199,7 @@ export default fp(
       '/api/v1/extension/errors',
       {
         onRequest: [fastify.authenticate],
+        config: { rateLimit: INGEST_RATE_LIMIT },
         schema: { tags: ['extension'], body: extensionErrorReportSchema, response: { 200: z.object({ accepted: z.number() }) } },
       },
       async (request) => {

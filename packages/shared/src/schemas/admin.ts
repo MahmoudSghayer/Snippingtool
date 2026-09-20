@@ -23,24 +23,28 @@ export const auditLogEntrySchema = z.object({
 });
 export type AuditLogEntry = z.infer<typeof auditLogEntrySchema>;
 
-export const auditLogQuerySchema = z.object({
-  actorId: z.string().uuid().optional(),
-  entityType: z.string().min(1).max(80).optional(),
-  // audit_logs.entity_id is a `uuid` column (02-database.md §6.9) — validated
-  // here so a malformed filter value 400s as VALIDATION_FAILED instead of
-  // reaching the database and raising a Postgres type-cast error (500).
-  entityId: z.string().uuid().optional(),
-  from: z.string().datetime().optional(),
-  to: z.string().datetime().optional(),
-});
+export const auditLogQuerySchema = z
+  .object({
+    actorId: z.string().uuid().optional(),
+    entityType: z.string().min(1).max(80).optional(),
+    // audit_logs.entity_id is a `uuid` column (02-database.md §6.9) — validated
+    // here so a malformed filter value 400s as VALIDATION_FAILED instead of
+    // reaching the database and raising a Postgres type-cast error (500).
+    entityId: z.string().uuid().optional(),
+    from: z.string().datetime().optional(),
+    to: z.string().datetime().optional(),
+  })
+  .strict();
 export type AuditLogQuery = z.infer<typeof auditLogQuerySchema>;
 
 /** Every admin mutation carries a `reason`, which lands in `admin_actions`
  * and the resulting `audit_logs` row — enforced by this schema, not left to
  * convention. */
-export const adminActionRequestSchema = z.object({
-  reason: z.string().min(1).max(1000),
-});
+export const adminActionRequestSchema = z
+  .object({
+    reason: z.string().min(1).max(1000),
+  })
+  .strict();
 export type AdminActionRequest = z.infer<typeof adminActionRequestSchema>;
 
 export const featureToggleDtoSchema = z.object({
@@ -52,11 +56,13 @@ export const featureToggleDtoSchema = z.object({
 });
 export type FeatureToggleDto = z.infer<typeof featureToggleDtoSchema>;
 
-export const updateFeatureToggleRequestSchema = z.object({
-  enabled: z.boolean().optional(),
-  rolloutPercent: z.number().int().min(0).max(100).optional(),
-  planGate: z.string().min(1).max(40).nullable().optional(),
-});
+export const updateFeatureToggleRequestSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    rolloutPercent: z.number().int().min(0).max(100).optional(),
+    planGate: z.string().min(1).max(40).nullable().optional(),
+  })
+  .strict();
 export type UpdateFeatureToggleRequest = z.infer<typeof updateFeatureToggleRequestSchema>;
 
 export const systemConfigDtoSchema = z.object({

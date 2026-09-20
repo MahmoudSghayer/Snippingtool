@@ -6,25 +6,29 @@ export type TradeStatus = (typeof TRADE_STATUSES)[number];
 /** One completed (or in-flight) trade, computed client-side by the
  * extension's own price model and reported so the dashboard can show
  * session/lifetime P&L. */
-export const tradeSchema = z.object({
-  id: z.string().uuid(),
-  tradeId: z.string().min(1).max(64),
-  resourceId: z.number().int().positive(),
-  assetId: z.number().int().positive().nullable(),
-  rating: z.number().int().min(0).max(99).nullable(),
-  buyPrice: z.number().int().min(0),
-  sellPrice: z.number().int().min(0).nullable(),
-  eaTax: z.number().min(0).max(1),
-  netProfit: z.number().int().nullable(),
-  status: z.enum(TRADE_STATUSES),
-  boughtAt: z.string().datetime(),
-  soldAt: z.string().datetime().nullable(),
-});
+export const tradeSchema = z
+  .object({
+    id: z.string().uuid(),
+    tradeId: z.string().min(1).max(64),
+    resourceId: z.number().int().positive(),
+    assetId: z.number().int().positive().nullable(),
+    rating: z.number().int().min(0).max(99).nullable(),
+    buyPrice: z.number().int().min(0),
+    sellPrice: z.number().int().min(0).nullable(),
+    eaTax: z.number().min(0).max(1),
+    netProfit: z.number().int().nullable(),
+    status: z.enum(TRADE_STATUSES),
+    boughtAt: z.string().datetime(),
+    soldAt: z.string().datetime().nullable(),
+  })
+  .strict();
 export type Trade = z.infer<typeof tradeSchema>;
 
-export const reportTradesRequestSchema = z.object({
-  trades: z.array(tradeSchema).min(1).max(200),
-});
+export const reportTradesRequestSchema = z
+  .object({
+    trades: z.array(tradeSchema).min(1).max(200),
+  })
+  .strict();
 export type ReportTradesRequest = z.infer<typeof reportTradesRequestSchema>;
 
 /** Daily rollup, `profits` table — `apps/api`'s `profits.rollup` job
@@ -41,9 +45,11 @@ export const dailyProfitSchema = z.object({
 });
 export type DailyProfit = z.infer<typeof dailyProfitSchema>;
 
-export const profitQuerySchema = z.object({
-  from: z.string().date(),
-  to: z.string().date(),
-  granularity: z.enum(['daily', 'weekly', 'monthly', 'lifetime']).default('daily'),
-});
+export const profitQuerySchema = z
+  .object({
+    from: z.string().date(),
+    to: z.string().date(),
+    granularity: z.enum(['daily', 'weekly', 'monthly', 'lifetime']).default('daily'),
+  })
+  .strict();
 export type ProfitQuery = z.infer<typeof profitQuerySchema>;

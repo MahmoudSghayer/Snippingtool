@@ -10,6 +10,7 @@ import { z } from 'zod';
 
 import { newId } from '../../lib/ids.js';
 import { decodeCursor, encodeCursor } from '../../lib/pagination.js';
+import { INGEST_RATE_LIMIT } from '../../lib/rate-limit-tiers.js';
 
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
@@ -22,6 +23,7 @@ export default fp(
       '/api/v1/trades/batch',
       {
         onRequest: [fastify.authenticate],
+        config: { rateLimit: INGEST_RATE_LIMIT },
         schema: { tags: ['trades'], body: reportTradesRequestSchema, response: { 200: z.object({ upserted: z.number() }) } },
       },
       async (request) => {

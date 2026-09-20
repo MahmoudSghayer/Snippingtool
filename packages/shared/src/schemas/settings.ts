@@ -32,13 +32,15 @@ const boundedFloat = (bound: { min: number; max: number }) =>
  * "safety governor"). These are the numbers behind the risk budget meter —
  * a user can tighten them, never loosen them past the plan's admin-set
  * ceiling. */
-export const governorSettingsSchema = z.object({
-  actionsPerHour: boundedInt(GOVERNOR_ABSOLUTE_LIMITS.actionsPerHour),
-  sessionLengthMinutes: boundedInt(GOVERNOR_ABSOLUTE_LIMITS.sessionLengthMinutes),
-  buyToSearchRatio: boundedFloat(GOVERNOR_ABSOLUTE_LIMITS.buyToSearchRatio),
-  cooldownSeconds: boundedInt(GOVERNOR_ABSOLUTE_LIMITS.cooldownSeconds),
-  maxCoinFlowPerHour: boundedInt(GOVERNOR_ABSOLUTE_LIMITS.maxCoinFlowPerHour),
-});
+export const governorSettingsSchema = z
+  .object({
+    actionsPerHour: boundedInt(GOVERNOR_ABSOLUTE_LIMITS.actionsPerHour),
+    sessionLengthMinutes: boundedInt(GOVERNOR_ABSOLUTE_LIMITS.sessionLengthMinutes),
+    buyToSearchRatio: boundedFloat(GOVERNOR_ABSOLUTE_LIMITS.buyToSearchRatio),
+    cooldownSeconds: boundedInt(GOVERNOR_ABSOLUTE_LIMITS.cooldownSeconds),
+    maxCoinFlowPerHour: boundedInt(GOVERNOR_ABSOLUTE_LIMITS.maxCoinFlowPerHour),
+  })
+  .strict();
 export type GovernorSettings = z.infer<typeof governorSettingsSchema>;
 
 export const DEFAULT_GOVERNOR_SETTINGS: GovernorSettings = {
@@ -51,25 +53,31 @@ export const DEFAULT_GOVERNOR_SETTINGS: GovernorSettings = {
 
 /** What the extension is trying to achieve — the ranker scores opportunities
  * against these. */
-export const targetsSchema = z.object({
-  minProfitPerSnipe: z.number().int().min(0).max(10_000_000),
-  dailyProfitGoal: z.number().int().min(0).max(100_000_000).nullable(),
-});
+export const targetsSchema = z
+  .object({
+    minProfitPerSnipe: z.number().int().min(0).max(10_000_000),
+    dailyProfitGoal: z.number().int().min(0).max(100_000_000).nullable(),
+  })
+  .strict();
 export type Targets = z.infer<typeof targetsSchema>;
 
-export const budgetsSchema = z.object({
-  maxCoinsPerSnipe: z.number().int().min(0).max(100_000_000),
-  sessionCoinBudget: z.number().int().min(0).max(1_000_000_000).nullable(),
-});
+export const budgetsSchema = z
+  .object({
+    maxCoinsPerSnipe: z.number().int().min(0).max(100_000_000),
+    sessionCoinBudget: z.number().int().min(0).max(1_000_000_000).nullable(),
+  })
+  .strict();
 export type Budgets = z.infer<typeof budgetsSchema>;
 
-export const notificationPrefsSchema = z.object({
-  email: z.boolean(),
-  push: z.boolean(),
-  killSwitch: z.boolean(), // cannot be fully disabled server-side, but controls extra channels
-  subscriptionChanges: z.boolean(),
-  weeklyDigest: z.boolean(),
-});
+export const notificationPrefsSchema = z
+  .object({
+    email: z.boolean(),
+    push: z.boolean(),
+    killSwitch: z.boolean(), // cannot be fully disabled server-side, but controls extra channels
+    subscriptionChanges: z.boolean(),
+    weeklyDigest: z.boolean(),
+  })
+  .strict();
 export type NotificationPrefs = z.infer<typeof notificationPrefsSchema>;
 
 export const DEFAULT_NOTIFICATION_PREFS: NotificationPrefs = {
@@ -84,22 +92,26 @@ export const DEFAULT_NOTIFICATION_PREFS: NotificationPrefs = {
  * extension detect a server-side reset (e.g. an admin lowered a bound) and
  * is bumped by `apps/api` on every write; `settings_history` keeps prior
  * versions. */
-export const userSettingsSchema = z.object({
-  version: z.number().int().min(1),
-  targets: targetsSchema,
-  budgets: budgetsSchema,
-  governor: governorSettingsSchema,
-  telemetryOptOut: z.boolean(),
-  notifications: notificationPrefsSchema,
-});
+export const userSettingsSchema = z
+  .object({
+    version: z.number().int().min(1),
+    targets: targetsSchema,
+    budgets: budgetsSchema,
+    governor: governorSettingsSchema,
+    telemetryOptOut: z.boolean(),
+    notifications: notificationPrefsSchema,
+  })
+  .strict();
 export type UserSettings = z.infer<typeof userSettingsSchema>;
 
 /** PATCH body: every section optional, applied as a merge server-side. */
-export const updateUserSettingsRequestSchema = z.object({
-  targets: targetsSchema.partial().optional(),
-  budgets: budgetsSchema.partial().optional(),
-  governor: governorSettingsSchema.partial().optional(),
-  telemetryOptOut: z.boolean().optional(),
-  notifications: notificationPrefsSchema.partial().optional(),
-});
+export const updateUserSettingsRequestSchema = z
+  .object({
+    targets: targetsSchema.partial().strict().optional(),
+    budgets: budgetsSchema.partial().strict().optional(),
+    governor: governorSettingsSchema.partial().strict().optional(),
+    telemetryOptOut: z.boolean().optional(),
+    notifications: notificationPrefsSchema.partial().strict().optional(),
+  })
+  .strict();
 export type UpdateUserSettingsRequest = z.infer<typeof updateUserSettingsRequestSchema>;
