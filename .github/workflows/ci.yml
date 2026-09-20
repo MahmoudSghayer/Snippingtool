@@ -378,10 +378,13 @@ jobs:
       - unit-tests
       - db-migration-test
       - api-integration-tests
+      - security-tests
       - extension-build
       - dashboard-build
       - security-scan
       - docker-build
+      - e2e-dashboard
+      - e2e-extension
     runs-on: ubuntu-latest
     steps:
       - name: check every job succeeded

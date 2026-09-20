@@ -127,49 +127,106 @@ export function AppLayout() {
       : []),
   ];
 
+  const brand = (
+    <Link to="/dashboard" className="flex items-center gap-2 font-mono text-sm font-semibold">
+      <Shield className="size-5 text-gold" aria-hidden="true" />
+      Sniper's Ledger
+    </Link>
+  );
+
+  const signOutFooter = (
+    <button
+      type="button"
+      onClick={handleLogout}
+      className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium text-ink-2 hover:bg-surface-2 hover:text-ink"
+    >
+      <LogOut className="size-4" aria-hidden="true" />
+      Sign out
+    </button>
+  );
+
+  const connectionLabel = connectionStatus === 'open' ? 'Online' : connectionStatus === 'connecting' ? 'Connecting…' : 'Offline';
+  const connectionDotClass = connectionStatus === 'open' ? 'bg-live' : connectionStatus === 'connecting' ? 'bg-gold animate-pulse' : 'bg-risk';
+
   return (
     <div className="flex h-dvh overflow-hidden bg-ground text-ink">
+      {/* Desktop sidebar — hidden below `lg`, replaced by the off-canvas
+          Drawer below (docs/10-design-system.md "Responsive: sidebar ->
+          drawer at 360–390px/768px"). */}
       <Sidebar
-        brand={
-          <Link to="/dashboard" className="flex items-center gap-2 font-mono text-sm font-semibold">
-            <Shield className="size-5 text-gold" aria-hidden="true" />
-            Sniper's Ledger
-          </Link>
-        }
+        className="hidden lg:flex"
+        brand={brand}
         sections={sections}
         linkComponent={({ href, className, children, ...rest }) => (
           <Link to={href} className={className} {...rest}>
             {children}
           </Link>
         )}
-        footer={
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium text-ink-2 hover:bg-surface-2 hover:text-ink"
-          >
-            <LogOut className="size-4" aria-hidden="true" />
-            Sign out
-          </button>
-        }
+        footer={signOutFooter}
       />
+
+      {/* Mobile/tablet off-canvas nav — same content, opened by the topbar's
+          hamburger button, closed on a link tap. */}
+      <Drawer open={navOpen} onOpenChange={setNavOpen} side="left" width="nav">
+        <Sidebar
+          className="h-full w-full border-r-0"
+          brand={brand}
+          sections={sections}
+          linkComponent={({ href, className, children, ...rest }) => (
+            <Link to={href} className={className} onClick={() => setNavOpen(false)} {...rest}>
+              {children}
+            </Link>
+          )}
+          footer={signOutFooter}
+        />
+      </Drawer>
+
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} isAdmin={isAdmin} />
+
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-16 shrink-0 items-center justify-between border-b border-line px-6">
-          <div className="flex items-center gap-2">
-            <span className="inline-flex size-2 rounded-full bg-live" aria-hidden="true" />
-            <span className="text-xs text-ink-2">Online</span>
+        <header className="flex h-16 shrink-0 items-center justify-between gap-3 border-b border-line px-4 sm:px-6">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setNavOpen(true)}
+              aria-label="Open navigation"
+              className="rounded-[--sl-radius-sm] p-1.5 text-ink-2 hover:bg-surface-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 focus-visible:ring-offset-ground lg:hidden"
+            >
+              <Menu className="size-5" aria-hidden="true" />
+            </button>
+            <div className="hidden items-center gap-2 sm:flex">
+              <span className={`inline-flex size-2 rounded-full ${connectionDotClass}`} aria-hidden="true" />
+              <span className="text-xs text-ink-2">{connectionLabel}</span>
+            </div>
             {isAdmin && (
-              <Badge tone="accent" className="ml-2">
+              <Badge tone="accent" className="hidden sm:inline-flex">
                 Admin
               </Badge>
             )}
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <button
+              type="button"
+              onClick={() => setPaletteOpen(true)}
+              className="hidden items-center gap-2 rounded-[--sl-radius-sm] border border-line bg-surface-2 px-2.5 py-1.5 text-xs text-ink-2 transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 focus-visible:ring-offset-ground sm:flex"
+            >
+              <Search className="size-3.5" aria-hidden="true" />
+              Search
+              <kbd className="ml-1 rounded border border-line px-1 font-mono text-[10px]">⌘K</kbd>
+            </button>
+            <button
+              type="button"
+              onClick={() => setPaletteOpen(true)}
+              aria-label="Open command palette"
+              className="rounded-[--sl-radius-sm] p-1.5 text-ink-2 hover:bg-surface-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 focus-visible:ring-offset-ground sm:hidden"
+            >
+              <Search className="size-4" aria-hidden="true" />
+            </button>
             <NotificationsBell />
-            <span className="text-sm text-ink-2">{user?.email}</span>
+            <span className="hidden text-sm text-ink-2 md:inline">{user?.email}</span>
           </div>
         </header>
-        <main className="flex-1 overflow-y-auto px-6 py-6">
+        <main className="flex-1 overflow-y-auto px-4 py-5 sm:px-6 sm:py-6">
           <Outlet />
         </main>
       </div>
