@@ -1,6 +1,6 @@
 // Matches migrations/0004_admin.sql, 0019_moderation.sql.
 
-import { relations } from 'drizzle-orm';
+import { isNull, relations } from 'drizzle-orm';
 import { index, jsonb, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import {
   adminRoleEnum,
@@ -36,7 +36,7 @@ export const adminUsers = pgTable(
     updatedBy: uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
     rowVersion: rowVersion(),
   },
-  (t) => [index('admin_users_admin_role_idx').on(t.adminRole).where(t.deletedAt.isNull())],
+  (t) => [index('admin_users_admin_role_idx').on(t.adminRole).where(isNull(t.deletedAt))],
 );
 
 export const adminUsersRelations = relations(adminUsers, ({ one, many }) => ({
@@ -96,9 +96,9 @@ export const bans = pgTable(
     rowVersion: rowVersion(),
   },
   (t) => [
-    index('bans_user_id_idx').on(t.userId).where(t.liftedAt.isNull()),
-    index('bans_type_value_idx').on(t.type, t.value).where(t.liftedAt.isNull()),
-    index('bans_expires_at_idx').on(t.expiresAt).where(t.liftedAt.isNull()),
+    index('bans_user_id_idx').on(t.userId).where(isNull(t.liftedAt)),
+    index('bans_type_value_idx').on(t.type, t.value).where(isNull(t.liftedAt)),
+    index('bans_expires_at_idx').on(t.expiresAt).where(isNull(t.liftedAt)),
   ],
 );
 

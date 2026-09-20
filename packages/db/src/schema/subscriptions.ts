@@ -1,6 +1,6 @@
 // Matches migrations/0005_plans.sql, 0006_subscriptions.sql, 0007_licenses.sql.
 
-import { relations } from 'drizzle-orm';
+import { isNull, relations } from 'drizzle-orm';
 import { boolean, index, integer, jsonb, pgTable, smallint, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import {
   createdAt,
@@ -45,9 +45,9 @@ export const plans = pgTable(
     rowVersion: rowVersion(),
   },
   (t) => [
-    uniqueIndex('plans_code_unique_live').on(t.code).where(t.deletedAt.isNull()),
-    uniqueIndex('plans_stripe_price_id_unique').on(t.stripePriceId).where(t.deletedAt.isNull()),
-    index('plans_is_active_idx').on(t.isActive).where(t.deletedAt.isNull()),
+    uniqueIndex('plans_code_unique_live').on(t.code).where(isNull(t.deletedAt)),
+    uniqueIndex('plans_stripe_price_id_unique').on(t.stripePriceId).where(isNull(t.deletedAt)),
+    index('plans_is_active_idx').on(t.isActive).where(isNull(t.deletedAt)),
   ],
 );
 
@@ -91,11 +91,11 @@ export const subscriptions = pgTable(
   },
   (t) => [
     uniqueIndex('subscriptions_stripe_subscription_id_unique').on(t.stripeSubscriptionId),
-    index('subscriptions_user_id_idx').on(t.userId).where(t.deletedAt.isNull()),
-    index('subscriptions_plan_id_idx').on(t.planId).where(t.deletedAt.isNull()),
-    index('subscriptions_status_idx').on(t.status).where(t.deletedAt.isNull()),
-    index('subscriptions_current_period_end_idx').on(t.currentPeriodEnd).where(t.deletedAt.isNull()),
-    index('subscriptions_trial_ends_at_idx').on(t.trialEndsAt).where(t.deletedAt.isNull()),
+    index('subscriptions_user_id_idx').on(t.userId).where(isNull(t.deletedAt)),
+    index('subscriptions_plan_id_idx').on(t.planId).where(isNull(t.deletedAt)),
+    index('subscriptions_status_idx').on(t.status).where(isNull(t.deletedAt)),
+    index('subscriptions_current_period_end_idx').on(t.currentPeriodEnd).where(isNull(t.deletedAt)),
+    index('subscriptions_trial_ends_at_idx').on(t.trialEndsAt).where(isNull(t.deletedAt)),
   ],
 );
 
@@ -139,10 +139,10 @@ export const licenses = pgTable(
   },
   (t) => [
     uniqueIndex('licenses_key_hash_unique').on(t.keyHash),
-    index('licenses_subscription_id_idx').on(t.subscriptionId).where(t.deletedAt.isNull()),
-    index('licenses_user_id_idx').on(t.userId).where(t.deletedAt.isNull()),
-    index('licenses_status_idx').on(t.status).where(t.deletedAt.isNull()),
-    index('licenses_expires_at_idx').on(t.expiresAt).where(t.deletedAt.isNull()),
+    index('licenses_subscription_id_idx').on(t.subscriptionId).where(isNull(t.deletedAt)),
+    index('licenses_user_id_idx').on(t.userId).where(isNull(t.deletedAt)),
+    index('licenses_status_idx').on(t.status).where(isNull(t.deletedAt)),
+    index('licenses_expires_at_idx').on(t.expiresAt).where(isNull(t.deletedAt)),
     index('licenses_key_prefix_idx').on(t.keyPrefix),
   ],
 );

@@ -1,6 +1,6 @@
 // Matches migrations/0017_coupons.sql, 0018_billing.sql.
 
-import { relations } from 'drizzle-orm';
+import { isNull, relations } from 'drizzle-orm';
 import { boolean, index, integer, jsonb, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import {
   couponTypeEnum,
@@ -40,9 +40,9 @@ export const coupons = pgTable(
     rowVersion: rowVersion(),
   },
   (t) => [
-    uniqueIndex('coupons_code_unique_live').on(t.code).where(t.deletedAt.isNull()),
-    index('coupons_is_active_idx').on(t.isActive).where(t.deletedAt.isNull()),
-    index('coupons_expires_at_idx').on(t.expiresAt).where(t.deletedAt.isNull()),
+    uniqueIndex('coupons_code_unique_live').on(t.code).where(isNull(t.deletedAt)),
+    index('coupons_is_active_idx').on(t.isActive).where(isNull(t.deletedAt)),
+    index('coupons_expires_at_idx').on(t.expiresAt).where(isNull(t.deletedAt)),
   ],
 );
 
@@ -167,6 +167,6 @@ export const stripeWebhookEvents = pgTable(
   (t) => [
     uniqueIndex('stripe_webhook_events_event_id_unique').on(t.eventId),
     index('stripe_webhook_events_type_idx').on(t.type),
-    index('stripe_webhook_events_unprocessed_idx').on(t.createdAt).where(t.processedAt.isNull()),
+    index('stripe_webhook_events_unprocessed_idx').on(t.createdAt).where(isNull(t.processedAt)),
   ],
 );

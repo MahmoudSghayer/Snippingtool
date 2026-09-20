@@ -1,6 +1,6 @@
 // Matches migrations/0015_settings.sql, 0016_notifications.sql.
 
-import { relations } from 'drizzle-orm';
+import { isNull, relations } from 'drizzle-orm';
 import { index, integer, jsonb, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { createdAt, idPk, notificationChannelEnum, rowVersion, timestamptz, updatedAt } from './common';
 import { users } from './users';
@@ -77,7 +77,7 @@ export const notifications = pgTable(
   },
   (t) => [
     index('notifications_user_id_idx').on(t.userId, t.createdAt),
-    index('notifications_unread_idx').on(t.userId).where(t.readAt.isNull()),
+    index('notifications_unread_idx').on(t.userId).where(isNull(t.readAt)),
     index('notifications_type_idx').on(t.type),
   ],
 );

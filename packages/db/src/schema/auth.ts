@@ -1,6 +1,6 @@
 // Matches migrations/0008_devices.sql, 0009_sessions.sql, 0010_auth_tokens.sql.
 
-import { relations } from 'drizzle-orm';
+import { isNull, relations } from 'drizzle-orm';
 import { index, inet, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { createdAt, deletedAt, deviceStatusEnum, idPk, rowVersion, timestamptz, updatedAt } from './common';
 import { users } from './users';
@@ -34,10 +34,10 @@ export const devices = pgTable(
     rowVersion: rowVersion(),
   },
   (t) => [
-    uniqueIndex('devices_user_fingerprint_unique_live').on(t.userId, t.fingerprintHash).where(t.deletedAt.isNull()),
-    index('devices_user_id_idx').on(t.userId).where(t.deletedAt.isNull()),
-    index('devices_license_id_idx').on(t.licenseId).where(t.deletedAt.isNull()),
-    index('devices_status_idx').on(t.status).where(t.deletedAt.isNull()),
+    uniqueIndex('devices_user_fingerprint_unique_live').on(t.userId, t.fingerprintHash).where(isNull(t.deletedAt)),
+    index('devices_user_id_idx').on(t.userId).where(isNull(t.deletedAt)),
+    index('devices_license_id_idx').on(t.licenseId).where(isNull(t.deletedAt)),
+    index('devices_status_idx').on(t.status).where(isNull(t.deletedAt)),
     index('devices_last_seen_at_idx').on(t.lastSeenAt),
   ],
 );
@@ -78,7 +78,7 @@ export const sessions = pgTable(
     index('sessions_user_id_idx').on(t.userId),
     index('sessions_device_id_idx').on(t.deviceId),
     index('sessions_family_id_idx').on(t.familyId),
-    index('sessions_active_idx').on(t.userId, t.expiresAt).where(t.revokedAt.isNull()),
+    index('sessions_active_idx').on(t.userId, t.expiresAt).where(isNull(t.revokedAt)),
   ],
 );
 
@@ -105,8 +105,8 @@ export const emailVerifications = pgTable(
   },
   (t) => [
     uniqueIndex('email_verifications_token_hash_unique').on(t.tokenHash),
-    index('email_verifications_user_id_idx').on(t.userId).where(t.consumedAt.isNull()),
-    index('email_verifications_expires_at_idx').on(t.expiresAt).where(t.consumedAt.isNull()),
+    index('email_verifications_user_id_idx').on(t.userId).where(isNull(t.consumedAt)),
+    index('email_verifications_expires_at_idx').on(t.expiresAt).where(isNull(t.consumedAt)),
   ],
 );
 
@@ -127,8 +127,8 @@ export const passwordResets = pgTable(
   },
   (t) => [
     uniqueIndex('password_resets_token_hash_unique').on(t.tokenHash),
-    index('password_resets_user_id_idx').on(t.userId).where(t.consumedAt.isNull()),
-    index('password_resets_expires_at_idx').on(t.expiresAt).where(t.consumedAt.isNull()),
+    index('password_resets_user_id_idx').on(t.userId).where(isNull(t.consumedAt)),
+    index('password_resets_expires_at_idx').on(t.expiresAt).where(isNull(t.consumedAt)),
   ],
 );
 
@@ -147,6 +147,6 @@ export const totpRecoveryCodes = pgTable(
   },
   (t) => [
     uniqueIndex('totp_recovery_codes_code_hash_unique').on(t.codeHash),
-    index('totp_recovery_codes_user_id_idx').on(t.userId).where(t.usedAt.isNull()),
+    index('totp_recovery_codes_user_id_idx').on(t.userId).where(isNull(t.usedAt)),
   ],
 );

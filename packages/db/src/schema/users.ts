@@ -1,6 +1,6 @@
 // Matches migrations/0003_users.sql.
 
-import { relations } from 'drizzle-orm';
+import { isNull, relations } from 'drizzle-orm';
 import { customType, index, integer, pgTable, smallint, text, uniqueIndex, uuid, inet } from 'drizzle-orm/pg-core';
 import { citext, createdAt, deletedAt, idPk, rowVersion, timestamptz, updatedAt, userRoleEnum, userStatusEnum } from './common';
 import { subscriptions } from './subscriptions';
@@ -44,14 +44,14 @@ export const users = pgTable(
     rowVersion: rowVersion(),
   },
   (t) => [
-    uniqueIndex('users_email_unique_live').on(t.email).where(t.deletedAt.isNull()),
+    uniqueIndex('users_email_unique_live').on(t.email).where(isNull(t.deletedAt)),
     uniqueIndex('users_referral_code_unique_live')
       .on(t.referralCode)
-      .where(t.deletedAt.isNull()),
-    index('users_status_idx').on(t.status).where(t.deletedAt.isNull()),
-    index('users_role_idx').on(t.role).where(t.deletedAt.isNull()),
+      .where(isNull(t.deletedAt)),
+    index('users_status_idx').on(t.status).where(isNull(t.deletedAt)),
+    index('users_role_idx').on(t.role).where(isNull(t.deletedAt)),
     index('users_created_at_idx').on(t.createdAt),
-    index('users_last_login_at_idx').on(t.lastLoginAt).where(t.deletedAt.isNull()),
+    index('users_last_login_at_idx').on(t.lastLoginAt).where(isNull(t.deletedAt)),
   ],
 );
 

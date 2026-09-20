@@ -3,12 +3,31 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "The Sniper's Ledger — MV3 extension (M1 recorder; M2 assist / M3 automation TypeScript rewrite lands in a later wave).",
+  "description": "The Sniper's Ledger — MV3 Chrome extension. Two build targets from one codebase: `ledger` (listable: M1 recorder + M2 assist) and `ledger-auto` (adds M3 automation).",
   "scripts": {
-    "test": "node --test test/*.test.js",
-    "lint": "echo \"@sl/extension: plain JS milestone-1 code, not yet on the shared ESLint preset (TS migration is a later wave) - skipping\"",
-    "typecheck": "echo \"@sl/extension: plain JS milestone-1 code, no tsconfig yet (TS migration is a later wave) - skipping\"",
-    "build": "echo \"@sl/extension: no build step yet, loads unpacked (Vite/crxjs build lands with the TS migration)\"",
-    "dev": "echo \"@sl/extension: load unpacked via chrome://extensions during development\""
+    "dev": "vite build --mode ledger --watch",
+    "build": "pnpm run build:ledger && pnpm run build:auto",
+    "build:ledger": "vite build --mode ledger && node scripts/generate-manifest.mjs ledger",
+    "build:auto": "vite build --mode ledger-auto && node scripts/generate-manifest.mjs ledger-auto",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint . --max-warnings=0",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@sl/shared": "workspace:*",
+    "webextension-polyfill": "^0.12.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.1",
+    "@sl/config": "workspace:*",
+    "@types/chrome": "^0.0.287",
+    "@types/webextension-polyfill": "^0.12.1",
+    "fake-indexeddb": "^6.0.0",
+    "jsdom": "^25.0.1",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.7",
+    "vitest": "^2.1.8"
   }
 }
