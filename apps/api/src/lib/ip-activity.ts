@@ -8,10 +8,10 @@
 import { ipActivity, type Database } from '@sl/db';
 import { and, desc, eq, isNull, ne } from 'drizzle-orm';
 
-import { newId } from './ids.js';
 import { createFlag } from '../modules/flags/service.js';
 
 import { getGeoIpProvider, type GeoIpProvider } from './geoip.js';
+import { newId } from './ids.js';
 
 export type IpActivityRow = typeof ipActivity.$inferSelect;
 

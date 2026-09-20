@@ -16,10 +16,9 @@ import { z } from 'zod';
 import { verifySecret, hashSecret, randomToken, fastHash, encryptTotpSecret, decryptTotpSecret, reencryptTotpSecret } from '../../lib/crypto.js';
 import { findOrRegisterDevice } from '../../lib/devices.js';
 import { AppErrors } from '../../lib/errors.js';
-import { recordSuspiciousIpIfAny, upsertIpActivity } from '../../lib/ip-activity.js';
 import { newId } from '../../lib/ids.js';
+import { recordSuspiciousIpIfAny, upsertIpActivity } from '../../lib/ip-activity.js';
 import { assertNotLocked, checkSlidingWindowRateLimit, recordFailedLogin, resetLoginFailures } from '../../lib/lockout.js';
-import { uaFamiliesCompatible } from '../../lib/ua.js';
 import {
   ACCESS_TOKEN_TTL_SECONDS,
   MFA_TICKET_TTL_SECONDS,
@@ -29,6 +28,7 @@ import {
   generateRefreshToken,
   signAccessToken,
 } from '../../lib/tokens.js';
+import { uaFamiliesCompatible } from '../../lib/ua.js';
 
 import * as repo from './repo.js';
 import { generateRecoveryCodes, generateTotpSecret, totpKeyUri, verifyTotpCode } from './totp.js';

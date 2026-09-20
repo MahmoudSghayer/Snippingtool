@@ -16,6 +16,7 @@ import {
   type ColumnDef,
 } from '@sl/ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSearch } from '@tanstack/react-router';
 import { useState } from 'react';
 import { toast } from 'sonner';
 
@@ -46,7 +47,10 @@ const columns: ColumnDef<UserDto, unknown>[] = [
 
 export function UsersPage() {
   const queryClient = useQueryClient();
-  const [q, setQ] = useState('');
+  // Pre-filled by the command palette's admin user search (`?q=`), or empty
+  // on a normal nav-link visit.
+  const search = useSearch({ from: '/admin/users' });
+  const [q, setQ] = useState(search.q ?? '');
   const [status, setStatus] = useState(ANY);
   const [cursor, setCursor] = useState<string | undefined>(undefined);
   const [cursorStack, setCursorStack] = useState<string[]>([]);

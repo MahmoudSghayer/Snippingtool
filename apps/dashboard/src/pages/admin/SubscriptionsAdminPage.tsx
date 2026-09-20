@@ -1,4 +1,4 @@
-import { AreaChart, ChartCard, DateRangePicker, defaultDateRange, DonutChart, EmptyState, KpiGrid, PageHeader, StatTile, type DateRange } from '@sl/ui';
+import { AreaChart, ChartCard, ChartLegend, DateRangePicker, defaultDateRange, DonutChart, EmptyState, KpiGrid, PageHeader, seriesColor, seriesLegendItems, StatTile, type DateRange } from '@sl/ui';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 
@@ -26,6 +26,10 @@ export function SubscriptionsAdminPage() {
 
   const items = metricsQuery.data?.items ?? [];
   const planMix = Object.entries(metricsQuery.data?.planMix ?? {}).map(([key, value], i) => ({ key, label: key, value, colorIndex: i }));
+  const newVsCanceledSeries = [
+    { key: 'newSubscriptions', label: 'New', colorIndex: 0 },
+    { key: 'canceledSubscriptions', label: 'Canceled', colorIndex: 2 },
+  ];
 
   return (
     <div className="flex flex-col gap-6">
@@ -42,20 +46,19 @@ export function SubscriptionsAdminPage() {
         <ChartCard
           title="New vs. canceled"
           className="lg:col-span-2"
+          legend={<ChartLegend items={seriesLegendItems(newVsCanceledSeries)} />}
           isLoading={metricsQuery.isLoading}
           isEmpty={!metricsQuery.isLoading && !metricsQuery.isError && items.length === 0}
           emptyMessage={metricsQuery.isError ? "Couldn't load subscription analytics." : 'No activity in this range.'}
         >
-          <AreaChart
-            data={items}
-            xKey="bucket"
-            series={[
-              { key: 'newSubscriptions', label: 'New', colorIndex: 0 },
-              { key: 'canceledSubscriptions', label: 'Canceled', colorIndex: 4 },
-            ]}
-          />
+          <AreaChart data={items} xKey="bucket" series={newVsCanceledSeries} />
         </ChartCard>
-        <ChartCard title="Plan mix" isLoading={metricsQuery.isLoading} isEmpty={!metricsQuery.isLoading && planMix.length === 0}>
+        <ChartCard
+          title="Plan mix"
+          legend={<ChartLegend items={planMix.map((d) => ({ key: d.key, label: d.label, color: seriesColor(d.colorIndex) }))} />}
+          isLoading={metricsQuery.isLoading}
+          isEmpty={!metricsQuery.isLoading && planMix.length === 0}
+        >
           <DonutChart data={planMix} />
         </ChartCard>
       </div>

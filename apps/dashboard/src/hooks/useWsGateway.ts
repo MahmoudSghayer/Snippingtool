@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { WsConnection } from '@/lib/ws.js';
 import { useAdminLiveStore } from '@/stores/adminLive.js';
 import { useAuthStore } from '@/stores/auth.js';
+import { useConnectionStore } from '@/stores/connection.js';
 
 export function useWsGateway(): void {
   const queryClient = useQueryClient();
@@ -16,7 +17,10 @@ export function useWsGateway(): void {
   const connectionRef = useRef<WsConnection | null>(null);
 
   useEffect(() => {
-    if (status !== 'authenticated') return;
+    if (status !== 'authenticated') {
+      useConnectionStore.getState().setStatus('closed');
+      return;
+    }
 
     const connection = new WsConnection((event) => {
       switch (event.type) {
@@ -54,7 +58,7 @@ export function useWsGateway(): void {
           break;
         }
       }
-    });
+    }, (wsStatus) => useConnectionStore.getState().setStatus(wsStatus));
 
     connectionRef.current = connection;
     void connection.connect();

@@ -127,9 +127,9 @@ export function DataTable<TData>({
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-[--sl-radius-lg] border border-[--sl-border]">
+      <div className="max-h-[70vh] overflow-auto rounded-[--sl-radius-lg] border border-[--sl-border]">
         <table className="w-full border-collapse text-sm">
-          <thead>
+          <thead className="sticky top-0 z-10">
             {table.getHeaderGroups().map((headerGroup) => (
               <tr key={headerGroup.id} className="border-b border-[--sl-border] bg-[--sl-surface-2]">
                 {headerGroup.headers.map((header) => {

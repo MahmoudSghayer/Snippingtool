@@ -11,9 +11,20 @@ export function seriesColor(index: number): string {
   return value || fallback;
 }
 
-const FALLBACK: readonly string[] = ['#6fbf9b', '#ddb35c', '#7ea7e0', '#c993dd', '#e08678', '#8fd0c9'];
+const FALLBACK: readonly string[] = ['#35a87e', '#b96fd9', '#d9584a', '#2fa8ad', '#b9822a', '#4f7fd9'];
 
-export const POSITIVE_COLOR = '#6fbf9b';
-export const NEGATIVE_COLOR = '#e08678';
+// Pinned directly to chart-1 (green) / chart-3 (red), not resolved by index,
+// so a future reorder of the categorical ramp (tokens.css) can never
+// silently flip a profit/loss chart's polarity.
+export const POSITIVE_COLOR = '#35a87e';
+export const NEGATIVE_COLOR = '#d9584a';
+
+/** `[{ key, label, colorIndex? }]` (a chart's own `series` prop) -> the
+ * `ChartLegend` items with resolved colours, so every multi-series chart
+ * builds its legend from the same array it already passes to the chart
+ * instead of re-deriving colours by hand. */
+export function seriesLegendItems(series: { key: string; label: string; colorIndex?: number }[]): { key: string; label: string; color: string }[] {
+  return series.map((s, i) => ({ key: s.key, label: s.label, color: seriesColor(s.colorIndex ?? i) }));
+}
 export const GRID_COLOR = '#242f2b';
 export const AXIS_COLOR = '#94a49e';

@@ -136,9 +136,14 @@ const adminOverviewRoute = createRoute({
   component: lazyRouteComponent(() => import('@/pages/admin/OverviewPage.js'), 'OverviewPage'),
 });
 
+// `q` lets the command palette (Cmd/Ctrl+K) deep-link straight into a
+// pre-filled admin user search from anywhere in the app.
+const adminUsersSearchSchema = z.object({ q: z.string().optional() });
+
 const adminUsersRoute = createRoute({
   getParentRoute: () => adminLayoutRoute,
   path: '/users',
+  validateSearch: adminUsersSearchSchema,
   component: lazyRouteComponent(() => import('@/pages/admin/UsersPage.js'), 'UsersPage'),
 });
 
@@ -263,4 +268,43 @@ declare module '@tanstack/react-router' {
 setUnauthorizedHandler((path) => {
   if (window.location.pathname === '/login') return;
   void router.navigate({ to: '/login', search: { returnTo: path } });
+});
+
+// --- Per-route <title> --------------------------------------------------
+// One static map + one subscription, rather than a `useEffect` in every
+// page component — the exact-path entries below win over the prefix
+// fallbacks (checked longest-first) for the admin section's shared prefix.
+const PAGE_TITLES: [string, string][] = [
+  ['/login', 'Sign in'],
+  ['/register', 'Create account'],
+  ['/verify-email', 'Verify email'],
+  ['/forgot-password', 'Forgot password'],
+  ['/reset-password', 'Reset password'],
+  ['/dashboard', 'Dashboard'],
+  ['/analytics', 'Analytics'],
+  ['/subscriptions', 'Subscription'],
+  ['/settings', 'Settings'],
+  ['/admin/users', 'Admin · Users'],
+  ['/admin/profits', 'Admin · Profits'],
+  ['/admin/activity', 'Admin · Activity'],
+  ['/admin/system', 'Admin · System'],
+  ['/admin/audit', 'Admin · Audit log'],
+  ['/admin/subscriptions', 'Admin · Subscriptions'],
+  ['/admin/coupons', 'Admin · Coupons'],
+  ['/admin/plans', 'Admin · Plans'],
+  ['/admin/flags', 'Admin · Flags'],
+  ['/admin/bans', 'Admin · Bans'],
+  ['/admin/feature-toggles', 'Admin · Feature toggles'],
+  ['/admin/config', 'Admin · Config'],
+  ['/admin', 'Admin · Overview'],
+].sort((a, b) => b[0].length - a[0].length);
+
+function titleForPath(pathname: string): string {
+  const match = PAGE_TITLES.find(([prefix]) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+  return match ? `${match[1]} · The Sniper's Ledger` : "The Sniper's Ledger";
+}
+
+document.title = titleForPath(window.location.pathname);
+router.subscribe('onResolved', ({ toLocation }) => {
+  document.title = titleForPath(toLocation.pathname);
 });

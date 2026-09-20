@@ -1,0 +1,41 @@
+name: CodeQL
+
+# Static analysis (SAST) across the monorepo's JS/TypeScript. Complements
+# ci.yml's `security-scan` job (pnpm audit / gitleaks / semgrep — dependency
+# vulnerabilities, secrets, and this repo's own custom rules) with GitHub's
+# own, continuously-updated query suite. Runs on every PR/push to `main` and
+# once a week to catch newly-published queries against unchanged code. See
+# docs/11-devops.md "CI/CD" for how this fits with the rest of the pipeline.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # 04:17 UTC every Monday — off-peak, offset from other scheduled jobs.
+    - cron: "17 4 * * 1"
+
+permissions:
+  contents: read
+  security-events: write # upload SARIF results to the repo's Security tab
+
+jobs:
+  analyze:
+    name: Analyze (javascript-typescript)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          # No compiled artifacts needed for JS/TS analysis (unlike a
+          # compiled language) — skip the workspace install/build entirely.
+          build-mode: none
+
+      - name: perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript-typescript"

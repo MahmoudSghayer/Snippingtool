@@ -1,0 +1,42 @@
+name: Setup Playwright Chromium (xvfb)
+description: >-
+  Installs the `xvfb` package plus a Playwright Chromium (matching whichever
+  @playwright/test version the given workspace package pins) into
+  /opt/pw-browsers/chromium — the fixed path apps/dashboard/playwright.config.ts
+  and apps/extension/playwright.config.ts both expect (matching this repo's
+  own dev/agent sandbox convention; see docs/06-extension.md and
+  docs/07-dashboard.md "Testing"). Extension loading and Chromium's UI both
+  need a real display, which GitHub-hosted runners don't have — pair this
+  with `xvfb-run -a <command>` in the step that actually runs Playwright.
+  Run once per e2e job, after ./.github/actions/setup-pnpm.
+
+inputs:
+  workspace-filter:
+    description: pnpm --filter package to resolve @playwright/test's version from (e.g. @sl/dashboard)
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: install xvfb + Chromium OS deps, download Chromium into /opt/pw-browsers
+      shell: bash
+      env:
+        PLAYWRIGHT_BROWSERS_PATH: /opt/pw-browsers
+      run: |
+        set -euo pipefail
+        sudo mkdir -p /opt/pw-browsers
+        sudo chown "$(id -u):$(id -g)" /opt/pw-browsers
+        sudo apt-get update
+        sudo apt-get install -y xvfb
+        pnpm --filter '${{ inputs.workspace-filter }}' exec playwright install --with-deps chromium
+
+        # `playwright install` lays the browser down at
+        # /opt/pw-browsers/chromium-<rev>/chrome-linux/chrome; both configs
+        # expect it at exactly /opt/pw-browsers/chromium, so symlink it.
+        chromium_bin="$(find /opt/pw-browsers -maxdepth 3 -type f -name chrome -path '*/chrome-linux/*' | head -n1)"
+        if [ -z "$chromium_bin" ]; then
+          echo "::error::Playwright Chromium binary not found under /opt/pw-browsers after install" >&2
+          exit 1
+        fi
+        ln -sf "$chromium_bin" /opt/pw-browsers/chromium
+        echo "linked /opt/pw-browsers/chromium -> $chromium_bin"

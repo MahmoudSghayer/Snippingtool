@@ -44,14 +44,28 @@
   --sl-warning: var(--sl-mid);
 
   /* Chart series — one consistent categorical palette across every chart
-     (dataviz skill: "one visual system"). Index 0/1 double as
-     positive/negative in profit charts. */
-  --sl-chart-1: var(--sl-green);
-  --sl-chart-2: var(--sl-gold);
-  --sl-chart-3: #7ea7e0;
-  --sl-chart-4: #c993dd;
-  --sl-chart-5: var(--sl-red);
-  --sl-chart-6: #8fd0c9;
+     (dataviz skill: "one visual system"). This is a *marks-only* ramp,
+     deliberately more saturated/darker than the --sl-green/--sl-gold/--sl-red
+     status tokens above (those are tuned for 4.5:1+ small-text contrast on
+     badges/labels; marks only need 3:1 against the chart surface, so they can
+     sit at a chroma/lightness that reads clearly as fills and lines). Order
+     is the CVD-safety mechanism, not cosmetic: validated with the `dataviz`
+     skill's `scripts/validate_palette.js` against this app's dark surfaces —
+     `node validate_palette.js "#35a87e,#b96fd9,#d9584a,#2fa8ad,#b9822a,#4f7fd9"
+     --mode dark --surface "#151d1a"` — all checks pass (lightness band,
+     chroma floor, adjacent CVD ΔE, normal-vision floor, contrast). Do not
+     reorder without re-running the validator: slots 2/6 (purple/blue) and
+     3/5 (red/gold) are deliberately non-adjacent. Slot 1 (green) still reads
+     as "positive" first and slot 3 (red) as "negative" for 2-series
+     profit/loss charts (POSITIVE_COLOR/NEGATIVE_COLOR in charts/palette.ts
+     pin to these two directly rather than by index, so a future reorder
+     can't silently flip profit to red). */
+  --sl-chart-1: #35a87e;
+  --sl-chart-2: #b96fd9;
+  --sl-chart-3: #d9584a;
+  --sl-chart-4: #2fa8ad;
+  --sl-chart-5: #b9822a;
+  --sl-chart-6: #4f7fd9;
 
   /* Radii */
   --sl-radius-sm: 6px;

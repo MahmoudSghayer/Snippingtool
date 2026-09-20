@@ -8,6 +8,8 @@ import { api, API_BASE_URL } from '@/api/client.js';
 import type { WsEvent } from '@sl/shared';
 
 export type WsEventHandler = (event: WsEvent) => void;
+export type WsStatus = 'connecting' | 'open' | 'closed';
+export type WsStatusHandler = (status: WsStatus) => void;
 
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 30_000;
@@ -28,10 +30,14 @@ export class WsConnection {
   private presenceTimer: ReturnType<typeof setInterval> | null = null;
   private closedByCaller = false;
 
-  constructor(private readonly onEvent: WsEventHandler) {}
+  constructor(
+    private readonly onEvent: WsEventHandler,
+    private readonly onStatus?: WsStatusHandler,
+  ) {}
 
   async connect(): Promise<void> {
     this.closedByCaller = false;
+    this.onStatus?.('connecting');
     try {
       const { data, error } = await api.POST('/api/v1/ws/ticket', {});
       if (error || !data) {
@@ -44,6 +50,7 @@ export class WsConnection {
 
       socket.addEventListener('open', () => {
         this.reconnectAttempt = 0;
+        this.onStatus?.('open');
       });
       socket.addEventListener('message', (event) => {
         try {
@@ -55,6 +62,7 @@ export class WsConnection {
       });
       socket.addEventListener('close', () => {
         this.socket = null;
+        this.onStatus?.('closed');
         if (!this.closedByCaller) this.scheduleReconnect();
       });
       socket.addEventListener('error', () => {
@@ -67,6 +75,7 @@ export class WsConnection {
 
   private scheduleReconnect(): void {
     if (this.closedByCaller) return;
+    this.onStatus?.('closed');
     const delay = Math.min(RECONNECT_BASE_MS * 2 ** this.reconnectAttempt, RECONNECT_MAX_MS);
     this.reconnectAttempt += 1;
     this.reconnectTimer = setTimeout(() => void this.connect(), delay);
@@ -78,5 +87,6 @@ export class WsConnection {
     if (this.presenceTimer) clearInterval(this.presenceTimer);
     this.socket?.close();
     this.socket = null;
+    this.onStatus?.('closed');
   }
 }

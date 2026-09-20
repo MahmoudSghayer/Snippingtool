@@ -1,5 +1,6 @@
 import {
   ChartCard,
+  ChartLegend,
   DateRangePicker,
   defaultDateRange,
   DonutChart,
@@ -8,6 +9,8 @@ import {
   KpiGrid,
   LineChart,
   PageHeader,
+  seriesColor,
+  seriesLegendItems,
   StatTile,
   type DateRange,
 } from '@sl/ui';
@@ -38,6 +41,11 @@ export function OverviewPage() {
 
   const tick = useAdminLiveStore((s) => s.lastTick);
   const overview = overviewQuery.data;
+
+  const retentionSeries = [
+    { key: 'd7', label: 'D7 retention %', colorIndex: 0 },
+    { key: 'd30', label: 'D30 retention %', colorIndex: 1 },
+  ];
 
   const retentionData = (overview?.retention ?? []).map((r) => ({
     bucket: r.cohortWeek,
@@ -75,16 +83,18 @@ export function OverviewPage() {
           title="Retention"
           description="7-day and 30-day cohort retention."
           className="lg:col-span-2"
+          legend={<ChartLegend items={seriesLegendItems(retentionSeries)} />}
           isLoading={overviewQuery.isLoading}
           isEmpty={!overviewQuery.isLoading && !overviewQuery.isError && retentionData.length === 0}
           emptyMessage={overviewQuery.isError ? "Couldn't load overview analytics." : 'No cohort data yet.'}
         >
-          <LineChart data={retentionData} xKey="bucket" series={[{ key: 'd7', label: 'D7 retention %', colorIndex: 0 }, { key: 'd30', label: 'D30 retention %', colorIndex: 1 }]} />
+          <LineChart data={retentionData} xKey="bucket" series={retentionSeries} />
         </ChartCard>
 
         <ChartCard
           title="Extension versions"
           description="Active-device version distribution."
+          legend={<ChartLegend items={versionData.map((d) => ({ key: d.key, label: d.label, color: seriesColor(d.colorIndex) }))} />}
           isLoading={overviewQuery.isLoading}
           isEmpty={!overviewQuery.isLoading && !overviewQuery.isError && versionData.length === 0}
         >

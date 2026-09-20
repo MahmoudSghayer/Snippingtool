@@ -93,18 +93,14 @@ describe('CSRF (docs/04-auth.md §10)', () => {
     const { cookies } = await loginAsDashboard('csrf-valid@example.com', 'csrf-fp-valid-0000000000000');
     // @fastify/csrf-protection's double-submit check compares the *signed*
     // cookie value against the header — @fastify/cookie signs as
-    // `<value>.<hmac>`; the header must be the unsigned value the plugin
-    // itself generated via GET /api/v1/... no dedicated "get csrf token"
-    // route exists in this API (the dashboard reads the cookie directly,
-    // per docs/04-auth.md §10), so this test reads the *unsigned* half back
-    // out of the signed cookie the same way client JS would: the cookie's
-    // plain value before the '.' is what @fastify/csrf-protection issues as
-    // gettable via its own token generator — reproduced here by asking the
-    // already-authenticated session for a fresh CSRF-protected GET (which
-    // never itself needs the token) is not applicable; instead this test
-    // demonstrates the header/cookie pairing directly using the signed
-    // cookie's own plaintext segment.
-    const csrfToken = decodeURIComponent(cookies.sl_csrf!).split('.')[0]!;
+    // `<value>.<hmac>`; per plugins/csrf.ts, verification is a literal
+    // double-submit match against the *whole* raw cookie value (no
+    // separate token-issuance endpoint exists or is needed) — exactly what
+    // apps/dashboard/src/api/client.ts's `readCsrfCookie()` sends: it reads
+    // `document.cookie` and echoes the `sl_csrf` value back verbatim, signed
+    // segment and all, with no decoding or splitting. Reproduced here the
+    // same way.
+    const csrfToken = cookies.sl_csrf!;
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/auth/password/change',

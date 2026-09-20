@@ -1,4 +1,4 @@
-import { Badge, Sidebar, Toaster } from '@sl/ui';
+import { Badge, Drawer, Sidebar, Toaster } from '@sl/ui';
 import { Link, Outlet, useMatchRoute, useNavigate } from '@tanstack/react-router';
 import {
   Activity,
@@ -13,6 +13,8 @@ import {
   Gift,
   LayoutDashboard,
   LogOut,
+  Menu,
+  Search,
   Server,
   Settings as SettingsIcon,
   Shield,
@@ -21,14 +23,16 @@ import {
   Users as UsersIcon,
   Wallet,
 } from 'lucide-react';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
 
 import { api } from '@/api/client.js';
+import { CommandPalette, useCommandPaletteShortcut } from '@/components/CommandPalette.js';
 import { NotificationsBell } from '@/components/NotificationsBell.js';
 import { useWsGateway } from '@/hooks/useWsGateway.js';
 import { resetBootstrap } from '@/lib/authBootstrap.js';
 import { useAuthStore } from '@/stores/auth.js';
+import { useConnectionStore } from '@/stores/connection.js';
 
 /** Wraps every route (public and authenticated): toaster + notFound live
  * here once instead of per-layout. */
@@ -87,8 +91,12 @@ export function AppLayout() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const isAdmin = useAuthStore((s) => s.admin !== null);
+  const connectionStatus = useConnectionStore((s) => s.status);
+  const [navOpen, setNavOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   useWsGateway();
+  useCommandPaletteShortcut(setPaletteOpen);
 
   useEffect(() => {
     if (!user) return;

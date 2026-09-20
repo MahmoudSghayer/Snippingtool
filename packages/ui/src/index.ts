@@ -34,9 +34,11 @@ export * from './components/DiffViewer.js';
 export * from './components/CopyField.js';
 export * from './components/Sidebar.js';
 export * from './components/KpiGrid.js';
+export * from './components/CommandPalette.js';
 
 export * from './charts/palette.js';
 export * from './charts/ChartTooltip.js';
+export * from './charts/ChartLegend.js';
 export * from './charts/LineChart.js';
 export * from './charts/AreaChart.js';
 export * from './charts/BarChart.js';

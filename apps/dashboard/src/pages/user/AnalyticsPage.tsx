@@ -7,12 +7,14 @@ import {
   CardHeader,
   CardTitle,
   ChartCard,
+  ChartLegend,
   DataTable,
   DateRangePicker,
   defaultDateRange,
   EmptyState,
   formatCoins,
   PageHeader,
+  seriesLegendItems,
   Tabs,
   TabsContent,
   TabsList,
@@ -27,6 +29,11 @@ import { api } from '@/api/client.js';
 
 import type { ActivityAnalyticsPoint } from '@sl/shared';
 
+
+const snipeOutcomeSeries = [
+  { key: 'snipeAttempts', label: 'Attempts', colorIndex: 1 },
+  { key: 'snipeSuccesses', label: 'Successes', colorIndex: 0 },
+];
 
 const activityColumns: ColumnDef<ActivityAnalyticsPoint, unknown>[] = [
   { accessorKey: 'bucket', header: 'Date' },
@@ -89,18 +96,12 @@ export function AnalyticsPage() {
         <ChartCard
           title="Snipe outcomes"
           description="Attempts vs. successes per day."
+          legend={<ChartLegend items={seriesLegendItems(snipeOutcomeSeries)} />}
           isLoading={activityQuery.isLoading}
           isEmpty={!activityQuery.isLoading && !activityQuery.isError && activityItems.length === 0}
           emptyMessage={activityQuery.isError ? "Couldn't load activity analytics." : 'No snipe activity for this range.'}
         >
-          <BarChart
-            data={activityItems}
-            xKey="bucket"
-            series={[
-              { key: 'snipeAttempts', label: 'Attempts', colorIndex: 1 },
-              { key: 'snipeSuccesses', label: 'Successes', colorIndex: 0 },
-            ]}
-          />
+          <BarChart data={activityItems} xKey="bucket" series={snipeOutcomeSeries} />
         </ChartCard>
 
         <ChartCard
