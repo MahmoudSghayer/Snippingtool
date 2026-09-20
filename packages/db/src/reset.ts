@@ -1,4 +1,5 @@
 #!/usr/bin/env tsx
+/* eslint-disable no-console -- CLI script: progress output to the terminal is the point. */
 // db:reset — drops and recreates the `public` schema on the target database
 // (DATABASE_URL), then re-applies every migration from scratch. Destructive;
 // intended for local dev and the test database, never production.

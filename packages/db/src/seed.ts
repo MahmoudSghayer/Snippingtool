@@ -1,4 +1,5 @@
 #!/usr/bin/env tsx
+/* eslint-disable no-console -- CLI script: progress output to the terminal is the point. */
 // Idempotent seed data: plans, feature toggles, system config (safety-governor
 // defaults), a super admin (from SEED_ADMIN_EMAIL/SEED_ADMIN_PASSWORD), and —
 // outside production — a dev user. Safe to run repeatedly: every entity is

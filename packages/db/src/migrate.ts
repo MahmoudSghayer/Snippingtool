@@ -1,4 +1,5 @@
 #!/usr/bin/env tsx
+/* eslint-disable no-console -- CLI script: progress output to the terminal is the point. */
 // Hand-written-SQL migrator. Applies every *.sql file in migrations/ (sorted
 // lexically, so the NNNN_ prefix controls order) inside its own transaction,
 // and records what has been applied in a `schema_migrations` table. Re-running

@@ -72,18 +72,50 @@ export const adapterAuctionsMessageSchema = z.object({
 
 /** Result of an `act()` call (`search`/`buy`/`readResult`) driven through
  * the web app's own service layer — never a forged request. Only present in
- * builds where M2/M3 act surface is enabled. */
+ * builds where M2/M3 act surface is enabled. `requestId` (added
+ * additively — optional, so any older reader of this message still parses
+ * it) echoes the triggering `adapterActRequestMessage.data.requestId` so the
+ * content script can correlate a reply to the call that made it instead of
+ * assuming in-order delivery. */
 export const adapterActionResultMessageSchema = z.object({
   channel: z.literal(ADAPTER_CHANNEL),
   kind: z.literal('action_result'),
   data: z.object({
     action: z.enum(['search', 'buy', 'readResult']),
+    requestId: z.string().min(1).optional(),
     ok: z.boolean(),
     requestedAt: z.number(),
     completedAt: z.number(),
     error: z.string().optional(),
+    /** Only present for `action: 'readResult'` — a coarse "is this trade
+     * still an open listing" read, never listing contents beyond what
+     * `trimAuction` already allows out of the page. */
+    stillListed: z.boolean().optional(),
   }),
 });
+
+/** ISOLATED world (content/engine) -> MAIN world (adapter): drive the act
+ * surface. This is the inbound half of the channel — `content/index.ts` is
+ * the only sender, `adapter.ts` is the only listener, and every request re-runs
+ * the bundle probe first (docs/01-architecture.md, §3.5) before touching the
+ * assumed service layer. Added additively alongside the existing
+ * (adapter -> content) message kinds; `adapterMessageSchema` covers
+ * everything the adapter itself *emits*, this one covers what it *accepts*. */
+export const adapterActRequestMessageSchema = z.object({
+  channel: z.literal(ADAPTER_CHANNEL),
+  kind: z.literal('act_request'),
+  data: z.discriminatedUnion('action', [
+    z.object({ action: z.literal('search'), requestId: z.string().min(1), filter: filterCriteriaSchema }),
+    z.object({
+      action: z.literal('buy'),
+      requestId: z.string().min(1),
+      tradeId: z.string().min(1),
+      price: z.number().int().min(0),
+    }),
+    z.object({ action: z.literal('readResult'), requestId: z.string().min(1), tradeId: z.string().min(1) }),
+  ]),
+});
+export type AdapterActRequestMessage = z.infer<typeof adapterActRequestMessageSchema>;
 
 export const adapterMessageSchema = z.discriminatedUnion('kind', [
   adapterReadyMessageSchema,

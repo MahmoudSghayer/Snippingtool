@@ -85,11 +85,14 @@ describe('schema: every expected table/view/partition exists', () => {
 
   it('has at least 13 monthly partitions plus a default partition for each partitioned table', async () => {
     for (const table of PARTITIONED_TABLES) {
-      const rows = await sql<{ inhrelid: string }[]>`
-        SELECT inhrelid::regclass::text AS inhrelid
-        FROM pg_inherits
-        WHERE inhparent = ${table}::regclass
-      `;
+      // sql.unsafe: a constant query string with a bound ($1) parameter —
+      // not string interpolation into the query text — since `table` needs
+      // to be cast to ::regclass, which the tagged-template form can't
+      // parameterize as a plain identifier or literal cleanly.
+      const rows = await sql.unsafe<{ inhrelid: string }[]>(
+        `SELECT inhrelid::regclass::text AS inhrelid FROM pg_inherits WHERE inhparent = $1::regclass`,
+        [table],
+      );
       const names = rows.map((r) => r.inhrelid);
       expect(names.some((n) => n === `${table}_default`), `${table} missing default partition`).toBe(true);
       const monthly = names.filter((n) => new RegExp(`^${table}_y\\d{4}m\\d{2}$`).test(n));
