@@ -12,9 +12,9 @@
 // env vars this test suite doesn't set, and opens its own DB connection).
 // Mirrors the plan rows packages/db/src/seed.ts creates.
 
+import { plans, type Database } from '@sl/db';
 import { eq } from 'drizzle-orm';
 
-import { plans, type Database } from '@sl/db';
 
 const PLAN_SEEDS = [
   { code: 'trial', name: 'Trial', priceCents: 0, interval: 'month', isLifetime: false, deviceLimit: 1, sortOrder: 0 },

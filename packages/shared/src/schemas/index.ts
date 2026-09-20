@@ -1,5 +1,6 @@
 export * from './admin.js';
 export * from './activity.js';
+export * from './analytics.js';
 export * from './api.js';
 export * from './auth.js';
 export * from './devices.js';
