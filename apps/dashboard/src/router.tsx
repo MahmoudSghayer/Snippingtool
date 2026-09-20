@@ -297,7 +297,8 @@ const PAGE_TITLES: [string, string][] = [
   ['/admin/feature-toggles', 'Admin · Feature toggles'],
   ['/admin/config', 'Admin · Config'],
   ['/admin', 'Admin · Overview'],
-].sort((a, b) => b[0].length - a[0].length);
+];
+PAGE_TITLES.sort((a, b) => b[0].length - a[0].length);
 
 function titleForPath(pathname: string): string {
   const match = PAGE_TITLES.find(([prefix]) => pathname === prefix || pathname.startsWith(`${prefix}/`));

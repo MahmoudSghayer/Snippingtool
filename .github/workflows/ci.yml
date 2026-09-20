@@ -336,7 +336,12 @@ jobs:
         if: failure()
         with:
           name: dashboard-e2e-report
-          path: apps/dashboard/playwright-report
+          # playwright.config.ts's `trace: 'retain-on-failure'` /
+          # `screenshot: 'only-on-failure'` write here (test-results/), not
+          # to an HTML report dir — this config uses the plain `list`
+          # reporter, so there's no playwright-report/ to upload instead.
+          path: apps/dashboard/test-results
+          if-no-files-found: ignore
           retention-days: 7
 
   # -------------------------------------------------------------------------
@@ -363,7 +368,14 @@ jobs:
         if: failure()
         with:
           name: extension-e2e-report
-          path: apps/extension/playwright-report
+          # extension.spec.ts's persistent-context Chromium runs headed
+          # (`headless: false`, required to load an unpacked extension) with
+          # no trace/screenshot capture configured — this uploads whatever
+          # the `list` reporter's default output directory holds, if any;
+          # `if-no-files-found: ignore` keeps an already-red job from
+          # failing a second time over nothing to upload.
+          path: apps/extension/test-results
+          if-no-files-found: ignore
           retention-days: 7
 
   # -------------------------------------------------------------------------

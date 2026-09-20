@@ -19,9 +19,11 @@ export interface AreaChartProps {
   series: SeriesConfig[];
   valueFormatter?: (value: number) => string;
   stacked?: boolean;
+  /** See `LineChart`'s prop of the same name — same default (true). */
+  connectNulls?: boolean;
 }
 
-export function AreaChart({ data, xKey, series, valueFormatter, stacked }: AreaChartProps) {
+export function AreaChart({ data, xKey, series, valueFormatter, stacked, connectNulls = true }: AreaChartProps) {
   return (
     <ResponsiveContainer width="100%" height="100%">
       <RAreaChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
@@ -47,6 +49,7 @@ export function AreaChart({ data, xKey, series, valueFormatter, stacked }: AreaC
             stroke={seriesColor(s.colorIndex ?? i)}
             strokeWidth={2}
             fill={`url(#sl-area-${s.key})`}
+            connectNulls={connectNulls}
           />
         ))}
       </RAreaChart>

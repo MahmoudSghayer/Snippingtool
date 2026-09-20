@@ -22,9 +22,16 @@ export interface LineChartProps {
   xKey: string;
   series: SeriesConfig[];
   valueFormatter?: (value: number) => string;
+  /** Bridges `null`/missing points across the bucket axis instead of
+   * breaking the line (dataviz skill: a chart's x-axis should read
+   * continuously even where a day/bucket has no value — the default here,
+   * since every series in this app is a rolling day/week/month bucket, not
+   * a sparse event log where a true gap is itself the signal). Pass `false`
+   * to show real breaks. */
+  connectNulls?: boolean;
 }
 
-export function LineChart({ data, xKey, series, valueFormatter }: LineChartProps) {
+export function LineChart({ data, xKey, series, valueFormatter, connectNulls = true }: LineChartProps) {
   return (
     <ResponsiveContainer width="100%" height="100%">
       <RLineChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
@@ -42,6 +49,7 @@ export function LineChart({ data, xKey, series, valueFormatter }: LineChartProps
             strokeWidth={2}
             dot={false}
             activeDot={{ r: 4 }}
+            connectNulls={connectNulls}
           />
         ))}
       </RLineChart>
