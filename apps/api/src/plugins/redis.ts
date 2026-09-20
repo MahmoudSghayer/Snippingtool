@@ -36,13 +36,29 @@ const TEST_REDIS_DB = 15;
 
 export default fp(
   async function redisPlugin(fastify: FastifyInstance) {
-    const db = fastify.config.NODE_ENV === 'test' ? TEST_REDIS_DB : undefined;
+    const isTest = fastify.config.NODE_ENV === 'test';
+    const db = isTest ? TEST_REDIS_DB : undefined;
 
     const redis = new Redis(fastify.config.REDIS_URL, { maxRetriesPerRequest: null, lazyConnect: false, db });
     const redisSub = new Redis(fastify.config.REDIS_URL, { maxRetriesPerRequest: null, lazyConnect: false, db });
 
     redis.on('error', (err) => fastify.log.error({ err }, 'redis connection error'));
     redisSub.on('error', (err) => fastify.log.error({ err }, 'redis pub/sub connection error'));
+
+    if (isTest) {
+      // Every `buildApp()` call is one test FILE's `beforeAll` (each file
+      // builds its own app once, per this codebase's own test convention —
+      // see any `modules/*/__tests__/*.test.ts`). Flushing here, once per
+      // app instance, isolates Redis state *between test files* the same
+      // way `resetDatabase()` in each file's own `beforeEach` already
+      // isolates Postgres state between individual tests — global-setup's
+      // FLUSHDB only runs once for the whole `pnpm test` run, which left
+      // rate-limit counters, MFA tickets, dedupe keys, etc. from one file
+      // visible to the next (found via real cross-file flakiness: two
+      // otherwise-passing files started intermittently failing each other's
+      // login/trial-abuse assertions only when run together, never alone).
+      await redis.flushdb();
+    }
 
     fastify.decorate('redis', redis);
     fastify.decorate('redisSub', redisSub);

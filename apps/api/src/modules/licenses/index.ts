@@ -87,6 +87,7 @@ export default fp(
         const result = await validateLicense(fastify.db, fastify.entitlements, {
           licenseKey: request.body.licenseKey,
           device: request.body.device,
+          ip: request.ip,
         });
         return result;
       },

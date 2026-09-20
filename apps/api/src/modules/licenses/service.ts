@@ -13,7 +13,7 @@ import { randomBytes } from 'node:crypto';
 
 import { devices, licenses, plans, subscriptions, type Database } from '@sl/db';
 import { generateLicenseKey, LICENSE_KEY_RANDOM_BYTES, validateLicenseKeyFormat } from '@sl/shared';
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, isNull, lt } from 'drizzle-orm';
 
 import { fastHash } from '../../lib/crypto.js';
 import { AppError, AppErrors } from '../../lib/errors.js';
@@ -133,6 +133,12 @@ export interface ValidateLicenseInput {
     os?: string;
     extensionVersion?: string;
   };
+  /** Caller's IP (`request.ip`), recorded onto `devices.last_ip` — this is
+   * what the `abuse.scan` job's "license validated from too many distinct
+   * networks" detector reads (docs/05-subscriptions.md §6). Optional only
+   * so unit tests that construct `ValidateLicenseInput` directly don't all
+   * need to supply one. */
+  ip?: string | null;
 }
 
 export interface ValidateLicenseResult {
@@ -184,6 +190,7 @@ export async function validateLicense(
       .update(devices)
       .set({
         lastSeenAt: new Date(),
+        lastIp: input.ip ?? existingDevice.lastIp,
         licenseId: license.id,
         status: 'active',
         name: input.device.name ?? existingDevice.name,
@@ -207,6 +214,7 @@ export async function validateLicense(
         userId: license.userId,
         licenseId: license.id,
         fingerprintHash,
+        lastIp: input.ip ?? null,
         name: input.device.name ?? null,
         browser: input.device.browser ?? null,
         os: input.device.os ?? null,
@@ -223,4 +231,38 @@ export async function validateLicense(
   const entitlementJws = await entitlementProvider.signEntitlementBlob(snapshot, license.userId, deviceId);
 
   return { status: license.status, entitlements: snapshot, entitlementJws };
+}
+
+const NON_LIVE_SUBSCRIPTION_STATUSES = new Set(['canceled', 'expired', 'suspended']);
+
+/** `licenses.revalidate` job (nightly consistency sweep — see
+ * docs/05-subscriptions.md §9): expires any `active` license past its
+ * `expires_at`, and revokes any `active` license whose subscription has
+ * since left every "live" status. The synchronous paths elsewhere
+ * (`subscriptions.expire`, admin suspend/cancel, the Stripe webhook) should
+ * already have handled each of these — this is the backstop for anything
+ * that slipped through. */
+export async function revalidateLicenses(db: Database): Promise<{ expiredCount: number; revokedCount: number }> {
+  const now = new Date();
+
+  const expiredCandidates = await db.query.licenses.findMany({
+    where: and(eq(licenses.status, 'active'), isNotNull(licenses.expiresAt), lt(licenses.expiresAt, now), isNull(licenses.deletedAt)),
+  });
+  for (const license of expiredCandidates) {
+    await db.update(licenses).set({ status: 'expired' }).where(eq(licenses.id, license.id));
+  }
+
+  const stillActive = await db.query.licenses.findMany({
+    where: and(eq(licenses.status, 'active'), isNull(licenses.deletedAt)),
+  });
+  let revokedCount = 0;
+  for (const license of stillActive) {
+    const sub = await db.query.subscriptions.findFirst({ where: eq(subscriptions.id, license.subscriptionId) });
+    if (sub && NON_LIVE_SUBSCRIPTION_STATUSES.has(sub.status)) {
+      await revoke(db, license.id, `revalidate_sweep: subscription is ${sub.status}`);
+      revokedCount += 1;
+    }
+  }
+
+  return { expiredCount: expiredCandidates.length, revokedCount };
 }

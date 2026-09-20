@@ -205,6 +205,15 @@ export async function login(
   if (!user.emailVerifiedAt) throw AppErrors.emailNotVerified();
   if (user.status !== 'active') throw AppErrors.forbidden('Account is not active.');
 
+  // Cross-agent seam (docs/05-subscriptions.md §"Cross-agent touchpoints"):
+  // modules/bans owns ban creation/lifting; this is the login-time check it
+  // asked the auth module to call, covering account/IP/device/hwid bans —
+  // a superset of `users.status === 'banned'` (which is also covered above,
+  // since an account ban sets that too, but IP/device/hwid bans never do).
+  const { checkBans } = await import('../bans/service.js');
+  const banCheck = await checkBans(ctx.db, { userId: user.id, ip, deviceFingerprintHash: input.device.fingerprint });
+  if (banCheck.banned) throw AppErrors.forbidden('This account, device, or network has been banned.');
+
   await resetLoginFailures(ctx.db, user.id);
 
   const requiresEnrollment = user.role === 'admin' && !user.totpEnabledAt;

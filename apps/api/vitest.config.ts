@@ -11,7 +11,22 @@ export default defineConfig({
     include: ['src/**/__tests__/*.test.ts'],
     globalSetup: ['src/test/global-setup.ts'],
     setupFiles: ['src/test/setup.ts'],
+    // `fileParallelism: false` alone was not enough to fully serialize
+    // execution — real, reproducible cross-file flakiness (a request in
+    // file B intermittently failing with a stale/invalid-looking auth
+    // response) still showed up under vitest even though the exact same
+    // sequence run 25/25 times outside vitest (a plain tsx script driving
+    // the same app.inject() calls) never failed once. `poolOptions.forks.
+    // singleFork` pins every test file to one OS process with no worker
+    // pool scheduling ambiguity, matching what every test file's own
+    // sequential-by-design assumptions (one shared `app.redis` connection,
+    // one Postgres pool, `resetDatabase()`-before-every-test) actually need.
     fileParallelism: false,
+    pool: 'forks',
+    poolOptions: { forks: { singleFork: true } },
+    maxWorkers: 1,
+    minWorkers: 1,
+    sequence: { concurrent: false },
     testTimeout: 30_000,
     hookTimeout: 30_000,
     server: {

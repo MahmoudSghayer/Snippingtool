@@ -14,6 +14,7 @@ import 'dotenv/config';
 
 import { loadEnv } from './config/env.js';
 import { loadJobs } from './jobs/index.js';
+import { createMailer } from './lib/mailer.js';
 
 import type { JobContext } from './jobs/types.js';
 
@@ -24,7 +25,7 @@ async function main() {
   const { db, sql } = createDb(env.DATABASE_URL, { max: 5 });
   const connection = new Redis(env.REDIS_URL, { maxRetriesPerRequest: null });
 
-  const ctx: JobContext = { db, redis: connection, log };
+  const ctx: JobContext = { db, redis: connection, env, mailer: createMailer(env), log };
   const jobs = await loadJobs();
 
   const queues: Queue[] = [];

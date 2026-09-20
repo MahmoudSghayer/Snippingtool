@@ -3,13 +3,22 @@
 // reads a module-level singleton) so tests can pass a fake — see
 // `stripe-client.ts`'s doc comment and this module's `__tests__/`.
 
-import { payments, type Database } from '@sl/db';
-import { and, desc, eq, lt } from 'drizzle-orm';
+import { payments, subscriptions, type Database } from '@sl/db';
+import { and, desc, eq, inArray, isNotNull, lt } from 'drizzle-orm';
 
 import { AppErrors } from '../../lib/errors.js';
 import { decodeCursor, paginate } from '../../lib/pagination.js';
+import { publishToUser } from '../../ws/publish.js';
 import { checkCouponEligibility, redeemCoupon } from '../coupons/service.js';
-import { activateManual, getLiveSubscriptionForUser, getPlanByCode, grantLifetime, toSubscriptionDto } from '../subscriptions/service.js';
+import {
+  activateManual,
+  getLiveSubscriptionForUser,
+  getPlanByCode,
+  getPlanById,
+  grantLifetime,
+  toSubscriptionDto,
+  type SubscriptionRow,
+} from '../subscriptions/service.js';
 
 import type { StripeConfig } from './stripe-config.js';
 import type { Redis } from 'ioredis';
@@ -157,4 +166,89 @@ export async function listPaymentHistory(db: Database, userId: string, limit: nu
     limit: limit + 1,
   });
   return paginate(rows, limit, (row) => row.createdAt.toISOString());
+}
+
+// ---------------------------------------------------------------------------
+// Stripe <-> local status mapping, shared by the webhook handler
+// (webhooks.ts's `customer.subscription.updated`) and `stripe.reconcile`
+// below, so the two never drift into two different mappings.
+// ---------------------------------------------------------------------------
+
+export const STRIPE_STATUS_MAP: Partial<Record<Stripe.Subscription.Status, SubscriptionRow['status']>> = {
+  active: 'active',
+  trialing: 'trialing',
+  past_due: 'past_due',
+  canceled: 'canceled',
+  unpaid: 'past_due',
+  incomplete: 'past_due',
+  incomplete_expired: 'canceled',
+  paused: 'suspended',
+};
+
+const RECONCILABLE_STATUSES = ['trialing', 'active', 'past_due', 'suspended'] as const;
+
+/**
+ * `stripe.reconcile` nightly job (docs/05-subscriptions.md §9): re-fetches
+ * every local Stripe-sourced live subscription from Stripe directly and
+ * corrects any drift — the backstop for a webhook that was missed,
+ * delivered out of order, or never arrived. Uses the exact same
+ * `STRIPE_STATUS_MAP`/period-reading logic the webhook handler uses, via
+ * this one shared function, so a subscription reconciled by this job ends
+ * up in the identical state a correctly-delivered webhook would have left
+ * it in.
+ */
+export async function reconcileStripeSubscriptions(db: Database, redis: Redis, stripe: Stripe): Promise<{ reconciledCount: number; errorCount: number }> {
+  const rows = await db.query.subscriptions.findMany({
+    where: and(
+      eq(subscriptions.source, 'stripe'),
+      isNotNull(subscriptions.stripeSubscriptionId),
+      inArray(subscriptions.status, [...RECONCILABLE_STATUSES]),
+    ),
+  });
+
+  let reconciledCount = 0;
+  let errorCount = 0;
+
+  for (const sub of rows) {
+    if (!sub.stripeSubscriptionId) continue;
+
+    let stripeSub: Stripe.Subscription;
+    try {
+      stripeSub = await stripe.subscriptions.retrieve(sub.stripeSubscriptionId);
+    } catch {
+      errorCount += 1;
+      continue;
+    }
+
+    const period = getSubscriptionPeriod(stripeSub);
+    const mappedStatus = STRIPE_STATUS_MAP[stripeSub.status] ?? sub.status;
+
+    const drifted =
+      mappedStatus !== sub.status ||
+      period.end.getTime() !== (sub.currentPeriodEnd?.getTime() ?? -1) ||
+      stripeSub.cancel_at_period_end !== sub.cancelAtPeriodEnd;
+
+    if (!drifted) continue;
+
+    const [after] = await db
+      .update(subscriptions)
+      .set({
+        status: mappedStatus,
+        currentPeriodStart: period.start,
+        currentPeriodEnd: period.end,
+        cancelAtPeriodEnd: stripeSub.cancel_at_period_end,
+        // Constraint: trial_ends_at must be NULL whenever status != 'trialing'.
+        trialEndsAt: mappedStatus === 'trialing' ? sub.trialEndsAt : null,
+      })
+      .where(eq(subscriptions.id, sub.id))
+      .returning();
+
+    const plan = await getPlanById(db, sub.planId);
+    if (plan && after) {
+      await publishToUser(redis, sub.userId, { type: 'subscription.changed', subscription: toSubscriptionDto(after, plan) });
+    }
+    reconciledCount += 1;
+  }
+
+  return { reconciledCount, errorCount };
 }

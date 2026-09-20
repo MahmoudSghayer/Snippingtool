@@ -5,13 +5,21 @@
 // repeatable schedule (if any) once at startup (idempotent — BullMQ
 // dedupes identical repeat jobs by key).
 
+import type { Env } from '../config/env.js';
+import type { Mailer } from '../lib/mailer.js';
 import type { Database } from '@sl/db';
 import type { Job } from 'bullmq';
 import type { Redis } from 'ioredis';
 
+
 export interface JobContext {
   db: Database;
   redis: Redis;
+  env: Env;
+  /** Lazily constructed on first access (most jobs never send mail) — see
+   * worker.ts. Real SMTP in production, in-memory JSON transport in
+   * dev/test, same as the API process's `fastify.mailer`. */
+  mailer: Mailer;
   log: {
     info: (obj: unknown, msg?: string) => void;
     warn: (obj: unknown, msg?: string) => void;

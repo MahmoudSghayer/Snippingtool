@@ -442,7 +442,13 @@ export async function suspend(
   if (!before) throw AppErrors.notFound('subscription');
   if (before.status === 'suspended') throw AppErrors.conflict('Subscription is already suspended.');
 
-  const [after] = await db.update(subscriptions).set({ status: 'suspended' }).where(eq(subscriptions.id, subscriptionId)).returning();
+  const [after] = await db
+    .update(subscriptions)
+    // Same constraint as expireDueSubscriptions — 'suspended' is never
+    // 'trialing', so trial_ends_at must be cleared here too.
+    .set({ status: 'suspended', trialEndsAt: null })
+    .where(eq(subscriptions.id, subscriptionId))
+    .returning();
   const plan = await getPlanById(db, after!.planId);
   if (plan) await publishSubscriptionChanged(redis, after!, plan);
   return { before, after: after! };
@@ -476,7 +482,7 @@ export async function cancelByAdmin(
 
   const now = new Date();
   const patch = immediate
-    ? { status: 'canceled' as const, canceledAt: now, endedAt: now, cancelAtPeriodEnd: true }
+    ? { status: 'canceled' as const, canceledAt: now, endedAt: now, cancelAtPeriodEnd: true, trialEndsAt: null }
     : { cancelAtPeriodEnd: true, canceledAt: now };
 
   const [after] = await db.update(subscriptions).set(patch).where(eq(subscriptions.id, subscriptionId)).returning();
@@ -522,7 +528,10 @@ export async function expireDueSubscriptions(db: Database, redis: Redis): Promis
   for (const sub of due) {
     const [after] = await db
       .update(subscriptions)
-      .set({ status: 'expired', endedAt: now })
+      // trial_ends_at must be cleared in the same UPDATE — the DB constraint
+      // `subscriptions_trial_ends_only_when_trialing` requires it be NULL
+      // once status leaves 'trialing' (02-database.md §6.3).
+      .set({ status: 'expired', endedAt: now, trialEndsAt: null })
       .where(eq(subscriptions.id, sub.id))
       .returning();
 

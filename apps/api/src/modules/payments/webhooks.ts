@@ -20,10 +20,9 @@ import {
   getPlanById,
   suspend,
   toSubscriptionDto,
-  type SubscriptionRow,
 } from '../subscriptions/service.js';
 
-import { getSubscriptionPeriod } from './service.js';
+import { getSubscriptionPeriod, STRIPE_STATUS_MAP } from './service.js';
 
 import type { Redis } from 'ioredis';
 import type Stripe from 'stripe';
@@ -222,7 +221,11 @@ async function handleInvoicePaymentFailed(db: Database, redis: Redis, event: Str
   const sub = await db.query.subscriptions.findFirst({ where: eq(subscriptions.stripeSubscriptionId, stripeSubId) });
   if (!sub) return;
 
-  const [after] = await db.update(subscriptions).set({ status: 'past_due' }).where(eq(subscriptions.id, sub.id)).returning();
+  const [after] = await db
+    .update(subscriptions)
+    .set({ status: 'past_due', trialEndsAt: null })
+    .where(eq(subscriptions.id, sub.id))
+    .returning();
   const plan = await getPlanById(db, after!.planId);
 
   await recordPayment(db, {
@@ -250,17 +253,6 @@ async function handleInvoicePaymentFailed(db: Database, redis: Redis, event: Str
   });
 }
 
-const STRIPE_STATUS_MAP: Partial<Record<Stripe.Subscription.Status, SubscriptionRow['status']>> = {
-  active: 'active',
-  trialing: 'trialing',
-  past_due: 'past_due',
-  canceled: 'canceled',
-  unpaid: 'past_due',
-  incomplete: 'past_due',
-  incomplete_expired: 'canceled',
-  paused: 'suspended',
-};
-
 async function handleSubscriptionUpdated(db: Database, redis: Redis, event: Stripe.Event): Promise<void> {
   const stripeSub = event.data.object as Stripe.Subscription;
   const sub = await db.query.subscriptions.findFirst({ where: eq(subscriptions.stripeSubscriptionId, stripeSub.id) });
@@ -276,6 +268,8 @@ async function handleSubscriptionUpdated(db: Database, redis: Redis, event: Stri
       currentPeriodStart: period.start,
       currentPeriodEnd: period.end,
       cancelAtPeriodEnd: stripeSub.cancel_at_period_end,
+      // Constraint: trial_ends_at must be NULL whenever status != 'trialing'.
+      trialEndsAt: mappedStatus === 'trialing' ? sub.trialEndsAt : null,
     })
     .where(eq(subscriptions.id, sub.id))
     .returning();
@@ -291,7 +285,7 @@ async function handleSubscriptionDeleted(db: Database, redis: Redis, event: Stri
 
   const [after] = await db
     .update(subscriptions)
-    .set({ status: 'canceled', endedAt: new Date() })
+    .set({ status: 'canceled', endedAt: new Date(), trialEndsAt: null })
     .where(eq(subscriptions.id, sub.id))
     .returning();
 
@@ -377,7 +371,9 @@ async function handleDisputeCreated(db: Database, redis: Redis, event: Stripe.Ev
         entityId: sub.id,
         before: toAuditSnapshot(before),
         after: toAuditSnapshot(after),
-        requestId: event.id,
+        // No HTTP request_id for a webhook-triggered system action (that
+        // column is a uuid correlating to the API's own x-request-id, and
+        // Stripe's event.id, e.g. "evt_...", is not a UUID) — omitted.
       });
     }
   }
