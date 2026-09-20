@@ -48,6 +48,28 @@ export default fp(
         fastify.csrfProtection(request, reply, done);
       },
     );
+
+    // Token issuance (the other half of double-submit): `@fastify/csrf-
+    // protection` only *decorates* `reply.generateCsrf()` — nothing calls it
+    // on its own, and this app never did either, which meant the `sl_csrf`
+    // cookie the dashboard's own API client already reads
+    // (docs/07-dashboard.md §4, "the exact double-submit contract
+    // docs/04-auth.md §10 describes") was never actually issued by the
+    // server: every cookie-session mutation would 403 with "Missing csrf
+    // secret" on a browser that had never separately been handed the
+    // cookie some other way. Fixed here, once, for every non-bearer
+    // request rather than only on login, so the cookie exists from the
+    // dashboard's very first page load (any GET) — a browser that only
+    // ever calls `GET /users/me` before its first mutation still has a
+    // valid `sl_csrf` cookie in hand by the time it needs one.
+    // `generateCsrf()` reuses the existing secret (and does not re-set the
+    // cookie) when the request already carries a valid one — see
+    // `@fastify/csrf-protection`'s own `generateCsrfCookie`, so this is a
+    // no-op on every request after the first for a given client.
+    fastify.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply) => {
+      if (request.headers.authorization) return; // bearer clients never need this cookie
+      reply.generateCsrf();
+    });
   },
   { name: 'csrf', dependencies: ['config', 'cookie'] },
 );
