@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Ledger",
+  "version": "0.1.0",
+  "description": "Records what the FC transfer market actually does, so you can trade on measured numbers instead of guesses.",
+  "permissions": ["storage", "unlimitedStorage"],
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.ea.com/*/ultimate-team/web-app/*",
+        "https://www.ea.com/ultimate-team/web-app/*"
+      ],
+      "js": ["src/main/adapter.js"],
+      "world": "MAIN",
+      "run_at": "document_start",
+      "all_frames": false
+    },
+    {
+      "matches": [
+        "https://www.ea.com/*/ultimate-team/web-app/*",
+        "https://www.ea.com/ultimate-team/web-app/*"
+      ],
+      "js": ["src/ui/panel.js", "src/content.js"],
+      "world": "ISOLATED",
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ]
+}
