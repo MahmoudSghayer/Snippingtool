@@ -33,8 +33,10 @@ export const ACCESS_TOKEN_TTL_SECONDS = 15 * 60;
 export const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 export const MFA_TICKET_TTL_SECONDS = 5 * 60;
 
-let cachedPrivateKey: Promise<CryptoKey> | undefined;
-let cachedPublicKey: Promise<CryptoKey> | undefined;
+type JoseKey = Awaited<ReturnType<typeof importPKCS8>>;
+
+let cachedPrivateKey: Promise<JoseKey> | undefined;
+let cachedPublicKey: Promise<JoseKey> | undefined;
 
 function getPrivateKey(pem: string) {
   cachedPrivateKey ??= importPKCS8(pem, 'EdDSA');

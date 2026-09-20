@@ -36,7 +36,9 @@ export default fp(
     // state under a cookie session add `{ preHandler: fastify.verifyCsrf }`.
     fastify.decorate('verifyCsrf', async (request: import('fastify').FastifyRequest, reply: import('fastify').FastifyReply) => {
       if (request.headers.authorization) return; // bearer path — no cookie session, no CSRF risk
-      await fastify.csrfProtection(request, reply);
+      await new Promise<void>((resolve, reject) => {
+        fastify.csrfProtection(request, reply, (err?: Error) => (err ? reject(err) : resolve()));
+      });
     });
   },
   { name: 'csrf', dependencies: ['config', 'cookie'] },

@@ -3,14 +3,7 @@
   "extends": "@sl/config/tsconfig.node.json",
   "compilerOptions": {
     "outDir": "dist",
-    "rootDir": "src",
-    "baseUrl": ".",
-    "paths": {
-      "@sl/shared": ["../../packages/shared/src/index.ts"],
-      "@sl/shared/*": ["../../packages/shared/src/*"],
-      "@sl/db": ["../../packages/db/src/index.ts"],
-      "@sl/db/*": ["../../packages/db/src/*"]
-    }
+    "rootDir": "src"
   },
   "include": ["src"]
 }
