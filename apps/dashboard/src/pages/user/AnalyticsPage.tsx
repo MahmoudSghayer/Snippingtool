@@ -23,9 +23,9 @@ import {
   type ColumnDef,
   type DateRange,
 } from '@sl/ui';
-import type { ActivityAnalyticsPoint, ActivityAnalyticsResponse, ProfitAnalyticsResponse } from '@sl/shared';
+import type { ActivityAnalyticsPoint } from '@sl/shared';
 
-import { analyticsGet } from '@/api/analyticsClient.js';
+import { api } from '@/api/client.js';
 
 const activityColumns: ColumnDef<ActivityAnalyticsPoint, unknown>[] = [
   { accessorKey: 'bucket', header: 'Date' },
@@ -37,27 +37,34 @@ const activityColumns: ColumnDef<ActivityAnalyticsPoint, unknown>[] = [
   { accessorKey: 'errors', header: 'Errors' },
 ];
 
-/** Consumes `@sl/shared`'s analytics DTOs against `/analytics/me/*` — see
- * src/api/analyticsClient.ts's header comment for why this goes through a
- * plain fetch instead of the generated openapi-fetch client: those routes
- * hadn't landed in apps/api/openapi/openapi.json as of this pass. Every
- * panel below degrades to an explicit empty state instead of erroring when
- * the service 404s. */
+/** `/analytics/me/{profits,activity}` — profit series, snipe outcomes and
+ * activity, per PHASE 7. Filter-performance (`filter_stats`) has no GET
+ * endpoint anywhere in the API yet (only the extension's ingest `POST
+ * /filters/stats`) — documented as a follow-up in docs/07-dashboard.md
+ * rather than faked here. */
 export function AnalyticsPage() {
   const [range, setRange] = useState<DateRange>(defaultDateRange('30d'));
 
   const profitsQuery = useQuery({
     queryKey: ['analytics', 'me', 'profits', range],
-    queryFn: () => analyticsGet<ProfitAnalyticsResponse>('/analytics/me/profits', { ...range, granularity: 'day' }),
+    queryFn: async () => {
+      const { data, error } = await api.GET('/analytics/me/profits', { params: { query: { ...range, granularity: 'day' } } });
+      if (error) throw error;
+      return data;
+    },
   });
 
   const activityQuery = useQuery({
     queryKey: ['analytics', 'me', 'activity', range],
-    queryFn: () => analyticsGet<ActivityAnalyticsResponse>('/analytics/me/activity', { ...range, granularity: 'day' }),
+    queryFn: async () => {
+      const { data, error } = await api.GET('/analytics/me/activity', { params: { query: { ...range, granularity: 'day', tz: 'UTC' } } });
+      if (error) throw error;
+      return data;
+    },
   });
 
-  const profitItems = profitsQuery.data?.data?.items ?? [];
-  const activityItems = activityQuery.data?.data?.items ?? [];
+  const profitItems = profitsQuery.data?.items ?? [];
+  const activityItems = activityQuery.data?.items ?? [];
 
   return (
     <div className="flex flex-col gap-6">
@@ -71,10 +78,8 @@ export function AnalyticsPage() {
         title="Net profit"
         description="Daily net coin profit for the selected range."
         isLoading={profitsQuery.isLoading}
-        isEmpty={!profitsQuery.isLoading && profitItems.length === 0}
-        emptyMessage={
-          profitsQuery.data?.error ? "Profit analytics aren't available yet — check back soon." : 'No profit recorded for this range.'
-        }
+        isEmpty={!profitsQuery.isLoading && !profitsQuery.isError && profitItems.length === 0}
+        emptyMessage={profitsQuery.isError ? "Couldn't load profit analytics." : 'No profit recorded for this range.'}
       >
         <AreaChart data={profitItems} xKey="bucket" series={[{ key: 'netProfit', label: 'Net profit', colorIndex: 0 }]} valueFormatter={formatCoins} />
       </ChartCard>
@@ -84,8 +89,8 @@ export function AnalyticsPage() {
           title="Snipe outcomes"
           description="Attempts vs. successes per day."
           isLoading={activityQuery.isLoading}
-          isEmpty={!activityQuery.isLoading && activityItems.length === 0}
-          emptyMessage={activityQuery.data?.error ? "Activity analytics aren't available yet — check back soon." : 'No snipe activity for this range.'}
+          isEmpty={!activityQuery.isLoading && !activityQuery.isError && activityItems.length === 0}
+          emptyMessage={activityQuery.isError ? "Couldn't load activity analytics." : 'No snipe activity for this range.'}
         >
           <BarChart
             data={activityItems}
@@ -101,7 +106,7 @@ export function AnalyticsPage() {
           title="Coins traded"
           description="Total coins moved per day (buy + sell)."
           isLoading={profitsQuery.isLoading}
-          isEmpty={!profitsQuery.isLoading && profitItems.length === 0}
+          isEmpty={!profitsQuery.isLoading && !profitsQuery.isError && profitItems.length === 0}
         >
           <BarChart data={profitItems} xKey="bucket" series={[{ key: 'coinsTraded', label: 'Coins traded', colorIndex: 2 }]} valueFormatter={formatCoins} />
         </ChartCard>
@@ -119,8 +124,8 @@ export function AnalyticsPage() {
                 columns={activityColumns}
                 data={activityItems}
                 isLoading={activityQuery.isLoading}
-                isError={!!activityQuery.data?.error}
-                errorMessage="Activity analytics aren't available yet."
+                isError={activityQuery.isError}
+                errorMessage="Couldn't load activity analytics."
                 onRetry={() => void activityQuery.refetch()}
                 emptyTitle="No activity in this range"
                 getRowId={(row) => row.bucket}

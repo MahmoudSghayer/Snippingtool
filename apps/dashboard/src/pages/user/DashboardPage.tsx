@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import { Gauge, Laptop, ShieldCheck, TrendingUp } from 'lucide-react';
+import { AlertTriangle, Gauge, Laptop, ShieldCheck, TrendingUp } from 'lucide-react';
 
 import {
   Badge,
@@ -19,11 +19,9 @@ import {
   StatTile,
   type ColumnDef,
 } from '@sl/ui';
-import type { MeOverviewResponse } from '@sl/shared';
 import type { Trade } from '@sl/shared';
 
 import { api } from '@/api/client.js';
-import { analyticsGet } from '@/api/analyticsClient.js';
 
 const tradeColumns: ColumnDef<Trade, unknown>[] = [
   { accessorKey: 'resourceId', header: 'Player', cell: (c) => <span className="font-mono">{c.getValue() as number}</span> },
@@ -49,7 +47,11 @@ const tradeColumns: ColumnDef<Trade, unknown>[] = [
 export function DashboardPage() {
   const overviewQuery = useQuery({
     queryKey: ['analytics', 'me', 'overview'],
-    queryFn: () => analyticsGet<MeOverviewResponse>('/analytics/me/overview'),
+    queryFn: async () => {
+      const { data, error } = await api.GET('/analytics/me/overview');
+      if (error) throw error;
+      return data;
+    },
   });
 
   const devicesQuery = useQuery({
@@ -88,7 +90,7 @@ export function DashboardPage() {
     },
   });
 
-  const overview = overviewQuery.data?.data;
+  const overview = overviewQuery.data;
   const activeDevices = devicesQuery.data?.filter((d) => d.status === 'active').length ?? 0;
 
   return (
@@ -113,12 +115,18 @@ export function DashboardPage() {
         <StatTile label="Active devices" value={activeDevices} icon={<Laptop className="size-4" />} />
       </KpiGrid>
 
-      {!overviewQuery.isLoading && !overview && (
+      {overviewQuery.isError && (
         <Card>
           <CardContent className="pt-5">
             <EmptyState
-              title="Live profit analytics aren't available yet"
-              description="This account's overview will appear here once the analytics service is deployed. Recent trades and license status below are already live."
+              icon={<AlertTriangle className="size-6" />}
+              title="Couldn't load your profit overview"
+              description="Recent trades and license status below are unaffected."
+              action={
+                <Button size="sm" variant="outline" onClick={() => void overviewQuery.refetch()}>
+                  Retry
+                </Button>
+              }
             />
           </CardContent>
         </Card>

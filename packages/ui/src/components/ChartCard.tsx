@@ -12,15 +12,16 @@ export interface ChartCardProps {
   isEmpty?: boolean;
   emptyMessage?: string;
   height?: number;
+  className?: string;
   children: ReactNode;
 }
 
 /** Frame every Recharts wrapper renders inside — title, optional
  * range/granularity controls in `actions`, and consistent loading/empty
  * states so no chart-owning page has to hand-roll them. */
-export function ChartCard({ title, description, actions, isLoading, isEmpty, emptyMessage = 'No data for this range.', height = 280, children }: ChartCardProps) {
+export function ChartCard({ title, description, actions, isLoading, isEmpty, emptyMessage = 'No data for this range.', height = 280, className, children }: ChartCardProps) {
   return (
-    <Card>
+    <Card className={className}>
       <CardHeader>
         <div>
           <CardTitle>{title}</CardTitle>

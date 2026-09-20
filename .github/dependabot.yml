@@ -1,0 +1,42 @@
+version: 2
+
+updates:
+  # pnpm workspace — Dependabot detects pnpm-lock.yaml at the repo root and
+  # updates dependencies across every apps/*/packages/* workspace package
+  # from this one entry; it does not need one entry per workspace package.
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    groups:
+      # Security patches land immediately as individual PRs (not grouped,
+      # so they're never held up waiting for the weekly batch); everything
+      # else groups by risk so CI runs once per batch instead of once per
+      # package bump.
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+    labels: ["dependencies"]
+    commit-message:
+      prefix: "chore(deps)"
+
+  # Dockerfiles under infra/docker/ (FROM base image versions).
+  - package-ecosystem: "docker"
+    directory: "/infra/docker"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels: ["dependencies", "docker"]
+    commit-message:
+      prefix: "chore(docker)"
+
+  # GitHub Actions used by .github/workflows/*.yml.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels: ["dependencies", "ci"]
+    commit-message:
+      prefix: "chore(ci)"

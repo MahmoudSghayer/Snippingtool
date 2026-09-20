@@ -1,0 +1,55 @@
+rules:
+  - id: no-raw-sql-string-interpolation
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >-
+      Raw SQL built with string interpolation/concatenation. Every query
+      must go through Drizzle's parameterised `sql` tagged template
+      (`` sql`... ${value} ...` ``, which parameterises automatically) or the
+      query builder — never `sql.raw(...)` fed a template literal/concat
+      that embeds a variable, and never a plain string built with `+` passed
+      to `.execute()`/`.query()`. See docs/09-security.md.
+    patterns:
+      - pattern-either:
+          - pattern: sql.raw(`...${$X}...`)
+          - pattern: sql.raw($A + $B)
+          - pattern: $DB.execute(`...${$X}...`)
+          - pattern: $CLIENT.query(`...${$X}...`)
+          - pattern: $CLIENT.unsafe(`...${$X}...`)
+
+  - id: no-eval-or-function-constructor
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: "eval()/new Function() executes arbitrary strings as code — never needed in this codebase (adapter.ts and the extension engine parse EA's JSON responses, they never need to eval script)."
+    patterns:
+      - pattern-either:
+          - pattern: eval(...)
+          - pattern: new Function(...)
+
+  - id: no-hardcoded-jwt-or-api-secret-assignment
+    languages: [typescript, javascript]
+    severity: WARNING
+    message: >-
+      A literal string assigned to a variable/property named like a secret
+      (key/secret/password/token). Secrets must come from env (see
+      apps/api/src/config/env.ts, infra/env/*.example) — flag for review;
+      test fixtures and the documented dev-only example keypairs are
+      expected false positives here (see the `paths.exclude` below).
+    patterns:
+      - pattern-either:
+          - pattern: const $VAR = "..."
+          - pattern: $OBJ.$KEY = "..."
+      - metavariable-regex:
+          metavariable: $VAR
+          regex: (?i)(secret|password|apikey|api_key|privatekey|private_key)$
+      - metavariable-comparison:
+          comparison: len(str(value)) > 8
+
+  - id: no-disabled-tls-verification
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: "Disabling TLS certificate verification (NODE_TLS_REJECT_UNAUTHORIZED=0 or rejectUnauthorized: false) defeats TLS entirely — see docs/09-security.md 'TLS everywhere'."
+    patterns:
+      - pattern-either:
+          - pattern: process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"
+          - pattern: "{ ..., rejectUnauthorized: false, ... }"
