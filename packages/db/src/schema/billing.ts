@@ -12,9 +12,9 @@ import {
   rowVersion,
   timestamptz,
   updatedAt,
-} from './common';
-import { users } from './users';
-import { subscriptions } from './subscriptions';
+} from './common.js';
+import { users } from './users.js';
+import { subscriptions } from './subscriptions.js';
 
 export const coupons = pgTable(
   'coupons',

@@ -19,7 +19,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 import { date } from 'drizzle-orm/pg-core';
-import { auditActorTypeEnum, createdAt, idPk, rowVersion, timestamptz, updatedAt } from './common';
+import { auditActorTypeEnum, createdAt, idPk, rowVersion, timestamptz, updatedAt } from './common.js';
 
 // ---------------------------------------------------------------------------
 // audit_logs: append-only, partitioned by month on occurred_at (see 0020).

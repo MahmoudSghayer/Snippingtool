@@ -4,15 +4,15 @@
 // back), `New<Table>` = insert shape (defaults/generated columns optional).
 
 import type { InferInsertModel, InferSelectModel } from 'drizzle-orm';
-import { users } from './users';
-import { adminUsers, adminActions, bans, flags } from './admin';
-import { plans, subscriptions, licenses } from './subscriptions';
-import { coupons, couponRedemptions, payments, paymentHistory, stripeWebhookEvents } from './billing';
-import { devices, sessions, emailVerifications, passwordResets, totpRecoveryCodes } from './auth';
-import { userActivity, searchActivity, snipingActivity, riskBudgetEvents } from './activity';
-import { trades, profits, savedFilters, filterStats } from './trading';
-import { userSettings, settingsHistory, notifications } from './settings';
-import { auditLogs, featureToggles, systemConfig, ipActivity, extensionInstalls, analyticsDaily } from './system';
+import { users } from './users.js';
+import { adminUsers, adminActions, bans, flags } from './admin.js';
+import { plans, subscriptions, licenses } from './subscriptions.js';
+import { coupons, couponRedemptions, payments, paymentHistory, stripeWebhookEvents } from './billing.js';
+import { devices, sessions, emailVerifications, passwordResets, totpRecoveryCodes } from './auth.js';
+import { userActivity, searchActivity, snipingActivity, riskBudgetEvents } from './activity.js';
+import { trades, profits, savedFilters, filterStats } from './trading.js';
+import { userSettings, settingsHistory, notifications } from './settings.js';
+import { auditLogs, featureToggles, systemConfig, ipActivity, extensionInstalls, analyticsDaily } from './system.js';
 
 export type User = InferSelectModel<typeof users>;
 export type NewUser = InferInsertModel<typeof users>;

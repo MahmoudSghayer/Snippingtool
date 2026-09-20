@@ -2,8 +2,8 @@
 
 import { isNull, relations } from 'drizzle-orm';
 import { bigint, boolean, date, index, integer, jsonb, numeric, pgTable, smallint, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
-import { createdAt, deletedAt, idPk, rowVersion, timestamptz, tradeStatusEnum, updatedAt } from './common';
-import { users } from './users';
+import { createdAt, deletedAt, idPk, rowVersion, timestamptz, tradeStatusEnum, updatedAt } from './common.js';
+import { users } from './users.js';
 
 export const trades = pgTable(
   'trades',

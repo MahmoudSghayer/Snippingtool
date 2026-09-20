@@ -2,28 +2,28 @@
 // `schema` object drizzle() expects, plus everything individually for
 // direct imports (`import { users } from '@sl/db'`).
 
-export * from './common';
-export * from './users';
-export * from './auth';
-export * from './admin';
-export * from './subscriptions';
-export * from './billing';
-export * from './activity';
-export * from './trading';
-export * from './settings';
-export * from './system';
-export * from './types';
+export * from './common.js';
+export * from './users.js';
+export * from './auth.js';
+export * from './admin.js';
+export * from './subscriptions.js';
+export * from './billing.js';
+export * from './activity.js';
+export * from './trading.js';
+export * from './settings.js';
+export * from './system.js';
+export * from './types.js';
 
-import * as common from './common';
-import * as users from './users';
-import * as auth from './auth';
-import * as admin from './admin';
-import * as subscriptions from './subscriptions';
-import * as billing from './billing';
-import * as activity from './activity';
-import * as trading from './trading';
-import * as settings from './settings';
-import * as system from './system';
+import * as common from './common.js';
+import * as users from './users.js';
+import * as auth from './auth.js';
+import * as admin from './admin.js';
+import * as subscriptions from './subscriptions.js';
+import * as billing from './billing.js';
+import * as activity from './activity.js';
+import * as trading from './trading.js';
+import * as settings from './settings.js';
+import * as system from './system.js';
 
 export const schema = {
   ...common,

@@ -7,8 +7,8 @@
 // sniper_ledger_test pair this repo's local Postgres runs.
 
 import { sql as sqlTag } from 'drizzle-orm';
-import { createDb, getDatabaseUrl, type Database } from './index';
-import { up } from './migrate';
+import { createDb, getDatabaseUrl, type Database } from './index.js';
+import { up } from './migrate.js';
 
 export function getTestDatabaseUrl(env: NodeJS.ProcessEnv = process.env): string {
   if (env.TEST_DATABASE_URL) return env.TEST_DATABASE_URL;

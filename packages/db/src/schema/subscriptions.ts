@@ -12,9 +12,9 @@ import {
   subscriptionStatusEnum,
   timestamptz,
   updatedAt,
-} from './common';
-import { users } from './users';
-import { adminUsers } from './admin';
+} from './common.js';
+import { users } from './users.js';
+import { adminUsers } from './admin.js';
 
 export const plans = pgTable(
   'plans',

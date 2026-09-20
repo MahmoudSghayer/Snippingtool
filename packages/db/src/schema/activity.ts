@@ -9,9 +9,9 @@
 
 import { relations } from 'drizzle-orm';
 import { index, inet, integer, jsonb, pgTable, primaryKey, text, uuid } from 'drizzle-orm/pg-core';
-import { createdAt, riskEventKindEnum, snipingOutcomeEnum, timestamptz, userActivityTypeEnum } from './common';
-import { users } from './users';
-import { devices, sessions } from './auth';
+import { createdAt, riskEventKindEnum, snipingOutcomeEnum, timestamptz, userActivityTypeEnum } from './common.js';
+import { users } from './users.js';
+import { devices, sessions } from './auth.js';
 
 export const userActivity = pgTable(
   'user_activity',

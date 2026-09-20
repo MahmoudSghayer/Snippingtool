@@ -5,8 +5,8 @@
 
 import postgres from 'postgres';
 import 'dotenv/config';
-import { getDatabaseUrl } from './index';
-import { up } from './migrate';
+import { getDatabaseUrl } from './index.js';
+import { up } from './migrate.js';
 
 async function main() {
   const url = getDatabaseUrl();

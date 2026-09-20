@@ -14,8 +14,8 @@ import {
   rowVersion,
   timestamptz,
   updatedAt,
-} from './common';
-import { users } from './users';
+} from './common.js';
+import { users } from './users.js';
 
 export const adminUsers = pgTable(
   'admin_users',

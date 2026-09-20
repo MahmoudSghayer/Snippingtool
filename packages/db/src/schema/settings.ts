@@ -2,8 +2,8 @@
 
 import { isNull, relations } from 'drizzle-orm';
 import { index, integer, jsonb, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
-import { createdAt, idPk, notificationChannelEnum, rowVersion, timestamptz, updatedAt } from './common';
-import { users } from './users';
+import { createdAt, idPk, notificationChannelEnum, rowVersion, timestamptz, updatedAt } from './common.js';
+import { users } from './users.js';
 
 export const userSettings = pgTable(
   'user_settings',
