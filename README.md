@@ -88,7 +88,7 @@ per-domain as each wave of the build lands.
 - It does not bypass CAPTCHAs or spoof a client.
 - Raw market observations never leave the browser — there is no server-side
   observation table, even once accounts and telemetry exist. What the
-  backend *does* receive is listed explicitly in
+  backend _does_ receive is listed explicitly in
   `docs/01-architecture.md`'s trust-boundary section.
 - The safety governor is not optional and not bypassable from the UI: budgets
   can be tightened by the user, never loosened past the plan's admin-set

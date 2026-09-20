@@ -6,5 +6,6 @@ packages:
 # eslint-import-resolver-typescript); their install scripts only fetch/build
 # their own native binaries, nothing repo-specific.
 allowBuilds:
+  argon2: true
   esbuild: true
   unrs-resolver: true
