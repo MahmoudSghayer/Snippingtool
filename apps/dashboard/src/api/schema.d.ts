@@ -3260,6 +3260,13 @@ export interface paths {
                 content: {
                     "application/json": {
                         refreshToken?: string;
+                        device?: {
+                            fingerprint: string;
+                            name?: string;
+                            browser?: string;
+                            os?: string;
+                            extensionVersion?: string;
+                        };
                     };
                 };
             };

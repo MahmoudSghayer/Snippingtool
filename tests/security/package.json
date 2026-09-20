@@ -1,0 +1,28 @@
+{
+  "name": "@sl/security-tests",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cross-cutting security tests for The Sniper's Ledger: authz matrix, unauthenticated-access, CSRF, rate-limit/lockout, injection payloads, security headers, mass-assignment, IDOR and webhook-signature checks — run against the real built @sl/api app (buildApp()), never mocks. See README.md for how CI wires these plus pnpm audit / gitleaks / semgrep / CodeQL.",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@sl/db": "workspace:*",
+    "@sl/shared": "workspace:*",
+    "drizzle-orm": "^0.38.3"
+  },
+  "devDependencies": {
+    "@sl/api": "workspace:*",
+    "@sl/config": "workspace:*",
+    "@types/node": "^22.10.5",
+    "dotenv": "^16.4.7",
+    "fastify": "^5.2.1",
+    "otplib": "^12.0.1",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}

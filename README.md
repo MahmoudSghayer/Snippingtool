@@ -34,7 +34,7 @@ phase lands on this branch.
 | 4 Authentication | JWT + rotating refresh, sessions, devices, 2FA, lockout, admin roles | Done | `apps/api/src/modules/auth`, `docs/04-auth.md` |
 | 5 Subscriptions | Plans, trials with abuse protection, licenses, Stripe, coupons, bans, flags | Done | `apps/api/src/modules/{subscriptions,licenses,payments,coupons,plans,bans,flags}`, `docs/05-subscriptions.md` |
 | 6 Extension | TypeScript port, ranker, governor, assist, gated autobuyer, popup, options | Done | `apps/extension`, `docs/06-extension.md` |
-| 7 Dashboard | React user + admin dashboard | In progress | `apps/dashboard`, `packages/ui`, `docs/07-dashboard.md` |
+| 7 Dashboard | React user + admin dashboard, design system, e2e against the real API | Done | `apps/dashboard`, `packages/ui`, `docs/07-dashboard.md` |
 | 8 Analytics | KPI engine, profit analytics, reports, CSV exports, materialisation jobs | Done | `apps/api/src/modules/{analytics,admin-analytics}`, `docs/08-analytics.md` |
 | 9 Security | Hardening pass, threat model | Planned | `docs/09-security.md`, `docs/threat-model.md` |
 | 10 UI/UX | Design system polish across dashboard, popup, panel | Planned | `packages/ui`, `docs/10-design-system.md` |
@@ -69,6 +69,11 @@ and an audit log with before/after on every admin action.
 partitioning for activity and audit tables, append-only audit logs, soft
 deletes everywhere, KPI views and a materialised daily KPI table.
 
+**Dashboard** (`apps/dashboard` + `packages/ui`): React 19 user and admin
+dashboard on the generated OpenAPI client, cookie sessions with CSRF, live
+counters and notifications over WebSocket, and a component library in the
+dark gaming theme. Deployed to Vercel.
+
 **Shared contracts** (`packages/shared`): plan and feature constants, error
 codes, the admin permission matrix, every request and response schema, the
 WebSocket event union and the extension message contracts.
@@ -78,13 +83,13 @@ WebSocket event union and the extension message contracts.
 ```
 apps/
   api/          Fastify backend: REST, WebSocket, BullMQ workers
-  dashboard/    React user + admin dashboard (in progress)
+  dashboard/    React user + admin dashboard (Vite, TanStack, Tailwind)
   extension/    MV3 extension, two build targets
 packages/
   shared/       Zod schemas, DTOs, error codes, plans, permissions, message contracts
   db/           SQL migrations, Drizzle schema, seed, test utilities
   config/       Shared tsconfig / ESLint / Prettier presets
-  ui/           Design system (in progress)
+  ui/           Design system: tokens and React components
 infra/          Docker, Compose, Caddy, monitoring, backups (in progress)
 docs/           One document per phase; start at docs/01-architecture.md
 ```
@@ -119,8 +124,9 @@ API integration tests need `DATABASE_URL`, `TEST_DATABASE_URL` and
 
 ## Deployment
 
-The dashboard deploys to Vercel from `apps/dashboard` (see `vercel.json`;
-deployments are skipped until that app exists on the branch). The API,
+The dashboard deploys to Vercel from `apps/dashboard` (see `vercel.json`);
+set `VITE_API_ORIGIN` in the Vercel project and `DASHBOARD_ORIGIN` on the
+API, see `docs/07-dashboard.md`. The API,
 worker, PostgreSQL and Redis run on a VM with Docker Compose behind Caddy;
 the DevOps phase adds the images, Compose files, CI/CD and runbooks under
 `infra/` and `docs/11-devops.md`.
@@ -135,11 +141,12 @@ the DevOps phase adds the images, Compose files, CI/CD and runbooks under
 | `docs/04-auth.md` | Token lifetimes, refresh rotation, devices, 2FA, CSRF, admin roles |
 | `docs/05-subscriptions.md` | Plan matrix, state machine, license keys, trial protection, Stripe webhooks |
 | `docs/06-extension.md` | Worlds, message flows, governor math, telemetry itemisation, day-one checklist |
+| `docs/07-dashboard.md` | Routes and permissions, auth/CSRF/WS handling, tokens, components, Vercel deployment |
 | `docs/08-analytics.md` | Every metric formula, source tables, materialisation schedule, export formats |
 | `docs/13-roadmap.md` | Remaining phases, exit criteria, go-live checklist |
 
-Documents for the dashboard, security, design system, DevOps and
-testing are added by their phases.
+Documents for security, the design system, DevOps and testing are added
+by their phases.
 
 ## What this product will and will not do
 

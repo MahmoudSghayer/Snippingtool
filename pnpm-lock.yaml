@@ -577,6 +577,43 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.20.4)(jsdom@25.0.1(supports-color@7.2.0))(lightningcss@1.32.0)(supports-color@7.2.0)
 
+  tests/security:
+    dependencies:
+      '@sl/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@sl/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      drizzle-orm:
+        specifier: ^0.38.3
+        version: 0.38.4(@opentelemetry/api@1.9.1)(@types/react@19.3.0)(postgres@3.4.9)(react@19.3.0)
+    devDependencies:
+      '@sl/api':
+        specifier: workspace:*
+        version: link:../../apps/api
+      '@sl/config':
+        specifier: workspace:*
+        version: link:../../packages/config
+      '@types/node':
+        specifier: ^22.10.5
+        version: 22.20.4
+      dotenv:
+        specifier: ^16.4.7
+        version: 16.6.1
+      fastify:
+        specifier: ^5.2.1
+        version: 5.12.5
+      otplib:
+        specifier: ^12.0.1
+        version: 12.0.1
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.4)(jsdom@25.0.1(supports-color@10.2.2))(lightningcss@1.32.0)(supports-color@10.2.2)
+
 packages:
 
   '@adobe/css-tools@4.5.0':

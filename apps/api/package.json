@@ -5,6 +5,13 @@
   "type": "module",
   "description": "The Sniper's Ledger — Fastify backend: REST API, WebSocket gateway and BullMQ workers.",
   "main": "./dist/server.js",
+  "exports": {
+    ".": "./dist/server.js",
+    "./app": {
+      "types": "./dist/app.d.ts",
+      "import": "./dist/app.js"
+    }
+  },
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "worker": "tsx watch src/worker.ts",

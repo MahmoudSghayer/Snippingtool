@@ -48,11 +48,19 @@ rules:
       A literal string assigned to an object property named like a secret
       (key/secret/password/token). Secrets must come from env (see
       apps/api/src/config/env.ts, infra/env/*.example) — flag for review.
+      (Enumerated literally, not via metavariable-regex: semgrep's
+      metavariable-regex does not reliably match against a member-expression
+      property metavariable in this semgrep version — verified locally.)
     patterns:
-      - pattern: $OBJ.$KEY = "..."
-      - metavariable-regex:
-          metavariable: $KEY
-          regex: (?i)(secret|password|apikey|api_key|privatekey|private_key)
+      - pattern-either:
+          - pattern: $OBJ.password = "..."
+          - pattern: $OBJ.secret = "..."
+          - pattern: $OBJ.apiKey = "..."
+          - pattern: $OBJ.api_key = "..."
+          - pattern: $OBJ.privateKey = "..."
+          - pattern: $OBJ.private_key = "..."
+          - pattern: $OBJ.accessToken = "..."
+          - pattern: $OBJ.refreshToken = "..."
 
   - id: no-disabled-tls-verification
     languages: [typescript, javascript]
