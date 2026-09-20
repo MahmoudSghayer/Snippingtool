@@ -1,0 +1,268 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Cancel superseded runs on the same ref (a new push to a PR branch makes
+# the previous run's results moot).
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "22"
+  PNPM_VERSION: "12.5.1"
+
+jobs:
+  # -------------------------------------------------------------------------
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - run: pnpm -r lint
+      - run: pnpm format:check
+
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - run: pnpm -r typecheck
+
+  # -------------------------------------------------------------------------
+  # Everything that needs no external service: packages/shared,
+  # packages/ui, apps/extension (jsdom + fake-indexeddb). apps/api and
+  # packages/db need Postgres/Redis — see their own jobs below.
+  unit-tests:
+    name: Unit tests (shared / ui / extension)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - run: pnpm exec turbo run test --filter=@sl/shared --filter=@sl/ui --filter=@sl/extension
+
+  # -------------------------------------------------------------------------
+  db-migration-test:
+    name: DB migration test (from scratch)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sl
+          POSTGRES_PASSWORD: sl
+          POSTGRES_DB: sniper_ledger
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U sl -d sniper_ledger"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://sl:sl@localhost:5432/sniper_ledger
+      TEST_DATABASE_URL: postgres://sl:sl@localhost:5432/sniper_ledger_test
+      SEED_ADMIN_EMAIL: admin@sniperledger.local
+      SEED_ADMIN_PASSWORD: ci-only-not-a-real-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - name: create test database
+        run: PGPASSWORD=sl psql -h localhost -U sl -d sniper_ledger -c "CREATE DATABASE sniper_ledger_test;"
+      - name: migrate a fresh database, twice (idempotency)
+        run: |
+          pnpm --filter @sl/db migrate
+          pnpm --filter @sl/db migrate:status
+          pnpm --filter @sl/db migrate # re-running applies zero new migrations, must not error
+      - name: seed, twice (idempotency)
+        run: |
+          pnpm --filter @sl/db seed
+          pnpm --filter @sl/db seed
+      - name: packages/db's own test suite (schema, partitions, triggers, views, soft-delete, audit)
+        run: pnpm --filter @sl/db test
+
+  # -------------------------------------------------------------------------
+  api-integration-tests:
+    name: API integration tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sl
+          POSTGRES_PASSWORD: sl
+          POSTGRES_DB: sniper_ledger
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U sl -d sniper_ledger"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - name: create test database
+        run: PGPASSWORD=sl psql -h localhost -U sl -d sniper_ledger -c "CREATE DATABASE sniper_ledger_test;"
+      - name: write apps/api/.env (dev-only example keys — see apps/api/src/test/setup.ts)
+        run: cp infra/env/.env.development.example apps/api/.env
+      - name: validate the env file the tests will boot with
+        run: node infra/scripts/check-env.mjs apps/api/.env
+      - name: build @sl/db and @sl/shared (apps/api resolves them via their built dist, not source)
+        run: pnpm exec turbo run build --filter=@sl/api^...
+      - run: pnpm --filter @sl/api test
+        env:
+          NODE_ENV: test
+
+  # -------------------------------------------------------------------------
+  extension-build:
+    name: Extension build (both targets) + no-autobuyer-in-ledger check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - run: pnpm exec turbo run build --filter=@sl/extension...
+      - name: ledger (listable) build must never contain "autobuyer"
+        run: |
+          if grep -rIl "autobuyer" apps/extension/dist/ledger; then
+            echo "::error::found the string 'autobuyer' in the listable (ledger) build — M3 automation must never ship in the Web-Store-listed target. See apps/extension/README.md 'End-to-end test'."
+            exit 1
+          fi
+          echo "OK — dist/ledger contains no reference to autobuyer."
+      - name: ledger-auto build DOES ship automation
+        run: |
+          if ! grep -rIlq "autobuyer" apps/extension/dist/ledger-auto; then
+            echo "::warning::expected 'autobuyer' to appear somewhere in dist/ledger-auto (VITE_AUTOMATION build) — verify engine/autobuyer.ts is still wired into that target."
+          fi
+
+  # -------------------------------------------------------------------------
+  dashboard-build:
+    name: Dashboard build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - name: build (skipped if apps/dashboard doesn't exist yet)
+        run: |
+          if [ -d apps/dashboard ]; then
+            pnpm exec turbo run build --filter=@sl/dashboard...
+          else
+            echo "apps/dashboard not present yet - skipping (mirrors vercel.json's ignoreCommand)"
+          fi
+        env:
+          VITE_API_ORIGIN: https://api.ci.sniperledger.invalid
+
+  # -------------------------------------------------------------------------
+  security-scan:
+    name: Security scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # gitleaks needs full history to scan every commit on the PR
+      - uses: ./.github/actions/setup-pnpm
+
+      - name: pnpm audit (production dependencies only)
+        run: pnpm audit --prod --audit-level=high
+        continue-on-error: false
+
+      - name: gitleaks (secret scanning)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: semgrep (custom ruleset — see .github/semgrep/rules.yml)
+        run: |
+          python3 -m pip install --quiet semgrep
+          semgrep scan \
+            --config .github/semgrep/rules.yml \
+            --error \
+            --metrics=off \
+            apps packages
+
+  # -------------------------------------------------------------------------
+  docker-build:
+    name: Docker build (api server/worker, dashboard) — no push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: build api (server target)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/api.Dockerfile
+          target: server
+          push: false
+          tags: sniper-ledger/api:ci
+          cache-from: type=gha,scope=api-server
+          cache-to: type=gha,mode=max,scope=api-server
+
+      - name: build api (worker target)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/api.Dockerfile
+          target: worker
+          push: false
+          tags: sniper-ledger/worker:ci
+          cache-from: type=gha,scope=api-worker
+          cache-to: type=gha,mode=max,scope=api-worker
+
+      - name: build db-migrator
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/db-migrator.Dockerfile
+          push: false
+          tags: sniper-ledger/db-migrator:ci
+          cache-from: type=gha,scope=db-migrator
+          cache-to: type=gha,mode=max,scope=db-migrator
+
+      - name: check apps/dashboard exists
+        id: dashboard-check
+        run: echo "exists=$([ -d apps/dashboard ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      - name: build dashboard
+        if: steps.dashboard-check.outputs.exists == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/dashboard.Dockerfile
+          push: false
+          tags: sniper-ledger/dashboard:ci
+          build-args: |
+            VITE_API_ORIGIN=https://api.ci.sniperledger.invalid
+          cache-from: type=gha,scope=dashboard
+          cache-to: type=gha,mode=max,scope=dashboard
+
+  # -------------------------------------------------------------------------
+  # Single required status check for branch protection — green iff every
+  # job above is green (or intentionally skipped).
+  ci-success:
+    name: CI success
+    if: always()
+    needs:
+      - lint
+      - typecheck
+      - unit-tests
+      - db-migration-test
+      - api-integration-tests
+      - extension-build
+      - dashboard-build
+      - security-scan
+      - docker-build
+    runs-on: ubuntu-latest
+    steps:
+      - name: check every job succeeded
+        run: |
+          if [ "${{ contains(needs.*.result, 'failure') }}" = "true" ] || [ "${{ contains(needs.*.result, 'cancelled') }}" = "true" ]; then
+            echo "one or more required jobs failed"
+            exit 1
+          fi
