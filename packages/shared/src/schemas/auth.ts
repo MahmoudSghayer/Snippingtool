@@ -13,29 +13,38 @@ export const passwordSchema = z
 
 export const emailSchema = z.string().trim().toLowerCase().email().max(320);
 
-export const deviceFingerprintSchema = z.object({
-  fingerprint: z.string().min(16).max(256),
-  name: z.string().min(1).max(120).optional(),
-  browser: z.string().min(1).max(60).optional(),
-  os: z.string().min(1).max(60).optional(),
-  extensionVersion: z.string().min(1).max(30).optional(),
-});
+// Every *RequestSchema below is `.strict()` — mass-assignment defence: an
+// unrecognised extra key in the body is a 400 (VALIDATION_FAILED), not a
+// silently-stripped no-op. See docs/09-security.md "Input validation".
+export const deviceFingerprintSchema = z
+  .object({
+    fingerprint: z.string().min(16).max(256),
+    name: z.string().min(1).max(120).optional(),
+    browser: z.string().min(1).max(60).optional(),
+    os: z.string().min(1).max(60).optional(),
+    extensionVersion: z.string().min(1).max(30).optional(),
+  })
+  .strict();
 export type DeviceFingerprint = z.infer<typeof deviceFingerprintSchema>;
 
-export const registerRequestSchema = z.object({
-  email: emailSchema,
-  password: passwordSchema,
-  timezone: z.string().min(1).max(64).optional(),
-  referralCode: z.string().min(1).max(40).optional(),
-  device: deviceFingerprintSchema,
-});
+export const registerRequestSchema = z
+  .object({
+    email: emailSchema,
+    password: passwordSchema,
+    timezone: z.string().min(1).max(64).optional(),
+    referralCode: z.string().min(1).max(40).optional(),
+    device: deviceFingerprintSchema,
+  })
+  .strict();
 export type RegisterRequest = z.infer<typeof registerRequestSchema>;
 
-export const loginRequestSchema = z.object({
-  email: emailSchema,
-  password: z.string().min(1).max(256),
-  device: deviceFingerprintSchema,
-});
+export const loginRequestSchema = z
+  .object({
+    email: emailSchema,
+    password: z.string().min(1).max(256),
+    device: deviceFingerprintSchema,
+  })
+  .strict();
 export type LoginRequest = z.infer<typeof loginRequestSchema>;
 
 /** Returned by `/auth/login` when the account has TOTP enabled: no tokens
@@ -55,13 +64,15 @@ export const loginResponseSchema = z.discriminatedUnion('status', [
 ]);
 export type LoginResponse = z.infer<typeof loginResponseSchema>;
 
-export const mfaVerifyRequestSchema = z.object({
-  mfaTicket: z.string().min(1),
-  code: z
-    .string()
-    .regex(/^\d{6}$/, 'Enter the 6-digit code')
-    .or(z.string().min(8).max(64)), // digit code or recovery code
-});
+export const mfaVerifyRequestSchema = z
+  .object({
+    mfaTicket: z.string().min(1),
+    code: z
+      .string()
+      .regex(/^\d{6}$/, 'Enter the 6-digit code')
+      .or(z.string().min(8).max(64)), // digit code or recovery code
+  })
+  .strict();
 export type MfaVerifyRequest = z.infer<typeof mfaVerifyRequestSchema>;
 
 export const mfaEnrollResponseSchema = z.object({
@@ -71,14 +82,28 @@ export const mfaEnrollResponseSchema = z.object({
 });
 export type MfaEnrollResponse = z.infer<typeof mfaEnrollResponseSchema>;
 
-export const mfaEnrollConfirmSchema = z.object({
-  code: z.string().regex(/^\d{6}$/),
-});
+export const mfaEnrollConfirmSchema = z
+  .object({
+    code: z.string().regex(/^\d{6}$/),
+  })
+  .strict();
 export type MfaEnrollConfirm = z.infer<typeof mfaEnrollConfirmSchema>;
 
-export const refreshRequestSchema = z.object({
-  refreshToken: z.string().min(1),
-});
+// `device` is optional and additive (docs/09-security.md "Session
+// security"): when the caller sends it, `/auth/refresh` verifies it matches
+// the fingerprint the session's device was registered with and treats a
+// mismatch the same as refresh-token reuse (whole family revoked) — a stolen
+// refresh token replayed from a different install is not silently accepted
+// just because the raw token bytes matched. Omitting it (older/extension
+// clients that predate this field) keeps today's behaviour unchanged; the
+// server also independently compares the request's User-Agent family
+// against the session's stored one regardless of whether `device` is sent.
+export const refreshRequestSchema = z
+  .object({
+    refreshToken: z.string().min(1),
+    device: deviceFingerprintSchema.optional(),
+  })
+  .strict();
 export type RefreshRequest = z.infer<typeof refreshRequestSchema>;
 
 export const refreshResponseSchema = z.object({
@@ -88,24 +113,32 @@ export const refreshResponseSchema = z.object({
 });
 export type RefreshResponse = z.infer<typeof refreshResponseSchema>;
 
-export const passwordResetRequestSchema = z.object({
-  email: emailSchema,
-});
+export const passwordResetRequestSchema = z
+  .object({
+    email: emailSchema,
+  })
+  .strict();
 export type PasswordResetRequest = z.infer<typeof passwordResetRequestSchema>;
 
-export const passwordResetConfirmSchema = z.object({
-  token: z.string().min(1),
-  password: passwordSchema,
-});
+export const passwordResetConfirmSchema = z
+  .object({
+    token: z.string().min(1),
+    password: passwordSchema,
+  })
+  .strict();
 export type PasswordResetConfirm = z.infer<typeof passwordResetConfirmSchema>;
 
-export const emailVerifyRequestSchema = z.object({
-  token: z.string().min(1),
-});
+export const emailVerifyRequestSchema = z
+  .object({
+    token: z.string().min(1),
+  })
+  .strict();
 export type EmailVerifyRequest = z.infer<typeof emailVerifyRequestSchema>;
 
-export const logoutRequestSchema = z.object({
-  refreshToken: z.string().min(1).optional(), // omit to only clear the local session
-  allDevices: z.boolean().default(false),
-});
+export const logoutRequestSchema = z
+  .object({
+    refreshToken: z.string().min(1).optional(), // omit to only clear the local session
+    allDevices: z.boolean().default(false),
+  })
+  .strict();
 export type LogoutRequest = z.infer<typeof logoutRequestSchema>;

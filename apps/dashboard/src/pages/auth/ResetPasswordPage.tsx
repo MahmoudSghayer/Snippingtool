@@ -1,12 +1,12 @@
 import { zodResolver } from '@hookform/resolvers/zod';
+import { passwordSchema } from '@sl/shared';
+import { Button, Card, CardContent, CardHeader, CardTitle, FormField, PasswordInput } from '@sl/ui';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 import { z } from 'zod';
 
-import { passwordSchema } from '@sl/shared';
-import { Button, Card, CardContent, CardHeader, CardTitle, FormField, PasswordInput } from '@sl/ui';
 
 import { api, apiErrorMessage } from '@/api/client.js';
 
@@ -40,7 +40,7 @@ export function ResetPasswordPage() {
   async function onSubmit(values: FormValues) {
     setSubmitting(true);
     try {
-      const { error } = await api.POST('/auth/password/reset-confirm', {
+      const { error } = await api.POST('/api/v1/auth/password/reset-confirm', {
         body: { token: search.token!, password: values.password },
       });
       if (error) {

@@ -1,10 +1,10 @@
 import { zodResolver } from '@hookform/resolvers/zod';
+import { passwordResetRequestSchema } from '@sl/shared';
+import { Button, Card, CardContent, CardHeader, CardTitle, FormField, Input } from '@sl/ui';
 import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 
-import { passwordResetRequestSchema } from '@sl/shared';
-import { Button, Card, CardContent, CardHeader, CardTitle, FormField, Input } from '@sl/ui';
 
 import { api } from '@/api/client.js';
 
@@ -18,7 +18,7 @@ export function ForgotPasswordPage() {
   async function onSubmit(values: FormValues) {
     setSubmitting(true);
     try {
-      await api.POST('/auth/password/reset-request', { body: { email: values.email } });
+      await api.POST('/api/v1/auth/password/reset-request', { body: { email: values.email } });
       setSent(true);
     } finally {
       setSubmitting(false);

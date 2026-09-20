@@ -26,7 +26,10 @@ export type AuditLogEntry = z.infer<typeof auditLogEntrySchema>;
 export const auditLogQuerySchema = z.object({
   actorId: z.string().uuid().optional(),
   entityType: z.string().min(1).max(80).optional(),
-  entityId: z.string().min(1).max(80).optional(),
+  // audit_logs.entity_id is a `uuid` column (02-database.md §6.9) — validated
+  // here so a malformed filter value 400s as VALIDATION_FAILED instead of
+  // reaching the database and raising a Postgres type-cast error (500).
+  entityId: z.string().uuid().optional(),
   from: z.string().datetime().optional(),
   to: z.string().datetime().optional(),
 });

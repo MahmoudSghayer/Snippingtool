@@ -1,7 +1,7 @@
+import { Button, EmptyState } from '@sl/ui';
 import { Link } from '@tanstack/react-router';
 import { Compass } from 'lucide-react';
 
-import { Button, EmptyState } from '@sl/ui';
 
 export function NotFoundPage() {
   return (

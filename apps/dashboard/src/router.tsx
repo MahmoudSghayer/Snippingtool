@@ -14,12 +14,12 @@ import {
 } from '@tanstack/react-router';
 import { z } from 'zod';
 
-import { ensureBootstrapped } from '@/lib/authBootstrap.js';
 import { setUnauthorizedHandler } from '@/api/client.js';
-import { useAuthStore } from '@/stores/auth.js';
-import { AppLayout, PublicLayout, RootLayout } from '@/routes/layouts.js';
-import { NotFoundPage } from '@/pages/NotFoundPage.js';
+import { ensureBootstrapped } from '@/lib/authBootstrap.js';
 import { ErrorPage } from '@/pages/ErrorPage.js';
+import { NotFoundPage } from '@/pages/NotFoundPage.js';
+import { AppLayout, PublicLayout, RootLayout } from '@/routes/layouts.js';
+import { useAuthStore } from '@/stores/auth.js';
 
 const rootRoute = createRootRoute({
   component: RootLayout,

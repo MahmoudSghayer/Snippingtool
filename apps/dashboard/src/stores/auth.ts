@@ -18,9 +18,9 @@
 // `PERMISSIONS` fallback below for the resolved value and every consumer of
 // `usePermission`/`useAnyPermission` (src/lib/permissions.ts) starts
 // reflecting it with no further change.
+import { PERMISSIONS } from '@sl/shared';
 import { create } from 'zustand';
 
-import { PERMISSIONS } from '@sl/shared';
 
 import type { AdminRole, Permission, UserDto } from '@sl/shared';
 

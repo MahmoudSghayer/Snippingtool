@@ -1,6 +1,3 @@
-import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
-
 import {
   AreaChart,
   BarChart,
@@ -23,9 +20,13 @@ import {
   type ColumnDef,
   type DateRange,
 } from '@sl/ui';
-import type { ActivityAnalyticsPoint } from '@sl/shared';
+import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
 
 import { api } from '@/api/client.js';
+
+import type { ActivityAnalyticsPoint } from '@sl/shared';
+
 
 const activityColumns: ColumnDef<ActivityAnalyticsPoint, unknown>[] = [
   { accessorKey: 'bucket', header: 'Date' },
@@ -48,7 +49,7 @@ export function AnalyticsPage() {
   const profitsQuery = useQuery({
     queryKey: ['analytics', 'me', 'profits', range],
     queryFn: async () => {
-      const { data, error } = await api.GET('/analytics/me/profits', { params: { query: { ...range, granularity: 'day' } } });
+      const { data, error } = await api.GET('/api/v1/analytics/me/profits', { params: { query: { ...range, granularity: 'day' } } });
       if (error) throw error;
       return data;
     },
@@ -57,7 +58,7 @@ export function AnalyticsPage() {
   const activityQuery = useQuery({
     queryKey: ['analytics', 'me', 'activity', range],
     queryFn: async () => {
-      const { data, error } = await api.GET('/analytics/me/activity', { params: { query: { ...range, granularity: 'day', tz: 'UTC' } } });
+      const { data, error } = await api.GET('/api/v1/analytics/me/activity', { params: { query: { ...range, granularity: 'day', tz: 'UTC' } } });
       if (error) throw error;
       return data;
     },

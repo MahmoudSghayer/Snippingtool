@@ -6,7 +6,7 @@
   "description": "The Sniper's Ledger — user + admin web dashboard (React 19 + Vite + TanStack Router/Query), deployed to Vercel as a static SPA.",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc --noEmit -p tsconfig.json && vite build",
     "preview": "vite preview --port 4173",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit -p tsconfig.json",

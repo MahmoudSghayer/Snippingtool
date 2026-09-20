@@ -1,12 +1,4 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from '@tanstack/react-router';
-import QRCode from 'qrcode';
-import { useEffect, useState } from 'react';
-import { useForm } from 'react-hook-form';
-import { toast } from 'sonner';
-import { z } from 'zod';
-
 import { changePasswordRequestSchema, governorSettingsSchema, GOVERNOR_ABSOLUTE_LIMITS } from '@sl/shared';
 import {
   Badge,
@@ -26,6 +18,14 @@ import {
   formatDate,
   type ColumnDef,
 } from '@sl/ui';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from '@tanstack/react-router';
+import QRCode from 'qrcode';
+import { useEffect, useState } from 'react';
+import { useForm } from 'react-hook-form';
+import { toast } from 'sonner';
+import { z } from 'zod';
+
 
 import { api, apiErrorMessage } from '@/api/client.js';
 import { resetBootstrap } from '@/lib/authBootstrap.js';
@@ -83,7 +83,7 @@ export function SettingsPage() {
   const settingsQuery = useQuery({
     queryKey: ['settings'],
     queryFn: async () => {
-      const { data, error } = await api.GET('/settings');
+      const { data, error } = await api.GET('/api/v1/settings');
       if (error) throw error;
       return data;
     },
@@ -92,7 +92,7 @@ export function SettingsPage() {
   const sessionsQuery = useQuery({
     queryKey: ['sessions'],
     queryFn: async () => {
-      const { data, error } = await api.GET('/sessions');
+      const { data, error } = await api.GET('/api/v1/sessions');
       if (error) throw error;
       return data as SessionRow[];
     },
@@ -129,7 +129,7 @@ export function SettingsPage() {
 
   const profileMutation = useMutation({
     mutationFn: async (values: ProfileForm) => {
-      const { error } = await api.PATCH('/users/me', { body: values });
+      const { error } = await api.PATCH('/api/v1/users/me', { body: values });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -141,7 +141,7 @@ export function SettingsPage() {
 
   const passwordMutation = useMutation({
     mutationFn: async (values: PasswordForm) => {
-      const { error } = await api.POST('/auth/password/change', { body: values });
+      const { error } = await api.POST('/api/v1/auth/password/change', { body: values });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -153,7 +153,7 @@ export function SettingsPage() {
 
   const governorMutation = useMutation({
     mutationFn: async (values: GovernorForm) => {
-      const { error } = await api.PUT('/settings', { body: { governor: values } });
+      const { error } = await api.PUT('/api/v1/settings', { body: { governor: values } });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -164,7 +164,7 @@ export function SettingsPage() {
   });
 
   async function toggleSetting(patch: Record<string, unknown>) {
-    const { error } = await api.PUT('/settings', { body: patch });
+    const { error } = await api.PUT('/api/v1/settings', { body: patch });
     if (error) {
       toast.error("Couldn't save", { description: apiErrorMessage(error) });
       return;
@@ -174,7 +174,7 @@ export function SettingsPage() {
 
   const enrollMutation = useMutation({
     mutationFn: async () => {
-      const { data, error } = await api.POST('/auth/totp/enroll', { body: {} });
+      const { data, error } = await api.POST('/api/v1/auth/totp/enroll', { body: {} });
       if (error) throw error;
       return data;
     },
@@ -184,7 +184,7 @@ export function SettingsPage() {
 
   const confirmMutation = useMutation({
     mutationFn: async () => {
-      const { error } = await api.POST('/auth/totp/enroll/confirm', { body: { code: mfaCode } });
+      const { error } = await api.POST('/api/v1/auth/totp/enroll/confirm', { body: { code: mfaCode } });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -199,7 +199,7 @@ export function SettingsPage() {
 
   const disableMutation = useMutation({
     mutationFn: async (values: { currentPassword: string; code: string }) => {
-      const { error } = await api.POST('/auth/totp/disable', { body: values });
+      const { error } = await api.POST('/api/v1/auth/totp/disable', { body: values });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -212,7 +212,7 @@ export function SettingsPage() {
 
   const revokeSessionMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await api.DELETE('/sessions/{id}', { params: { path: { id } } });
+      const { error } = await api.DELETE('/api/v1/sessions/{id}', { params: { path: { id } } });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -224,7 +224,7 @@ export function SettingsPage() {
 
   const deleteMutation = useMutation({
     mutationFn: async (values: DeleteAccountForm) => {
-      const { error } = await api.DELETE('/users/me', { body: values });
+      const { error } = await api.DELETE('/api/v1/users/me', { body: values });
       if (error) throw error;
     },
     onSuccess: () => {

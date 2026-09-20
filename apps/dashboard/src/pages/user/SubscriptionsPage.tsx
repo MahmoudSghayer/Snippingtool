@@ -1,11 +1,3 @@
-import { zodResolver } from '@hookform/resolvers/zod';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Laptop, ShieldCheck } from 'lucide-react';
-import { useState } from 'react';
-import { useForm } from 'react-hook-form';
-import { toast } from 'sonner';
-import { z } from 'zod';
-
 import {
   Badge,
   Button,
@@ -16,7 +8,6 @@ import {
   CardTitle,
   CopyField,
   DataTable,
-  formatCoins,
   formatCurrencyFromCents,
   formatDate,
   FormField,
@@ -25,9 +16,15 @@ import {
   PageHeader,
   type ColumnDef,
 } from '@sl/ui';
-import type { CouponValidateResponse, DeviceDto, PlanDto } from '@sl/shared';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Laptop, ShieldCheck } from 'lucide-react';
+import { useState } from 'react';
+import { toast } from 'sonner';
 
 import { api, apiErrorMessage } from '@/api/client.js';
+
+import type { CouponValidateResponse, DeviceDto, PlanDto } from '@sl/shared';
+
 
 const deviceColumns: ColumnDef<DeviceDto, unknown>[] = [
   {
@@ -56,7 +53,7 @@ export function SubscriptionsPage() {
   const subscriptionQuery = useQuery({
     queryKey: ['subscription'],
     queryFn: async () => {
-      const { data, error } = await api.GET('/subscriptions/me');
+      const { data, error } = await api.GET('/api/v1/subscriptions/me');
       if (error) throw error;
       return data;
     },
@@ -65,7 +62,7 @@ export function SubscriptionsPage() {
   const plansQuery = useQuery({
     queryKey: ['plans'],
     queryFn: async () => {
-      const { data, error } = await api.GET('/plans');
+      const { data, error } = await api.GET('/api/v1/plans');
       if (error) throw error;
       return data;
     },
@@ -74,7 +71,7 @@ export function SubscriptionsPage() {
   const devicesQuery = useQuery({
     queryKey: ['devices'],
     queryFn: async () => {
-      const { data, error } = await api.GET('/devices');
+      const { data, error } = await api.GET('/api/v1/devices');
       if (error) throw error;
       return data;
     },
@@ -82,7 +79,7 @@ export function SubscriptionsPage() {
 
   const checkoutMutation = useMutation({
     mutationFn: async (plan: PlanDto) => {
-      const { data, error } = await api.POST('/payments/checkout', {
+      const { data, error } = await api.POST('/api/v1/payments/checkout', {
         body: {
           planCode: plan.code as never,
           successUrl: `${window.location.origin}/subscriptions?checkout=success`,
@@ -101,7 +98,7 @@ export function SubscriptionsPage() {
 
   const portalMutation = useMutation({
     mutationFn: async () => {
-      const { data, error } = await api.POST('/payments/portal', { body: {} });
+      const { data, error } = await api.POST('/api/v1/payments/portal', { body: { returnUrl: window.location.href } });
       if (error) throw error;
       return data;
     },
@@ -111,7 +108,7 @@ export function SubscriptionsPage() {
 
   const trialMutation = useMutation({
     mutationFn: async () => {
-      const { error } = await api.POST('/subscriptions/trial', { body: {} });
+      const { error } = await api.POST('/api/v1/subscriptions/trial');
       if (error) throw error;
     },
     onSuccess: () => {
@@ -123,7 +120,7 @@ export function SubscriptionsPage() {
 
   const cancelMutation = useMutation({
     mutationFn: async () => {
-      const { error } = await api.POST('/subscriptions/cancel', { body: {} });
+      const { error } = await api.POST('/api/v1/subscriptions/cancel');
       if (error) throw error;
     },
     onSuccess: () => {
@@ -135,7 +132,7 @@ export function SubscriptionsPage() {
 
   const resumeMutation = useMutation({
     mutationFn: async () => {
-      const { error } = await api.POST('/subscriptions/resume', { body: {} });
+      const { error } = await api.POST('/api/v1/subscriptions/resume');
       if (error) throw error;
     },
     onSuccess: () => {
@@ -147,7 +144,7 @@ export function SubscriptionsPage() {
 
   const regenerateMutation = useMutation({
     mutationFn: async () => {
-      const { data, error } = await api.POST('/licenses/regenerate', { body: {} });
+      const { data, error } = await api.POST('/api/v1/licenses/regenerate');
       if (error) throw error;
       return data;
     },
@@ -161,7 +158,7 @@ export function SubscriptionsPage() {
 
   const revokeDeviceMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await api.DELETE('/devices/{id}', { params: { path: { id } } });
+      const { error } = await api.DELETE('/api/v1/devices/{id}', { params: { path: { id } } });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -173,7 +170,7 @@ export function SubscriptionsPage() {
 
   async function handleValidateCoupon(planCode: string) {
     if (!couponCode.trim()) return;
-    const { data, error } = await api.POST('/coupons/validate', { body: { code: couponCode.trim(), planCode: planCode as never } });
+    const { data, error } = await api.POST('/api/v1/coupons/validate', { body: { code: couponCode.trim(), planCode: planCode as never } });
     if (error) {
       toast.error('Invalid coupon', { description: apiErrorMessage(error) });
       return;
@@ -271,7 +268,7 @@ export function SubscriptionsPage() {
             </FormField>
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {(plansQuery.data ?? []).map((plan) => (
+            {(plansQuery.data?.items ?? []).map((plan) => (
               <Card key={plan.id} className={plan.code === subscription?.plan.code ? 'border-gold' : undefined}>
                 <CardHeader>
                   <CardTitle>{plan.name}</CardTitle>

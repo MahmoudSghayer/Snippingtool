@@ -129,6 +129,7 @@ export default fp(
           email: user.email,
           fingerprintHash,
           ip: request.ip,
+          stripeCustomerId: user.stripeCustomerId,
         });
 
         if (result.blocked) {

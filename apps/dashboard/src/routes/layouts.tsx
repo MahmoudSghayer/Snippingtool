@@ -1,3 +1,4 @@
+import { Badge, Sidebar, Toaster } from '@sl/ui';
 import { Link, Outlet, useMatchRoute, useNavigate } from '@tanstack/react-router';
 import {
   Activity,
@@ -22,13 +23,12 @@ import {
 } from 'lucide-react';
 import { useEffect } from 'react';
 
-import { Badge, Sidebar, Toaster } from '@sl/ui';
 
 import { api } from '@/api/client.js';
+import { NotificationsBell } from '@/components/NotificationsBell.js';
+import { useWsGateway } from '@/hooks/useWsGateway.js';
 import { resetBootstrap } from '@/lib/authBootstrap.js';
 import { useAuthStore } from '@/stores/auth.js';
-import { useWsGateway } from '@/hooks/useWsGateway.js';
-import { NotificationsBell } from '@/components/NotificationsBell.js';
 
 /** Wraps every route (public and authenticated): toaster + notFound live
  * here once instead of per-layout. */
@@ -98,7 +98,7 @@ export function AppLayout() {
   }, [user]);
 
   async function handleLogout() {
-    await api.POST('/auth/logout', { body: { allDevices: false } });
+    await api.POST('/api/v1/auth/logout', { body: { allDevices: false } });
     resetBootstrap();
     useAuthStore.getState().clearSession();
     void navigate({ to: '/login' });

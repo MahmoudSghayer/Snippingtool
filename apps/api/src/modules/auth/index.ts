@@ -38,6 +38,7 @@ function ctx(fastify: FastifyInstance): AuthContext {
     mailer: fastify.mailer,
     jwtPrivateKey: fastify.config.JWT_PRIVATE_KEY,
     cookieSecret: fastify.config.COOKIE_SECRET,
+    log: fastify.log,
   };
 }
 
@@ -154,7 +155,10 @@ export default fp(
       async (request, reply) => {
         const token = request.body.refreshToken ?? request.cookies.sl_rt;
         if (!token) throw AppErrors.tokenInvalid('No refresh token provided.');
-        const result = await service.refresh(ctx(fastify), token);
+        const result = await service.refresh(ctx(fastify), token, {
+          userAgent: request.headers['user-agent'] ?? null,
+          device: request.body.device ?? null,
+        });
         setSessionCookies(reply, result.accessToken, result.refreshToken, isProd);
         return result;
       },

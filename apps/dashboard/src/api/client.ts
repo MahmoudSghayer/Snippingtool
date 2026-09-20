@@ -5,15 +5,24 @@
 // handling").
 import createClient from 'openapi-fetch';
 
-import type { Middleware } from 'openapi-fetch';
 import type { paths } from './schema.js';
+import type { Middleware } from 'openapi-fetch';
 
-/** `VITE_API_ORIGIN` unset -> relative `/api/v1` (dev proxy / same-origin
- * Vercel setup). Set -> an absolute cross-origin base URL (see
- * apps/dashboard/.env.example and docs/07-dashboard.md for what the API side
- * must configure either way). */
+/** `VITE_API_ORIGIN` unset -> relative (empty) base, so requests hit the
+ * dev-proxy / same-origin Vercel deployment. Set -> an absolute cross-origin
+ * base URL (see apps/dashboard/.env.example and docs/07-dashboard.md for
+ * what the API side must configure either way).
+ *
+ * Deliberately just the origin, **not** `${origin}/api/v1` — every path key
+ * in the generated `paths` type (src/api/schema.d.ts, from
+ * apps/api/openapi/openapi.json) already includes the `/api/v1` prefix
+ * (Fastify's route prefix is baked into each OpenAPI path, not stripped via
+ * a `servers` entry), so every `api.GET(...)`/`api.POST(...)` call site
+ * writes the full `/api/v1/...` path — see docs/07-dashboard.md "API client
+ * base URL" for the full rationale, including why doubling this prefix here
+ * was an early bug this comment now guards against. */
 const apiOrigin = import.meta.env.VITE_API_ORIGIN?.replace(/\/$/, '') ?? '';
-export const API_BASE_URL = `${apiOrigin}/api/v1`;
+export const API_BASE_URL = apiOrigin;
 
 /** Reads the (non-httpOnly, signed) `sl_csrf` cookie the dashboard's own JS
  * is meant to read per docs/04-auth.md §10 — the double-submit token, not a
@@ -37,9 +46,11 @@ export function setUnauthorizedHandler(handler: (path: string) => void): void {
  * redirect flow itself. */
 const AUTH_EXEMPT_PATH_FRAGMENTS = ['/auth/login', '/auth/refresh', '/auth/logout', '/auth/mfa/verify'];
 
+// `credentials` is a read-only property on a constructed `Request`, so it
+// can't be set from inside `onRequest` — it's passed to `createClient`
+// below instead (openapi-fetch forwards it into the `Request` it builds).
 const csrfAndCredentialsMiddleware: Middleware = {
   async onRequest({ request }) {
-    request.credentials = 'include';
     if (MUTATING_METHODS.has(request.method)) {
       const token = readCsrfCookie();
       if (token) request.headers.set('x-csrf-token', token);
@@ -57,7 +68,7 @@ const csrfAndCredentialsMiddleware: Middleware = {
   },
 };
 
-export const api = createClient<paths>({ baseUrl: API_BASE_URL });
+export const api = createClient<paths>({ baseUrl: API_BASE_URL, credentials: 'include' });
 api.use(csrfAndCredentialsMiddleware);
 
 /** Every `@sl/shared` error envelope shape (`{ code, message, details?,

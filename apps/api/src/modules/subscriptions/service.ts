@@ -104,38 +104,82 @@ export function ipToAbusePrefix(ip: string): string {
 }
 
 export interface TrialAbuseMatch {
-  detector: 'email' | 'device' | 'ip';
+  detector: 'email' | 'device' | 'ip' | 'stripe_customer';
   matchedUserIds: string[];
 }
 
 const TRIAL_ABUSE_WINDOW_MS = 30 * DAY_MS;
 
-/** Runs all three checks (docs §5) and returns every one that matched — the
+/** Runs all four checks (docs §5) and returns every one that matched — the
  * caller decides what to do with them (deny + flag). Never throws for "no
  * match"; an empty array means clean. */
 export async function checkTrialAbuse(
   db: Database,
-  input: { normalisedEmail: string; fingerprintHash: string | null; ipPrefix: string | null; excludeUserId: string },
+  input: {
+    normalisedEmail: string;
+    fingerprintHash: string | null;
+    ipPrefix: string | null;
+    /** The requesting user's own `users.stripe_customer_id`, if any (check
+     * 4 — see docs/05-subscriptions.md §5). Almost always null for a user's
+     * very first subscription attempt (a trial never itself goes through
+     * Stripe); set only when this account previously resolved a Stripe
+     * customer some other way (an earlier checkout/portal session on a
+     * prior, now-non-live subscription, or on this same account before a
+     * churn-and-retry). */
+    stripeCustomerId: string | null;
+    excludeUserId: string;
+  },
 ): Promise<TrialAbuseMatch[]> {
   const matches: TrialAbuseMatch[] = [];
 
-  // Every user who has ever had a trial (trial_ends_at set at some point),
-  // regardless of that subscription's current status — this is the
-  // unbounded-lookback set checks 1/2/3 all filter against.
-  const trialHistory = await db
-    .select({ userId: subscriptions.userId, email: users.email })
+  // Check 1 (email): an indexed equality lookup against the generated
+  // `users.email_normalised` column (migrations/0025) instead of scanning
+  // every user who has ever had a trial and normalising each one in
+  // application code — the previous approach, dropped once the index
+  // existed (docs/05-subscriptions.md §5's "scaling note").
+  const emailMatchRows = await db
+    .select({ userId: subscriptions.userId })
     .from(subscriptions)
     .innerJoin(users, eq(users.id, subscriptions.userId))
-    .where(and(isNotNull(subscriptions.trialEndsAt), ne(subscriptions.userId, input.excludeUserId)));
-
-  const trialUserIds = new Set(trialHistory.map((r) => r.userId));
-
-  const emailMatches = [
-    ...new Set(
-      trialHistory.filter((r) => normaliseEmailForAbuseCheck(r.email) === input.normalisedEmail).map((r) => r.userId),
-    ),
-  ];
+    .where(
+      and(
+        isNotNull(subscriptions.trialEndsAt),
+        eq(users.emailNormalised, input.normalisedEmail),
+        ne(subscriptions.userId, input.excludeUserId),
+      ),
+    );
+  const emailMatches = [...new Set(emailMatchRows.map((r) => r.userId))];
   if (emailMatches.length > 0) matches.push({ detector: 'email', matchedUserIds: emailMatches });
+
+  // Check 4 (Stripe customer): only runs when the requester's own account
+  // already has a stripe_customer_id to compare (see the doc comment on the
+  // input field above).
+  if (input.stripeCustomerId) {
+    const stripeCustomerMatchRows = await db
+      .select({ userId: subscriptions.userId })
+      .from(subscriptions)
+      .innerJoin(users, eq(users.id, subscriptions.userId))
+      .where(
+        and(
+          isNotNull(subscriptions.trialEndsAt),
+          eq(users.stripeCustomerId, input.stripeCustomerId),
+          ne(subscriptions.userId, input.excludeUserId),
+        ),
+      );
+    const stripeCustomerMatches = [...new Set(stripeCustomerMatchRows.map((r) => r.userId))];
+    if (stripeCustomerMatches.length > 0) matches.push({ detector: 'stripe_customer', matchedUserIds: stripeCustomerMatches });
+  }
+
+  // Every user who has ever had a trial (trial_ends_at set at some point),
+  // regardless of that subscription's current status — the unbounded-
+  // lookback set checks 2/3 (device/IP) filter their own matches against
+  // (only a *prior trial* counts, never a prior paid subscription — the
+  // false-positive guard, docs §5).
+  const trialHistory = await db
+    .select({ userId: subscriptions.userId })
+    .from(subscriptions)
+    .where(and(isNotNull(subscriptions.trialEndsAt), ne(subscriptions.userId, input.excludeUserId)));
+  const trialUserIds = new Set(trialHistory.map((r) => r.userId));
 
   const windowStart = new Date(Date.now() - TRIAL_ABUSE_WINDOW_MS);
 
@@ -202,6 +246,8 @@ export interface StartTrialInput {
   email: string;
   fingerprintHash: string | null;
   ip: string | null;
+  /** See `checkTrialAbuse`'s `stripeCustomerId` doc comment (check 4). */
+  stripeCustomerId: string | null;
 }
 
 export type StartTrialResult =
@@ -224,6 +270,7 @@ export async function startTrial(db: Database, redis: Redis, input: StartTrialIn
     normalisedEmail,
     fingerprintHash: input.fingerprintHash,
     ipPrefix,
+    stripeCustomerId: input.stripeCustomerId,
     excludeUserId: input.userId,
   });
 

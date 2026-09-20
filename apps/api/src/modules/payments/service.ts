@@ -3,7 +3,7 @@
 // reads a module-level singleton) so tests can pass a fake — see
 // `stripe-client.ts`'s doc comment and this module's `__tests__/`.
 
-import { payments, subscriptions, type Database } from '@sl/db';
+import { payments, subscriptions, users, type Database } from '@sl/db';
 import { and, desc, eq, inArray, isNotNull, lt } from 'drizzle-orm';
 
 import { AppErrors } from '../../lib/errors.js';
@@ -136,18 +136,33 @@ export async function createCheckoutSession(
 }
 
 /**
- * Creates a Stripe Customer Portal session. There is no persisted
- * `stripe_customer_id` column on `users`/`subscriptions`
- * (`docs/05-subscriptions.md` §5's schema-gap note applies here too), so
- * this looks the customer up by email — an MVP-scale approximation
- * (multiple Stripe customers sharing one email would be ambiguous) rather
- * than a guaranteed-exact lookup; flagged in the handoff report.
+ * Creates a Stripe Customer Portal session. Looks the customer up by
+ * `users.stripe_customer_id` first (migrations/0025) — an exact,
+ * unambiguous lookup — and only falls back to the email-based lookup
+ * (an MVP-scale approximation: multiple Stripe customers could in principle
+ * share one email) when this user has no persisted customer id yet.
+ * Whatever customer id the fallback resolves (found or newly created) is
+ * persisted back onto `users.stripe_customer_id` so every later call for
+ * this user takes the exact-lookup path, and so the trial-abuse "shared
+ * Stripe customer" check (`docs/05-subscriptions.md` §5, check 4) has
+ * something to compare against even for a user who never went through
+ * Checkout.
  */
-export async function createPortalSession(stripe: Stripe, input: { email: string; returnUrl: string }): Promise<{ portalUrl: string }> {
-  const existing = await stripe.customers.list({ email: input.email, limit: 1 });
-  const customer = existing.data[0] ?? (await stripe.customers.create({ email: input.email }));
+export async function createPortalSession(
+  stripe: Stripe,
+  db: Database,
+  input: { userId: string; email: string; stripeCustomerId: string | null; returnUrl: string },
+): Promise<{ portalUrl: string }> {
+  let customerId = input.stripeCustomerId;
 
-  const session = await stripe.billingPortal.sessions.create({ customer: customer.id, return_url: input.returnUrl });
+  if (!customerId) {
+    const existing = await stripe.customers.list({ email: input.email, limit: 1 });
+    const customer = existing.data[0] ?? (await stripe.customers.create({ email: input.email }));
+    customerId = customer.id;
+    await db.update(users).set({ stripeCustomerId: customerId }).where(eq(users.id, input.userId));
+  }
+
+  const session = await stripe.billingPortal.sessions.create({ customer: customerId, return_url: input.returnUrl });
   return { portalUrl: session.url };
 }
 

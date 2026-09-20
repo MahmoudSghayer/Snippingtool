@@ -1,12 +1,12 @@
 import { zodResolver } from '@hookform/resolvers/zod';
+import { emailSchema } from '@sl/shared';
+import { Button, Card, CardContent, CardHeader, CardTitle, FormField, Input } from '@sl/ui';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 import { z } from 'zod';
 
-import { emailSchema } from '@sl/shared';
-import { Button, Card, CardContent, CardHeader, CardTitle, FormField, Input } from '@sl/ui';
 
 import { api, apiErrorMessage } from '@/api/client.js';
 
@@ -29,7 +29,7 @@ export function VerifyEmailPage() {
     if (!search.token) return;
     let cancelled = false;
     void (async () => {
-      const { error } = await api.POST('/auth/verify-email', { body: { token: search.token! } });
+      const { error } = await api.POST('/api/v1/auth/verify-email', { body: { token: search.token! } });
       if (cancelled) return;
       setStatus(error ? 'error' : 'verified');
     })();
@@ -41,7 +41,7 @@ export function VerifyEmailPage() {
   async function onResend(values: ResendForm) {
     setSubmitting(true);
     try {
-      await api.POST('/auth/resend-verification', { body: { email: values.email } });
+      await api.POST('/api/v1/auth/resend-verification', { body: { email: values.email } });
       // Always show the same message regardless of whether the account
       // exists — matches docs/04-auth.md's own "never reveal account
       // existence" framing for this endpoint.

@@ -1,12 +1,12 @@
 import { zodResolver } from '@hookform/resolvers/zod';
+import { emailSchema } from '@sl/shared';
+import { Button, Card, CardContent, CardHeader, CardTitle, FormField, Input, PasswordInput } from '@sl/ui';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 import { z } from 'zod';
 
-import { emailSchema } from '@sl/shared';
-import { Button, Card, CardContent, CardHeader, CardTitle, FormField, Input, PasswordInput } from '@sl/ui';
 
 import { api, apiErrorMessage } from '@/api/client.js';
 import { ensureBootstrapped, resetBootstrap } from '@/lib/authBootstrap.js';
@@ -51,7 +51,7 @@ export function LoginPage() {
   async function onSubmitCredentials(values: CredentialsForm) {
     setSubmitting(true);
     try {
-      const { data, error } = await api.POST('/auth/login', {
+      const { data, error } = await api.POST('/api/v1/auth/login', {
         body: { email: values.email, password: values.password, device: buildDevicePayload(values.deviceName) },
       });
       if (error) {
@@ -73,7 +73,7 @@ export function LoginPage() {
     if (!mfaTicket) return;
     setSubmitting(true);
     try {
-      const { error } = await api.POST('/auth/mfa/verify', { body: { mfaTicket, code: values.code } });
+      const { error } = await api.POST('/api/v1/auth/mfa/verify', { body: { mfaTicket, code: values.code } });
       if (error) {
         toast.error('Verification failed', { description: apiErrorMessage(error) });
         return;

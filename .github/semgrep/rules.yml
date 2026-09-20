@@ -26,22 +26,35 @@ rules:
           - pattern: eval(...)
           - pattern: new Function(...)
 
-  - id: no-hardcoded-jwt-or-api-secret-assignment
+  - id: no-hardcoded-secret-const
     languages: [typescript, javascript]
     severity: WARNING
     message: >-
-      A literal string assigned to a variable/property named like a secret
+      A literal string assigned to a `const` named like a secret
       (key/secret/password/token). Secrets must come from env (see
       apps/api/src/config/env.ts, infra/env/*.example) — flag for review;
-      test fixtures and the documented dev-only example keypairs are
-      expected false positives here (see the `paths.exclude` below).
+      the documented dev-only example keypairs are expected, reviewed false
+      positives.
     patterns:
-      - pattern-either:
-          - pattern: const $VAR = "..."
-          - pattern: $OBJ.$KEY = "..."
+      - pattern: const $VAR = "..."
       - metavariable-regex:
           metavariable: $VAR
-          regex: (?i)(secret|password|apikey|api_key|privatekey|private_key)$
+          regex: (?i)(secret|password|apikey|api_key|privatekey|private_key)
+      - metavariable-comparison:
+          comparison: len(str(value)) > 8
+
+  - id: no-hardcoded-secret-property
+    languages: [typescript, javascript]
+    severity: WARNING
+    message: >-
+      A literal string assigned to an object property named like a secret
+      (key/secret/password/token). Secrets must come from env (see
+      apps/api/src/config/env.ts, infra/env/*.example) — flag for review.
+    patterns:
+      - pattern: $OBJ.$KEY = "..."
+      - metavariable-regex:
+          metavariable: $KEY
+          regex: (?i)(secret|password|apikey|api_key|privatekey|private_key)
       - metavariable-comparison:
           comparison: len(str(value)) > 8
 

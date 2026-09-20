@@ -1,6 +1,6 @@
+import { Button, FormField, Modal, Textarea } from '@sl/ui';
 import { useState } from 'react';
 
-import { Button, FormField, Modal, Textarea } from '@sl/ui';
 
 import type { ReactNode } from 'react';
 

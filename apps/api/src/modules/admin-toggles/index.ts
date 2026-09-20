@@ -13,7 +13,8 @@ import { z } from 'zod';
 
 import { recordAudit } from '../../lib/audit.js';
 import { AppErrors } from '../../lib/errors.js';
-import { publishAdmin } from '../../ws/publish.js';
+import { scanOnlineUserIds } from '../../ws/presence.js';
+import { publishAdmin, publishToUser } from '../../ws/publish.js';
 
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
@@ -79,7 +80,18 @@ export default fp(
         await publishAdmin(fastify.redis, { type: 'feature_toggles.changed', toggles: allToggles });
 
         if (after!.key === 'kill_switch') {
-          await publishAdmin(fastify.redis, { type: 'kill_switch', active: after!.enabled, reason: request.body.enabled !== undefined ? 'admin toggle' : undefined });
+          const reason = request.body.enabled !== undefined ? 'admin toggle' : undefined;
+          const event = { type: 'kill_switch' as const, active: after!.enabled, reason };
+          await publishAdmin(fastify.redis, event);
+          // Every online user, not just admins watching admin:overview — the
+          // kill switch is the one event every build must treat as absolute
+          // and immediate (@sl/shared's killSwitchEventSchema doc comment),
+          // so it fans out to every currently-connected user:{id} channel
+          // too, batched via the presence set so this never loads the whole
+          // online-user list into memory at once.
+          for await (const batch of scanOnlineUserIds(fastify.redis)) {
+            await Promise.all(batch.map((userId) => publishToUser(fastify.redis, userId, event)));
+          }
         }
 
         return toDto(after!);

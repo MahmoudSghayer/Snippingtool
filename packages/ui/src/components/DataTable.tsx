@@ -37,7 +37,7 @@ export interface DataTableProps<TData> {
   emptyTitle?: string;
   emptyDescription?: string;
   onRowClick?: (row: TData) => void;
-  getRowId?: (row: TData) => string;
+  getRowId?: (row: TData, index: number) => string;
   rowActions?: (row: TData) => ReactNode;
   enableColumnVisibility?: boolean;
   toolbar?: ReactNode;
@@ -89,7 +89,7 @@ export function DataTable<TData>({
     onColumnVisibilityChange: setColumnVisibility,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
-    getRowId: getRowId as ((row: TData, index: number) => string) | undefined,
+    getRowId,
   });
 
   const showEmpty = !isLoading && !isError && data.length === 0;

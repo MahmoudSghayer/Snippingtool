@@ -1,6 +1,3 @@
-import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
-
 import {
   AreaChart,
   Button,
@@ -23,10 +20,14 @@ import {
   type ColumnDef,
   type DateRange,
 } from '@sl/ui';
-import type { ProfitLeaderboardEntry } from '@sl/shared';
+import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
+
 
 import { api } from '@/api/client.js';
 import { downloadCsv } from '@/lib/csv.js';
+
+import type { ProfitLeaderboardEntry } from '@sl/shared';
 
 const leaderboardColumns: ColumnDef<ProfitLeaderboardEntry, unknown>[] = [
   { accessorKey: 'rank', header: '#' },
@@ -45,7 +46,7 @@ export function ProfitsPage() {
   const profitsQuery = useQuery({
     queryKey: ['admin', 'analytics', 'profits', range],
     queryFn: async () => {
-      const { data, error } = await api.GET('/admin/analytics/profits', { params: { query: range } });
+      const { data, error } = await api.GET('/api/v1/admin/analytics/profits', { params: { query: range } });
       if (error) throw error;
       return data;
     },
@@ -54,7 +55,7 @@ export function ProfitsPage() {
   const topQuery = useQuery({
     queryKey: ['admin', 'analytics', 'leaderboard', range, 'top'],
     queryFn: async () => {
-      const { data, error } = await api.GET('/admin/analytics/profits/leaderboard', { params: { query: { ...range, order: 'top', limit: 20 } } });
+      const { data, error } = await api.GET('/api/v1/admin/analytics/profits/leaderboard', { params: { query: { ...range, order: 'top', limit: 20 } } });
       if (error) throw error;
       return data;
     },
@@ -63,7 +64,7 @@ export function ProfitsPage() {
   const leastQuery = useQuery({
     queryKey: ['admin', 'analytics', 'leaderboard', range, 'least'],
     queryFn: async () => {
-      const { data, error } = await api.GET('/admin/analytics/profits/leaderboard', { params: { query: { ...range, order: 'least', limit: 20 } } });
+      const { data, error } = await api.GET('/api/v1/admin/analytics/profits/leaderboard', { params: { query: { ...range, order: 'least', limit: 20 } } });
       if (error) throw error;
       return data;
     },

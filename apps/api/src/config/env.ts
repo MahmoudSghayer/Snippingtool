@@ -22,6 +22,14 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1).default('postgres://sl:sl@127.0.0.1:5432/sniper_ledger'),
   TEST_DATABASE_URL: z.string().min(1).optional(),
   REDIS_URL: z.string().min(1).default('redis://127.0.0.1:6379'),
+  // Logical Redis DB index used only under NODE_ENV=test (plugins/redis.ts,
+  // src/test/global-setup.ts) — see the SKELETON_READY note on why this is a
+  // dedicated DB index rather than a key prefix. Configurable so two test
+  // suites that must not collide (e.g. this repo's own `pnpm test` run vs.
+  // an ad hoc `TEST_DATABASE_URL=... REDIS_TEST_DB=14 pnpm test` pass) can
+  // use different indices; default (15) is unchanged from before this was
+  // configurable.
+  REDIS_TEST_DB: z.coerce.number().int().min(0).max(15).default(15),
 
   // --- Origins / CORS ---
   APP_ORIGIN: z.string().url().default('http://localhost:3000'),

@@ -30,6 +30,25 @@ export async function countOnline(redis: Redis): Promise<number> {
   return redis.scard(ONLINE_SET);
 }
 
+const SCAN_BATCH_SIZE = 200;
+
+/** Iterates every online user id in batches via `SSCAN` (never `SMEMBERS`,
+ * which would pull the whole online set into memory in one round trip) —
+ * for fan-out sends (e.g. admin-toggles' kill-switch broadcast) that need
+ * to reach every currently-online user without loading the whole set at
+ * once. Best-effort/eventually-consistent like `SSCAN` itself: a user who
+ * connects or disconnects mid-scan may or may not be included, which is
+ * fine for a broadcast (a client that connects moments later gets the
+ * current state on its own initial bootstrap/heartbeat anyway). */
+export async function* scanOnlineUserIds(redis: Redis, batchSize: number = SCAN_BATCH_SIZE): AsyncGenerator<string[]> {
+  let cursor = '0';
+  do {
+    const [nextCursor, members] = await redis.sscan(ONLINE_SET, cursor, 'COUNT', batchSize);
+    cursor = nextCursor;
+    if (members.length > 0) yield members;
+  } while (cursor !== '0');
+}
+
 /** Removes stale members: online-set entries whose TTL key has expired.
  * Called by the presence.sweep job on a schedule. Returns the number
  * removed. */

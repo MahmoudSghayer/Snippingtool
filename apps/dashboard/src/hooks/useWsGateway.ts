@@ -5,9 +5,9 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 
+import { WsConnection } from '@/lib/ws.js';
 import { useAdminLiveStore } from '@/stores/adminLive.js';
 import { useAuthStore } from '@/stores/auth.js';
-import { WsConnection } from '@/lib/ws.js';
 
 export function useWsGateway(): void {
   const queryClient = useQueryClient();

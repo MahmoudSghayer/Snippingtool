@@ -13,11 +13,10 @@ const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 30_000;
 
 function wsUpgradeUrl(ticket: string): string {
-  // API_BASE_URL is `${origin}/api/v1` (or `/api/v1` for the dev proxy /
-  // same-origin case) — the WS upgrade itself is unprefixed (docs/03-api.md
-  // §ws), so strip `/api/v1` and swap the http(s) scheme for ws(s).
-  const base = API_BASE_URL.replace(/\/api\/v1$/, '');
-  const absoluteBase = base.startsWith('http') ? base : `${window.location.origin}${base}`;
+  // API_BASE_URL is the bare origin (or '' for the dev proxy / same-origin
+  // case) — the WS upgrade itself is unprefixed (docs/03-api.md §ws), so no
+  // `/api/v1` stripping is needed here, just the http(s) -> ws(s) swap.
+  const absoluteBase = API_BASE_URL.startsWith('http') ? API_BASE_URL : `${window.location.origin}${API_BASE_URL}`;
   const wsBase = absoluteBase.replace(/^http/, 'ws');
   return `${wsBase}/ws?ticket=${encodeURIComponent(ticket)}`;
 }
@@ -34,7 +33,7 @@ export class WsConnection {
   async connect(): Promise<void> {
     this.closedByCaller = false;
     try {
-      const { data, error } = await api.POST('/ws/ticket', {});
+      const { data, error } = await api.POST('/api/v1/ws/ticket', {});
       if (error || !data) {
         this.scheduleReconnect();
         return;

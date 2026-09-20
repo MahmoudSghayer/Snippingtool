@@ -1,34 +1,35 @@
 import { zodResolver } from '@hookform/resolvers/zod';
+import { registerRequestSchema } from '@sl/shared';
+import { Button, Card, CardContent, CardHeader, CardTitle, FormField, Input, PasswordInput } from '@sl/ui';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 import { z } from 'zod';
 
-import { registerRequestSchema } from '@sl/shared';
-import { Button, Card, CardContent, CardHeader, CardTitle, FormField, Input, PasswordInput } from '@sl/ui';
-
 import { api, apiErrorMessage } from '@/api/client.js';
 import { buildDevicePayload, defaultDeviceName } from '@/lib/device.js';
 
-const formSchema = registerRequestSchema
+// Exported so test/RegisterForm.test.tsx can validate it directly without
+// needing a router context to render the whole page.
+export const registerFormSchema = registerRequestSchema
   .omit({ device: true })
   .extend({ deviceName: z.string().min(1).max(120), confirmPassword: z.string() })
   .refine((v) => v.password === v.confirmPassword, { message: 'Passwords do not match', path: ['confirmPassword'] });
-type FormValues = z.infer<typeof formSchema>;
+type FormValues = z.infer<typeof registerFormSchema>;
 
 export function RegisterPage() {
   const navigate = useNavigate();
   const [submitting, setSubmitting] = useState(false);
   const form = useForm<FormValues>({
-    resolver: zodResolver(formSchema),
+    resolver: zodResolver(registerFormSchema),
     defaultValues: { email: '', password: '', confirmPassword: '', deviceName: defaultDeviceName() },
   });
 
   async function onSubmit(values: FormValues) {
     setSubmitting(true);
     try {
-      const { error } = await api.POST('/auth/register', {
+      const { error } = await api.POST('/api/v1/auth/register', {
         body: {
           email: values.email,
           password: values.password,

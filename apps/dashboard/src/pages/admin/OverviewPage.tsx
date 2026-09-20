@@ -1,7 +1,3 @@
-import { useQuery } from '@tanstack/react-query';
-import { Activity, AlertTriangle, DollarSign, TrendingUp, Users } from 'lucide-react';
-import { useState } from 'react';
-
 import {
   ChartCard,
   DateRangePicker,
@@ -15,6 +11,10 @@ import {
   StatTile,
   type DateRange,
 } from '@sl/ui';
+import { useQuery } from '@tanstack/react-query';
+import { Activity, AlertTriangle, DollarSign, TrendingUp, Users } from 'lucide-react';
+import { useState } from 'react';
+
 
 import { api } from '@/api/client.js';
 import { useAdminLiveStore } from '@/stores/adminLive.js';
@@ -29,7 +29,7 @@ export function OverviewPage() {
   const overviewQuery = useQuery({
     queryKey: ['admin', 'analytics', 'overview', range],
     queryFn: async () => {
-      const { data, error } = await api.GET('/admin/analytics/overview', { params: { query: range } });
+      const { data, error } = await api.GET('/api/v1/admin/analytics/overview', { params: { query: range } });
       if (error) throw error;
       return data;
     },

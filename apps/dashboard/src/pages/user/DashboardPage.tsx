@@ -1,7 +1,3 @@
-import { useQuery } from '@tanstack/react-query';
-import { Link } from '@tanstack/react-router';
-import { AlertTriangle, Gauge, Laptop, ShieldCheck, TrendingUp } from 'lucide-react';
-
 import {
   Badge,
   Button,
@@ -19,9 +15,14 @@ import {
   StatTile,
   type ColumnDef,
 } from '@sl/ui';
-import type { Trade } from '@sl/shared';
+import { useQuery } from '@tanstack/react-query';
+import { Link } from '@tanstack/react-router';
+import { AlertTriangle, Gauge, Laptop, ShieldCheck, TrendingUp } from 'lucide-react';
 
 import { api } from '@/api/client.js';
+
+import type { Trade } from '@sl/shared';
+
 
 const tradeColumns: ColumnDef<Trade, unknown>[] = [
   { accessorKey: 'resourceId', header: 'Player', cell: (c) => <span className="font-mono">{c.getValue() as number}</span> },
@@ -48,7 +49,7 @@ export function DashboardPage() {
   const overviewQuery = useQuery({
     queryKey: ['analytics', 'me', 'overview'],
     queryFn: async () => {
-      const { data, error } = await api.GET('/analytics/me/overview');
+      const { data, error } = await api.GET('/api/v1/analytics/me/overview');
       if (error) throw error;
       return data;
     },
@@ -57,7 +58,7 @@ export function DashboardPage() {
   const devicesQuery = useQuery({
     queryKey: ['devices'],
     queryFn: async () => {
-      const { data, error } = await api.GET('/devices');
+      const { data, error } = await api.GET('/api/v1/devices');
       if (error) throw error;
       return data;
     },
@@ -66,7 +67,7 @@ export function DashboardPage() {
   const licenseQuery = useQuery({
     queryKey: ['license', 'me'],
     queryFn: async () => {
-      const { data, error } = await api.GET('/licenses/me');
+      const { data, error } = await api.GET('/api/v1/licenses/me');
       if (error) throw error;
       return data;
     },
@@ -75,7 +76,7 @@ export function DashboardPage() {
   const settingsQuery = useQuery({
     queryKey: ['settings'],
     queryFn: async () => {
-      const { data, error } = await api.GET('/settings');
+      const { data, error } = await api.GET('/api/v1/settings');
       if (error) throw error;
       return data;
     },
@@ -84,7 +85,7 @@ export function DashboardPage() {
   const tradesQuery = useQuery({
     queryKey: ['trades', 'recent'],
     queryFn: async () => {
-      const { data, error } = await api.GET('/trades', { params: { query: { limit: 8 } } });
+      const { data, error } = await api.GET('/api/v1/trades', { params: { query: { limit: 8 } } });
       if (error) throw error;
       return data;
     },

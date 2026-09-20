@@ -4,7 +4,7 @@
 // routes.
 
 
-import { users, type Database, type User } from '@sl/db';
+import { devices, users, type Database, type User } from '@sl/db';
 import {
   type DeviceFingerprint,
   type LoginResponse,
@@ -16,8 +16,10 @@ import { z } from 'zod';
 import { verifySecret, hashSecret, randomToken, fastHash, encryptTotpSecret, decryptTotpSecret } from '../../lib/crypto.js';
 import { findOrRegisterDevice } from '../../lib/devices.js';
 import { AppErrors } from '../../lib/errors.js';
+import { recordSuspiciousIpIfAny, upsertIpActivity } from '../../lib/ip-activity.js';
 import { newId } from '../../lib/ids.js';
 import { assertNotLocked, checkSlidingWindowRateLimit, recordFailedLogin, resetLoginFailures } from '../../lib/lockout.js';
+import { uaFamiliesCompatible } from '../../lib/ua.js';
 import {
   ACCESS_TOKEN_TTL_SECONDS,
   MFA_TICKET_TTL_SECONDS,
@@ -42,6 +44,11 @@ export interface AuthContext {
   mailer: Mailer;
   jwtPrivateKey: string;
   cookieSecret: string;
+  /** Optional structured logger (fastify.log in production; omitted in unit
+   * tests that build an ad-hoc context). Only ever used for non-fatal
+   * warnings — nothing security-sensitive is ever logged here (see
+   * docs/09-security.md "Logging & redaction"). */
+  log?: { warn: (obj: unknown, msg?: string) => void };
 }
 
 const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000;
@@ -179,6 +186,17 @@ export async function completeLogin(
     ctx.jwtPrivateKey,
   );
 
+  // IP monitoring (docs/09-security.md "IP monitoring"): upsert the rolling
+  // per-(ip,user) counter with geo/ASN enrichment, then check for a new
+  // country / impossible travel and raise a `flags` row if so. Best-effort —
+  // never blocks or fails a login; a monitoring hiccup must not become an
+  // availability incident for the thing it's supposed to be protecting.
+  if (ip) {
+    void upsertIpActivity(ctx.db, { ip, userId: user.id, deviceId })
+      .then((activity) => recordSuspiciousIpIfAny(ctx.db, { userId: user.id, ip, activity }))
+      .catch((err) => ctx.log?.warn({ err }, 'ip-activity monitoring failed (non-fatal)'));
+  }
+
   return { status: 'ok', accessToken, refreshToken: refresh.token, expiresIn: ACCESS_TOKEN_TTL_SECONDS };
 }
 
@@ -292,6 +310,7 @@ async function tryConsumeRecoveryCode(db: Database, userId: string, code: string
 export async function refresh(
   ctx: AuthContext,
   refreshToken: string,
+  presented?: { userAgent?: string | null; device?: DeviceFingerprint | null },
 ): Promise<{ accessToken: string; refreshToken: string; expiresIn: number }> {
   const hash = fastHash(refreshToken);
   const session = await repo.findSessionByRefreshHash(ctx.db, hash);
@@ -306,6 +325,29 @@ export async function refresh(
 
   if (session.expiresAt.getTime() < Date.now()) {
     throw AppErrors.tokenExpired();
+  }
+
+  // Refresh-token binding (docs/09-security.md "Session security"): a
+  // refresh token is scoped to the device/browser-family it was issued to.
+  // The session already carries the User-Agent it was created/last-rotated
+  // with — compare that against what's presented now. A mismatch is treated
+  // exactly like reuse of a stolen token: revoke the whole family rather
+  // than silently rotating for whoever holds the raw token bytes.
+  if (session.userAgent && !uaFamiliesCompatible(session.userAgent, presented?.userAgent)) {
+    await repo.revokeSessionFamily(ctx.db, session.familyId, 'device_binding_mismatch');
+    throw AppErrors.tokenReused();
+  }
+
+  // Same reasoning for an explicitly-presented device fingerprint (optional,
+  // additive field — see `refreshRequestSchema`): if the caller sends one at
+  // all, it must match the fingerprint the session's device was registered
+  // under.
+  if (presented?.device && session.deviceId) {
+    const boundDevice = await ctx.db.query.devices.findFirst({ where: eq(devices.id, session.deviceId) });
+    if (boundDevice && boundDevice.fingerprintHash !== presented.device.fingerprint) {
+      await repo.revokeSessionFamily(ctx.db, session.familyId, 'device_binding_mismatch');
+      throw AppErrors.tokenReused();
+    }
   }
 
   const user = await repo.findUserById(ctx.db, session.userId);

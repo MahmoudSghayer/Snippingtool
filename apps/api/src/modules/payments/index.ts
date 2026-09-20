@@ -91,7 +91,12 @@ export default fp(
         if (!user) throw AppErrors.notFound('user');
 
         const stripe = getStripeClient(fastify.config);
-        return createPortalSession(stripe, { email: user.email, returnUrl: request.body.returnUrl });
+        return createPortalSession(stripe, fastify.db, {
+          userId: user.id,
+          email: user.email,
+          stripeCustomerId: user.stripeCustomerId,
+          returnUrl: request.body.returnUrl,
+        });
       },
     );
 

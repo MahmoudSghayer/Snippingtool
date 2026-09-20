@@ -3,7 +3,7 @@
 // after signature verification — see docs/05-subscriptions.md §7 for the
 // full per-event-type table this file implements.
 
-import { coupons, notifications, payments, paymentHistory, stripeWebhookEvents, subscriptions, type Database } from '@sl/db';
+import { coupons, notifications, payments, paymentHistory, stripeWebhookEvents, subscriptions, users, type Database } from '@sl/db';
 import { and, eq } from 'drizzle-orm';
 
 import { recordAudit } from '../../lib/audit.js';
@@ -100,7 +100,16 @@ async function handleCheckoutCompleted(db: Database, redis: Redis, stripe: Strip
   if (!plan) return;
 
   const existingLive = await getLiveSubscriptionForUser(db, userId);
-  if (existingLive) return; // idempotent guard against a duplicate/late delivery
+  // A live subscription that is NOT a trial already existing means this
+  // event is a duplicate/late delivery for a checkout that already took
+  // effect — skip it (idempotent guard). A live TRIAL, though, is not
+  // "already handled": it is exactly the row this checkout upgrades
+  // atomically into the new paid subscription
+  // (docs/05-subscriptions.md §2's `trialing --> active` transition, §7's
+  // "Atomic trial→paid" note) — handled by the transaction below instead of
+  // being treated as a conflict.
+  if (existingLive && existingLive.status !== 'trialing') return;
+  const trialToUpgrade = existingLive?.status === 'trialing' ? existingLive : null;
 
   let currentPeriodStart = new Date();
   let currentPeriodEnd: Date | null = null;
@@ -114,57 +123,89 @@ async function handleCheckoutCompleted(db: Database, redis: Redis, stripe: Strip
     stripeSubscriptionId = stripeSub.id;
   }
 
-  const [row] = await db
-    .insert(subscriptions)
-    .values({
-      id: newId(),
-      userId,
-      planId: plan.id,
-      status: 'active',
-      currentPeriodStart,
-      currentPeriodEnd: plan.isLifetime ? null : currentPeriodEnd,
-      trialEndsAt: null,
-      cancelAtPeriodEnd: false,
-      autoRenew: !plan.isLifetime,
-      source: 'stripe',
-      stripeSubscriptionId,
-    })
-    .returning();
-
-  await issueForSubscription(db, {
-    subscriptionId: row!.id,
-    userId,
-    maxDevices: plan.deviceLimit,
-    expiresAt: plan.isLifetime ? null : currentPeriodEnd,
-  });
-
+  // checkout.session.completed is the first point a Stripe Customer exists
+  // for this checkout — persist it (migrations/0025) so later portal
+  // sessions and the trial-abuse "shared Stripe customer" check
+  // (docs/05-subscriptions.md §5, check 4) can use it.
+  const stripeCustomerId = typeof session.customer === 'string' ? session.customer : (session.customer?.id ?? null);
   const couponId = session.metadata?.couponId;
-  if (couponId) {
-    const coupon = await db.query.coupons.findFirst({ where: eq(coupons.id, couponId) });
-    if (coupon) await redeemCoupon(db, coupon, userId, row!.id);
-  }
 
-  await recordPayment(db, {
-    userId,
-    subscriptionId: row!.id,
-    providerPaymentId: session.id,
-    amountCents: session.amount_total ?? 0,
-    currency: session.currency ?? plan.currency,
-    status: 'succeeded',
-    couponId: couponId || null,
-    invoiceUrl: null,
-    eventName: event.type,
-    rawEvent: event,
+  // Everything that must be consistent together — ending the trial row (if
+  // any), creating the paid row, issuing its license, redeeming the coupon,
+  // and recording the payment — happens in one transaction, so a crash
+  // partway through never leaves a user with two live subscriptions, a
+  // trial that outlived its own paid upgrade, or a paid row with no
+  // license.
+  const row = await db.transaction(async (tx) => {
+    if (trialToUpgrade) {
+      // trial_ends_at must already be NULL by the time status leaves
+      // 'trialing' (subscriptions_trial_ends_only_when_trialing CHECK,
+      // 02-database.md §6.3) — cleared in the same UPDATE.
+      await tx
+        .update(subscriptions)
+        .set({ status: 'canceled', endedAt: new Date(), trialEndsAt: null })
+        .where(eq(subscriptions.id, trialToUpgrade.id));
+      const trialLicense = await findActiveForSubscription(tx, trialToUpgrade.id);
+      if (trialLicense) await revokeLicense(tx, trialLicense.id, 'upgraded_to_paid');
+    }
+
+    const [insertedRow] = await tx
+      .insert(subscriptions)
+      .values({
+        id: newId(),
+        userId,
+        planId: plan.id,
+        status: 'active',
+        currentPeriodStart,
+        currentPeriodEnd: plan.isLifetime ? null : currentPeriodEnd,
+        trialEndsAt: null,
+        cancelAtPeriodEnd: false,
+        autoRenew: !plan.isLifetime,
+        source: 'stripe',
+        stripeSubscriptionId,
+      })
+      .returning();
+
+    await issueForSubscription(tx, {
+      subscriptionId: insertedRow!.id,
+      userId,
+      maxDevices: plan.deviceLimit,
+      expiresAt: plan.isLifetime ? null : currentPeriodEnd,
+    });
+
+    if (couponId) {
+      const coupon = await tx.query.coupons.findFirst({ where: eq(coupons.id, couponId) });
+      if (coupon) await redeemCoupon(tx, coupon, userId, insertedRow!.id);
+    }
+
+    if (stripeCustomerId) {
+      await tx.update(users).set({ stripeCustomerId }).where(eq(users.id, userId));
+    }
+
+    await recordPayment(tx, {
+      userId,
+      subscriptionId: insertedRow!.id,
+      providerPaymentId: session.id,
+      amountCents: session.amount_total ?? 0,
+      currency: session.currency ?? plan.currency,
+      status: 'succeeded',
+      couponId: couponId || null,
+      invoiceUrl: null,
+      eventName: event.type,
+      rawEvent: event,
+    });
+
+    return insertedRow!;
   });
 
-  await publishToUser(redis, userId, { type: 'subscription.changed', subscription: toSubscriptionDto(row!, plan) });
+  await publishToUser(redis, userId, { type: 'subscription.changed', subscription: toSubscriptionDto(row, plan) });
   await db.insert(notifications).values({
     id: newId(),
     userId,
     type: 'subscription.activated',
     title: `Welcome to ${plan.name}`,
     body: null,
-    data: { subscriptionId: row!.id },
+    data: { subscriptionId: row.id },
     deliveredVia: 'in_app',
   });
 }

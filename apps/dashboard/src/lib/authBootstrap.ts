@@ -11,7 +11,7 @@ let bootstrapPromise: Promise<void> | null = null;
 export function ensureBootstrapped(): Promise<void> {
   if (!bootstrapPromise) {
     bootstrapPromise = (async () => {
-      const { data, error } = await api.GET('/users/me');
+      const { data, error } = await api.GET('/api/v1/users/me');
       if (error || !data) {
         useAuthStore.getState().clearSession();
         return;

@@ -27,17 +27,19 @@ declare module 'fastify' {
 // namespacing and the two conflict. A separate logical DB sidesteps the
 // class of problem entirely: every command (including BullMQ's, and
 // SUBSCRIBE/PUBLISH channel names) is naturally isolated with zero
-// per-library special-casing, and cleanup is one FLUSHDB. Fixed index
-// rather than random since this repo's tests run sequentially
+// per-library special-casing, and cleanup is one FLUSHDB. The index is
+// `REDIS_TEST_DB` (config/env.ts, default 15, matching the previous fixed
+// value) rather than hard-coded, so two test runs that must not collide
+// (this repo's own `pnpm test` vs. a parallel suite pointed at a different
+// TEST_DATABASE_URL) can use different Redis DBs too. Fixed rather than
+// random since this repo's own tests run sequentially within one run
 // (fileParallelism: false) — see src/test/global-setup.ts, which FLUSHDBs
-// this index once before every test run to also clear any state left by a
-// crashed previous run.
-const TEST_REDIS_DB = 15;
-
+// the configured index once before every test run to also clear any state
+// left by a crashed previous run.
 export default fp(
   async function redisPlugin(fastify: FastifyInstance) {
     const isTest = fastify.config.NODE_ENV === 'test';
-    const db = isTest ? TEST_REDIS_DB : undefined;
+    const db = isTest ? fastify.config.REDIS_TEST_DB : undefined;
 
     const redis = new Redis(fastify.config.REDIS_URL, { maxRetriesPerRequest: null, lazyConnect: false, db });
     const redisSub = new Redis(fastify.config.REDIS_URL, { maxRetriesPerRequest: null, lazyConnect: false, db });
