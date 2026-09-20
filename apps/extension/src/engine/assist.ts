@@ -7,10 +7,10 @@
  * confirm key is not an exemption from the safety budget, it is the thing
  * the safety budget is shaped around.
  */
-import type { AdapterClient } from '../content/adapter-client.js';
 import type { Governor } from './governor.js';
 import type { ScoredOpportunity } from './ranker.js';
 import type { AttemptInput, TradeInput } from './types.js';
+import type { AdapterClient } from '../content/adapter-client.js';
 
 export interface Keybindings {
   nextFilter: string;

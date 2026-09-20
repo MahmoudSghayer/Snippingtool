@@ -7,5 +7,7 @@
  * guarantees `ledger`'s dist never contains the autobuyer module at all.
  */
 declare module 'virtual:autobuyer-loader' {
+  // An ambient module declaration can't hoist a named type import above itself.
+  // eslint-disable-next-line @typescript-eslint/consistent-type-imports
   export function loadAutobuyer(): Promise<typeof import('../engine/autobuyer.js') | null>;
 }

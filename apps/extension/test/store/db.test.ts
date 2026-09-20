@@ -19,9 +19,14 @@ function auction(overrides: Partial<Parameters<typeof db.recordSightings>[0][num
 }
 
 describe('store/db', () => {
-  beforeEach(() => {
-    db._resetForTests();
-    indexedDB.deleteDatabase('ledger');
+  beforeEach(async () => {
+    await db._resetForTests();
+    await new Promise<void>((resolve) => {
+      const req = indexedDB.deleteDatabase('ledger');
+      req.onsuccess = () => resolve();
+      req.onerror = () => resolve();
+      req.onblocked = () => resolve();
+    });
   });
 
   it('inserts a new auction and reports it in counts()', async () => {

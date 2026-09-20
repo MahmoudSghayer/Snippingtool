@@ -54,6 +54,7 @@ const env = {
 const define = Object.fromEntries(Object.entries(env).map(([k, v]) => [`import.meta.env.${k}`, JSON.stringify(v)]));
 
 const sharedAlias = {
+  '@sl/shared/adapter-channel.js': path.resolve(root, '../../packages/shared/src/adapter-channel.ts'),
   '@sl/shared': path.resolve(root, '../../packages/shared/src/index.ts'),
   'virtual:autobuyer-loader': path.resolve(
     root,
@@ -73,12 +74,31 @@ function baseConfig(first) {
       outDir,
       emptyOutDir: first,
       minify: true,
-      sourcemap: true,
+      // Not shipped to the Chrome Web Store / self-hosted update server
+      // either way, and keeping them out of dist is also what makes the
+      // "ledger never contains the word autobuyer" check (below) exact
+      // rather than accidentally failing on a source map's embedded
+      // original source text of an unrelated file that merely *mentions*
+      // the word in a comment or a variable name.
+      sourcemap: false,
       target: 'chrome110',
       watch: watch ? {} : undefined,
     },
   };
 }
+
+/**
+ * zod and this repo's own schema modules are pure — no top-level side
+ * effects — so telling Rollup that explicitly (rather than relying on its
+ * conservative default) is safe, and it is what lets an unused schema (e.g.
+ * `bootstrapResponseSchema`, which only ever crosses this codebase as a
+ * TypeScript type, never a runtime value) be fully eliminated instead of
+ * dragging its dependencies — here, `FEATURE_KEYS`, whose values include the
+ * literal string `'automation.autobuyer'` — into every bundle that imports
+ * any *other* export of the same `@sl/shared` barrel module.
+ */
+
+const TREESHAKE = { moduleSideEffects: false };
 
 async function buildLibEntry(entry, fileName, globalName, first) {
   await build({
@@ -86,7 +106,7 @@ async function buildLibEntry(entry, fileName, globalName, first) {
     build: {
       ...baseConfig(first).build,
       lib: { entry: path.join(root, entry), formats: ['iife'], name: globalName, fileName: () => fileName },
-      rollupOptions: { output: { extend: true } },
+      rollupOptions: { treeshake: TREESHAKE, output: { extend: true } },
     },
   });
 }
@@ -97,6 +117,7 @@ async function buildEsGroup(first) {
     build: {
       ...baseConfig(first).build,
       rollupOptions: {
+        treeshake: TREESHAKE,
         input: {
           background: path.join(root, 'src/background/index.ts'),
           popup: path.join(root, 'src/popup/index.html'),
@@ -124,7 +145,7 @@ async function main() {
   await buildLibEntry('src/content/index.ts', 'content.js', 'SLContent', false);
   await buildEsGroup(false);
   writeManifest();
-  console.log(`[build] ${target} -> ${path.relative(root, outDir)}`);
+  console.warn(`[build] ${target} -> ${path.relative(root, outDir)}`);
 }
 
 main().catch((err) => {

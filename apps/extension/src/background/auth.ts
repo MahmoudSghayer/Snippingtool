@@ -4,12 +4,14 @@
  * job here is just message routing (rule 5: no loops, no extra state beyond
  * what `lib/auth.ts` already keeps in `storage.session`/`storage.local`).
  */
-import type { LoginResponse, MfaVerifyRequest, RegisterRequest } from '@sl/shared';
 
-import { computeFingerprint, detectBrowser, detectOs } from '../lib/fingerprint.js';
 import * as auth from '../lib/auth.js';
+import { computeFingerprint, detectBrowser, detectOs } from '../lib/fingerprint.js';
 import { logger } from '../lib/logger.js';
+
 import { runBootstrap } from './license.js';
+
+import type { LoginResponse, MfaVerifyRequest, RegisterRequest } from '@sl/shared';
 
 export interface AuthStatus {
   authenticated: boolean;

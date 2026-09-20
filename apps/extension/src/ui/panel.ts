@@ -10,10 +10,10 @@
  * a tiny price-history sparkline, session P&L, a risk budget meter, and the
  * ranker's current top candidates.
  */
-import type { PriceSummary } from '../model/prices.js';
+import type { SessionPnl } from '../engine/assist.js';
 import type { RiskSnapshot } from '../engine/governor.js';
 import type { ScoredOpportunity } from '../engine/ranker.js';
-import type { SessionPnl } from '../engine/assist.js';
+import type { PriceSummary } from '../model/prices.js';
 
 const css = `
   :host { all: initial; }

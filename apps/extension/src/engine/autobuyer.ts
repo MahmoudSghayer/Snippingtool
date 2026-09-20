@@ -14,11 +14,12 @@
  * longer matches reality, and continuing to act on stale assumptions is
  * exactly the failure mode this whole architecture exists to avoid.
  */
-import type { AdapterClient } from '../content/adapter-client.js';
 import { backoffMs, sleep } from '../lib/http.js';
+
 import type { Governor } from './governor.js';
 import type { ScoredOpportunity } from './ranker.js';
 import type { AttemptInput, TradeInput } from './types.js';
+import type { AdapterClient } from '../content/adapter-client.js';
 
 export interface AutobuyerDeps {
   governor: Governor;

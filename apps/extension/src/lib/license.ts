@@ -19,12 +19,13 @@
  * that doesn't sign yet), verification is skipped with a loud warning
  * instead of silently trusting an unverifiable blob in production.
  */
-import type { BootstrapRequest, BootstrapResponse, HeartbeatRequest, HeartbeatResponse } from '@sl/shared';
 
 import { apiJson } from './api.js';
 import { computeFingerprint, detectBrowser, detectOs } from './fingerprint.js';
 import { logger } from './logger.js';
 import { getLocal, setLocal } from './storage.js';
+
+import type { BootstrapRequest, BootstrapResponse, HeartbeatRequest, HeartbeatResponse } from '@sl/shared';
 
 const CACHE_KEY = 'sl.license.cache.v1';
 const OFFLINE_GRACE_MS = 24 * 60 * 60 * 1000;
@@ -54,7 +55,7 @@ async function importPublicKey(): Promise<CryptoKey | null> {
     return null;
   }
   try {
-    cachedPublicKey = await crypto.subtle.importKey('raw', fromBase64(PUBLIC_KEY_B64), { name: 'Ed25519' }, false, ['verify']);
+    cachedPublicKey = await crypto.subtle.importKey('raw', fromBase64(PUBLIC_KEY_B64) as BufferSource, { name: 'Ed25519' }, false, ['verify']);
   } catch (err) {
     logger.warn(`failed to import license public key: ${String(err)}`, 'license');
     cachedPublicKey = null;
@@ -76,7 +77,7 @@ export async function verifyEntitlementBlob(blob: string): Promise<boolean> {
     return false;
   }
   try {
-    return await crypto.subtle.verify('Ed25519', key, fromBase64(sigB64), fromBase64(payloadB64));
+    return await crypto.subtle.verify('Ed25519', key, fromBase64(sigB64) as BufferSource, fromBase64(payloadB64) as BufferSource);
   } catch (err) {
     logger.warn(`entitlement blob verification threw: ${String(err)}`, 'license');
     return false;

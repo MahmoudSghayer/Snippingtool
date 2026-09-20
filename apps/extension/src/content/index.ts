@@ -13,6 +13,19 @@
  * would be a governor bypass, not a convenience).
  */
 import browser from 'webextension-polyfill';
+
+import { AssistEngine } from '../engine/assist.js';
+import { Governor, type GovernorState } from '../engine/governor.js';
+import { rankCandidates, type OpportunityCandidate, type ScoredOpportunity } from '../engine/ranker.js';
+import { logger } from '../lib/logger.js';
+import { getSession, setSession } from '../lib/storage.js';
+import { createPanel, type Panel } from '../ui/panel.js';
+
+import { createAdapterClient } from './adapter-client.js';
+
+import type { Autobuyer, StopReason } from '../engine/autobuyer.js';
+import type { AttemptInput, TradeInput } from '../engine/types.js';
+import type { PriceSummary } from '../model/prices.js';
 import type {
   ActivityEvent,
   BackgroundResponse,
@@ -25,16 +38,6 @@ import type {
   TrimmedAuction,
   UserSettings,
 } from '@sl/shared';
-
-import { AssistEngine, type SessionPnl } from '../engine/assist.js';
-import type { StopReason } from '../engine/autobuyer.js';
-import { Governor, type GovernorState } from '../engine/governor.js';
-import { rankCandidates, type OpportunityCandidate, type ScoredOpportunity } from '../engine/ranker.js';
-import type { AttemptInput, TradeInput } from '../engine/types.js';
-import { logger } from '../lib/logger.js';
-import { getSession, setSession } from '../lib/storage.js';
-import { createAdapterClient } from './adapter-client.js';
-import { createPanel, type Panel } from '../ui/panel.js';
 
 const AUTOMATION_ENABLED = import.meta.env.VITE_AUTOMATION === '1';
 
@@ -113,7 +116,7 @@ async function main(): Promise<void> {
     if (lastResourceId != null) {
       const summary = await send<{
         resourceId: number;
-        summary: import('../model/prices.js').PriceSummary;
+        summary: PriceSummary;
         maxSnipe: number | null;
         recentPrices?: number[];
       }>('summary', { resourceId: lastResourceId, minProfit: settingsCache.targets.minProfitPerSnipe });
@@ -317,7 +320,7 @@ async function main(): Promise<void> {
     });
   }
 
-  let autobuyer: InstanceType<typeof import('../engine/autobuyer.js').Autobuyer> | null = null;
+  let autobuyer: Autobuyer | null = null;
   if (AUTOMATION_ENABLED && governor && features.includes('automation.autobuyer')) {
     const { loadAutobuyer } = await import('virtual:autobuyer-loader');
     const mod = await loadAutobuyer();
@@ -349,7 +352,7 @@ async function main(): Promise<void> {
       .filter((c): c is OpportunityCandidate => c.summary != null);
   }
 
-  const lastSummaryByResource = new Map<number, import('../model/prices.js').PriceSummary>();
+  const lastSummaryByResource = new Map<number, PriceSummary>();
 
   async function refreshSummaries(): Promise<void> {
     const resourceIds = new Set<number>();
@@ -357,7 +360,7 @@ async function main(): Promise<void> {
     let n = 0;
     for (const resourceId of resourceIds) {
       if (n++ >= 20) break;
-      const result = await send<{ resourceId: number; summary: import('../model/prices.js').PriceSummary }>('summary', {
+      const result = await send<{ resourceId: number; summary: PriceSummary }>('summary', {
         resourceId,
         minProfit: settingsCache.targets.minProfitPerSnipe,
       });

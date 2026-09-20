@@ -238,7 +238,7 @@ async function render(): Promise<void> {
 }
 
 function governorField(id: string, label: string, value: number, step = 1): string {
-  const bounds = (GOVERNOR_ABSOLUTE_LIMITS as Record<string, { min: number; max: number }>)[id];
+  const bounds = (GOVERNOR_ABSOLUTE_LIMITS as Record<string, { min: number; max: number }>)[id] ?? { min: 0, max: value };
   return `
     <label>${label} (${bounds.min}–${bounds.max})</label>
     <input id="${id}" type="number" min="${bounds.min}" max="${bounds.max}" step="${step}" value="${value}" />

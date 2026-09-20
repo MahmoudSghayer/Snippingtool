@@ -10,6 +10,11 @@
  * version + device fingerprint hash, never product telemetry) — see
  * `lib/license.ts`, which does not import this file.
  */
+
+import { apiJson } from './api.js';
+import { logger } from './logger.js';
+import { getCachedSettings } from './settings.js';
+
 import type {
   ActivityEvent,
   FilterStats,
@@ -18,10 +23,6 @@ import type {
   TelemetryEvent,
   Trade,
 } from '@sl/shared';
-
-import { apiJson } from './api.js';
-import { logger } from './logger.js';
-import { getCachedSettings } from './settings.js';
 
 interface QueuedBatches {
   activity: ActivityEvent[];
@@ -85,8 +86,7 @@ async function postBatch<T>(path: string, body: Record<string, T[]>): Promise<vo
 export async function flush(): Promise<{ ok: boolean; sent: number }> {
   const settings = await getCachedSettings();
   if (settings.telemetryOptOut) {
-    logger.debug('telemetry opted out — dropping queued batches locally', 'telemetry');
-    const sent = pendingCount();
+    logger.debug(`telemetry opted out — dropping ${pendingCount()} queued item(s) locally`, 'telemetry');
     queue = emptyBatches();
     return { ok: true, sent: 0 }; // "sent: 0" is deliberate — nothing left this machine
   }

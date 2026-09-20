@@ -8,6 +8,7 @@ const dirname = path.dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   resolve: {
     alias: {
+      '@sl/shared/adapter-channel.js': path.resolve(dirname, '../../packages/shared/src/adapter-channel.ts'),
       '@sl/shared': path.resolve(dirname, '../../packages/shared/src/index.ts'),
       // Tests exercise the full (M3-included) surface — see
       // scripts/build.mjs for the per-target alias used at build time.

@@ -56,7 +56,9 @@ describe('Governor — actionsPerHour', () => {
   });
 
   it('is a sliding window: actions older than an hour drop out', () => {
-    const { gov, setNow } = governorAt(START, { actionsPerHour: 2 });
+    // sessionLengthMinutes is overridden well above the 1h+1ms jump below
+    // so that threshold can't also fire and confound this test.
+    const { gov, setNow } = governorAt(START, { actionsPerHour: 2, sessionLengthMinutes: 999 });
     expect(gov.allow({ kind: 'search' }, START).allowed).toBe(true);
     expect(gov.allow({ kind: 'search' }, START + 1000).allowed).toBe(true);
     setNow(START + 3_600_001);
@@ -65,7 +67,7 @@ describe('Governor — actionsPerHour', () => {
   });
 
   it('hard-stop triggers a cooldown that blocks further actions', () => {
-    const { gov, setNow } = governorAt(START, { actionsPerHour: 1, cooldownSeconds: 30 });
+    const { gov, setNow } = governorAt(START, { actionsPerHour: 1, cooldownSeconds: 30, sessionLengthMinutes: 999 });
     expect(gov.allow({ kind: 'search' }, START).allowed).toBe(true);
     const denied = gov.allow({ kind: 'search' }, START + 10);
     expect(denied.allowed).toBe(false);
@@ -73,8 +75,17 @@ describe('Governor — actionsPerHour', () => {
     // still in cooldown a moment later
     setNow(START + 15_000);
     expect(gov.allow({ kind: 'search' }).allowed).toBe(false);
-    // cooldown has elapsed
+    // cooldown has elapsed, but the very first action is still inside the
+    // 1h actionsPerHour window (only 30s have passed) — actionsPerHour: 1
+    // means a second action this soon hard-stops again, which is correct:
+    // the cooldown clearing and the hourly window clearing are two
+    // different clocks, and both have to clear before allow() succeeds.
     setNow(START + 30_001);
+    const stillOverHourly = gov.allow({ kind: 'search' });
+    expect(stillOverHourly.allowed).toBe(false);
+    expect(stillOverHourly.reason).toBe('hard_stop');
+    // once the 1h window has fully cleared too, the same governor recovers.
+    setNow(START + 3_600_001);
     expect(gov.allow({ kind: 'search' }).allowed).toBe(true);
   });
 });
@@ -119,7 +130,7 @@ describe('Governor — buyToSearchRatio', () => {
 
 describe('Governor — maxCoinFlowPerHour', () => {
   it('allows spend within budget and denies a buy that would exceed it', () => {
-    const { gov } = governorAt(START, { maxCoinFlowPerHour: 1000, buyToSearchRatio: 1, actionsPerHour: 999 });
+    const { gov } = governorAt(START, { maxCoinFlowPerHour: 1000, buyToSearchRatio: 999, actionsPerHour: 999 });
     gov.allow({ kind: 'search' });
     expect(gov.allow({ kind: 'buy', coins: 900 }).allowed).toBe(true);
     const denied = gov.allow({ kind: 'buy', coins: 200 }); // 900 + 200 > 1000
@@ -129,7 +140,12 @@ describe('Governor — maxCoinFlowPerHour', () => {
   });
 
   it('coin flow is a sliding window', () => {
-    const { gov, setNow } = governorAt(START, { maxCoinFlowPerHour: 1000, buyToSearchRatio: 999, actionsPerHour: 999 });
+    const { gov, setNow } = governorAt(START, {
+      maxCoinFlowPerHour: 1000,
+      buyToSearchRatio: 999,
+      actionsPerHour: 999,
+      sessionLengthMinutes: 999,
+    });
     expect(gov.allow({ kind: 'buy', coins: 900 }, START).allowed).toBe(true);
     setNow(START + 3_600_001);
     // the earlier 900-coin spend has aged out of the window
@@ -139,7 +155,7 @@ describe('Governor — maxCoinFlowPerHour', () => {
 
 describe('Governor — snapshot', () => {
   it('reports utilization without denying anything', () => {
-    const { gov } = governorAt(START, { actionsPerHour: 10, maxCoinFlowPerHour: 5000 });
+    const { gov } = governorAt(START, { actionsPerHour: 10, maxCoinFlowPerHour: 5000, buyToSearchRatio: 999 });
     gov.allow({ kind: 'search' });
     gov.allow({ kind: 'buy', coins: 1000 });
     const snap = gov.snapshot();
@@ -153,12 +169,12 @@ describe('Governor — snapshot', () => {
 
 describe('Governor — serialize/hydrate', () => {
   it('round-trips state across a simulated reload', () => {
-    const { gov } = governorAt(START, { actionsPerHour: 10 });
+    const { gov } = governorAt(START, { actionsPerHour: 10, buyToSearchRatio: 999 });
     gov.allow({ kind: 'search' });
     gov.allow({ kind: 'buy', coins: 500 });
     const state = gov.serialize();
 
-    const rehydrated = Governor.hydrate(settings, state, { now: () => START + 1 });
+    const rehydrated = Governor.hydrate({ ...settings, buyToSearchRatio: 999 }, state, { now: () => START + 1 });
     const snap = rehydrated.snapshot();
     expect(snap.actionsLastHour).toBe(2);
     expect(snap.coinFlowLastHour).toBe(500);

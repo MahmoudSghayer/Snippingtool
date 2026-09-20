@@ -94,6 +94,7 @@ export const createCouponRequestSchema = z.object({
   planCodes: z.array(z.enum(PLAN_CODES)).min(1),
   maxRedemptions: z.number().int().positive().nullable(),
   expiresAt: z.string().datetime().nullable(),
+  reason: z.string().min(1).max(1000),
 });
 export type CreateCouponRequest = z.infer<typeof createCouponRequestSchema>;
 
@@ -101,6 +102,7 @@ export const updateCouponRequestSchema = z.object({
   isActive: z.boolean().optional(),
   maxRedemptions: z.number().int().positive().nullable().optional(),
   expiresAt: z.string().datetime().nullable().optional(),
+  reason: z.string().min(1).max(1000),
 });
 export type UpdateCouponRequest = z.infer<typeof updateCouponRequestSchema>;
 
@@ -155,6 +157,7 @@ export const planCreateRequestSchema = z.object({
   features: z.array(z.string().min(1).max(80)),
   stripePriceId: z.string().min(1).max(200).nullable().optional(),
   sortOrder: z.number().int().default(0),
+  reason: z.string().min(1).max(1000),
 });
 export type PlanCreateRequest = z.infer<typeof planCreateRequestSchema>;
 
@@ -167,6 +170,7 @@ export const planUpdateRequestSchema = z.object({
   stripePriceId: z.string().min(1).max(200).nullable().optional(),
   isActive: z.boolean().optional(),
   sortOrder: z.number().int().optional(),
+  reason: z.string().min(1).max(1000),
 });
 export type PlanUpdateRequest = z.infer<typeof planUpdateRequestSchema>;
 
@@ -174,18 +178,30 @@ export type PlanUpdateRequest = z.infer<typeof planUpdateRequestSchema>;
 // Licenses
 // ---------------------------------------------------------------------------
 
-/** The signed blob the extension caches for the 24h offline grace window
- * (docs/05-subscriptions.md §4). Signed Ed25519/EdDSA as a compact JWS;
- * this schema validates the decoded payload, not the JWS envelope itself. */
-export const entitlementBlobSchema = z.object({
-  userId: z.string().uuid(),
-  plan: z.string().min(1).max(40),
-  features: z.array(z.string().min(1).max(80)),
-  deviceLimit: z.number().int().min(1),
+/** Mirrors `apps/api`'s `EntitlementSnapshot` (`src/lib/entitlements.ts`) —
+ * the payload the `EntitlementProvider` signs into the compact JWS the
+ * extension caches for the 24h offline-grace window
+ * (docs/05-subscriptions.md §4). This schema validates the *decoded* JWT
+ * payload's `snapshot` claim, not the JWS envelope itself (the envelope also
+ * carries `sub` = userId and `deviceId`, verified separately by `jose`). */
+export const entitlementSnapshotSchema = z.object({
+  plan: z.string().nullable(),
+  planName: z.string().nullable(),
+  status: z.string().nullable(),
+  features: z.array(z.string()),
+  deviceLimit: z.number().int().min(0),
   expiresAt: z.string().datetime().nullable(),
-  issuedAt: z.string().datetime(),
+  currentPeriodEnd: z.string().datetime().nullable(),
+  license: z
+    .object({
+      keyPrefix: z.string(),
+      status: z.string(),
+      maxDevices: z.number().int(),
+      expiresAt: z.string().datetime().nullable(),
+    })
+    .nullable(),
 });
-export type EntitlementBlob = z.infer<typeof entitlementBlobSchema>;
+export type EntitlementSnapshotDto = z.infer<typeof entitlementSnapshotSchema>;
 
 export const licenseValidateRequestSchema = z.object({
   licenseKey: z.string().min(1).max(40),
@@ -201,7 +217,7 @@ export type LicenseValidateRequest = z.infer<typeof licenseValidateRequestSchema
 
 export const licenseValidateResponseSchema = z.object({
   status: z.enum(LICENSE_STATUSES),
-  entitlements: entitlementBlobSchema,
+  entitlements: entitlementSnapshotSchema,
   entitlementJws: z.string().min(1), // signed compact JWS of `entitlements`, cached by the extension
 });
 export type LicenseValidateResponse = z.infer<typeof licenseValidateResponseSchema>;

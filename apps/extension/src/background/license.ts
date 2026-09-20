@@ -6,14 +6,15 @@
  * whether that means "return the cache" or "hit the network", so the
  * content script never has to know the difference.
  */
-import type { BootstrapResponse, HeartbeatResponse } from '@sl/shared';
 import browser from 'webextension-polyfill';
 
 import * as auth from '../lib/auth.js';
 import * as license from '../lib/license.js';
 import { logger } from '../lib/logger.js';
-import { getLocal, setLocal } from '../lib/storage.js';
 import { applyServerSettings } from '../lib/settings.js';
+import { getLocal, setLocal } from '../lib/storage.js';
+
+import type { BootstrapResponse, HeartbeatResponse } from '@sl/shared';
 
 const HEARTBEAT_ALARM = 'sl.license.heartbeat';
 const HEARTBEAT_PERIOD_MINUTES = 10;

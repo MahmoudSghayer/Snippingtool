@@ -3,44 +3,64 @@ import { describe, expect, it } from 'vitest';
 import {
   couponValidateRequestSchema,
   couponValidateResponseSchema,
-  entitlementBlobSchema,
+  entitlementSnapshotSchema,
   licenseValidateRequestSchema,
   planCreateRequestSchema,
   planUpdateRequestSchema,
 } from '../../src/schemas/subscriptions.js';
 
-describe('entitlementBlobSchema', () => {
-  it('accepts a fully-populated blob', () => {
-    const result = entitlementBlobSchema.safeParse({
-      userId: '0198f2b1-0000-7000-8000-000000000001',
+describe('entitlementSnapshotSchema', () => {
+  it('accepts a fully-populated snapshot', () => {
+    const result = entitlementSnapshotSchema.safeParse({
       plan: 'ultimate',
+      planName: 'Ultimate',
+      status: 'active',
       features: ['ledger.recorder', 'automation.autobuyer'],
       deviceLimit: 3,
       expiresAt: '2026-10-20T00:00:00.000Z',
-      issuedAt: '2026-09-20T14:32:05.000Z',
+      currentPeriodEnd: '2026-10-20T00:00:00.000Z',
+      license: { keyPrefix: 'SL-9F2K', status: 'active', maxDevices: 3, expiresAt: null },
     });
     expect(result.success).toBe(true);
   });
 
-  it('accepts a null expiresAt for a lifetime plan', () => {
-    const result = entitlementBlobSchema.safeParse({
-      userId: '0198f2b1-0000-7000-8000-000000000001',
+  it('accepts a null expiresAt/currentPeriodEnd/license for a lifetime plan with no license yet', () => {
+    const result = entitlementSnapshotSchema.safeParse({
       plan: 'lifetime',
+      planName: 'Lifetime',
+      status: 'lifetime',
       features: ['ledger.recorder'],
       deviceLimit: 3,
       expiresAt: null,
-      issuedAt: '2026-09-20T14:32:05.000Z',
+      currentPeriodEnd: null,
+      license: null,
     });
     expect(result.success).toBe(true);
   });
 
-  it('rejects a missing issuedAt (required for the offline-grace check)', () => {
-    const result = entitlementBlobSchema.safeParse({
-      userId: '0198f2b1-0000-7000-8000-000000000001',
-      plan: 'basic',
+  it('accepts the no-subscription-yet shape (all nulls, zero device limit)', () => {
+    const result = entitlementSnapshotSchema.safeParse({
+      plan: null,
+      planName: null,
+      status: null,
       features: [],
       deviceLimit: 1,
       expiresAt: null,
+      currentPeriodEnd: null,
+      license: null,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects a missing deviceLimit', () => {
+    const result = entitlementSnapshotSchema.safeParse({
+      plan: 'basic',
+      planName: 'Basic',
+      status: 'active',
+      features: [],
+      expiresAt: null,
+      currentPeriodEnd: null,
+      license: null,
     });
     expect(result.success).toBe(false);
   });
@@ -73,6 +93,7 @@ describe('planCreateRequestSchema', () => {
       deviceLimit: 2,
       features: ['ledger.recorder'],
       sortOrder: 5,
+      reason: 'new limited-time plan',
     });
     expect(result.success).toBe(true);
   });
@@ -85,6 +106,7 @@ describe('planCreateRequestSchema', () => {
       interval: 'month',
       deviceLimit: 1,
       features: [],
+      reason: 'x',
     });
     expect(result.success).toBe(false);
   });
@@ -97,6 +119,19 @@ describe('planCreateRequestSchema', () => {
       interval: 'month',
       deviceLimit: 11,
       features: [],
+      reason: 'x',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a missing reason', () => {
+    const result = planCreateRequestSchema.safeParse({
+      code: 'no-reason',
+      name: 'No Reason',
+      priceCents: 0,
+      interval: 'month',
+      deviceLimit: 1,
+      features: [],
     });
     expect(result.success).toBe(false);
   });
@@ -104,11 +139,11 @@ describe('planCreateRequestSchema', () => {
 
 describe('planUpdateRequestSchema', () => {
   it('accepts a partial update', () => {
-    expect(planUpdateRequestSchema.safeParse({ isActive: false }).success).toBe(true);
+    expect(planUpdateRequestSchema.safeParse({ isActive: false, reason: 'archiving' }).success).toBe(true);
   });
 
-  it('accepts an empty update (no-op)', () => {
-    expect(planUpdateRequestSchema.safeParse({}).success).toBe(true);
+  it('rejects an update missing a reason', () => {
+    expect(planUpdateRequestSchema.safeParse({ isActive: false }).success).toBe(false);
   });
 });
 

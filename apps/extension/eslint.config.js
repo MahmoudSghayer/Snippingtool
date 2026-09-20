@@ -15,7 +15,18 @@ import { base } from '../../packages/config/eslint-preset.js';
  */
 export default [
   {
-    ignores: ['dist/**', 'dist-ledger/**', 'dist-ledger-auto/**', 'coverage/**', 'playwright-report/**', 'test-results/**'],
+    ignores: [
+      'dist/**',
+      'dist-ledger/**',
+      'dist-ledger-auto/**',
+      'coverage/**',
+      'playwright-report/**',
+      'test-results/**',
+      // Served as-is to the mock page by Playwright route interception
+      // (test/e2e/extension.spec.ts) — plain browser JS, never built or
+      // typechecked by this package's own toolchain.
+      'test/fixtures/mock-ea-app/**',
+    ],
   },
   ...base,
   {

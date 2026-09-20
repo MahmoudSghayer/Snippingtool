@@ -3,10 +3,11 @@
  * toggles. Vanilla TS (no framework — the popup is small enough that a
  * dependency would cost more than it saves, see docs/06-extension.md).
  */
-import type { BootstrapResponse, LoginResponse, UserSettings } from '@sl/shared';
 import browser from 'webextension-polyfill';
 
 import { send } from '../lib/bg-client.js';
+
+import type { BootstrapResponse, LoginResponse, UserSettings } from '@sl/shared';
 
 const app = document.getElementById('app') as HTMLDivElement;
 

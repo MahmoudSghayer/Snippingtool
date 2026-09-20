@@ -10,12 +10,11 @@
  * origin survives a clear of ea.com's site data — that part of milestone 1
  * is unchanged, just typed and merged into this larger message router.
  */
-import type { BackgroundMessageEnvelope, BackgroundResponse } from '@sl/shared';
 import browser from 'webextension-polyfill';
 
+import { logger } from '../lib/logger.js';
 import { margin, maxSnipePrice, summarise } from '../model/prices.js';
 import * as db from '../store/db.js';
-import { logger } from '../lib/logger.js';
 
 import { handleAuthLogin, handleAuthLogout, handleAuthMfaVerify, handleAuthRegister, handleAuthStatus } from './auth.js';
 import { installGlobalErrorHandlers, handleErrorsReport, ensureErrorFlushAlarm, onErrorFlushAlarm } from './errors.js';
@@ -30,6 +29,8 @@ import {
 } from './settings.js';
 import { ensureFlushAlarm, handleTelemetryEnqueue, handleTelemetryFlush, onFlushAlarm } from './telemetry.js';
 import { installUpdateHandler } from './update.js';
+
+import type { BackgroundMessageEnvelope, BackgroundResponse } from '@sl/shared';
 
 const WINDOW_MS = 7 * 24 * 60 * 60 * 1000; // a week of history per card
 
@@ -86,19 +87,24 @@ const handlers: Record<string, Handler> = {
   },
 };
 
-browser.runtime.onMessage.addListener((message: unknown, _sender, sendResponse: (r: BackgroundResponse) => void) => {
+// webextension-polyfill's promise-based `onMessage` API: a listener that
+// returns a `Promise<unknown>` (rather than the raw MV3 callback +
+// `return true` dance) resolves as the response. Any message type this
+// router doesn't recognise is left for another listener by returning
+// `undefined` synchronously.
+browser.runtime.onMessage.addListener((message: unknown, _sender: unknown): Promise<BackgroundResponse> | undefined => {
   const envelope = message as BackgroundMessageEnvelope | null;
-  const handler = envelope && typeof envelope.type === 'string' ? handlers[envelope.type] : undefined;
-  if (!handler) return false;
+  if (!envelope || typeof envelope.type !== 'string') return undefined;
+  const handler = handlers[envelope.type];
+  if (!handler) return undefined;
+  const type = envelope.type;
 
-  handler(envelope!.payload)
-    .then((data) => sendResponse({ ok: true, data }))
-    .catch((err) => {
-      logger.error(`handler '${envelope!.type}' threw: ${String(err)}`, 'background');
-      sendResponse({ ok: false, error: String((err as Error)?.message ?? err) });
+  return handler(envelope.payload)
+    .then((data): BackgroundResponse => ({ ok: true, data }))
+    .catch((err): BackgroundResponse => {
+      logger.error(`handler '${type}' threw: ${String(err)}`, 'background');
+      return { ok: false, error: String((err as Error)?.message ?? err) };
     });
-
-  return true; // keep the message channel open for the async reply
 });
 
 browser.alarms.onAlarm.addListener((alarm) => {

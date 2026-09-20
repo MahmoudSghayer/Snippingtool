@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { ADAPTER_CHANNEL } from './adapter-channel.js';
 import { filterCriteriaSchema } from './schemas/filters.js';
 
 /**
@@ -13,7 +14,9 @@ import { filterCriteriaSchema } from './schemas/filters.js';
 // ---- MAIN world (adapter) -> ISOLATED world (content), via window.postMessage ----
 // Bumped from the milestone-1 'ledger:v1' channel: v2 adds the bundle probe
 // and the `act` surface (search/buy/readResult) alongside passive observation.
-export const ADAPTER_CHANNEL = 'ledger:v2';
+// Re-exported from `./adapter-channel.js` (zod-free — see that file) so
+// every existing `import { ADAPTER_CHANNEL } from '@sl/shared'` keeps working.
+export { ADAPTER_CHANNEL };
 
 export const trimmedAuctionSchema = z.object({
   tradeId: z.string(),

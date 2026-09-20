@@ -22,12 +22,14 @@
  * mismatch, unchanged from milestone 1). The act surface additionally runs a
  * *bundle probe* before it will do anything at all — see below.
  */
-import {
-  ADAPTER_CHANNEL,
-  type AdapterActRequestMessage,
-  type FilterCriteria,
-  type TrimmedAuction,
-} from '@sl/shared';
+// `ADAPTER_CHANNEL` comes from the zod-free `adapter-channel.js` subpath, not
+// the `@sl/shared` barrel — this file runs in the page's MAIN world on every
+// matching load, so it deliberately avoids pulling `zod` and every schema in
+// `ext-messages.ts` along with it just for one string constant (see
+// packages/shared/src/adapter-channel.ts).
+import { ADAPTER_CHANNEL } from '@sl/shared/adapter-channel.js';
+
+import type { AdapterActRequestMessage, FilterCriteria, TrimmedAuction } from '@sl/shared';
 
 /* ------------------------------------------------------------------------ *
  * ASSUMED SHAPE — verify on day one
@@ -289,7 +291,7 @@ if (typeof nativeFetch === 'function') {
   window.fetch = function (input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
     let url = '';
     try {
-      url = typeof input === 'string' ? input : (input as Request | URL).url ? String((input as Request | URL).url) : '';
+      url = typeof input === 'string' ? input : input instanceof Request ? input.url : input instanceof URL ? input.toString() : '';
     } catch {
       /* ignore */
     }

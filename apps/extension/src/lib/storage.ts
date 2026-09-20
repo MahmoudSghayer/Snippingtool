@@ -81,8 +81,8 @@ export async function decryptString(payload: string): Promise<string> {
   const [ivB64, ctB64] = payload.split('.');
   if (!ivB64 || !ctB64) throw new Error('decryptString: malformed payload');
   const key = await getOrCreateInstallKey();
-  const iv = fromBase64(ivB64);
-  const ciphertext = fromBase64(ctB64);
+  const iv = fromBase64(ivB64) as BufferSource;
+  const ciphertext = fromBase64(ctB64) as BufferSource;
   const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext);
   return new TextDecoder().decode(plaintext);
 }

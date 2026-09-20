@@ -10,9 +10,9 @@
  * One row per auction, not per sighting. Keeping firstSeen/lastSeen on a
  * single row is what lets us tell later whether a card sold or just expired.
  */
+import type { AuctionRow } from '../model/prices.js';
 import type { TrimmedAuction } from '@sl/shared';
 
-import type { AuctionRow } from '../model/prices.js';
 
 const DB_NAME = 'ledger';
 const DB_VERSION = 1;
@@ -40,9 +40,17 @@ export function open(): Promise<IDBDatabase> {
   return dbPromise;
 }
 
-/** Test-only: drop the cached connection so a fresh `open()` reopens (and, in
- * `fake-indexeddb`, re-runs `onupgradeneeded` against a clean database). */
-export function _resetForTests(): void {
+/** Test-only: close the cached connection (if any) and drop it, so a fresh
+ * `open()` reopens and, in `fake-indexeddb`, re-runs `onupgradeneeded`
+ * against a clean database. Awaited (not fire-and-forget) so a test's
+ * `indexedDB.deleteDatabase()` right after this never races an still-open
+ * connection — a real `deleteDatabase()` blocks until every connection to
+ * that database is closed. */
+export async function _resetForTests(): Promise<void> {
+  if (dbPromise) {
+    const db = await dbPromise.catch(() => null);
+    db?.close();
+  }
   dbPromise = null;
 }
 

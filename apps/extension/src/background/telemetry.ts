@@ -4,11 +4,12 @@
  * `chrome.alarms` tick (never a `setInterval`). `content/index.ts` is the
  * only sender; this file just dispatches by `kind`.
  */
-import type { ActivityEvent, FilterStats, RiskBudgetEvent, SnipingAttempt, TelemetryEvent, Trade } from '@sl/shared';
 import browser from 'webextension-polyfill';
 
-import * as telemetry from '../lib/telemetry.js';
 import { logger } from '../lib/logger.js';
+import * as telemetry from '../lib/telemetry.js';
+
+import type { ActivityEvent, FilterStats, RiskBudgetEvent, SnipingAttempt, TelemetryEvent, Trade } from '@sl/shared';
 
 const FLUSH_ALARM = 'sl.telemetry.flush';
 const FLUSH_PERIOD_MINUTES = 2;

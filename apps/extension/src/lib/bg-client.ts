@@ -4,6 +4,7 @@
  * UI surfaces talk to the service worker the same way.
  */
 import browser from 'webextension-polyfill';
+
 import type { BackgroundResponse } from '@sl/shared';
 
 /** Throws on an explicit `{ ok: false }` response (the caller decides what

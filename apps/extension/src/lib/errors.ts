@@ -9,10 +9,11 @@
  * to), but still local-only until a device is registered (no `deviceId` yet
  * means nothing to flush).
  */
-import type { ExtensionErrorReport } from '@sl/shared';
 
 import { apiJson } from './api.js';
 import { exportLogs, type LogEntry } from './logger.js';
+
+import type { ExtensionErrorReport } from '@sl/shared';
 
 const EXTENSION_VERSION = import.meta.env.VITE_EXTENSION_VERSION;
 

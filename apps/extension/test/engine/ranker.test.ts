@@ -10,6 +10,7 @@ import {
   scoreOpportunity,
   type OpportunityCandidate,
 } from '../../src/engine/ranker.js';
+
 import type { PriceSummary } from '../../src/model/prices.js';
 
 function summary(overrides: Partial<PriceSummary> = {}): PriceSummary {
@@ -75,9 +76,12 @@ describe('rankCandidates', () => {
   });
 
   it('breaks EV ties by lower price', () => {
-    const cheap: OpportunityCandidate = { ...base, tradeId: 'cheap', price: 100, summary: summary({ median: 300, sellThrough: 1 }) };
-    const pricey: OpportunityCandidate = { ...base, tradeId: 'pricey', price: 100, summary: summary({ median: 300, sellThrough: 1 }) };
-    const ranked = rankCandidates([pricey, cheap]);
+    // Both score -Infinity (no median to judge by) — a real tie regardless
+    // of price — so minEv is relaxed to let them both through and isolate
+    // the tie-break itself from the usual EV-based filtering.
+    const cheap: OpportunityCandidate = { ...base, tradeId: 'cheap', price: 100, summary: summary({ median: null }) };
+    const pricey: OpportunityCandidate = { ...base, tradeId: 'pricey', price: 300, summary: summary({ median: null }) };
+    const ranked = rankCandidates([pricey, cheap], { minEv: -Infinity });
     expect(ranked[0]?.ev).toBe(ranked[1]?.ev);
     expect(ranked[0]?.tradeId).toBe('cheap');
   });

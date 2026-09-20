@@ -10,6 +10,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./adapter-channel.js": {
+      "types": "./dist/adapter-channel.d.ts",
+      "import": "./dist/adapter-channel.js"
     }
   },
   "files": [

@@ -20,9 +20,10 @@
  * things that turn a ranked candidate into an action, and only through the
  * governor (docs/01-architecture.md, §3.4).
  */
+import { EA_TAX, type PriceSummary } from '../model/prices.js';
+
 import type { FilterStats, SavedFilter } from '@sl/shared';
 
-import { EA_TAX, type PriceSummary } from '../model/prices.js';
 
 // ---- 1. Opportunity scoring -------------------------------------------------
 

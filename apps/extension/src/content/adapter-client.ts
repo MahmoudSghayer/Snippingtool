@@ -6,7 +6,11 @@
  * `engine/assist.ts` and `engine/autobuyer.ts` ever reach the page — none of
  * them touch `window.postMessage` directly.
  */
-import { ADAPTER_CHANNEL, type FilterCriteria } from '@sl/shared';
+// See src/main/adapter.ts's equivalent comment: the zod-free subpath keeps
+// this ISOLATED-world file (bundled into content.js) from pulling in `zod`.
+import { ADAPTER_CHANNEL } from '@sl/shared/adapter-channel.js';
+
+import type { FilterCriteria } from '@sl/shared';
 
 const ACTION_TIMEOUT_MS = 15_000;
 
