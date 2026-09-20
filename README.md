@@ -6,90 +6,148 @@ sniping, built on a private, per-user record of what the market actually did
 
 - **M1 — Ledger (done).** A read-only MV3 extension that passively records
   market listings into local IndexedDB and shows floor / median / sell-through
-  / max-snipe in an in-page panel. No account, no server, no automation.
-- **M2 — Assist.** Human-in-the-loop opportunity ranking, filter rotation by
-  realised coins/hour, session P&L, and a visible risk-budget meter, backed
-  by an account, subscriptions and a dashboard.
-- **M3 — Automation.** An autobuyer gated behind the safety governor,
-  distributed as a **separate extension build** from the listable one.
+  / max-snipe in an in-page panel. No automation.
+- **M2 — Assist (built, awaiting live-market verification).** Human-in-the-loop
+  opportunity ranking, filter rotation by realised coins/hour, session P&L and
+  a visible risk-budget meter, backed by accounts, subscriptions and a
+  dashboard.
+- **M3 — Automation (built, gated).** An autobuyer that only ever acts through
+  the safety governor, shipped as a **separate extension build** from the
+  listable one.
 
 Two rules hold across every milestone: the extension only ever **drives the
 game's own service layer**, never forges a request; and the **safety
 governor** sits between every decision and every action so the product stops
-you before you look like a bot — it is never sold as "undetectable." See
-`docs/01-architecture.md` for how that is enforced end to end.
+you before you look like a bot — it is never sold as "undetectable". See
+[`docs/01-architecture.md`](docs/01-architecture.md) for how that is enforced.
+
+## Build status
+
+The build follows a data-first sequence. This table is kept current as each
+phase lands on this branch.
+
+| Phase | Scope | Status | Where |
+| --- | --- | --- | --- |
+| 1 Architecture | Monorepo, shared contracts, diagrams, roadmap | Done | `packages/shared`, `docs/01-architecture.md`, `docs/13-roadmap.md` |
+| 2 Database | 35 tables, partitioning, audit, views, seed, tests | Done | `packages/db`, `docs/02-database.md` |
+| 3 Backend API | Fastify, 90 routes, WS gateway, jobs, OpenAPI | Done | `apps/api`, `docs/03-api.md` |
+| 4 Authentication | JWT + rotating refresh, sessions, devices, 2FA, lockout, admin roles | Done | `apps/api/src/modules/auth`, `docs/04-auth.md` |
+| 5 Subscriptions | Plans, trials with abuse protection, licenses, Stripe, coupons, bans, flags | Done | `apps/api/src/modules/{subscriptions,licenses,payments,coupons,plans,bans,flags}`, `docs/05-subscriptions.md` |
+| 6 Extension | TypeScript port, ranker, governor, assist, gated autobuyer, popup, options | Done | `apps/extension`, `docs/06-extension.md` |
+| 7 Dashboard | React user + admin dashboard | In progress | `apps/dashboard`, `packages/ui`, `docs/07-dashboard.md` |
+| 8 Analytics | KPI engine, profit analytics, reports, exports | In progress | `apps/api/src/modules/{analytics,admin-analytics}`, `docs/08-analytics.md` |
+| 9 Security | Hardening pass, threat model | Planned | `docs/09-security.md`, `docs/threat-model.md` |
+| 10 UI/UX | Design system polish across dashboard, popup, panel | Planned | `packages/ui`, `docs/10-design-system.md` |
+| 11 Testing | Unit, integration, e2e, load, security suites | Planned | `tests/`, `docs/12-testing.md` |
+| DevOps | Docker, Compose, CI/CD, monitoring, backups, deploy guides | In progress | `infra/`, `.github/`, `docs/11-devops.md` |
+
+Known follow-ups tracked for the remaining phases: a `stripe_customer_id`
+column on users (Customer Portal lookup and a fourth trial-abuse vector), an
+atomic trial-to-paid transition through Checkout, an indexed path for the
+trial-abuse email scan, and per-user fan-out of the kill switch over
+WebSocket (today it reaches extensions through bootstrap and heartbeat).
+
+## What exists today
+
+**Extension** (`apps/extension`): two build targets from one codebase.
+`ledger` is the listable build (recorder + assist); `ledger-auto` adds the
+autobuyer, which is excluded from the `ledger` bundle at build time. The
+only EA-aware file is `src/main/adapter.ts`; it observes passively, probes the
+web app's service layer at load and before every action, and hard-stops on a
+shape mismatch. The governor enforces actions per hour, session length,
+buy-to-search ratio and coin flow, with cooldowns and an unconditional server
+kill switch. Raw observations stay in IndexedDB. What the extension sends to
+the backend is itemised in `docs/06-extension.md` and in the options page.
+
+**Backend** (`apps/api`): Fastify 5 with Zod validation and generated OpenAPI,
+Drizzle over PostgreSQL 16, Redis-backed rate limits and presence, a
+WebSocket gateway with Redis pub/sub fan-out, BullMQ workers, Stripe billing,
+and an audit log with before/after on every admin action.
+
+**Database** (`packages/db`): hand-written SQL migrations with monthly
+partitioning for activity and audit tables, append-only audit logs, soft
+deletes everywhere, KPI views and a materialised daily KPI table.
+
+**Shared contracts** (`packages/shared`): plan and feature constants, error
+codes, the admin permission matrix, every request and response schema, the
+WebSocket event union and the extension message contracts.
 
 ## Layout
 
-This is a pnpm + Turborepo monorepo.
-
 ```
 apps/
-  extension/    MV3 browser extension (M1 today; M2/M3 TypeScript rewrite is a later wave)
-  api/          Fastify backend — REST + WS + workers            (wave 2+)
-  dashboard/    React admin + user dashboard                     (wave 3+)
+  api/          Fastify backend: REST, WebSocket, BullMQ workers
+  dashboard/    React user + admin dashboard (in progress)
+  extension/    MV3 extension, two build targets
 packages/
-  shared/       Zod schemas, DTOs, error codes, plan/permission constants, WS & extension message types
-  config/       Shared tsconfig / ESLint / Prettier configuration
-  db/           Drizzle schema, migrations, seed, ERD            (wave 1+)
-  ui/           Design system (tokens, components)                (wave 5+)
-infra/          Docker, Compose, Caddy, Prometheus/Grafana/Loki   (wave 4+)
-tests/          e2e (Playwright), load (k6), security, fixtures  (wave 5+)
-docs/           Architecture, database, API, auth, subscriptions, extension,
-                dashboard, analytics, security, design system, DevOps,
-                testing, roadmap — see docs/01-architecture.md to start
+  shared/       Zod schemas, DTOs, error codes, plans, permissions, message contracts
+  db/           SQL migrations, Drizzle schema, seed, test utilities
+  config/       Shared tsconfig / ESLint / Prettier presets
+  ui/           Design system (in progress)
+infra/          Docker, Compose, Caddy, monitoring, backups (in progress)
+docs/           One document per phase; start at docs/01-architecture.md
 ```
-
-`apps/api`, `apps/dashboard`, `packages/db`, `packages/ui`, `infra/` and
-`tests/` are scaffolded by later waves of the build (see
-`docs/13-roadmap.md`) and don't exist yet on this branch.
 
 ## Quick start
 
-Requirements: Node 22, pnpm (via Corepack), a local PostgreSQL 16 and Redis 7
-(see `docs/01-architecture.md` for the compose-based dev stack once
-`packages/db` and `apps/api` land).
+Requirements: Node 22, pnpm via Corepack, PostgreSQL 16 and Redis 7.
 
 ```bash
 corepack enable
 pnpm install
 
-# once packages/db and apps/api exist:
-#   docker compose up -d postgres redis
-#   pnpm --filter @sl/db migrate && pnpm --filter @sl/db seed
-#   pnpm --filter @sl/api dev
+# database (defaults: postgres://sl:sl@127.0.0.1:5432/sniper_ledger)
+pnpm --filter @sl/db migrate
+SEED_ADMIN_EMAIL=admin@example.com SEED_ADMIN_PASSWORD='change-me' pnpm --filter @sl/db seed
 
-pnpm dev          # turbo run dev, across every app
-pnpm build        # turbo run build
-pnpm lint         # turbo run lint
-pnpm typecheck    # turbo run typecheck
-pnpm test         # turbo run test
-pnpm format       # prettier --write across the repo
+# API (copy apps/api/.env.example to apps/api/.env first)
+pnpm --filter @sl/api keys:generate      # JWT + entitlement signing keys
+pnpm --filter @sl/api dev                # http://localhost:3000, /health/ready
+pnpm --filter @sl/api worker             # BullMQ jobs
+
+# extension
+pnpm --filter @sl/extension build        # dist/ledger and dist/ledger-auto
+# chrome://extensions → Developer mode → Load unpacked → apps/extension/dist/ledger
+
+# everything
+pnpm typecheck && pnpm lint && pnpm test && pnpm build
 ```
 
-For the extension specifically: `chrome://extensions` → **Developer mode** →
-**Load unpacked** → select `apps/extension/`. Its own README
-(`apps/extension/README.md`) has the milestone-1 details — what it records,
-what it sends (nothing, in M1), and its honest limits.
+API integration tests need `DATABASE_URL`, `TEST_DATABASE_URL` and
+`REDIS_URL`; see `apps/api/.env.example`.
+
+## Deployment
+
+The dashboard deploys to Vercel from `apps/dashboard` (see `vercel.json`;
+deployments are skipped until that app exists on the branch). The API,
+worker, PostgreSQL and Redis run on a VM with Docker Compose behind Caddy;
+the DevOps phase adds the images, Compose files, CI/CD and runbooks under
+`infra/` and `docs/11-devops.md`.
 
 ## Documentation
 
-Start at [`docs/01-architecture.md`](docs/01-architecture.md) — component,
-deployment and sequence diagrams, the trust-boundary section (what data
-crosses the browser/API boundary and why), and the two extension build
-targets. [`docs/13-roadmap.md`](docs/13-roadmap.md) lays out every remaining
-phase, exit criteria, and the go-live checklist. The rest of `docs/` fills in
-per-domain as each wave of the build lands.
+| Document | Contents |
+| --- | --- |
+| `docs/01-architecture.md` | Components, deployment, sequence diagrams, trust boundaries, build targets |
+| `docs/02-database.md` | ERD, every table, indexes, partitioning and retention runbooks |
+| `docs/03-api.md` | Every route with auth, permission, rate limit and schema |
+| `docs/04-auth.md` | Token lifetimes, refresh rotation, devices, 2FA, CSRF, admin roles |
+| `docs/05-subscriptions.md` | Plan matrix, state machine, license keys, trial protection, Stripe webhooks |
+| `docs/06-extension.md` | Worlds, message flows, governor math, telemetry itemisation, day-one checklist |
+| `docs/13-roadmap.md` | Remaining phases, exit criteria, go-live checklist |
+
+Documents for the dashboard, analytics, security, design system, DevOps and
+testing are added by their phases.
 
 ## What this product will and will not do
 
 - It drives the transfer-market app's own controls; it does not forge UTAS
   requests or lift a session token.
 - It does not bypass CAPTCHAs or spoof a client.
-- Raw market observations never leave the browser — there is no server-side
-  observation table, even once accounts and telemetry exist. What the
-  backend _does_ receive is listed explicitly in
-  `docs/01-architecture.md`'s trust-boundary section.
-- The safety governor is not optional and not bypassable from the UI: budgets
-  can be tightened by the user, never loosened past the plan's admin-set
-  ceiling.
+- Raw market observations never leave the browser. What the backend does
+  receive is listed in `docs/06-extension.md`.
+- The safety governor cannot be loosened past the admin-set ceiling from the
+  UI, and the server kill switch is unconditional.
+- The live market is not yet unlocked for this title, so the adapter's
+  assumed service-layer shape must be verified on day one against the real
+  web app; the checklist is in `docs/06-extension.md`.
