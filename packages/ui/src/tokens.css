@@ -1,0 +1,89 @@
+/**
+ * The Sniper's Ledger — design tokens (dark gaming theme, the only theme for
+ * now). Consumed by apps/dashboard's Tailwind v4 entry (`@import
+ * "@sl/ui/tokens.css";` before `@import "tailwindcss";`) and mapped into
+ * Tailwind's `@theme` there. Values match docs/07-dashboard.md "Design
+ * tokens reference" and the extension popup/panel palette
+ * (apps/extension/src/popup/style.css, src/ui/panel.ts) so the dashboard,
+ * popup and panel read as one product.
+ *
+ * `prefers-reduced-motion` is respected globally here so no component has to
+ * remember to check it individually.
+ */
+
+:root {
+  /* Surfaces */
+  --sl-ground: #0d1311;
+  --sl-surface: #151d1a;
+  --sl-surface-2: #1b2522;
+  --sl-line: #242f2b;
+
+  /* Ink */
+  --sl-ink: #e7edea;
+  --sl-ink-2: #94a49e;
+
+  /* Accents */
+  --sl-gold: #ddb35c;
+  --sl-gold-ink: #221a0b;
+  --sl-green: #6fbf9b;
+  --sl-red: #e08678;
+  --sl-mid: #d6a94e;
+
+  /* Semantic aliases (used by components, so a future re-theme only edits
+     the block above) */
+  --sl-bg: var(--sl-ground);
+  --sl-card: var(--sl-surface);
+  --sl-card-2: var(--sl-surface-2);
+  --sl-border: var(--sl-line);
+  --sl-fg: var(--sl-ink);
+  --sl-fg-muted: var(--sl-ink-2);
+  --sl-accent: var(--sl-gold);
+  --sl-accent-ink: var(--sl-gold-ink);
+  --sl-positive: var(--sl-green);
+  --sl-negative: var(--sl-red);
+  --sl-warning: var(--sl-mid);
+
+  /* Chart series — one consistent categorical palette across every chart
+     (dataviz skill: "one visual system"). Index 0/1 double as
+     positive/negative in profit charts. */
+  --sl-chart-1: var(--sl-green);
+  --sl-chart-2: var(--sl-gold);
+  --sl-chart-3: #7ea7e0;
+  --sl-chart-4: #c993dd;
+  --sl-chart-5: var(--sl-red);
+  --sl-chart-6: #8fd0c9;
+
+  /* Radii */
+  --sl-radius-sm: 6px;
+  --sl-radius-md: 10px;
+  --sl-radius-lg: 14px;
+
+  /* Motion */
+  --sl-motion-fast: 150ms;
+  --sl-motion-base: 200ms;
+  --sl-motion-slow: 250ms;
+  --sl-ease: cubic-bezier(0.4, 0, 0.2, 1);
+
+  color-scheme: dark;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --sl-motion-fast: 0ms;
+    --sl-motion-base: 0ms;
+    --sl-motion-slow: 0ms;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+body {
+  background-color: var(--sl-bg);
+  color: var(--sl-fg);
+}
