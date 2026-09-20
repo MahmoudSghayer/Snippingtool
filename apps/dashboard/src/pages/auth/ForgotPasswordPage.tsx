@@ -56,7 +56,7 @@ export function ForgotPasswordPage() {
           </Button>
         </form>
         <p className="mt-5 text-center text-sm text-ink-2">
-          <Link to="/login" className="text-gold hover:underline">
+          <Link to="/login" className="text-gold underline underline-offset-2 hover:text-gold/80">
             Back to sign in
           </Link>
         </p>

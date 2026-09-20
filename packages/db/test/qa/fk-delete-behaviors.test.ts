@@ -96,16 +96,24 @@ describe('FK ON DELETE behaviours per docs/02-database.md §6', () => {
   });
 
   it.each(EXPECTED)('$table.$column ON DELETE $onDelete ($doc)', async ({ table, column, onDelete }) => {
-    const rows = await sql<{ confdeltype: string; confrelid_name: string }[]>`
+    // table/column always come from this file's own EXPECTED literal above
+    // (never request input) — validated before sql.raw() per the project
+    // lint preset (packages/config/eslint-preset.js), which forbids
+    // interpolating a value into a Drizzle-style `sql` tagged template at
+    // all, even a would-be-parameterised one.
+    if (!/^[a-z_]+$/.test(table) || !/^[a-z_]+$/.test(column)) {
+      throw new Error(`refusing to interpolate an unexpected identifier into SQL: ${table}.${column}`);
+    }
+    const rows = (await sql.unsafe(`
       SELECT con.confdeltype, confrel.relname AS confrelid_name
       FROM pg_constraint con
       JOIN pg_class rel ON rel.oid = con.conrelid
       JOIN pg_class confrel ON confrel.oid = con.confrelid
       JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = ANY(con.conkey)
       WHERE con.contype = 'f'
-        AND rel.relname = ${table}
-        AND att.attname = ${column}
-    `;
+        AND rel.relname = '${table}'
+        AND att.attname = '${column}'
+    `)) as unknown as Array<{ confdeltype: string; confrelid_name: string }>;
     expect(rows.length, `expected exactly one FK on ${table}.${column}, found ${rows.length}`).toBe(1);
     expect(CONFDELTYPE_TO_LABEL[rows[0]!.confdeltype]).toBe(onDelete);
   });

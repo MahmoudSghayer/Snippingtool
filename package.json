@@ -15,7 +15,22 @@
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "format": "prettier --write \"**/*.{ts,tsx,js,mjs,cjs,json,md,yml,yaml}\" --ignore-unknown",
-    "format:check": "prettier --check \"**/*.{ts,tsx,js,mjs,cjs,json,md,yml,yaml}\" --ignore-unknown"
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,mjs,cjs,json,md,yml,yaml}\" --ignore-unknown",
+    "docker:dev": "docker compose -f infra/docker-compose.yml up -d postgres redis mailpit",
+    "docker:dev:down": "docker compose -f infra/docker-compose.yml down",
+    "docker:dev:logs": "docker compose -f infra/docker-compose.yml logs -f",
+    "docker:build:api": "docker build -f infra/docker/api.Dockerfile --target server -t sniper-ledger/api:local .",
+    "docker:build:worker": "docker build -f infra/docker/api.Dockerfile --target worker -t sniper-ledger/worker:local .",
+    "docker:build:dashboard": "docker build -f infra/docker/dashboard.Dockerfile -t sniper-ledger/dashboard:local .",
+    "docker:build:migrator": "docker build -f infra/docker/db-migrator.Dockerfile -t sniper-ledger/db-migrator:local .",
+    "docker:build:backup": "docker build -f infra/docker/backup.Dockerfile -t sniper-ledger/backup:local .",
+    "docker:config:staging": "docker compose --env-file infra/.env.staging -f infra/docker-compose.staging.yml config",
+    "docker:config:prod": "docker compose --env-file infra/.env.production -f infra/docker-compose.prod.yml config",
+    "ci:lint": "pnpm -r lint && pnpm format:check",
+    "ci:typecheck": "pnpm -r typecheck",
+    "ci:check-env": "node infra/scripts/check-env.mjs infra/env/.env.development.example",
+    "ci:hadolint": "hadolint --config infra/docker/.hadolint.yaml infra/docker/*.Dockerfile",
+    "ci:actionlint": "actionlint"
   },
   "devDependencies": {
     "@eslint/js": "^9.18.0",

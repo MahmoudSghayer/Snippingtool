@@ -86,7 +86,11 @@ describe('migration reversibility (down applies in reverse, then re-applies clea
 
       await expect(down(QA_DATABASE_URL), `down() should not throw while rolling back ${expectedFile}`).resolves.toBeUndefined();
 
-      const remaining = await sql<{ filename: string }[]>`SELECT filename FROM schema_migrations WHERE filename = ${expectedFile}`;
+      // expectedFile always comes from this file's own listMigrationFiles()
+      // (never request input) — plain identifiers ending in `.sql`, safe to
+      // inline via sql.unsafe(), same convention as fk-delete-behaviors.test.ts.
+      if (!/^[\w.-]+\.sql$/.test(expectedFile)) throw new Error(`refusing to interpolate an unexpected filename into SQL: ${expectedFile}`);
+      const remaining = (await sql.unsafe(`SELECT filename FROM schema_migrations WHERE filename = '${expectedFile}'`)) as unknown as Array<{ filename: string }>;
       expect(remaining, `${expectedFile} should no longer be recorded as applied after its own down`).toHaveLength(0);
     }
 
@@ -110,7 +114,11 @@ describe('migration reversibility (down applies in reverse, then re-applies clea
     expect(rows.map((r) => r.filename)).toEqual(allFiles);
 
     for (const table of SPOT_CHECK_TABLES) {
-      const exists = await sql<{ exists: boolean }[]>`SELECT EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = ${table}) AS exists`;
+      // table always comes from this file's own SPOT_CHECK_TABLES literal above.
+      if (!/^[a-z_]+$/.test(table)) throw new Error(`refusing to interpolate an unexpected identifier into SQL: ${table}`);
+      const exists = (await sql.unsafe(
+        `SELECT EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = '${table}') AS exists`,
+      )) as unknown as Array<{ exists: boolean }>;
       expect(exists[0]?.exists, `expected table "${table}" to exist after re-applying every migration`).toBe(true);
     }
 

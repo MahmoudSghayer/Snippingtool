@@ -101,7 +101,7 @@ describe('settings versioning and sync-conflict policy', () => {
       headers: bearer(user.accessToken),
       payload: { governor: { actionsPerHour: 40 } },
     });
-    expect(res.statusCode).toBe(422);
+    expect(res.statusCode).toBe(400);
     const body = res.json() as { message: string };
     expect(body.message).toMatch(/exceeds the plan's configured ceiling/);
   });

@@ -137,7 +137,7 @@ export function DashboardPage() {
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle>Recent trades</CardTitle>
-            <Link to="/analytics" className="text-xs text-gold hover:underline">
+            <Link to="/analytics" className="text-xs text-gold underline underline-offset-2 hover:text-gold/80">
               View analytics
             </Link>
           </CardHeader>

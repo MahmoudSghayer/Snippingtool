@@ -39,7 +39,7 @@ phase lands on this branch.
 | 9 Security | Hardening pass, threat model | Planned | `docs/09-security.md`, `docs/threat-model.md` |
 | 10 UI/UX | Design system polish across dashboard, popup, panel | Planned | `packages/ui`, `docs/10-design-system.md` |
 | 11 Testing | Unit, integration, e2e, load, security suites | Planned | `tests/`, `docs/12-testing.md` |
-| DevOps | Docker, Compose, CI/CD, monitoring, backups, deploy guides | In progress | `infra/`, `.github/`, `docs/11-devops.md` |
+| DevOps | Docker, Compose, Caddy, CI/CD, monitoring, backups, deploy guides | Done | `infra/`, `.github/`, `docs/11-devops.md` |
 
 Follow-ups from the phase reports have been closed: users carry a
 `stripe_customer_id` (Customer Portal lookup and a fourth trial-abuse vector),
@@ -90,7 +90,7 @@ packages/
   db/           SQL migrations, Drizzle schema, seed, test utilities
   config/       Shared tsconfig / ESLint / Prettier presets
   ui/           Design system: tokens and React components
-infra/          Docker, Compose, Caddy, monitoring, backups (in progress)
+infra/          Docker, Compose, Caddy, monitoring, backups
 docs/           One document per phase; start at docs/01-architecture.md
 ```
 
@@ -127,9 +127,10 @@ API integration tests need `DATABASE_URL`, `TEST_DATABASE_URL` and
 The dashboard deploys to Vercel from `apps/dashboard` (see `vercel.json`);
 set `VITE_API_ORIGIN` in the Vercel project and `DASHBOARD_ORIGIN` on the
 API, see `docs/07-dashboard.md`. The API,
-worker, PostgreSQL and Redis run on a VM with Docker Compose behind Caddy;
-the DevOps phase adds the images, Compose files, CI/CD and runbooks under
-`infra/` and `docs/11-devops.md`.
+worker, PostgreSQL and Redis run on a VM with Docker Compose behind Caddy.
+Images, Compose files for dev/staging/prod, monitoring, backups, CI/CD and
+the step-by-step deployment guide live under `infra/`, `.github/` and
+`docs/11-devops.md`.
 
 ## Documentation
 
@@ -143,10 +144,11 @@ the DevOps phase adds the images, Compose files, CI/CD and runbooks under
 | `docs/06-extension.md` | Worlds, message flows, governor math, telemetry itemisation, day-one checklist |
 | `docs/07-dashboard.md` | Routes and permissions, auth/CSRF/WS handling, tokens, components, Vercel deployment |
 | `docs/08-analytics.md` | Every metric formula, source tables, materialisation schedule, export formats |
+| `docs/11-devops.md` | Local dev, environments, deployment guide, monitoring runbook, backups, readiness checklist |
 | `docs/13-roadmap.md` | Remaining phases, exit criteria, go-live checklist |
 
-Documents for security, the design system, DevOps and testing are added
-by their phases.
+Documents for security, the design system and testing are added by their
+phases.
 
 ## What this product will and will not do
 

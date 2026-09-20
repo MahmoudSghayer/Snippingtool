@@ -38,8 +38,7 @@ export function CommandPalette({ open, onOpenChange, query, onQueryChange, place
 
   useEffect(() => {
     if (!open) onQueryChange('');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, onQueryChange]);
 
   useEffect(() => {
     setActiveIndex(0);

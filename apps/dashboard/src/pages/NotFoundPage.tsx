@@ -9,6 +9,7 @@ export function NotFoundPage() {
       <EmptyState
         icon={<Compass className="size-8" />}
         title="Page not found"
+        titleAs="h1"
         description="The page you're looking for doesn't exist or you don't have access to it."
         action={
           <Link to="/dashboard">

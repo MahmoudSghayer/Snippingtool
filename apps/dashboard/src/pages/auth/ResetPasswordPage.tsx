@@ -29,7 +29,7 @@ export function ResetPasswordPage() {
         </CardHeader>
         <CardContent>
           <p className="text-sm text-ink-2">This password reset link is missing its token. Request a new one.</p>
-          <Link to="/forgot-password" className="mt-4 inline-block text-sm text-gold hover:underline">
+          <Link to="/forgot-password" className="mt-4 inline-block text-sm text-gold underline underline-offset-2 hover:text-gold/80">
             Request a new link
           </Link>
         </CardContent>

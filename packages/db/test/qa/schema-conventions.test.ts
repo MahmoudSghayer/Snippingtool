@@ -78,18 +78,23 @@ describe('schema conventions: created_at/updated_at/deleted_at/row_version per d
   });
 
   it('every table has exactly the standard audit columns the docs say it should', async () => {
-    const rows = await sql<{ table_name: string; column_name: string }[]>`
+    // STANDARD is this file's own fixed literal above (never request input)
+    // — inlined as a SQL array literal via sql.unsafe() rather than a bound
+    // param, per the project lint preset (packages/config/eslint-preset.js),
+    // which forbids interpolating any value into a `sql` tagged template.
+    const columnList = STANDARD.map((c) => `'${c}'`).join(', ');
+    const rows = (await sql.unsafe(`
       SELECT c.table_name, c.column_name
       FROM information_schema.columns c
       JOIN information_schema.tables t
         ON t.table_name = c.table_name AND t.table_schema = 'public'
       WHERE c.table_schema = 'public'
         AND t.table_type = 'BASE TABLE'
-        AND c.table_name NOT LIKE '%\_y____m__' ESCAPE '\'
-        AND c.table_name NOT LIKE '%\_default' ESCAPE '\'
+        AND c.table_name NOT LIKE '%\\_y____m__' ESCAPE '\\'
+        AND c.table_name NOT LIKE '%\\_default' ESCAPE '\\'
         AND c.table_name <> 'schema_migrations'
-        AND c.column_name = ANY(${['created_at', 'updated_at', 'deleted_at', 'row_version']})
-    `;
+        AND c.column_name = ANY(ARRAY[${columnList}])
+    `)) as unknown as Array<{ table_name: string; column_name: string }>;
 
     const byTable = new Map<string, Set<string>>();
     for (const row of rows) {

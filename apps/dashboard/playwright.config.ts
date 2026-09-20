@@ -23,6 +23,13 @@ export default defineConfig({
   timeout: 60_000,
   expect: { timeout: 10_000 },
   fullyParallel: false,
+  // Every spec file authenticates as the one seeded admin (device limit 1,
+  // and TOTP enrollment is a one-time, order-dependent flow across the
+  // whole run — see e2e/helpers/adminAuth.ts) — `workers: 1` guarantees
+  // spec files run strictly one after another, not concurrently, which
+  // `fullyParallel: false` alone does not (it only serialises tests
+  // *within* a file).
+  workers: 1,
   retries: 0,
   reporter: [['list']],
   use: {

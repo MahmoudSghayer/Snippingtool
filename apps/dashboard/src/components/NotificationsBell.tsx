@@ -24,16 +24,24 @@ export function NotificationsBell() {
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger asChild>
-        <div className="relative">
+      {/* The `relative` positioning wrapper stays *outside* the trigger so
+          Radix's `asChild` merges its aria-haspopup/aria-expanded/
+          aria-controls straight onto the real `<button>` (IconButton) —
+          those attributes aren't valid on a plain `<div>`'s implicit
+          "generic" role (axe `aria-allowed-attr`, caught by this pass's
+          new accessibility e2e). The unread badge is a sibling, not a
+          trigger child, so it never affects the trigger's accessible
+          name/role either. */}
+      <div className="relative">
+        <DropdownMenuTrigger asChild>
           <IconButton icon={<Bell className="size-4" />} label="Notifications" />
-          {unread > 0 && (
-            <span className="absolute -right-0.5 -top-0.5 flex size-4 items-center justify-center rounded-full bg-risk text-[10px] font-semibold text-ground">
-              {unread > 9 ? '9+' : unread}
-            </span>
-          )}
-        </div>
-      </DropdownMenuTrigger>
+        </DropdownMenuTrigger>
+        {unread > 0 && (
+          <span className="pointer-events-none absolute -right-0.5 -top-0.5 flex size-4 items-center justify-center rounded-full bg-risk text-[10px] font-semibold text-ground">
+            {unread > 9 ? '9+' : unread}
+          </span>
+        )}
+      </div>
       <DropdownMenuContent align="end" className="w-80">
         <DropdownMenuLabel>Notifications</DropdownMenuLabel>
         <DropdownMenuSeparator />

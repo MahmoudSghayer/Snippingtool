@@ -232,7 +232,7 @@ export function LoginPage() {
         </form>
         <p className="mt-5 text-center text-sm text-ink-2">
           Don&apos;t have an account?{' '}
-          <Link to="/register" className="text-gold hover:underline">
+          <Link to="/register" className="text-gold underline underline-offset-2 hover:text-gold/80">
             Create one
           </Link>
         </p>

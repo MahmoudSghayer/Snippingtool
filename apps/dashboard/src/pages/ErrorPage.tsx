@@ -9,6 +9,7 @@ export function ErrorPage({ error }: { error: unknown }) {
       <EmptyState
         icon={<AlertOctagon className="size-8 text-risk" />}
         title="Something went wrong"
+        titleAs="h1"
         description={message || 'An unexpected error occurred while rendering this page.'}
         action={
           <Button variant="outline" onClick={() => window.location.reload()}>

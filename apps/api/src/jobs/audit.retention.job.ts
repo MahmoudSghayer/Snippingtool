@@ -32,10 +32,19 @@ export default defineJob({
     for (let i = 1; i <= LOOKBACK_MONTHS_TO_CHECK; i++) {
       const target = new Date(Date.UTC(cutoff.getUTCFullYear(), cutoff.getUTCMonth() - i, 1));
       const name = partitionName(target);
-      // Identifier is derived solely from date arithmetic above, never from
-      // request input — sql.raw() with a programmatically built (not
-      // request-controlled) identifier, no bound params needed.
-      await db.execute(sql.raw(`DROP TABLE IF EXISTS "${name}"`));
+      // Defense-in-depth even though `name` is derived solely from date
+      // arithmetic above (never request input): assert it still matches the
+      // exact identifier shape `partitionName()` produces before it's ever
+      // allowed near sql.raw(), so a future change to that function (or to
+      // this loop) can't silently start interpolating something else.
+      if (!/^audit_logs_y\d{4}m\d{2}$/.test(name)) {
+        throw new Error(`audit.retention: refusing to DROP an unexpected partition identifier: ${name}`);
+      }
+      // DDL identifier (DROP TABLE target) can't be a bound parameter in
+      // Postgres; `name` is validated immediately above against a fixed
+      // regex, not request-controlled. See docs/09-security.md "No
+      // string-interpolated SQL".
+      await db.execute(sql.raw(`DROP TABLE IF EXISTS "${name}"`)); // nosemgrep: no-raw-sql-string-interpolation
     }
 
     log.info({ retentionMonths, cutoff: cutoff.toISOString() }, `audit.retention checked ${LOOKBACK_MONTHS_TO_CHECK} candidate partitions`);

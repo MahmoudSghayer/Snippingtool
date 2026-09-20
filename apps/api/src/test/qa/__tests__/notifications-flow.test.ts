@@ -65,7 +65,7 @@ describe('notifications flow', () => {
     expect(allForABody.items).toHaveLength(5);
   });
 
-  it('marks a single notification read, scoped to the owner (404 for someone else's notification)', async () => {
+  it('marks a single notification read, scoped to the owner (404 for another user’s notification)', async () => {
     const userA = await createUserSession(app, 'notif-mark-a@example.com', 'fp-notif-mark-a-000000000001');
     const userB = await createUserSession(app, 'notif-mark-b@example.com', 'fp-notif-mark-b-000000000002');
     const [rowA] = await seedNotifications(userA.userId, 1);
