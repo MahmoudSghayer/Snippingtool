@@ -96,3 +96,145 @@ export const createCouponRequestSchema = z.object({
   expiresAt: z.string().datetime().nullable(),
 });
 export type CreateCouponRequest = z.infer<typeof createCouponRequestSchema>;
+
+export const updateCouponRequestSchema = z.object({
+  isActive: z.boolean().optional(),
+  maxRedemptions: z.number().int().positive().nullable().optional(),
+  expiresAt: z.string().datetime().nullable().optional(),
+});
+export type UpdateCouponRequest = z.infer<typeof updateCouponRequestSchema>;
+
+export const couponDtoSchema = z.object({
+  id: z.string().uuid(),
+  code: z.string(),
+  type: z.enum(COUPON_TYPES),
+  value: z.number(),
+  planCodes: z.array(z.enum(PLAN_CODES)),
+  maxRedemptions: z.number().int().positive().nullable(),
+  redeemedCount: z.number().int().min(0),
+  expiresAt: z.string().datetime().nullable(),
+  isActive: z.boolean(),
+});
+export type CouponDto = z.infer<typeof couponDtoSchema>;
+
+export const couponValidateRequestSchema = z.object({
+  code: z.string().min(1).max(40),
+  planCode: z.enum(PLAN_CODES),
+});
+export type CouponValidateRequest = z.infer<typeof couponValidateRequestSchema>;
+
+/** `POST /coupons/validate` response. `discountPreview` is a human-readable
+ * summary only (e.g. "20% off", "14 free days", "Lifetime access") — the
+ * actual discount is always computed authoritatively at redemption/checkout
+ * time, never trusted from a prior validate call. */
+export const couponValidateResponseSchema = z.object({
+  valid: z.boolean(),
+  coupon: couponDtoSchema.nullable(),
+  discountPreview: z.string().max(80).nullable(),
+  reason: z.enum(['NOT_FOUND', 'EXPIRED', 'MAX_REDEMPTIONS', 'ALREADY_REDEEMED', 'PLAN_NOT_ELIGIBLE']).nullable(),
+});
+export type CouponValidateResponse = z.infer<typeof couponValidateResponseSchema>;
+
+// ---------------------------------------------------------------------------
+// Admin plans CRUD
+// ---------------------------------------------------------------------------
+
+export const planCreateRequestSchema = z.object({
+  code: z
+    .string()
+    .min(1)
+    .max(40)
+    .regex(/^[a-z0-9_-]+$/, 'Lowercase letters, digits, - and _ only'),
+  name: z.string().min(1).max(80),
+  description: z.string().max(2000).nullable().optional(),
+  priceCents: z.number().int().min(0),
+  currency: z.string().length(3).default('usd'),
+  interval: z.enum(['day', 'week', 'month', 'year', 'one_time']),
+  isLifetime: z.boolean().default(false),
+  deviceLimit: z.number().int().min(1).max(10),
+  features: z.array(z.string().min(1).max(80)),
+  stripePriceId: z.string().min(1).max(200).nullable().optional(),
+  sortOrder: z.number().int().default(0),
+});
+export type PlanCreateRequest = z.infer<typeof planCreateRequestSchema>;
+
+export const planUpdateRequestSchema = z.object({
+  name: z.string().min(1).max(80).optional(),
+  description: z.string().max(2000).nullable().optional(),
+  priceCents: z.number().int().min(0).optional(),
+  deviceLimit: z.number().int().min(1).max(10).optional(),
+  features: z.array(z.string().min(1).max(80)).optional(),
+  stripePriceId: z.string().min(1).max(200).nullable().optional(),
+  isActive: z.boolean().optional(),
+  sortOrder: z.number().int().optional(),
+});
+export type PlanUpdateRequest = z.infer<typeof planUpdateRequestSchema>;
+
+// ---------------------------------------------------------------------------
+// Licenses
+// ---------------------------------------------------------------------------
+
+/** The signed blob the extension caches for the 24h offline grace window
+ * (docs/05-subscriptions.md §4). Signed Ed25519/EdDSA as a compact JWS;
+ * this schema validates the decoded payload, not the JWS envelope itself. */
+export const entitlementBlobSchema = z.object({
+  userId: z.string().uuid(),
+  plan: z.string().min(1).max(40),
+  features: z.array(z.string().min(1).max(80)),
+  deviceLimit: z.number().int().min(1),
+  expiresAt: z.string().datetime().nullable(),
+  issuedAt: z.string().datetime(),
+});
+export type EntitlementBlob = z.infer<typeof entitlementBlobSchema>;
+
+export const licenseValidateRequestSchema = z.object({
+  licenseKey: z.string().min(1).max(40),
+  device: z.object({
+    fingerprint: z.string().min(16).max(256),
+    name: z.string().min(1).max(120).optional(),
+    browser: z.string().min(1).max(60).optional(),
+    os: z.string().min(1).max(60).optional(),
+    extensionVersion: z.string().min(1).max(30).optional(),
+  }),
+});
+export type LicenseValidateRequest = z.infer<typeof licenseValidateRequestSchema>;
+
+export const licenseValidateResponseSchema = z.object({
+  status: z.enum(LICENSE_STATUSES),
+  entitlements: entitlementBlobSchema,
+  entitlementJws: z.string().min(1), // signed compact JWS of `entitlements`, cached by the extension
+});
+export type LicenseValidateResponse = z.infer<typeof licenseValidateResponseSchema>;
+
+export const regenerateLicenseResponseSchema = z.object({
+  licenseKey: z.string().min(1), // full key, returned exactly once — see docs/05-subscriptions.md §3
+  keyPrefix: z.string().min(1).max(20),
+});
+export type RegenerateLicenseResponse = z.infer<typeof regenerateLicenseResponseSchema>;
+
+// ---------------------------------------------------------------------------
+// Admin subscriptions
+// ---------------------------------------------------------------------------
+
+export const adminExtendSubscriptionRequestSchema = z.object({
+  periodDays: z.number().int().positive(),
+  reason: z.string().min(1).max(1000),
+});
+export type AdminExtendSubscriptionRequest = z.infer<typeof adminExtendSubscriptionRequestSchema>;
+
+export const adminSuspendSubscriptionRequestSchema = z.object({
+  reason: z.string().min(1).max(1000),
+});
+export type AdminSuspendSubscriptionRequest = z.infer<typeof adminSuspendSubscriptionRequestSchema>;
+
+export const adminCancelSubscriptionRequestSchema = z.object({
+  reason: z.string().min(1).max(1000),
+  immediate: z.boolean().default(false),
+});
+export type AdminCancelSubscriptionRequest = z.infer<typeof adminCancelSubscriptionRequestSchema>;
+
+export const adminDeviceLimitOverrideRequestSchema = z.object({
+  maxDevices: z.number().int().min(1).max(10),
+  reason: z.string().min(1).max(1000),
+});
+export type AdminDeviceLimitOverrideRequest = z.infer<typeof adminDeviceLimitOverrideRequestSchema>;

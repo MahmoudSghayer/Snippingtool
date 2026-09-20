@@ -133,6 +133,12 @@ export const backgroundMessageTypeSchema = z.enum([
   'summary',
   'counts',
   'auth.login',
+  'auth.register',
+  /** Added additively: the login response can come back `mfa_required`
+   * (`@sl/shared`'s `loginResponseSchema`), and the popup's login form needs
+   * a second round trip to submit the 6-digit/recovery code against
+   * `/auth/mfa/verify` — this is that step. */
+  'auth.mfa',
   'auth.logout',
   'auth.refresh',
   'auth.status',
@@ -141,8 +147,29 @@ export const backgroundMessageTypeSchema = z.enum([
   'settings.get',
   'settings.set',
   'telemetry.flush',
+  /** Added additively alongside `telemetry.flush`: the content script's
+   * only way to hand background a batch of one telemetry kind (activity /
+   * sniping / trades / filterStats / riskEvents / events — see
+   * `lib/telemetry.ts`'s `enqueue*` functions) without importing `lib/api.ts`
+   * itself (docs/01-architecture.md: only background talks to the network).
+   * `telemetry.flush` remains the separate "flush now" trigger the 10-min
+   * alarm (and this message) both use. */
+  'telemetry.enqueue',
   'errors.report',
   'engine.state',
+  /** Locally-persisted saved filters (`SavedFilter[]`, `storage.local`) —
+   * server sync against `/api/v1/filters` lands once `apps/api` ships (see
+   * docs/06-extension.md); the message shape already matches that DTO so
+   * wiring the real endpoint in is additive, not a rewrite. */
+  'filters.list',
+  'filters.save',
+  /** `GET /api/v1/devices` passthrough for the options page's devices list
+   * (added additively — `apps/api`'s devices module is built concurrently;
+   * this message shape is forward-compatible with it landing). */
+  'devices.list',
+  /** Exports `lib/logger.ts`'s ring buffer for the options page's "Export
+   * logs" button — local only, no network call. */
+  'logs.export',
 ]);
 export type BackgroundMessageType = z.infer<typeof backgroundMessageTypeSchema>;
 

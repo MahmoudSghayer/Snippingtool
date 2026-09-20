@@ -5,10 +5,10 @@
   "type": "module",
   "description": "The Sniper's Ledger — MV3 Chrome extension. Two build targets from one codebase: `ledger` (listable: M1 recorder + M2 assist) and `ledger-auto` (adds M3 automation).",
   "scripts": {
-    "dev": "vite build --mode ledger --watch",
+    "dev": "node scripts/build.mjs ledger --watch",
     "build": "pnpm run build:ledger && pnpm run build:auto",
-    "build:ledger": "vite build --mode ledger && node scripts/generate-manifest.mjs ledger",
-    "build:auto": "vite build --mode ledger-auto && node scripts/generate-manifest.mjs ledger-auto",
+    "build:ledger": "node scripts/build.mjs ledger",
+    "build:auto": "node scripts/build.mjs ledger-auto",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint . --max-warnings=0",
     "test": "vitest run",

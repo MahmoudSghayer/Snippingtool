@@ -1,0 +1,30 @@
+// @fastify/rate-limit with a Redis store, so rate limits are shared across
+// API instances. Global default here (RATE_LIMIT_GLOBAL_*); stricter,
+// route-specific limits (login, register, password reset) are applied
+// per-route in modules/auth via the `config.rateLimit` route option, which
+// @fastify/rate-limit supports overriding per-route.
+
+import rateLimit from '@fastify/rate-limit';
+import fp from 'fastify-plugin';
+
+import { AppErrors } from '../lib/errors.js';
+
+import type { FastifyInstance } from 'fastify';
+
+export default fp(
+  async function rateLimitPlugin(fastify: FastifyInstance) {
+    await fastify.register(rateLimit, {
+      global: true,
+      max: fastify.config.RATE_LIMIT_GLOBAL_MAX,
+      timeWindow: fastify.config.RATE_LIMIT_GLOBAL_WINDOW_MS,
+      redis: fastify.redis,
+      nameSpace: 'rl:',
+      keyGenerator: (request) => request.ip,
+      errorResponseBuilder: (_request, context) => {
+        const err = AppErrors.rateLimited(Math.ceil(context.ttl / 1000));
+        return { code: err.code, message: err.message, details: err.details, requestId: _request.id };
+      },
+    });
+  },
+  { name: 'rate-limit', dependencies: ['config', 'redis'] },
+);

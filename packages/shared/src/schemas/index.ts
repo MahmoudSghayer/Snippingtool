@@ -5,6 +5,7 @@ export * from './auth.js';
 export * from './devices.js';
 export * from './extension.js';
 export * from './filters.js';
+export * from './moderation.js';
 export * from './pagination.js';
 export * from './risk.js';
 export * from './settings.js';
