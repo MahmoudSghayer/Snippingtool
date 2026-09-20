@@ -43,6 +43,12 @@ export default defineConfig(({ mode }) => {
       setupFiles: ['./test/setup.ts'],
       include: ['test/**/*.test.{ts,tsx}'],
       css: true,
+      // Gives src/api/client.ts an absolute base URL under jsdom, where a
+      // bare relative URL (the normal dev/prod behaviour) can't be resolved
+      // without a real `window.location` navigation, which jsdom doesn't
+      // perform for `Request` construction. Set here (not a gitignored
+      // .env.test) so it's committed and reproducible on a clean checkout.
+      env: { VITE_API_ORIGIN: 'http://localhost:3000' },
     },
   };
 });
