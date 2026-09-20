@@ -6,10 +6,10 @@
 // startup — BullMQ's repeatable-job keys are content-addressed, so
 // re-running this on every deploy does not create duplicate schedules.
 
-import pino from 'pino';
 import { createDb } from '@sl/db';
 import { Queue, Worker } from 'bullmq';
 import { Redis } from 'ioredis';
+import pino from 'pino';
 import 'dotenv/config';
 
 import { loadEnv } from './config/env.js';

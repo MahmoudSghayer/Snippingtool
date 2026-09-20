@@ -1,11 +1,41 @@
 // Token/password hashing helpers used across auth, devices, and anywhere else
 // a secret needs to be hashed-at-rest and compared safely.
 
-import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
+import { randomBytes, createHash, createCipheriv, createDecipheriv, timingSafeEqual } from 'node:crypto';
 
 import argon2 from 'argon2';
 
 const ARGON2_OPTS = { type: argon2.argon2id } as const;
+
+// --- TOTP secret at-rest encryption -----------------------------------
+// AES-256-GCM, application-layer (not pgcrypto) so it works identically in
+// tests against a plain Postgres role with no extra setup. The key is
+// derived from COOKIE_SECRET (already a required, secret env var) via
+// SHA-256 with a fixed, purpose-specific salt string, rather than adding a
+// second required secret — deliberately not reusing COOKIE_SECRET's raw
+// bytes directly for a different purpose.
+function totpKey(cookieSecret: string): Buffer {
+  return createHash('sha256').update(`totp-secret-encryption:${cookieSecret}`).digest();
+}
+
+/** Encrypts a base32 TOTP secret for storage in `users.totp_secret_enc`
+ * (bytea): 12-byte random IV + ciphertext + 16-byte auth tag, concatenated. */
+export function encryptTotpSecret(secret: string, cookieSecret: string): Buffer {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', totpKey(cookieSecret), iv);
+  const ciphertext = Buffer.concat([cipher.update(secret, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return Buffer.concat([iv, ciphertext, tag]);
+}
+
+export function decryptTotpSecret(blob: Buffer, cookieSecret: string): string {
+  const iv = blob.subarray(0, 12);
+  const tag = blob.subarray(blob.length - 16);
+  const ciphertext = blob.subarray(12, blob.length - 16);
+  const decipher = createDecipheriv('aes-256-gcm', totpKey(cookieSecret), iv);
+  decipher.setAuthTag(tag);
+  return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
+}
 
 /** Hashes a password or any opaque secret (verification tokens, recovery
  * codes, refresh tokens) with argon2id. */

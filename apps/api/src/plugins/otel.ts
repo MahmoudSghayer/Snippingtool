@@ -15,9 +15,17 @@ export default fp(
     }
 
     try {
-      const { NodeSDK } = await import('@opentelemetry/sdk-node');
-      const { OTLPTraceExporter } = await import('@opentelemetry/exporter-trace-otlp-http');
-      const { getNodeAutoInstrumentations } = await import('@opentelemetry/auto-instrumentations-node');
+      // Imported via variables (not string literals) so this stays a pure
+      // *runtime* optional dependency: TypeScript cannot statically resolve
+      // a non-literal specifier, so no @opentelemetry/* type packages need
+      // to be installed just to typecheck this file.
+      const sdkModule = '@opentelemetry/sdk-node';
+      const traceExporterModule = '@opentelemetry/exporter-trace-otlp-http';
+      const autoInstrumentationsModule = '@opentelemetry/auto-instrumentations-node';
+
+      const { NodeSDK } = (await import(sdkModule)) as { NodeSDK: new (opts: Record<string, unknown>) => { start: () => void; shutdown: () => Promise<void> } };
+      const { OTLPTraceExporter } = (await import(traceExporterModule)) as { OTLPTraceExporter: new (opts: Record<string, unknown>) => unknown };
+      const { getNodeAutoInstrumentations } = (await import(autoInstrumentationsModule)) as { getNodeAutoInstrumentations: () => unknown[] };
 
       const sdk = new NodeSDK({
         traceExporter: new OTLPTraceExporter({ url: endpoint }),

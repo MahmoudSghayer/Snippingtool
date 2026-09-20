@@ -14,11 +14,11 @@
 // requiring role==='admin' here is sufficient; no separate step-up needed
 // mid-session).
 
+import { adminUsers, users } from '@sl/db';
+import { hasPermission, isAdminRole, type Permission } from '@sl/shared';
 import { eq } from 'drizzle-orm';
 import fp from 'fastify-plugin';
 
-import { adminUsers, users } from '@sl/db';
-import { hasPermission, isAdminRole, type Permission } from '@sl/shared';
 
 import { AppErrors } from '../lib/errors.js';
 import { verifyAccessToken, type AccessTokenClaims } from '../lib/tokens.js';
@@ -40,6 +40,10 @@ declare module 'fastify' {
   }
   interface FastifyInstance {
     authenticate: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
+    /** Same as `authenticate`, but resolves to the AuthUser (or undefined)
+     * instead of throwing — for routes that accept either an authenticated
+     * session or some other credential (e.g. an out-of-band ticket). */
+    tryAuthenticate: (request: FastifyRequest) => Promise<AuthUser | undefined>;
     requireAdmin: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
     requirePermission: (permission: Permission) => (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
   }
@@ -57,36 +61,49 @@ function extractToken(request: FastifyRequest): { token: string; method: 'bearer
   return null;
 }
 
+async function resolveAuthUser(fastify: FastifyInstance, request: FastifyRequest): Promise<void> {
+  const found = extractToken(request);
+  if (!found) throw AppErrors.tokenInvalid('Missing credentials.');
+
+  let claims: AccessTokenClaims;
+  try {
+    const publicKey = fastify.config.JWT_PUBLIC_KEY;
+    if (!publicKey) throw AppErrors.internal('JWT_PUBLIC_KEY is not configured.');
+    claims = await verifyAccessToken(found.token, publicKey);
+  } catch (err) {
+    if (err instanceof Error && err.name === 'JWTExpired') throw AppErrors.tokenExpired();
+    if (err && typeof err === 'object' && 'status' in err) throw err;
+    throw AppErrors.tokenInvalid();
+  }
+
+  const user = await fastify.db.query.users.findFirst({ where: eq(users.id, claims.sub) });
+  if (!user || user.deletedAt) throw AppErrors.tokenInvalid('Account no longer exists.');
+  if (user.status === 'banned' || user.status === 'suspended') throw AppErrors.forbidden('Account is not active.');
+  if (user.rowVersion !== claims.ver) throw AppErrors.sessionRevoked();
+
+  request.authUser = {
+    id: user.id,
+    role: user.role,
+    plan: claims.plan,
+    sessionId: claims.sid,
+    deviceId: claims.did,
+  };
+  request.authMethod = found.method;
+}
+
 export default fp(
   async function authPlugin(fastify: FastifyInstance) {
     fastify.decorate('authenticate', async (request: FastifyRequest, _reply: FastifyReply) => {
-      const found = extractToken(request);
-      if (!found) throw AppErrors.tokenInvalid('Missing credentials.');
+      await resolveAuthUser(fastify, request);
+    });
 
-      let claims: AccessTokenClaims;
+    fastify.decorate('tryAuthenticate', async (request: FastifyRequest) => {
       try {
-        const publicKey = fastify.config.JWT_PUBLIC_KEY;
-        if (!publicKey) throw AppErrors.internal('JWT_PUBLIC_KEY is not configured.');
-        claims = await verifyAccessToken(found.token, publicKey);
-      } catch (err) {
-        if (err instanceof Error && err.name === 'JWTExpired') throw AppErrors.tokenExpired();
-        if (err && typeof err === 'object' && 'status' in err) throw err;
-        throw AppErrors.tokenInvalid();
+        await resolveAuthUser(fastify, request);
+        return request.authUser;
+      } catch {
+        return undefined;
       }
-
-      const user = await fastify.db.query.users.findFirst({ where: eq(users.id, claims.sub) });
-      if (!user || user.deletedAt) throw AppErrors.tokenInvalid('Account no longer exists.');
-      if (user.status === 'banned' || user.status === 'suspended') throw AppErrors.forbidden('Account is not active.');
-      if (user.rowVersion !== claims.ver) throw AppErrors.sessionRevoked();
-
-      request.authUser = {
-        id: user.id,
-        role: user.role,
-        plan: claims.plan,
-        sessionId: claims.sid,
-        deviceId: claims.did,
-      };
-      request.authMethod = found.method;
     });
 
     fastify.decorate('requireAdmin', async (request: FastifyRequest, reply: FastifyReply) => {

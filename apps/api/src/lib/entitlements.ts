@@ -11,11 +11,11 @@
 // verify it offline during the grace window (docs/04-auth.md, "offline
 // grace").
 
+import { devices, licenses, subscriptions, plans, type Database } from '@sl/db';
+import { type FeatureKey, PLAN_FEATURES, DEVICE_LIMITS, type PlanCode, isPlanCode } from '@sl/shared';
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import { SignJWT, importPKCS8 } from 'jose';
 
-import { devices, licenses, subscriptions, plans, type Database } from '@sl/db';
-import { type FeatureKey, PLAN_FEATURES, DEVICE_LIMITS, type PlanCode, isPlanCode } from '@sl/shared';
 
 export interface EntitlementSnapshot {
   plan: PlanCode | null;

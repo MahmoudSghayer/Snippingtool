@@ -116,17 +116,21 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   });
 
   if (!options.skipModuleAutoload) {
-    // Each modules/<name>/ folder's index.ts is autoloaded as one
-    // encapsulated plugin (autoload's own rule: a directory containing an
-    // index file registers *only* that file — service/repo/schema files
-    // alongside it are never auto-registered as separate plugins). By
-    // default it answers on `/api/v1/<name>` (computed below); a module that
-    // needs a different prefix (health, ws, the six admin-* modules) exports
-    // `export const autoPrefix = '/whatever'` from its index.ts, which fully
-    // overrides the computed default — see apps/api/SKELETON_READY.
+    // Each modules/<name>/ folder's index.ts is autoloaded as one plugin
+    // (autoload's own rule: a directory containing an index file registers
+    // *only* that file — service/repo/schema files alongside it are never
+    // auto-registered separately). IMPORTANT: every module's index.ts is
+    // wrapped in `fastify-plugin` (so it can reach `fastify.db`,
+    // `fastify.authenticate`, etc. via the same non-encapsulated instance as
+    // every other module) — and `fastify-plugin` deliberately skips the
+    // encapsulation Fastify's `prefix` register-option relies on, so
+    // autoload's folder-name-derived prefix (and `autoPrefix` overrides)
+    // has **no effect** on an fp()-wrapped plugin. Every module therefore
+    // writes the full absolute path for each route it registers
+    // (`fastify.get('/api/v1/auth/login', ...)`, not `fastify.get('/login',
+    // ...)` under an assumed prefix) — see apps/api/SKELETON_READY.
     await app.register(autoload, {
       dir: join(__dirname, 'modules'),
-      dirNameRoutePrefix: (_dir: string, folderName: string) => `api/v1/${folderName}`,
       ignorePattern: /^__tests__$|.*\.test\.(js|ts)$/,
     });
   }

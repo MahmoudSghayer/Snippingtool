@@ -5,9 +5,8 @@
 // repeatable schedule (if any) once at startup (idempotent — BullMQ
 // dedupes identical repeat jobs by key).
 
-import type { Job } from 'bullmq';
-
 import type { Database } from '@sl/db';
+import type { Job } from 'bullmq';
 import type { Redis } from 'ioredis';
 
 export interface JobContext {

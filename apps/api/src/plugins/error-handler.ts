@@ -4,15 +4,15 @@
 // request fails schema validation) map to VALIDATION_FAILED; anything else
 // is logged and reported as INTERNAL without leaking internals.
 
-import { hasZodFastifySchemaValidationErrors } from 'fastify-type-provider-zod';
 import fp from 'fastify-plugin';
+import { hasZodFastifySchemaValidationErrors } from 'fastify-type-provider-zod';
 
 import { AppError, isAppError } from '../lib/errors.js';
 
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 export default fp(async function errorHandlerPlugin(fastify: FastifyInstance) {
-  fastify.setErrorHandler((error, request: FastifyRequest, reply: FastifyReply) => {
+  fastify.setErrorHandler((error: FastifyError | AppError, request: FastifyRequest, reply: FastifyReply) => {
     if (isAppError(error)) {
       if (error.status >= 500) {
         request.log.error({ err: error, code: error.code }, error.message);

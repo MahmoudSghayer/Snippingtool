@@ -13,11 +13,11 @@
 import csrfProtection from '@fastify/csrf-protection';
 import fp from 'fastify-plugin';
 
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 declare module 'fastify' {
   interface FastifyInstance {
-    verifyCsrf: (request: import('fastify').FastifyRequest, reply: import('fastify').FastifyReply) => Promise<void>;
+    verifyCsrf: (request: FastifyRequest, reply: FastifyReply, done: (err?: Error) => void) => void;
   }
 }
 
@@ -34,12 +34,20 @@ export default fp(
     // Authorization header cannot be set by a cross-site form/script, so
     // bearer calls are immune to CSRF by construction. Routes that mutate
     // state under a cookie session add `{ preHandler: fastify.verifyCsrf }`.
-    fastify.decorate('verifyCsrf', async (request: import('fastify').FastifyRequest, reply: import('fastify').FastifyReply) => {
-      if (request.headers.authorization) return; // bearer path — no cookie session, no CSRF risk
-      await new Promise<void>((resolve, reject) => {
-        fastify.csrfProtection(request, reply, (err?: Error) => (err ? reject(err) : resolve()));
-      });
-    });
+    // Kept as a (request, reply, done) callback — matching
+    // `fastify.csrfProtection`'s own signature — so Fastify's hook system
+    // treats it as callback-style and correctly short-circuits when
+    // csrfProtection calls `reply.send(error)` without calling `done()`.
+    fastify.decorate(
+      'verifyCsrf',
+      function verifyCsrf(request: FastifyRequest, reply: FastifyReply, done: (err?: Error) => void) {
+        if (request.headers.authorization) {
+          done();
+          return;
+        }
+        fastify.csrfProtection(request, reply, done);
+      },
+    );
   },
   { name: 'csrf', dependencies: ['config', 'cookie'] },
 );

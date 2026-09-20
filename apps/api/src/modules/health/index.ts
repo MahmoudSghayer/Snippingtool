@@ -1,16 +1,17 @@
-// Liveness/readiness probes. `autoPrefix` overrides the folder-derived
-// default (`/api/v1/health`) — probes are unprefixed (`/health/live`,
-// `/health/ready`) per the PHASE 3 spec, since they're hit by infra (load
-// balancer / orchestrator health checks), not API clients.
+// Liveness/readiness probes, unprefixed (`/health/live`, `/health/ready`)
+// per the PHASE 3 spec, since they're hit by infra (load balancer /
+// orchestrator health checks), not API clients. Full paths, not a prefix
+// option — see the module convention note in apps/api/SKELETON_READY:
+// `fastify-plugin`-wrapped plugins are deliberately non-encapsulated, and
+// Fastify's `prefix` option only applies to encapsulated children, so every
+// module writes its own absolute path for every route.
 
+import { Queue } from 'bullmq';
 import { sql } from 'drizzle-orm';
 import fp from 'fastify-plugin';
-import { Queue } from 'bullmq';
 import { z } from 'zod';
 
 import type { FastifyInstance } from 'fastify';
-
-export const autoPrefix = '/health';
 
 export default fp(
   async function healthModule(fastify: FastifyInstance) {
@@ -22,13 +23,13 @@ export default fp(
     });
 
     fastify.get(
-      '/live',
+      '/health/live',
       { schema: { tags: ['health'], response: { 200: z.object({ status: z.literal('ok') }) } } },
       async () => ({ status: 'ok' as const }),
     );
 
     fastify.get(
-      '/ready',
+      '/health/ready',
       {
         schema: {
           tags: ['health'],

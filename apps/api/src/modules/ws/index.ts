@@ -1,7 +1,8 @@
-// WebSocket gateway. `autoPrefix` fully overrides the folder-derived default
-// (`/api/v1/ws`) because this module deliberately answers on two different
-// paths: `POST /api/v1/ws/ticket` (issues a ticket) and `GET /ws` (the
-// upgrade itself, unprefixed per the PHASE 3 spec) — see apps/api/SKELETON_READY.
+// WebSocket gateway. Answers on two different absolute paths — `POST
+// /api/v1/ws/ticket` (issues a ticket) and `GET /ws` (the upgrade itself,
+// unprefixed per the PHASE 3 spec) — see the module convention note in
+// apps/api/SKELETON_READY for why every route below is a full path rather
+// than relying on a computed prefix.
 //
 // Flow: authenticated client calls POST /api/v1/ws/ticket, gets back a
 // single-use, 30s-TTL opaque ticket (Redis-backed, never a JWT — no need to
@@ -16,13 +17,11 @@ import { randomBytes } from 'node:crypto';
 import fp from 'fastify-plugin';
 import { z } from 'zod';
 
-import { ADMIN_CHANNEL, userChannel } from '../../ws/publish.js';
 import { markOffline, markOnline, touchPresence } from '../../ws/presence.js';
+import { ADMIN_CHANNEL, userChannel } from '../../ws/publish.js';
 import { WsChannelRouter } from '../../ws/router.js';
 
 import type { FastifyInstance } from 'fastify';
-
-export const autoPrefix = '';
 
 const TICKET_TTL_SECONDS = 30;
 const PRESENCE_TOUCH_INTERVAL_MS = 20_000;

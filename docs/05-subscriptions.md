@@ -203,47 +203,59 @@ license's ceiling after the fact.
 The signed blob cached by the extension for the 24h offline grace
 (`01-architecture.md` §3.2) and returned by `POST /licenses/validate`,
 `POST /extension/bootstrap` and `POST /extension/heartbeat` (the latter two
-owned by the core agent's `EntitlementProvider`, §8 of this doc's "cross-agent
-touchpoints" note below — this module's `licenses` service reuses the same
-signer rather than defining a second one).
+owned by the core agent's `EntitlementProvider`, §"Cross-agent touchpoints"
+below — this module's `licenses` service reuses the same signer rather than
+defining a second one).
+
+**As actually implemented** (`apps/api/src/lib/entitlements.ts`'s
+`EntitlementSnapshot`, mirrored by `@sl/shared`'s
+`entitlementSnapshotSchema` — this superseded an earlier draft of this
+section written before that file existed; the shape below is the real one):
 
 ```jsonc
 {
-  "userId": "0198f2b1-....",        // uuid
-  "plan": "ultimate",                // plan code (or the admin-created plan's `code`)
-  "features": [                      // resolved from plans.features at issuance/refresh,
-    "ledger.recorder",                //   NOT recomputed client-side
-    "ledger.price_model",
+  "plan": "ultimate",                 // plan code, or null if the user has never had a subscription
+  "planName": "Ultimate",             // plans.name, or null
+  "status": "active",                 // subscriptions.status, or null
+  "features": [                       // PLAN_FEATURES[plan] when status is trialing/active/lifetime, else []
+    "ledger.recorder",
     "assist.ranker",
-    "assist.filter_rotation",
-    "assist.session_pnl",
-    "assist.risk_meter",
-    "automation.autobuyer",
-    "dashboard.analytics",
-    "dashboard.multi_device",
-    "support.priority"
+    "automation.autobuyer"
   ],
-  "deviceLimit": 3,                  // plans.device_limit at issuance (or the license's max_devices override)
-  "expiresAt": "2026-10-20T00:00:00Z", // licenses.expires_at, or null for an active non-trial/non-lifetime
-                                       // subscription's current_period_end, or null forever for lifetime
-  "issuedAt": "2026-09-20T14:32:05Z"  // server clock at signing — this is what the offline-grace check
-                                       // compares against `now()` on the client (24h window)
+  "deviceLimit": 3,                   // plans.device_limit, or DEVICE_LIMITS.trial as a floor when there is no subscription yet
+  "expiresAt": "2026-10-20T00:00:00Z",      // same value as currentPeriodEnd (kept as a separate field for the extension's own clarity)
+  "currentPeriodEnd": "2026-10-20T00:00:00Z", // subscriptions.current_period_end, null for a trial in progress or a lifetime grant
+  "license": {                        // the subscription's active license, or null if none has been issued yet
+    "keyPrefix": "SL-9F2K",
+    "status": "active",
+    "maxDevices": 3,
+    "expiresAt": null
+  }
 }
 ```
 
-**Signing:** Ed25519 (EdDSA), base64url-encoded compact JWS via `jose`, key
-material from `ENTITLEMENT_SIGNING_KEY` (env, base64url-encoded PKCS8 private
-key; the public key is embedded in the extension build for local
+This is signed as the JWS's `snapshot` claim (`new SignJWT({ snapshot,
+deviceId }).setSubject(userId).setIssuedAt()...`) — `userId` and `issuedAt`
+live in the JWT's own `sub`/`iat` claims rather than being duplicated inside
+`snapshot`, which is what the extension's `jose` verification step reads for
+the offline-grace `issuedAt`/`userId` check instead of parsing them out of
+this JSON body.
+
+**Signing:** Ed25519 (EdDSA), compact JWS via `jose`, key material from
+`ENTITLEMENT_SIGNING_KEY` (env, PKCS8 PEM private key; the public key —
+`ENTITLEMENT_PUBLIC_KEY` — is embedded in the extension build for local
 verification during the offline grace window). This is the **same** signer
 the core agent's default `EntitlementProvider` implementation
-(`apps/api/src/lib/entitlements.ts`) uses — this module does not stand up a
-second Ed25519 keypair or a second `jose` call site. If the core agent's
-`entitlements.ts` exposes a documented extension hook (e.g. an injectable
-"entitlement source" the provider delegates to for subscription-specific
-fields), this module's `src/modules/subscriptions/entitlements.ts` registers
-through that hook; if no such hook exists at the point this module needs one,
-that gap is called out explicitly in the handoff report rather than editing
-`lib/entitlements.ts` directly (out of this module's file ownership).
+(`apps/api/src/lib/entitlements.ts`, decorated onto `fastify.entitlements` by
+`plugins/entitlements.ts`) uses — this module calls
+`fastify.entitlements.getEntitlements(userId)` /
+`.signEntitlementBlob(snapshot, userId, deviceId)` from `POST
+/licenses/validate` rather than standing up a second Ed25519 keypair or a
+second `jose` call site. Per the core agent's own note in
+`plugins/entitlements.ts`, Fastify does not allow redecorating `entitlements`
+within the same encapsulation context, so this module never attempts to
+replace the decoration — it only ever consumes the `EntitlementProvider`
+interface the core agent published.
 
 **Verification (extension side, documented for completeness — implemented in
 `apps/extension`):** the cached blob's signature is checked against the
@@ -260,21 +272,31 @@ read-only until a fresh bootstrap/heartbeat succeeds.
 `POST /subscriptions/trial` denies a trial (`403 TRIAL_ABUSE_DETECTED`) and
 writes a `flags` row (`kind = 'trial_abuse'`, `severity` per table below,
 `evidence` = the exact match(es) that triggered the denial) whenever **any**
-of these four checks matches an existing trial within the lookback window.
-All four run on every trial request, not short-circuited at the first match,
-so `evidence` can record every reason at once (useful for the abuse-review
-queue — a request that trips two heuristics at once is a stronger signal
-than one that trips one).
+of these three checks matches an existing trial within the lookback window.
+All three run on every trial request, not short-circuited at the first
+match, so `evidence` can record every reason at once (useful for the
+abuse-review queue — a request that trips two heuristics at once is a
+stronger signal than one that trips one).
 
 | # | Check | Key | Window | Data source |
 |---|---|---|---|---|
-| 1 | **Email** | `normaliseEmailForAbuseCheck(email)` (`@sl/shared` — gmail dot/plus stripping + domain lowercasing, §3.3 in that file's doc comment) | unbounded (no lookback — a normalised email that has ever had a trial never gets a second one) | `users` joined to `subscriptions WHERE source ... trial-origin` — tracked via a dedicated lookup table maintained by this module, keyed on the normalised email, so a soft-deleted/renamed user account can't reopen the door |
-| 2 | **Device fingerprint** | SHA-256 hash of the fingerprint the extension/dashboard submits with the trial request (the same opaque hash `devices.fingerprint_hash` stores — never the raw fingerprint) | 30 days | `devices` (any user, any account) |
-| 3 | **IP /24** | The request IP's `/24` (first three octets for IPv4; `/48` for IPv6, same rationale — coarse enough to catch "same household/NAT/VPN exit" without flagging an entire ISP) | 30 days | `ip_activity` (rows written by this module on every trial attempt, successful or not) |
-| 4 | **Stripe customer** | `stripe_customer_id` on the user's prior subscription/payment history, if the trial request is associated with a returning Stripe customer (e.g. same card fingerprint surfaced via a prior Checkout session for this browser/session) | unbounded | `payments`/`subscriptions.stripe_subscription_id` history |
+| 1 | **Email** | `normaliseEmailForAbuseCheck(email)` (`@sl/shared` — gmail dot/plus stripping + domain lowercasing) | unbounded (no lookback — a normalised email that has ever had a trial never gets a second one) | Every `users.email` with a subscription whose `trial_ends_at IS NOT NULL` (i.e. was, at some point, a trial), normalised in application code and compared to the requester's normalised email. No schema change was available for a dedicated normalised-email index table, so this is a scan over the (expected-small, MVP-scale) set of users who have ever trialed — see the scaling note below. |
+| 2 | **Device fingerprint** | SHA-256 hash of the *authenticated request's own device* fingerprint — `request.authUser.deviceId` (set by login/registration, not resubmitted by the trial call) looked up in `devices` for its `fingerprint_hash` | 30 days | Every other `devices` row (any user) sharing that `fingerprint_hash`, joined to that user's trial-having subscriptions, `devices.first_seen_at` within 30 days |
+| 3 | **IP /24** | The request IP's `/24` (first three octets for IPv4; `/48` for IPv6, same rationale — coarse enough to catch "same household/NAT/VPN exit" without flagging an entire ISP) | 30 days | `ip_activity` (rows written by this module on every trial attempt, successful or not — `recordTrialIpActivity()`), joined to trial-having subscriptions |
+
+**Dropped from the original design (documented, not silently omitted): a
+4th "Stripe customer" check.** Neither `subscriptions` nor `payments` stores
+a `stripe_customer_id` column (only `stripe_subscription_id` /
+`provider_payment_id`), and a trial by definition never goes through Stripe
+Checkout, so there is no Stripe customer object to correlate at trial time
+in the first place. In practice the email check already covers the same
+signal Stripe-customer matching would have added (Stripe customers are
+created with the account's email). Flagged in the handoff report as a
+schema gap if a future pass wants a real fourth vector.
 
 **Severity mapping** (written to `flags.severity`): 1 match → `low`; 2
-matches → `medium`; 3 matches → `high`; all 4 → `critical`. `abuse.scan`
+matches → `medium`; all 3 → `critical` (skipping `high` — three independent
+signals agreeing is treated as certain, not merely likely). `abuse.scan`
 (§6) does not re-flag these — trial-time denial is synchronous and
 immediate, `abuse.scan` covers patterns that only emerge after the fact
 (velocity, cross-account fingerprint reuse, chargebacks).
@@ -285,12 +307,21 @@ prior *paid* subscription — a shared office IP/device where one person is on
 check 1, email, which is a much stronger signal on its own). This is the
 "true positive vs. false-positive-avoidance" pairing the roadmap's Phase 5
 exit criteria calls for, and is covered by
-`apps/api/src/modules/subscriptions/test/trial-protection.test.ts`.
+`apps/api/src/modules/subscriptions/__tests__/trial-protection.test.ts`.
 
 **Feature-toggle gate:** `trial.enabled` (`feature_toggles`, seeded `true`)
-is checked before any of the four heuristics — when off, every trial request
-returns `403 SUBSCRIPTION_REQUIRED` regardless of history (a kill switch for
-the trial funnel entirely, independent of abuse detection).
+is checked before any of the three heuristics — when off, every trial
+request returns `403 SUBSCRIPTION_REQUIRED` regardless of history (a kill
+switch for the trial funnel entirely, independent of abuse detection).
+
+**Scaling note (check 1):** a full scan over every user who has ever had a
+trial is fine at MVP scale (the roadmap's stated target — see
+`01-architecture.md` §7) but is the one piece of this module that would
+benefit from a dedicated indexed table (e.g. `trial_attempts(normalised_email
+unique, first_user_id, first_attempted_at)`) if trial volume grows well
+beyond MVP size; that table is a `packages/db` migration, outside this
+agent's file ownership, so it is a roadmap item rather than something this
+pass adds.
 
 ---
 
@@ -463,10 +494,14 @@ the task brief's deliverables.
 
 ## Cross-agent touchpoints (for the handoff report)
 
-- **Entitlement signer** — read from the core agent's
-  `apps/api/src/lib/entitlements.ts` once it exists; this module's
-  `src/modules/subscriptions/entitlements.ts` reuses that signer rather than
-  minting a second Ed25519 keypair.
+- **Entitlement signer** — `apps/api/src/lib/entitlements.ts`'s
+  `EntitlementProvider`, decorated onto `fastify.entitlements` by the core
+  agent's `plugins/entitlements.ts`. `modules/licenses`' `validate` route
+  calls `fastify.entitlements.getEntitlements(userId)` /
+  `.signEntitlementBlob(snapshot, userId, deviceId)` directly — no override
+  or second signer was needed, so `src/modules/subscriptions/entitlements.ts`
+  (mentioned as a fallback plan in an earlier draft of this doc) was not
+  created.
 - **`publishToUser`** — used for every `subscription.changed` /
   `session.revoked` push this module triggers.
 - **`recordAudit`** — used for every admin mutation's `audit_logs` write

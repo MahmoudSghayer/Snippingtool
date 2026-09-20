@@ -5,9 +5,9 @@
 import { createDb, type Database } from '@sl/db';
 import fp from 'fastify-plugin';
 
+import type { FastifyInstance } from 'fastify';
 import type { Sql } from 'postgres';
 
-import type { FastifyInstance } from 'fastify';
 
 declare module 'fastify' {
   interface FastifyInstance {
