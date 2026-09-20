@@ -672,6 +672,1271 @@
         }
       }
     },
+    "/api/v1/admin/analytics/overview": {
+      "get": {
+        "tags": [
+          "admin-analytics"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "in": "query",
+            "name": "from",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "in": "query",
+            "name": "to",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "day",
+                "week",
+                "month",
+                "lifetime"
+              ],
+              "default": "day"
+            },
+            "in": "query",
+            "name": "granularity",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "default": "UTC"
+            },
+            "in": "query",
+            "name": "tz",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "type": "string",
+                      "format": "date"
+                    },
+                    "to": {
+                      "type": "string",
+                      "format": "date"
+                    },
+                    "totalUsers": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "activeUsers7d": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "activeUsers30d": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "onlineUsers": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "totalRevenueCents": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "mrrCents": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "arrCents": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "conversion": {
+                      "type": "object",
+                      "properties": {
+                        "cohortSize": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "converted": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "rate": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        }
+                      },
+                      "required": [
+                        "cohortSize",
+                        "converted",
+                        "rate"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "churn": {
+                      "type": "object",
+                      "properties": {
+                        "activeAtStart": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "churned": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "rate": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        }
+                      },
+                      "required": [
+                        "activeAtStart",
+                        "churned",
+                        "rate"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "retention": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "cohortWeek": {
+                            "type": "string",
+                            "format": "date"
+                          },
+                          "cohortSize": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "retainedD7": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "retainedD30": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "retentionD7": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "retentionD30": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          }
+                        },
+                        "required": [
+                          "cohortWeek",
+                          "cohortSize",
+                          "retainedD7",
+                          "retainedD30",
+                          "retentionD7",
+                          "retentionD30"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "extensionInstalls": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "byBrowser": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        }
+                      },
+                      "required": [
+                        "total",
+                        "byBrowser"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "versionDistribution": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  },
+                  "required": [
+                    "from",
+                    "to",
+                    "totalUsers",
+                    "activeUsers7d",
+                    "activeUsers30d",
+                    "onlineUsers",
+                    "totalRevenueCents",
+                    "mrrCents",
+                    "arrCents",
+                    "conversion",
+                    "churn",
+                    "retention",
+                    "extensionInstalls",
+                    "versionDistribution"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/analytics/profits": {
+      "get": {
+        "tags": [
+          "admin-analytics"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "in": "query",
+            "name": "from",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "in": "query",
+            "name": "to",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "day",
+                "week",
+                "month",
+                "lifetime"
+              ],
+              "default": "day"
+            },
+            "in": "query",
+            "name": "granularity",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "default": "UTC"
+            },
+            "in": "query",
+            "name": "tz",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "granularity": {
+                      "type": "string",
+                      "enum": [
+                        "day",
+                        "week",
+                        "month",
+                        "lifetime"
+                      ]
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "bucket": {
+                            "type": "string"
+                          },
+                          "netProfit": {
+                            "type": "integer"
+                          },
+                          "coinsSpent": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "coinsEarned": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "coinsTraded": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "snipes": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "successes": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "tradesClosed": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "activeTraders": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "snipeSuccessRate": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          }
+                        },
+                        "required": [
+                          "bucket",
+                          "netProfit",
+                          "coinsSpent",
+                          "coinsEarned",
+                          "coinsTraded",
+                          "snipes",
+                          "successes",
+                          "tradesClosed",
+                          "activeTraders",
+                          "snipeSuccessRate"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "lifetime": {
+                      "type": "object",
+                      "properties": {
+                        "netProfit": {
+                          "type": "integer"
+                        },
+                        "coinsTraded": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "avgProfitPerActiveTrader": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "netProfit",
+                        "coinsTraded",
+                        "avgProfitPerActiveTrader"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "granularity",
+                    "items",
+                    "lifetime"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/analytics/profits/leaderboard": {
+      "get": {
+        "tags": [
+          "admin-analytics"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "in": "query",
+            "name": "from",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "in": "query",
+            "name": "to",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 10
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "top",
+                "least"
+              ],
+              "default": "top"
+            },
+            "in": "query",
+            "name": "order",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "order": {
+                      "type": "string",
+                      "enum": [
+                        "top",
+                        "least"
+                      ]
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "rank": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "userId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "email": {
+                            "type": "string",
+                            "format": "email"
+                          },
+                          "netProfit": {
+                            "type": "integer"
+                          },
+                          "coinsTraded": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "snipes": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "successes": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "tradesClosed": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        },
+                        "required": [
+                          "rank",
+                          "userId",
+                          "email",
+                          "netProfit",
+                          "coinsTraded",
+                          "snipes",
+                          "successes",
+                          "tradesClosed"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "order",
+                    "items"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/analytics/activity": {
+      "get": {
+        "tags": [
+          "admin-analytics"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "in": "query",
+            "name": "from",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "in": "query",
+            "name": "to",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "day",
+                "week",
+                "month",
+                "lifetime"
+              ],
+              "default": "day"
+            },
+            "in": "query",
+            "name": "granularity",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "default": "UTC"
+            },
+            "in": "query",
+            "name": "tz",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "granularity": {
+                      "type": "string",
+                      "enum": [
+                        "day",
+                        "week",
+                        "month",
+                        "lifetime"
+                      ]
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "bucket": {
+                            "type": "string"
+                          },
+                          "logins": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "searches": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "filterChanges": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "snipeAttempts": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "snipeSuccesses": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "errors": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "activeDevices": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "activeIps": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        },
+                        "required": [
+                          "bucket",
+                          "logins",
+                          "searches",
+                          "filterChanges",
+                          "snipeAttempts",
+                          "snipeSuccesses",
+                          "errors",
+                          "activeDevices",
+                          "activeIps"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "granularity",
+                    "items"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/analytics/subscriptions": {
+      "get": {
+        "tags": [
+          "admin-analytics"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "in": "query",
+            "name": "from",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "in": "query",
+            "name": "to",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "day",
+                "week",
+                "month",
+                "lifetime"
+              ],
+              "default": "day"
+            },
+            "in": "query",
+            "name": "granularity",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "default": "UTC"
+            },
+            "in": "query",
+            "name": "tz",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "granularity": {
+                      "type": "string",
+                      "enum": [
+                        "day",
+                        "week",
+                        "month",
+                        "lifetime"
+                      ]
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "bucket": {
+                            "type": "string"
+                          },
+                          "newSubscriptions": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "canceledSubscriptions": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "trialStarts": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "trialConversions": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "couponRedemptions": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        },
+                        "required": [
+                          "bucket",
+                          "newSubscriptions",
+                          "canceledSubscriptions",
+                          "trialStarts",
+                          "trialConversions",
+                          "couponRedemptions"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "planMix": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    },
+                    "pastDueCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "granularity",
+                    "items",
+                    "planMix",
+                    "pastDueCount"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/analytics/feature-usage": {
+      "get": {
+        "tags": [
+          "admin-analytics"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "in": "query",
+            "name": "from",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "in": "query",
+            "name": "to",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "day",
+                "week",
+                "month",
+                "lifetime"
+              ],
+              "default": "day"
+            },
+            "in": "query",
+            "name": "granularity",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "default": "UTC"
+            },
+            "in": "query",
+            "name": "tz",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "type": "string",
+                      "format": "date"
+                    },
+                    "to": {
+                      "type": "string",
+                      "format": "date"
+                    },
+                    "byFeature": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  },
+                  "required": [
+                    "from",
+                    "to",
+                    "byFeature"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/analytics/extension": {
+      "get": {
+        "tags": [
+          "admin-analytics"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "in": "query",
+            "name": "from",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "in": "query",
+            "name": "to",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "day",
+                "week",
+                "month",
+                "lifetime"
+              ],
+              "default": "day"
+            },
+            "in": "query",
+            "name": "granularity",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "default": "UTC"
+            },
+            "in": "query",
+            "name": "tz",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "type": "string",
+                      "format": "date"
+                    },
+                    "to": {
+                      "type": "string",
+                      "format": "date"
+                    },
+                    "heartbeats": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "activeInstalls": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "byVersion": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    },
+                    "byBrowser": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  },
+                  "required": [
+                    "from",
+                    "to",
+                    "heartbeats",
+                    "activeInstalls",
+                    "byVersion",
+                    "byBrowser"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/analytics/errors": {
+      "get": {
+        "tags": [
+          "admin-analytics"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "in": "query",
+            "name": "from",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "in": "query",
+            "name": "to",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "day",
+                "week",
+                "month",
+                "lifetime"
+              ],
+              "default": "day"
+            },
+            "in": "query",
+            "name": "granularity",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "default": "UTC"
+            },
+            "in": "query",
+            "name": "tz",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "type": "string",
+                      "format": "date"
+                    },
+                    "to": {
+                      "type": "string",
+                      "format": "date"
+                    },
+                    "extensionErrorsInRange": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "apiServerErrorsLast5Min": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "from",
+                    "to",
+                    "extensionErrorsInRange",
+                    "apiServerErrorsLast5Min"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/analytics/performance": {
+      "get": {
+        "tags": [
+          "admin-analytics"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sampleCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "p50Ms": {
+                      "type": "number",
+                      "minimum": 0,
+                      "nullable": true
+                    },
+                    "p95Ms": {
+                      "type": "number",
+                      "minimum": 0,
+                      "nullable": true
+                    },
+                    "p99Ms": {
+                      "type": "number",
+                      "minimum": 0,
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "sampleCount",
+                    "p50Ms",
+                    "p95Ms",
+                    "p99Ms"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/analytics/reports/kpi": {
+      "get": {
+        "tags": [
+          "admin-analytics"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "in": "query",
+            "name": "from",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "in": "query",
+            "name": "to",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "json",
+                "csv"
+              ],
+              "default": "json"
+            },
+            "in": "query",
+            "name": "format",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/analytics/reports/profits": {
+      "get": {
+        "tags": [
+          "admin-analytics"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "in": "query",
+            "name": "from",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "in": "query",
+            "name": "to",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "json",
+                "csv"
+              ],
+              "default": "json"
+            },
+            "in": "query",
+            "name": "format",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/analytics/reports/activity": {
+      "get": {
+        "tags": [
+          "admin-analytics"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "in": "query",
+            "name": "from",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "in": "query",
+            "name": "to",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "json",
+                "csv"
+              ],
+              "default": "json"
+            },
+            "in": "query",
+            "name": "format",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
     "/api/v1/admin/audit": {
       "get": {
         "tags": [
@@ -4551,6 +5816,372 @@
                   },
                   "required": [
                     "ok"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/analytics/me/overview": {
+      "get": {
+        "tags": [
+          "analytics"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "lifetimeNetProfit": {
+                      "type": "integer"
+                    },
+                    "lifetimeCoinsTraded": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "lifetimeSnipes": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "lifetimeSuccesses": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "last7d": {
+                      "type": "object",
+                      "properties": {
+                        "netProfit": {
+                          "type": "integer"
+                        },
+                        "snipes": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "successes": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "netProfit",
+                        "snipes",
+                        "successes"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "last30d": {
+                      "type": "object",
+                      "properties": {
+                        "netProfit": {
+                          "type": "integer"
+                        },
+                        "snipes": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "successes": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "netProfit",
+                        "snipes",
+                        "successes"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "activeDevices": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "snipeSuccessRateLifetime": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    }
+                  },
+                  "required": [
+                    "lifetimeNetProfit",
+                    "lifetimeCoinsTraded",
+                    "lifetimeSnipes",
+                    "lifetimeSuccesses",
+                    "last7d",
+                    "last30d",
+                    "activeDevices",
+                    "snipeSuccessRateLifetime"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/analytics/me/profits": {
+      "get": {
+        "tags": [
+          "analytics"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "in": "query",
+            "name": "from",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "in": "query",
+            "name": "to",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "day",
+                "week",
+                "month",
+                "lifetime"
+              ],
+              "default": "day"
+            },
+            "in": "query",
+            "name": "granularity",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "granularity": {
+                      "type": "string",
+                      "enum": [
+                        "day",
+                        "week",
+                        "month",
+                        "lifetime"
+                      ]
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "bucket": {
+                            "type": "string"
+                          },
+                          "netProfit": {
+                            "type": "integer"
+                          },
+                          "coinsSpent": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "coinsEarned": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "coinsTraded": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "snipes": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "successes": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "tradesClosed": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "activeTraders": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "snipeSuccessRate": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          }
+                        },
+                        "required": [
+                          "bucket",
+                          "netProfit",
+                          "coinsSpent",
+                          "coinsEarned",
+                          "coinsTraded",
+                          "snipes",
+                          "successes",
+                          "tradesClosed",
+                          "activeTraders",
+                          "snipeSuccessRate"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "granularity",
+                    "items"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/analytics/me/activity": {
+      "get": {
+        "tags": [
+          "analytics"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "in": "query",
+            "name": "from",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "in": "query",
+            "name": "to",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "day",
+                "week",
+                "month",
+                "lifetime"
+              ],
+              "default": "day"
+            },
+            "in": "query",
+            "name": "granularity",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "default": "UTC"
+            },
+            "in": "query",
+            "name": "tz",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "granularity": {
+                      "type": "string",
+                      "enum": [
+                        "day",
+                        "week",
+                        "month",
+                        "lifetime"
+                      ]
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "bucket": {
+                            "type": "string"
+                          },
+                          "logins": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "searches": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "filterChanges": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "snipeAttempts": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "snipeSuccesses": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "errors": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "activeDevices": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "activeIps": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        },
+                        "required": [
+                          "bucket",
+                          "logins",
+                          "searches",
+                          "filterChanges",
+                          "snipeAttempts",
+                          "snipeSuccesses",
+                          "errors",
+                          "activeDevices",
+                          "activeIps"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "granularity",
+                    "items"
                   ],
                   "additionalProperties": false
                 }

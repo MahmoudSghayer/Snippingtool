@@ -6,11 +6,13 @@
 
 import { userActivity, type Database } from '@sl/db';
 import { and, count, eq, gte, lt } from 'drizzle-orm';
-import type { Redis } from 'ioredis';
+
 
 import { getErrorRate } from '../error-rate.js';
 
 import { endOfDayUtc, parseDayUtc } from './dates.js';
+
+import type { Redis } from 'ioredis';
 
 export interface ErrorRateParams {
   from: string;

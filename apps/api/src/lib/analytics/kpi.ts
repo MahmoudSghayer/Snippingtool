@@ -6,13 +6,15 @@
 // one. Pure functions over Drizzle + (for online users) the existing WS
 // presence Redis helper; no mutation, no interpolated `sql` templates.
 
-import { extensionInstalls, payments, subscriptions, userActivity, users, vArr, vMrr, type Database } from '@sl/db';
-import { and, count, countDistinct, eq, gte, inArray, isNull, lt, lte, sum } from 'drizzle-orm';
-import type { Redis } from 'ioredis';
+import { extensionInstalls, payments, plans, subscriptions, userActivity, users, vArr, vMrr, type Database } from '@sl/db';
+import { and, count, countDistinct, eq, gte, inArray, isNull, lt, lte, ne, sum } from 'drizzle-orm';
+
 
 import { countOnline } from '../../ws/presence.js';
 
 import { endOfDayUtc, formatDayUtc, parseDayUtc, weekBucketKey } from './dates.js';
+
+import type { Redis } from 'ioredis';
 
 export interface KpiRangeParams {
   from: string;
@@ -20,8 +22,6 @@ export interface KpiRangeParams {
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const LIVE_SUBSCRIPTION_STATUSES = ['active', 'past_due', 'suspended', 'lifetime'] as const;
-const TERMINAL_STATUSES = ['canceled', 'expired'] as const;
 
 /** Total (non-deleted) users signed up on or before `asOf` (end of that UTC
  * calendar day). */
@@ -75,25 +75,60 @@ export interface ConversionResult {
 }
 
 /**
- * Trial -> paid conversion for the cohort of subscriptions whose trial
- * *started* (`created_at`, with `trial_ends_at` set) within [from, to].
- * "Converted" means: the subscription's current status is no longer
- * trialing/canceled/expired, it has a `current_period_start` (i.e. billing
- * actually began), and that billing start happened within 30 days of
- * `trial_ends_at`. See docs/08-analytics.md for the worked example.
+ * Trial -> paid conversion for the cohort of `trial`-plan subscriptions
+ * *started* (`created_at`) within [from, to].
+ *
+ * This schema never mutates a trial row into a paid one in place: the DB
+ * constraint `subscriptions_trial_ends_only_when_trialing` forces
+ * `trial_ends_at` to NULL the instant a subscription's status leaves
+ * 'trialing' (see migrations/0006_subscriptions.sql, and
+ * modules/subscriptions/service.ts's trial-expiry sweep, which clears it in
+ * the same UPDATE), and the app's own checkout/admin-activate paths both
+ * refuse to touch a row while the user still has *any* live subscription
+ * (the one-live-subscription-per-user invariant) — so a paid subscription
+ * is always a **separate row**, created only after the trial row has ended.
+ * "Converted" therefore means: the same user has another (non-trial-plan)
+ * subscription row whose `created_at` falls within 30 days of the trial's
+ * end reference (`ended_at` if the trial has already run its course, else
+ * `trial_ends_at` for one still in progress at query time). See
+ * docs/08-analytics.md for the worked example.
  */
 export async function getConversion(db: Database, params: KpiRangeParams): Promise<ConversionResult> {
-  const rows = await db.query.subscriptions.findMany({
-    where: and(isNull(subscriptions.deletedAt), gte(subscriptions.createdAt, parseDayUtc(params.from)), lt(subscriptions.createdAt, endOfDayUtc(params.to))),
+  const trialPlan = await db.query.plans.findFirst({ where: eq(plans.code, 'trial') });
+  if (!trialPlan) return { cohortSize: 0, converted: 0, rate: 0 };
+
+  const cohort = await db.query.subscriptions.findMany({
+    where: and(
+      eq(subscriptions.planId, trialPlan.id),
+      gte(subscriptions.createdAt, parseDayUtc(params.from)),
+      lt(subscriptions.createdAt, endOfDayUtc(params.to)),
+    ),
   });
-  const cohort = rows.filter((r) => r.trialEndsAt !== null);
-  const converted = cohort.filter((r) => {
-    if (r.status === 'trialing' || r.status === 'canceled' || r.status === 'expired') return false;
-    if (!r.currentPeriodStart || !r.trialEndsAt) return false;
-    const deadline = r.trialEndsAt.getTime() + 30 * DAY_MS;
-    return r.currentPeriodStart.getTime() <= deadline;
+  if (cohort.length === 0) return { cohortSize: 0, converted: 0, rate: 0 };
+
+  const userIds = [...new Set(cohort.map((r) => r.userId))];
+  const otherSubs = await db.query.subscriptions.findMany({
+    where: and(inArray(subscriptions.userId, userIds), ne(subscriptions.planId, trialPlan.id)),
+    columns: { userId: true, createdAt: true },
   });
-  return { cohortSize: cohort.length, converted: converted.length, rate: cohort.length > 0 ? converted.length / cohort.length : 0 };
+  const otherCreatedAtByUser = new Map<string, number[]>();
+  for (const r of otherSubs) {
+    const list = otherCreatedAtByUser.get(r.userId) ?? [];
+    list.push(r.createdAt.getTime());
+    otherCreatedAtByUser.set(r.userId, list);
+  }
+
+  let converted = 0;
+  for (const trial of cohort) {
+    const referenceEnd = trial.endedAt ?? trial.trialEndsAt;
+    if (!referenceEnd) continue;
+    const start = referenceEnd.getTime();
+    const deadline = start + 30 * DAY_MS;
+    const candidates = otherCreatedAtByUser.get(trial.userId) ?? [];
+    if (candidates.some((t) => t >= start && t <= deadline)) converted++;
+  }
+
+  return { cohortSize: cohort.length, converted, rate: converted / cohort.length };
 }
 
 export interface ChurnResult {
@@ -103,12 +138,25 @@ export interface ChurnResult {
 }
 
 /**
- * `activeAtStart`: subscriptions created before `from` that were still live
- * (status in active/past_due/suspended/lifetime, and not yet canceled) as
- * of the instant `from` begins. `churned`: subscriptions that transitioned
- * to canceled/expired (by `canceled_at`, falling back to `ended_at`) inside
- * [from, to]. `rate = churned / activeAtStart` (0 when there's no
- * `activeAtStart` base).
+ * Deliberately ignores the subscription row's *current* `status` (a single
+ * mutable-state column can't tell you what it was at a past instant) and
+ * uses only its lifecycle timestamps, which are set once and never
+ * reverted:
+ *
+ * - `activeAtStart`: subscriptions created before `from` whose
+ *   cancellation/end (if any) had not yet happened as of `from` —
+ *   `created_at <= from AND (canceled_at IS NULL OR canceled_at > from) AND
+ *   (ended_at IS NULL OR ended_at > from)`. `canceled_at` is set the
+ *   instant a user requests cancellation (`cancelAtPeriodEnd`), even though
+ *   `status` itself often doesn't flip to 'canceled' until the period
+ *   actually ends — so this row still correctly counts as "was live at
+ *   `from`" for every day up to that timestamp.
+ * - `churned`: subscriptions whose `canceled_at` (preferred — the
+ *   user-initiated cancellation event) or, if that's unset, `ended_at`
+ *   (a hard expiry with no explicit cancellation, e.g. trial lapse) falls
+ *   within [from, to).
+ * - `rate = churned / activeAtStart` (0 when there's no `activeAtStart`
+ *   base).
  */
 export async function getChurn(db: Database, params: KpiRangeParams): Promise<ChurnResult> {
   const fromInstant = parseDayUtc(params.from);
@@ -117,13 +165,12 @@ export async function getChurn(db: Database, params: KpiRangeParams): Promise<Ch
 
   const activeAtStart = rows.filter((r) => {
     if (r.createdAt.getTime() > fromInstant.getTime()) return false;
-    if (!(LIVE_SUBSCRIPTION_STATUSES as readonly string[]).includes(r.status)) return false;
     if (r.canceledAt && r.canceledAt.getTime() <= fromInstant.getTime()) return false;
+    if (r.endedAt && r.endedAt.getTime() <= fromInstant.getTime()) return false;
     return true;
   }).length;
 
   const churned = rows.filter((r) => {
-    if (!(TERMINAL_STATUSES as readonly string[]).includes(r.status)) return false;
     const endEvent = r.canceledAt ?? r.endedAt;
     if (!endEvent) return false;
     return endEvent.getTime() >= fromInstant.getTime() && endEvent.getTime() < toEnd.getTime();

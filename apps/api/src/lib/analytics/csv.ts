@@ -28,13 +28,16 @@ export interface CsvColumn<T> {
  * contract, not eagerness, that matters here; every row query in this
  * module is already a single bounded per-day-aggregate array, so the
  * "don't buffer" guarantee this gives is about the *HTTP response*, not
- * about re-querying the DB lazily).
+ * about re-querying the DB lazily). `T` is intentionally unconstrained
+ * (plain `object`, not `Record<string, unknown>`) so a concrete row
+ * interface (e.g. `ProfitSeriesPoint`) can be passed directly without a
+ * structural-index-signature mismatch.
  */
-export function csvStream<T extends Record<string, unknown>>(columns: Array<CsvColumn<T>>, rows: Iterable<T> | AsyncIterable<T>): Readable {
+export function csvStream<T extends object>(columns: Array<CsvColumn<T>>, rows: Iterable<T> | AsyncIterable<T>): Readable {
   async function* generate(): AsyncGenerator<string> {
     yield toCsvRow(columns.map((c) => c.header));
     for await (const row of rows) {
-      yield toCsvRow(columns.map((c) => row[c.key]));
+      yield toCsvRow(columns.map((c) => (row as Record<string, unknown>)[c.key]));
     }
   }
   return Readable.from(generate());

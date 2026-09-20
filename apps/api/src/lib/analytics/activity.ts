@@ -6,7 +6,7 @@
 // toward both `snipeAttempts` and `snipeSuccesses`).
 
 import { searchActivity, snipingActivity, userActivity, type Database } from '@sl/db';
-import { and, gte, inArray, lt } from 'drizzle-orm';
+import { and, eq, gte, inArray, lt } from 'drizzle-orm';
 
 import { bucketKeyFor, endOfDayUtc, formatDayUtc, listBuckets, parseDayUtc, type Granularity } from './dates.js';
 
@@ -14,6 +14,10 @@ export interface ActivityRangeParams {
   from: string;
   to: string;
   granularity: Granularity;
+  /** Scopes every source table to one user — used by the user-facing
+   * /api/v1/analytics/me/activity route. Omit for the platform-wide admin
+   * view. */
+  userId?: string;
 }
 
 export interface ActivityPoint {
@@ -34,15 +38,20 @@ export async function getActivitySeries(db: Database, params: ActivityRangeParam
 
   const [uaRows, searchRows, snipeRows] = await Promise.all([
     db.query.userActivity.findMany({
-      where: and(gte(userActivity.occurredAt, start), lt(userActivity.occurredAt, end), inArray(userActivity.type, ['login', 'filter_change', 'error'])),
+      where: and(
+        gte(userActivity.occurredAt, start),
+        lt(userActivity.occurredAt, end),
+        inArray(userActivity.type, ['login', 'filter_change', 'error']),
+        params.userId ? eq(userActivity.userId, params.userId) : undefined,
+      ),
       columns: { type: true, occurredAt: true, deviceId: true, ip: true },
     }),
     db.query.searchActivity.findMany({
-      where: and(gte(searchActivity.occurredAt, start), lt(searchActivity.occurredAt, end)),
+      where: and(gte(searchActivity.occurredAt, start), lt(searchActivity.occurredAt, end), params.userId ? eq(searchActivity.userId, params.userId) : undefined),
       columns: { occurredAt: true, deviceId: true },
     }),
     db.query.snipingActivity.findMany({
-      where: and(gte(snipingActivity.occurredAt, start), lt(snipingActivity.occurredAt, end)),
+      where: and(gte(snipingActivity.occurredAt, start), lt(snipingActivity.occurredAt, end), params.userId ? eq(snipingActivity.userId, params.userId) : undefined),
       columns: { occurredAt: true, outcome: true, deviceId: true },
     }),
   ]);

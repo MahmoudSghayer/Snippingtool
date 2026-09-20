@@ -16,7 +16,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "openapi": "tsx src/scripts/generate-openapi.ts",
-    "keys:generate": "tsx src/scripts/generate-keys.ts"
+    "keys:generate": "tsx src/scripts/generate-keys.ts",
+    "analytics:backfill": "tsx src/lib/analytics/backfill.ts"
   },
   "dependencies": {
     "@fastify/autoload": "^6.0.3",

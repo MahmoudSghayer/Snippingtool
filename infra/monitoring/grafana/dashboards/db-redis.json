@@ -1,0 +1,228 @@
+{
+  "uid": "sl-db-redis",
+  "title": "DB / Redis",
+  "tags": [
+    "sniper-ledger",
+    "database",
+    "redis"
+  ],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Postgres up",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "pg_up"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Redis up",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "redis_up"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Postgres connections vs max_connections",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 8,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(pg_stat_database_numbackends{datname=\"sniper_ledger\"})",
+          "legendFormat": "connections"
+        },
+        {
+          "expr": "pg_settings_max_connections",
+          "legendFormat": "max_connections"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Postgres cache hit ratio",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(pg_stat_database_blks_hit{datname=\"sniper_ledger\"}[5m])) / (sum(rate(pg_stat_database_blks_hit{datname=\"sniper_ledger\"}[5m])) + sum(rate(pg_stat_database_blks_read{datname=\"sniper_ledger\"}[5m])))",
+          "legendFormat": "cache hit ratio"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "title": "Database size",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "pg_database_size_bytes{datname=\"sniper_ledger\"}",
+          "legendFormat": "size"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "title": "Redis memory used",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 16
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "redis_memory_used_bytes",
+          "legendFormat": "used"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "title": "Redis ops/sec",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 16
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "rate(redis_commands_processed_total[1m])",
+          "legendFormat": "ops/s"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Redis connected clients",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 16
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "redis_connected_clients",
+          "legendFormat": "clients"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "BullMQ queue backlog (waiting jobs)",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "redis_key_size{key=~\"bull:.*:wait\"}",
+          "legendFormat": "{{key}}"
+        }
+      ]
+    }
+  ]
+}

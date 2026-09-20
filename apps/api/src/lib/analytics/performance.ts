@@ -41,7 +41,12 @@ export async function getPerformance(registry: Registry): Promise<PerformanceRes
   const metrics = await registry.getMetricsAsJSON();
   const histogram = metrics.find((m) => m.name === HISTOGRAM_NAME);
   const empty: PerformanceResult = { sampleCount: 0, p50Ms: null, p95Ms: null, p99Ms: null };
-  if (!histogram || histogram.type !== 'histogram') return empty;
+  // prom-client's `MetricType` is declared as a numeric TS enum, but
+  // `getMetricsAsJSON()` actually serialises `type` as the lowercase string
+  // ('histogram') at runtime (verified against prom-client 15.1.3) — the
+  // cast documents that declared/actual mismatch rather than papering over
+  // a real bug.
+  if (!histogram || (histogram.type as unknown as string) !== 'histogram') return empty;
 
   const values = histogram.values as unknown as HistogramJsonValue[];
   const buckets = new Map<number, number>(); // le (seconds, Infinity for +Inf) -> merged cumulative count

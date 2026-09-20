@@ -1,0 +1,44 @@
+# Applies to every `docker build` in this repo (all Dockerfiles use the repo
+# root as build context — see infra/docker/*.Dockerfile). Keeps build
+# contexts small and, more importantly, keeps host-built artifacts and
+# secrets out of images (everything here is rebuilt fresh inside the image).
+
+# VCS / editor
+.git
+.gitignore
+.github
+.vscode
+.idea
+*.log
+
+# Dependencies (installed fresh inside the image)
+**/node_modules
+
+# Build outputs (rebuilt fresh inside the image)
+**/dist
+**/build
+**/.turbo
+**/coverage
+**/playwright-report
+**/test-results
+apps/extension/dist
+
+# Env files / secrets — never bake real secrets into an image layer.
+# Docker's dockerignore patterns don't treat a leading dot specially, so
+# `infra/env/*.example` below matches `infra/env/.env.*.example` fine.
+.env
+.env.*
+!infra/env/*.example
+
+# Docs, tests fixtures and misc not needed inside any image
+docs
+tests
+*.md
+!README.md
+
+# Editor/OS cruft
+.DS_Store
+Thumbs.db
+
+# This tool's own scratch area, if ever present under the repo
+.tools

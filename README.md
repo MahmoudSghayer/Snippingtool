@@ -30,12 +30,12 @@ phase lands on this branch.
 | --- | --- | --- | --- |
 | 1 Architecture | Monorepo, shared contracts, diagrams, roadmap | Done | `packages/shared`, `docs/01-architecture.md`, `docs/13-roadmap.md` |
 | 2 Database | 35 tables, partitioning, audit, views, seed, tests | Done | `packages/db`, `docs/02-database.md` |
-| 3 Backend API | Fastify, 90 routes, WS gateway, jobs, OpenAPI | Done | `apps/api`, `docs/03-api.md` |
+| 3 Backend API | Fastify, 105 routes, WS gateway, jobs, OpenAPI | Done | `apps/api`, `docs/03-api.md` |
 | 4 Authentication | JWT + rotating refresh, sessions, devices, 2FA, lockout, admin roles | Done | `apps/api/src/modules/auth`, `docs/04-auth.md` |
 | 5 Subscriptions | Plans, trials with abuse protection, licenses, Stripe, coupons, bans, flags | Done | `apps/api/src/modules/{subscriptions,licenses,payments,coupons,plans,bans,flags}`, `docs/05-subscriptions.md` |
 | 6 Extension | TypeScript port, ranker, governor, assist, gated autobuyer, popup, options | Done | `apps/extension`, `docs/06-extension.md` |
 | 7 Dashboard | React user + admin dashboard | In progress | `apps/dashboard`, `packages/ui`, `docs/07-dashboard.md` |
-| 8 Analytics | KPI engine, profit analytics, reports, exports | In progress | `apps/api/src/modules/{analytics,admin-analytics}`, `docs/08-analytics.md` |
+| 8 Analytics | KPI engine, profit analytics, reports, CSV exports, materialisation jobs | Done | `apps/api/src/modules/{analytics,admin-analytics}`, `docs/08-analytics.md` |
 | 9 Security | Hardening pass, threat model | Planned | `docs/09-security.md`, `docs/threat-model.md` |
 | 10 UI/UX | Design system polish across dashboard, popup, panel | Planned | `packages/ui`, `docs/10-design-system.md` |
 | 11 Testing | Unit, integration, e2e, load, security suites | Planned | `tests/`, `docs/12-testing.md` |
@@ -134,9 +134,10 @@ the DevOps phase adds the images, Compose files, CI/CD and runbooks under
 | `docs/04-auth.md` | Token lifetimes, refresh rotation, devices, 2FA, CSRF, admin roles |
 | `docs/05-subscriptions.md` | Plan matrix, state machine, license keys, trial protection, Stripe webhooks |
 | `docs/06-extension.md` | Worlds, message flows, governor math, telemetry itemisation, day-one checklist |
+| `docs/08-analytics.md` | Every metric formula, source tables, materialisation schedule, export formats |
 | `docs/13-roadmap.md` | Remaining phases, exit criteria, go-live checklist |
 
-Documents for the dashboard, analytics, security, design system, DevOps and
+Documents for the dashboard, security, design system, DevOps and
 testing are added by their phases.
 
 ## What this product will and will not do

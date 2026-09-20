@@ -16,6 +16,10 @@ test-results/
 .env
 .env.*
 !.env.example
+# infra/env/*.example are committed templates (DevOps deliverable), not
+# real secrets — every other .env* file (a real infra/.env.production,
+# infra/.env.staging, or root .env for local dev) stays ignored above.
+!infra/env/*.example
 
 # logs
 *.log

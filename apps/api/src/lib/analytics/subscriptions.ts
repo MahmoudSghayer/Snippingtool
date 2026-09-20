@@ -105,7 +105,7 @@ export async function getPlanMix(db: Database): Promise<Record<string, number>> 
     .select({ code: plans.code })
     .from(subscriptions)
     .innerJoin(plans, eq(plans.id, subscriptions.planId))
-    .where(and(isNull(subscriptions.deletedAt), inArray(subscriptions.status, LIVE_STATUSES)));
+    .where(and(isNull(subscriptions.deletedAt), inArray(subscriptions.status, [...LIVE_STATUSES])));
   const mix: Record<string, number> = {};
   for (const r of rows) mix[r.code] = (mix[r.code] ?? 0) + 1;
   return mix;
