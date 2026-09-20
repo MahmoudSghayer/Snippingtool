@@ -12,6 +12,10 @@
 
 import * as db from './store/db.js';
 import { summarise, margin, maxSnipePrice } from './model/prices.js';
+import { initAnalytics } from './analytics.js';
+
+// Initialize Vercel Analytics when the service worker starts
+initAnalytics();
 
 const WINDOW_MS = 7 * 24 * 60 * 60 * 1000; // a week of history per card
 

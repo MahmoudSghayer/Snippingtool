@@ -7,12 +7,18 @@
  * payload changes, this file keeps working and adapter.js is the only thing to
  * fix.
  */
+
+import { initAnalytics, trackEvent } from './analytics.js';
+
 (() => {
   'use strict';
 
   const CHANNEL = 'ledger:v1';
   const FLUSH_MS = 2000;
   const FLUSH_AT = 300;
+
+  // Initialize Vercel Analytics
+  initAnalytics();
 
   const panel = globalThis.LedgerPanel();
 
@@ -46,6 +52,9 @@
       panel.setHealth('warn', 'Recorded nothing — the extension background may have been reloaded.');
       return;
     }
+
+    // Track auction recording event
+    trackEvent('auctions_recorded', { count: batch.length });
 
     const totals = await send({ type: 'counts' });
     if (totals && totals.ok) panel.setTotals(totals.data);
@@ -109,6 +118,9 @@
       searches++;
       panel.setSearches(searches);
       panel.setHealth('live', 'Recording. Nothing is sent anywhere.');
+
+      // Track search event
+      trackEvent('market_search', { auction_count: auctions.length });
 
       if (auctions.length > 0) {
         const dominant = dominantResource(auctions);

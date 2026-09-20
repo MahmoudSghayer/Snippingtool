@@ -6,5 +6,8 @@
   "description": "FC transfer market recorder — an unpacked MV3 extension, no build step.",
   "scripts": {
     "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@vercel/analytics": "^2.0.1"
   }
 }
