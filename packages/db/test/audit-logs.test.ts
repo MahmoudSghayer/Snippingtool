@@ -1,7 +1,8 @@
 import 'dotenv/config';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { createTestDb, closeTestDb, resetDatabase } from '../src/test-utils';
+
 import { auditLogs } from '../src/schema/index';
+import { createTestDb, closeTestDb, resetDatabase } from '../src/test-utils';
 
 describe('audit_logs is append-only', () => {
   const { db, sql } = createTestDb();

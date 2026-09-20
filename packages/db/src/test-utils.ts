@@ -7,8 +7,10 @@
 // sniper_ledger_test pair this repo's local Postgres runs.
 
 import { sql as sqlTag } from 'drizzle-orm';
-import { createDb, getDatabaseUrl, type Database } from './index.js';
+
 import { up } from './migrate.js';
+
+import { createDb, getDatabaseUrl, type Database } from './index.js';
 
 export function getTestDatabaseUrl(env: NodeJS.ProcessEnv = process.env): string {
   if (env.TEST_DATABASE_URL) return env.TEST_DATABASE_URL;
@@ -41,20 +43,19 @@ const SKIP_TABLES = new Set(['schema_migrations']);
  * tests/suites; does not drop or recreate schema (use db:reset for that).
  */
 export async function resetDatabase(db: Database): Promise<void> {
-  const tables = await db.execute<{ tablename: string }>(sqlTag`
+  const result = await db.execute(sqlTag`
     SELECT tablename FROM pg_tables
     WHERE schemaname = 'public'
       AND tablename NOT LIKE '%\_y____m__'  -- skip partition children, truncated via their parent
       AND tablename NOT LIKE '%\_default'
   `);
+  const tables = result as unknown as Array<{ tablename: string }>;
 
-  const names = tables
-    .map((r) => r.tablename)
-    .filter((name) => !SKIP_TABLES.has(name));
+  const names: string[] = tables.map((r) => r.tablename).filter((name) => !SKIP_TABLES.has(name));
 
   if (names.length === 0) return;
 
-  const identifiers = names.map((n) => `"${n}"`).join(', ');
+  const identifiers = names.map((n: string) => `"${n}"`).join(', ');
   await db.execute(sqlTag.raw(`TRUNCATE TABLE ${identifiers} RESTART IDENTITY CASCADE`));
 }
 

@@ -1,7 +1,9 @@
 import 'dotenv/config';
+import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { createTestDb, closeTestDb, resetDatabase } from '../src/test-utils';
+
 import { users, userActivity } from '../src/schema/index';
+import { createTestDb, closeTestDb, resetDatabase } from '../src/test-utils';
 
 describe('partition routing on user_activity', () => {
   const { db, sql } = createTestDb();

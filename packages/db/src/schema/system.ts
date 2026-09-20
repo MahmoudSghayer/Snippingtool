@@ -17,8 +17,8 @@ import {
   text,
   uniqueIndex,
   uuid,
-} from 'drizzle-orm/pg-core';
-import { date } from 'drizzle-orm/pg-core';
+ date } from 'drizzle-orm/pg-core';
+
 import { auditActorTypeEnum, createdAt, idPk, rowVersion, timestamptz, updatedAt } from './common.js';
 
 // ---------------------------------------------------------------------------

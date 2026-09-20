@@ -2,6 +2,8 @@
 
 import { isNull, relations } from 'drizzle-orm';
 import { boolean, index, integer, jsonb, pgTable, smallint, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+
+import { adminUsers } from './admin.js';
 import {
   createdAt,
   deletedAt,
@@ -14,7 +16,6 @@ import {
   updatedAt,
 } from './common.js';
 import { users } from './users.js';
-import { adminUsers } from './admin.js';
 
 export const plans = pgTable(
   'plans',

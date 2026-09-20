@@ -1,8 +1,9 @@
 import 'dotenv/config';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { createTestDb, closeTestDb, resetDatabase } from '../src/test-utils';
+
 import { users } from '../src/schema/index';
+import { createTestDb, closeTestDb, resetDatabase } from '../src/test-utils';
 
 describe('set_updated_at / bump_row_version triggers', () => {
   const { db, sql } = createTestDb();

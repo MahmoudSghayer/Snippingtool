@@ -5,12 +5,15 @@
 // looked up by its natural key first and updated in place rather than
 // re-inserted (upsert), so `pnpm seed` twice leaves the same rows behind.
 
+import { fileURLToPath } from 'node:url';
+
 import argon2 from 'argon2';
 import { eq } from 'drizzle-orm';
-import { fileURLToPath } from 'node:url';
+
 import 'dotenv/config';
-import { createDb, getDatabaseUrl } from './index.js';
 import { adminUsers, featureToggles, plans, systemConfig, users } from './schema/index.js';
+
+import { createDb, getDatabaseUrl } from './index.js';
 
 const ARGON2_OPTS = { type: argon2.argon2id } as const;
 

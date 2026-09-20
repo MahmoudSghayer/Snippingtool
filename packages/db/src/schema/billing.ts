@@ -2,6 +2,7 @@
 
 import { isNull, relations } from 'drizzle-orm';
 import { boolean, index, integer, jsonb, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+
 import {
   couponTypeEnum,
   createdAt,
@@ -13,8 +14,8 @@ import {
   timestamptz,
   updatedAt,
 } from './common.js';
-import { users } from './users.js';
 import { subscriptions } from './subscriptions.js';
+import { users } from './users.js';
 
 export const coupons = pgTable(
   'coupons',

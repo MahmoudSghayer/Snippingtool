@@ -1,8 +1,9 @@
 import 'dotenv/config';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { createTestDb, closeTestDb, resetDatabase } from '../src/test-utils';
+
 import { users } from '../src/schema/index';
+import { createTestDb, closeTestDb, resetDatabase } from '../src/test-utils';
 
 describe('partial unique index on users.email (soft-delete aware)', () => {
   const { db, sql } = createTestDb();

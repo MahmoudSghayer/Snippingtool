@@ -4,9 +4,11 @@
 // intended for local dev and the test database, never production.
 
 import postgres from 'postgres';
+
 import 'dotenv/config';
-import { getDatabaseUrl } from './index.js';
 import { up } from './migrate.js';
+
+import { getDatabaseUrl } from './index.js';
 
 async function main() {
   const url = getDatabaseUrl();

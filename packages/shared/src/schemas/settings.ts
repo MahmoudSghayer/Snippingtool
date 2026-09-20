@@ -14,6 +14,12 @@ export const GOVERNOR_ABSOLUTE_LIMITS = {
   sessionLengthMinutes: { min: 5, max: 240 },
   buyToSearchRatio: { min: 0.01, max: 1 },
   cooldownSeconds: { min: 0, max: 3600 },
+  /** Coins spent on `buy` actions per rolling hour. Added for
+   * `apps/extension`'s `engine/governor.ts` (docs/01-architecture.md,
+   * "safety governor": "coin flow/hour against thresholds") — additive, so
+   * existing `GovernorSettings` documents gain a required field with a
+   * shipped default (`DEFAULT_GOVERNOR_SETTINGS` below), not a breaking one. */
+  maxCoinFlowPerHour: { min: 1_000, max: 5_000_000 },
 } as const;
 
 const boundedInt = (bound: { min: number; max: number }) =>
@@ -31,6 +37,7 @@ export const governorSettingsSchema = z.object({
   sessionLengthMinutes: boundedInt(GOVERNOR_ABSOLUTE_LIMITS.sessionLengthMinutes),
   buyToSearchRatio: boundedFloat(GOVERNOR_ABSOLUTE_LIMITS.buyToSearchRatio),
   cooldownSeconds: boundedInt(GOVERNOR_ABSOLUTE_LIMITS.cooldownSeconds),
+  maxCoinFlowPerHour: boundedInt(GOVERNOR_ABSOLUTE_LIMITS.maxCoinFlowPerHour),
 });
 export type GovernorSettings = z.infer<typeof governorSettingsSchema>;
 
@@ -39,6 +46,7 @@ export const DEFAULT_GOVERNOR_SETTINGS: GovernorSettings = {
   sessionLengthMinutes: 90,
   buyToSearchRatio: 0.35,
   cooldownSeconds: 20,
+  maxCoinFlowPerHour: 300_000,
 };
 
 /** What the extension is trying to achieve — the ranker scores opportunities

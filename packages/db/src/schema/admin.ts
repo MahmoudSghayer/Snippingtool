@@ -1,7 +1,8 @@
 // Matches migrations/0004_admin.sql, 0019_moderation.sql.
 
 import { isNull, relations } from 'drizzle-orm';
-import { index, jsonb, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { index, jsonb, pgTable, text, uuid } from 'drizzle-orm/pg-core';
+
 import {
   adminRoleEnum,
   banTypeEnum,

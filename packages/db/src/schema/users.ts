@@ -1,11 +1,12 @@
 // Matches migrations/0003_users.sql.
 
 import { isNull, relations } from 'drizzle-orm';
-import { customType, index, integer, pgTable, smallint, text, uniqueIndex, uuid, inet } from 'drizzle-orm/pg-core';
+import { customType, index, inet, pgTable, smallint, text, uniqueIndex } from 'drizzle-orm/pg-core';
+
+import { adminUsers } from './admin.js';
+import { devices } from './auth.js';
 import { citext, createdAt, deletedAt, idPk, rowVersion, timestamptz, updatedAt, userRoleEnum, userStatusEnum } from './common.js';
 import { subscriptions } from './subscriptions.js';
-import { devices } from './auth.js';
-import { adminUsers } from './admin.js';
 
 // bytea passthrough for the encrypted TOTP secret; Buffer in/out.
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({

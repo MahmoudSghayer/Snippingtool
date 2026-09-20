@@ -2,9 +2,10 @@
 
 import { isNull, relations } from 'drizzle-orm';
 import { index, inet, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+
 import { createdAt, deletedAt, deviceStatusEnum, idPk, rowVersion, timestamptz, updatedAt } from './common.js';
-import { users } from './users.js';
 import { licenses } from './subscriptions.js';
+import { users } from './users.js';
 
 export const devices = pgTable(
   'devices',

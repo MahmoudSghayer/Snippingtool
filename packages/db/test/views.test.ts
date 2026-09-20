@@ -1,8 +1,9 @@
 import 'dotenv/config';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { createTestDb, closeTestDb, resetDatabase } from '../src/test-utils';
+
 import { plans, subscriptions, users } from '../src/schema/index';
 import { vMrr, vArr } from '../src/schema/system';
+import { createTestDb, closeTestDb, resetDatabase } from '../src/test-utils';
 
 describe('v_mrr / v_arr', () => {
   const { db, sql } = createTestDb();

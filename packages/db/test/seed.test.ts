@@ -1,8 +1,9 @@
 import 'dotenv/config';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { createTestDb, closeTestDb, getTestDatabaseUrl, resetDatabase } from '../src/test-utils';
+
 import { adminUsers, featureToggles, plans, systemConfig, users } from '../src/schema/index';
 import { seed } from '../src/seed';
+import { createTestDb, closeTestDb, getTestDatabaseUrl, resetDatabase } from '../src/test-utils';
 
 describe('seed is idempotent', () => {
   const { db, sql } = createTestDb();

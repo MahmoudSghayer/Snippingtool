@@ -14,16 +14,16 @@ export * from './settings.js';
 export * from './system.js';
 export * from './types.js';
 
-import * as common from './common.js';
-import * as users from './users.js';
-import * as auth from './auth.js';
-import * as admin from './admin.js';
-import * as subscriptions from './subscriptions.js';
-import * as billing from './billing.js';
 import * as activity from './activity.js';
-import * as trading from './trading.js';
+import * as admin from './admin.js';
+import * as auth from './auth.js';
+import * as billing from './billing.js';
+import * as common from './common.js';
 import * as settings from './settings.js';
+import * as subscriptions from './subscriptions.js';
 import * as system from './system.js';
+import * as trading from './trading.js';
+import * as users from './users.js';
 
 export const schema = {
   ...common,
