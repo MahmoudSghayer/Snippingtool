@@ -3,9 +3,8 @@
 // PERMISSION_MATRIX and writes an audit_logs row (before/after) via
 // recordAudit, plus an admin_actions row for the admin-specific action log.
 
-import { and, desc, eq, ilike, lt } from 'drizzle-orm';
-import fp from 'fastify-plugin';
-import type { ZodTypeProvider } from 'fastify-type-provider-zod';
+
+import { adminActions, users, type User } from '@sl/db';
 import {
   adminSuspendUserRequestSchema,
   paginatedResponseSchema,
@@ -13,19 +12,20 @@ import {
   userDtoSchema,
   type UserDto,
 } from '@sl/shared';
+import { and, desc, eq, ilike, lt } from 'drizzle-orm';
+import fp from 'fastify-plugin';
 import { z } from 'zod';
 
-import { adminActions, users, type User } from '@sl/db';
-
+import { forceLogoutNoticeHtml, forceLogoutNoticeText } from '../../emails/templates.js';
 import { recordAudit } from '../../lib/audit.js';
 import { AppErrors } from '../../lib/errors.js';
 import { newId } from '../../lib/ids.js';
 import { decodeCursor, encodeCursor } from '../../lib/pagination.js';
-import { forceLogoutNoticeHtml, forceLogoutNoticeText } from '../../emails/templates.js';
 import { publishToUser } from '../../ws/publish.js';
 import { revokeAllUserSessions, bumpUserVersion } from '../auth/repo.js';
 
 import type { FastifyInstance } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 
 function toDto(user: User): UserDto {
   return {

@@ -2,18 +2,18 @@
 // masking for anyone without config.write (read-only viewers still see that
 // a secret key exists, just not its value).
 
-import { eq } from 'drizzle-orm';
-import fp from 'fastify-plugin';
-import type { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { systemConfigDtoSchema } from '@sl/shared';
-import { z } from 'zod';
 
 import { systemConfig } from '@sl/db';
+import { systemConfigDtoSchema } from '@sl/shared';
+import { eq } from 'drizzle-orm';
+import fp from 'fastify-plugin';
+import { z } from 'zod';
 
 import { recordAudit } from '../../lib/audit.js';
 import { newId } from '../../lib/ids.js';
 
 import type { FastifyInstance } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 
 function toDto(row: typeof systemConfig.$inferSelect, canReveal: boolean) {
   return {

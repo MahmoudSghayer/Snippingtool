@@ -2,10 +2,9 @@
 // per-queue BullMQ depths, WS presence count, extension version
 // distribution, error rate.
 
+import { Queue } from 'bullmq';
 import { sql } from 'drizzle-orm';
 import fp from 'fastify-plugin';
-import type { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { Queue } from 'bullmq';
 import { Redis } from 'ioredis';
 import { z } from 'zod';
 
@@ -13,6 +12,7 @@ import { getErrorRate } from '../../lib/error-rate.js';
 import { countOnline } from '../../ws/presence.js';
 
 import type { FastifyInstance } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 
 function parseRedisInfo(info: string): Record<string, string> {
   const out: Record<string, string> = {};

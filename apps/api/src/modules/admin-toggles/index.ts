@@ -4,19 +4,19 @@
 // AND `user:{id}` for every currently-online user (best-effort: online set
 // only, not every user — offline clients pick it up on next heartbeat).
 
-import { eq } from 'drizzle-orm';
-import fp from 'fastify-plugin';
-import type { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { featureToggleDtoSchema, updateFeatureToggleRequestSchema } from '@sl/shared';
-import { z } from 'zod';
 
 import { featureToggles } from '@sl/db';
+import { featureToggleDtoSchema, updateFeatureToggleRequestSchema } from '@sl/shared';
+import { eq } from 'drizzle-orm';
+import fp from 'fastify-plugin';
+import { z } from 'zod';
 
 import { recordAudit } from '../../lib/audit.js';
 import { AppErrors } from '../../lib/errors.js';
 import { publishAdmin } from '../../ws/publish.js';
 
 import type { FastifyInstance } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 
 function toDto(row: typeof featureToggles.$inferSelect) {
   return {

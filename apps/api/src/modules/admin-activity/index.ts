@@ -1,16 +1,16 @@
 // /api/v1/admin/activity/* — activity monitoring: logins, searches, snipes,
 // errors, devices, IPs. Date range + cursor on every list.
 
+import { devices, ipActivity, searchActivity, snipingActivity, userActivity } from '@sl/db';
 import { and, desc, eq, gte, lte, lt } from 'drizzle-orm';
 import fp from 'fastify-plugin';
-import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 
-import { devices, ipActivity, searchActivity, snipingActivity, userActivity } from '@sl/db';
 
 import { decodeCursor, encodeCursor } from '../../lib/pagination.js';
 
 import type { FastifyInstance } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 
 const rangeQuery = z.object({
   from: z.string().datetime().optional(),

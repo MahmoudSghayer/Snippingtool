@@ -1,14 +1,13 @@
 // /api/v1/admin/audit — list/filter audit_logs, and stream a CSV export.
 
+import { auditLogs } from '@sl/db';
+import { auditLogEntrySchema, auditLogQuerySchema } from '@sl/shared';
 import { and, desc, eq, gte, lte } from 'drizzle-orm';
 import fp from 'fastify-plugin';
-import type { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { auditLogEntrySchema, auditLogQuerySchema } from '@sl/shared';
 import { z } from 'zod';
 
-import { auditLogs } from '@sl/db';
-
 import type { FastifyInstance } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 
 function toDto(row: typeof auditLogs.$inferSelect) {
   return {
