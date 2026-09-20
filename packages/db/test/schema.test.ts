@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 
 import { createTestDb, closeTestDb } from '../src/test-utils';
 

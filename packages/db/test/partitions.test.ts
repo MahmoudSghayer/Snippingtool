@@ -6,14 +6,14 @@ import { users, userActivity } from '../src/schema/index';
 import { createTestDb, closeTestDb, resetDatabase } from '../src/test-utils';
 
 describe('partition routing on user_activity', () => {
-  const { db, sql } = createTestDb();
+  const { db, sql: client } = createTestDb();
 
   beforeEach(async () => {
     await resetDatabase(db);
   });
 
   afterAll(async () => {
-    await closeTestDb(sql);
+    await closeTestDb(client);
   });
 
   it('routes a row to the partition matching its occurred_at month', async () => {
@@ -22,9 +22,10 @@ describe('partition routing on user_activity', () => {
 
     await db.insert(userActivity).values({ userId: user!.id, type: 'login', occurredAt: now });
 
-    const [row] = await sql<{ partition: string }[]>`
-      SELECT tableoid::regclass::text AS partition FROM user_activity WHERE user_id = ${user!.id}
-    `;
+    const [row] = await db
+      .select({ partition: sql<string>`tableoid::regclass::text` })
+      .from(userActivity)
+      .where(eq(userActivity.userId, user!.id));
     const expectedSuffix = `_y${now.getUTCFullYear()}m${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
     expect(row).toBeDefined();
     expect(row!.partition).toBe(`user_activity${expectedSuffix}`);
@@ -36,9 +37,10 @@ describe('partition routing on user_activity', () => {
 
     await db.insert(userActivity).values({ userId: user!.id, type: 'login', occurredAt: farFuture });
 
-    const [row] = await sql<{ partition: string }[]>`
-      SELECT tableoid::regclass::text AS partition FROM user_activity WHERE user_id = ${user!.id}
-    `;
+    const [row] = await db
+      .select({ partition: sql<string>`tableoid::regclass::text` })
+      .from(userActivity)
+      .where(eq(userActivity.userId, user!.id));
     expect(row!.partition).toBe('user_activity_default');
   });
 });

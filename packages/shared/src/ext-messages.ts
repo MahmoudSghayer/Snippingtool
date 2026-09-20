@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { filterCriteriaSchema } from './schemas/filters.js';
+
 /**
  * Typed message shapes for the extension's two internal channels. These are
  * the contract the TypeScript rewrite (docs/01-architecture.md, PHASE 6)
