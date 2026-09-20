@@ -58,7 +58,12 @@ const envSchema = z.object({
   // --- Rate limiting ---
   RATE_LIMIT_GLOBAL_MAX: z.coerce.number().int().positive().default(300),
   RATE_LIMIT_GLOBAL_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
-  RATE_LIMIT_LOGIN_MAX: z.coerce.number().int().positive().default(5),
+  // Coarse per-route/per-IP HTTP throttle (@fastify/rate-limit), deliberately
+  // looser than the 5-failure DB account lockout (users.failed_login_count /
+  // locked_until, see modules/auth) — that lockout is the primary
+  // brute-force defence per account; this is a blunter abuse guard against
+  // one IP hammering the route at all (any account, or none).
+  RATE_LIMIT_LOGIN_MAX: z.coerce.number().int().positive().default(20),
   RATE_LIMIT_LOGIN_WINDOW_MS: z.coerce.number().int().positive().default(900_000),
 
   // --- Extension distribution ---
@@ -74,6 +79,19 @@ export type Env = z.infer<typeof envSchema>;
 
 let cached: Env | undefined;
 
+/** Mirrors @sl/db's test-utils `getTestDatabaseUrl`: prefer an explicit
+ * TEST_DATABASE_URL, else swap DATABASE_URL's trailing path segment for
+ * `_test`. Applied automatically below so every consumer of
+ * `env.DATABASE_URL` (plugins/db.ts, jobs, scripts) transparently targets
+ * the test database under NODE_ENV=test without special-casing — this is
+ * the fix for a real incident during development: without it, an
+ * integration test's `resetDatabase()` truncated the *dev* database because
+ * nothing redirected DATABASE_URL. */
+function testDatabaseUrl(env: Env): string {
+  if (env.TEST_DATABASE_URL) return env.TEST_DATABASE_URL;
+  return env.DATABASE_URL.endsWith('_test') ? env.DATABASE_URL : `${env.DATABASE_URL}_test`;
+}
+
 /** Parses and validates `process.env` once, memoised. Throws a readable
  * error (via zod's message) if a required var is missing/malformed. */
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
@@ -83,7 +101,11 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     const message = parsed.error.issues.map((i) => `  - ${i.path.join('.')}: ${i.message}`).join('\n');
     throw new Error(`Invalid environment configuration:\n${message}`);
   }
-  cached = parsed.data;
+  const env = parsed.data;
+  if (env.NODE_ENV === 'test') {
+    env.DATABASE_URL = testDatabaseUrl(env);
+  }
+  cached = env;
   return cached;
 }
 

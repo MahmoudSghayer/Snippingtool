@@ -20,10 +20,12 @@ export default fp(
       redis: fastify.redis,
       nameSpace: 'rl:',
       keyGenerator: (request) => request.ip,
-      errorResponseBuilder: (_request, context) => {
-        const err = AppErrors.rateLimited(Math.ceil(context.ttl / 1000));
-        return { code: err.code, message: err.message, details: err.details, requestId: _request.id };
-      },
+      // @fastify/rate-limit `throw`s whatever this returns (see its
+      // source — not a `reply.send()`), so returning the AppError instance
+      // itself means it lands in plugins/error-handler.ts's `isAppError`
+      // branch with the correct status/code/message/details, exactly like
+      // an AppError thrown from a route handler.
+      errorResponseBuilder: (_request, context) => AppErrors.rateLimited(Math.ceil(context.ttl / 1000)),
     });
   },
   { name: 'rate-limit', dependencies: ['config', 'redis'] },

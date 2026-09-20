@@ -5,9 +5,51 @@ import {
   couponValidateResponseSchema,
   entitlementSnapshotSchema,
   licenseValidateRequestSchema,
+  paymentDtoSchema,
   planCreateRequestSchema,
   planUpdateRequestSchema,
 } from '../../src/schemas/subscriptions.js';
+
+describe('paymentDtoSchema', () => {
+  it('accepts a succeeded stripe payment', () => {
+    const result = paymentDtoSchema.safeParse({
+      id: '0198f2b1-0000-7000-8000-000000000001',
+      provider: 'stripe',
+      amountCents: 999,
+      currency: 'usd',
+      status: 'succeeded',
+      invoiceUrl: 'https://invoice.stripe.com/i/abc',
+      createdAt: '2026-09-20T00:00:00.000Z',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts a null invoiceUrl', () => {
+    const result = paymentDtoSchema.safeParse({
+      id: '0198f2b1-0000-7000-8000-000000000001',
+      provider: 'manual',
+      amountCents: 0,
+      currency: 'usd',
+      status: 'succeeded',
+      invoiceUrl: null,
+      createdAt: '2026-09-20T00:00:00.000Z',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects an invalid status', () => {
+    const result = paymentDtoSchema.safeParse({
+      id: '0198f2b1-0000-7000-8000-000000000001',
+      provider: 'stripe',
+      amountCents: 999,
+      currency: 'usd',
+      status: 'bogus',
+      invoiceUrl: null,
+      createdAt: '2026-09-20T00:00:00.000Z',
+    });
+    expect(result.success).toBe(false);
+  });
+});
 
 describe('entitlementSnapshotSchema', () => {
   it('accepts a fully-populated snapshot', () => {

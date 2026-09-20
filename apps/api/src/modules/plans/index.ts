@@ -3,21 +3,25 @@
 // page should render them. No auth required — this is marketing-page data.
 
 import { plans } from '@sl/db';
-import { planDtoSchema } from '@sl/shared';
+import { planDtoSchema, type PlanDto } from '@sl/shared';
 import { and, eq, isNull } from 'drizzle-orm';
 import fp from 'fastify-plugin';
 import { z } from 'zod';
 
 import type { FastifyInstance } from 'fastify';
 
-export function toPlanDto(plan: typeof plans.$inferSelect): unknown {
+/** `plan.interval` is stored as plain `text` (DB-level `CHECK` constrains it
+ * to these five values — see `02-database.md` §6.3), so Drizzle infers
+ * `string`, not the literal union `PlanDto` wants; the cast documents that
+ * the constraint is what makes it safe, not the TS type alone. */
+export function toPlanDto(plan: typeof plans.$inferSelect): PlanDto {
   return {
     id: plan.id,
     code: plan.code,
     name: plan.name,
     priceCents: plan.priceCents,
     currency: plan.currency,
-    interval: plan.interval,
+    interval: plan.interval as PlanDto['interval'],
     deviceLimit: plan.deviceLimit,
     features: Object.entries(plan.features ?? {})
       .filter(([, enabled]) => Boolean(enabled))

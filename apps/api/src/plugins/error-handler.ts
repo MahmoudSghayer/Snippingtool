@@ -7,6 +7,7 @@
 import fp from 'fastify-plugin';
 import { hasZodFastifySchemaValidationErrors } from 'fastify-type-provider-zod';
 
+import { recordError } from '../lib/error-rate.js';
 import { AppError, isAppError } from '../lib/errors.js';
 
 import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -16,6 +17,7 @@ export default fp(async function errorHandlerPlugin(fastify: FastifyInstance) {
     if (isAppError(error)) {
       if (error.status >= 500) {
         request.log.error({ err: error, code: error.code }, error.message);
+        void recordError(fastify.redis).catch(() => undefined);
       } else {
         request.log.info({ err: error, code: error.code }, error.message);
       }
@@ -50,6 +52,7 @@ export default fp(async function errorHandlerPlugin(fastify: FastifyInstance) {
     }
 
     request.log.error({ err: error }, 'Unhandled error');
+    void recordError(fastify.redis).catch(() => undefined);
     return reply.status(500).send({
       code: 'INTERNAL',
       message: 'Internal server error.',

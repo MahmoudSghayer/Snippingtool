@@ -16,10 +16,30 @@ declare module 'fastify' {
   }
 }
 
+// Test isolation: a dedicated Redis logical DB (SELECT), not a dev/test
+// shared DB 0 — this is what NODE_ENV=test connects to below. A first
+// attempt at this used ioredis's `keyPrefix` instead, applied uniformly to
+// every command; that broke the moment a module handed the *same* prefixed
+// client to BullMQ (`new Queue(name, { connection: fastify.redis })` — used
+// by the health module's readiness probe, and by admin-system's queue-depth
+// inspection), since BullMQ refuses an ioredis connection carrying a
+// `keyPrefix` ("use the prefix option instead") — it manages its own key
+// namespacing and the two conflict. A separate logical DB sidesteps the
+// class of problem entirely: every command (including BullMQ's, and
+// SUBSCRIBE/PUBLISH channel names) is naturally isolated with zero
+// per-library special-casing, and cleanup is one FLUSHDB. Fixed index
+// rather than random since this repo's tests run sequentially
+// (fileParallelism: false) — see src/test/global-setup.ts, which FLUSHDBs
+// this index once before every test run to also clear any state left by a
+// crashed previous run.
+const TEST_REDIS_DB = 15;
+
 export default fp(
   async function redisPlugin(fastify: FastifyInstance) {
-    const redis = new Redis(fastify.config.REDIS_URL, { maxRetriesPerRequest: null, lazyConnect: false });
-    const redisSub = new Redis(fastify.config.REDIS_URL, { maxRetriesPerRequest: null, lazyConnect: false });
+    const db = fastify.config.NODE_ENV === 'test' ? TEST_REDIS_DB : undefined;
+
+    const redis = new Redis(fastify.config.REDIS_URL, { maxRetriesPerRequest: null, lazyConnect: false, db });
+    const redisSub = new Redis(fastify.config.REDIS_URL, { maxRetriesPerRequest: null, lazyConnect: false, db });
 
     redis.on('error', (err) => fastify.log.error({ err }, 'redis connection error'));
     redisSub.on('error', (err) => fastify.log.error({ err }, 'redis pub/sub connection error'));

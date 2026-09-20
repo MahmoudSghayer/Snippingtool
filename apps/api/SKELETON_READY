@@ -173,14 +173,34 @@ export default defineJob({
 Integration tests live in `src/modules/<name>/__tests__/*.test.ts`
 (`vitest.config.ts` includes `src/**/__tests__/*.test.ts`, runs against the
 real `TEST_DATABASE_URL` Postgres and real local Redis, `fileParallelism:
-false` since files share test-DB state). Use `@sl/db`'s
-`resetDatabase(db)`/`migrateTestDatabase()` (already applied once via
-`src/test/global-setup.ts`) between tests, and `buildApp()` +
-`app.inject({ method, url, payload, headers })` — see
-`src/modules/auth/__tests__/register.test.ts` for the pattern (build app
-once per file in `beforeAll`, `resetDatabase` in `beforeEach`). For Redis,
-either reuse `app.redis` with a per-test-run key prefix you flush in
-`afterAll`, or connect your own `ioredis` client the same way.
+false` since files share test-DB state). Use `@sl/db/test-utils`'s
+`resetDatabase(db)` (note the subpath — `@sl/db`'s own `package.json`
+`exports` didn't originally expose `test-utils`; this agent added that
+subpath, additively, since it's needed from outside the package) between
+tests, and `buildApp()` + `app.inject({ method, url, payload, headers,
+remoteAddress })` — see `src/modules/auth/__tests__/auth.test.ts` for the
+pattern (build app once per file in `beforeAll`, `resetDatabase` in
+`beforeEach`, and give each `it()` its own `remoteAddress` via a small
+`nextIp()` counter so one test's IP-based rate limiting never leaks into
+another's).
+
+**Redis test isolation is a dedicated logical DB (`SELECT 15`), not a key
+prefix.** `plugins/redis.ts` connects to Redis DB 15 whenever
+`NODE_ENV=test` (vitest sets this by default) instead of DB 0 — so
+`app.redis`/`app.redisSub` are already isolated from dev data and from each
+other's runs without you doing anything, and `src/test/global-setup.ts`
+`FLUSHDB`s index 15 once before the whole suite runs. **This was a key
+prefix (`ioredis`'s `keyPrefix` option) in an earlier version of this
+skeleton — it was changed after discovering `keyPrefix` breaks BullMQ**
+(`new Queue(name, { connection: <prefixed client> })` throws "ioredis does
+not support ioredis prefixes, use the prefix option instead"), which both
+the health module's readiness probe and (per your admin-system module's
+"queue depths per BullMQ queue" requirement) your own code will hit if you
+ever pass `fastify.redis` to `new Queue()`/`new Worker()` — with the DB-index
+approach that now just works, no special-casing needed. If you connect your
+own extra `ioredis` client instead of reusing `fastify.redis`, connect it to
+the same DB 15 under test (`db: fastify.config.NODE_ENV === 'test' ? 15 :
+undefined`) for the same isolation.
 
 ## Env additions
 

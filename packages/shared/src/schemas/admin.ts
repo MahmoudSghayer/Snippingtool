@@ -11,7 +11,10 @@ export const auditLogEntrySchema = z.object({
   actorId: z.string().uuid().nullable(),
   action: z.string().min(1).max(120),
   entityType: z.string().min(1).max(80),
-  entityId: z.string().min(1).max(80),
+  // Nullable: audit_logs.entity_id is a nullable uuid in the DB (some
+  // system-actor actions have no single target entity) — widened here
+  // (additive) to match; existing string-only consumers keep working.
+  entityId: z.string().min(1).max(80).nullable(),
   before: z.record(z.unknown()).nullable(),
   after: z.record(z.unknown()).nullable(),
   diff: z.record(z.unknown()).nullable(),

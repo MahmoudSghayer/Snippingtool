@@ -77,16 +77,33 @@ export async function findSessionById(db: Database, id: string) {
   return db.query.sessions.findFirst({ where: eq(sessions.id, id) });
 }
 
+/**
+ * Refresh rotation: the previous session row is revoked (reason 'rotated'),
+ * never reused in place — a *new* row is inserted with the new hash, same
+ * family/user/device. This is deliberate, not incidental: reuse detection
+ * (see service.ts `refresh()`) works by looking up a *presented* refresh
+ * token's hash and checking whether the row it matches is already revoked.
+ * If rotation instead overwrote the hash on the same row, the old hash
+ * would match nothing at all after rotation (not "found but revoked"),
+ * making reuse silently indistinguishable from "never existed" — a real bug
+ * caught by this module's own integration test.
+ */
 export async function rotateSession(
   db: Database,
-  sessionId: string,
+  previous: { id: string; userId: string; deviceId: string | null; familyId: string; ip: string | null; userAgent: string | null },
   newRefreshTokenHash: string,
   expiresAt: Date,
-): Promise<void> {
-  await db
-    .update(sessions)
-    .set({ refreshTokenHash: newRefreshTokenHash, expiresAt, lastUsedAt: new Date() })
-    .where(eq(sessions.id, sessionId));
+): Promise<string> {
+  await revokeSession(db, previous.id, 'rotated');
+  return createSession(db, {
+    userId: previous.userId,
+    deviceId: previous.deviceId,
+    refreshTokenHash: newRefreshTokenHash,
+    familyId: previous.familyId,
+    ip: previous.ip,
+    userAgent: previous.userAgent,
+    expiresAt,
+  });
 }
 
 export async function revokeSession(db: Database, sessionId: string, reason: string): Promise<void> {

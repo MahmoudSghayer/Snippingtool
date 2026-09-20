@@ -18,6 +18,7 @@
 import { SignJWT, jwtVerify, importPKCS8, importSPKI } from 'jose';
 
 import { fastHash, randomToken } from './crypto.js';
+import { newId } from './ids.js';
 
 export interface AccessTokenClaims {
   sub: string; // userId
@@ -35,17 +36,31 @@ export const MFA_TICKET_TTL_SECONDS = 5 * 60;
 
 type JoseKey = Awaited<ReturnType<typeof importPKCS8>>;
 
-let cachedPrivateKey: Promise<JoseKey> | undefined;
-let cachedPublicKey: Promise<JoseKey> | undefined;
+// Keyed by the PEM string itself (not a single global slot) — in production
+// there is exactly one JWT_PRIVATE_KEY/PUBLIC_KEY per process, so this cache
+// never grows past one entry each, but keying by value (rather than
+// memoising unconditionally on first call) keeps this correct for anything
+// that legitimately verifies against more than one key value, e.g. tests
+// and any future key-rotation support.
+const privateKeyCache = new Map<string, Promise<JoseKey>>();
+const publicKeyCache = new Map<string, Promise<JoseKey>>();
 
 function getPrivateKey(pem: string) {
-  cachedPrivateKey ??= importPKCS8(pem, 'EdDSA');
-  return cachedPrivateKey;
+  let cached = privateKeyCache.get(pem);
+  if (!cached) {
+    cached = importPKCS8(pem, 'EdDSA');
+    privateKeyCache.set(pem, cached);
+  }
+  return cached;
 }
 
 function getPublicKey(pem: string) {
-  cachedPublicKey ??= importSPKI(pem, 'EdDSA');
-  return cachedPublicKey;
+  let cached = publicKeyCache.get(pem);
+  if (!cached) {
+    cached = importSPKI(pem, 'EdDSA');
+    publicKeyCache.set(pem, cached);
+  }
+  return cached;
 }
 
 export async function signAccessToken(claims: AccessTokenClaims, privateKeyPem: string): Promise<string> {
@@ -77,6 +92,7 @@ export function generateRefreshToken(): { token: string; hash: string } {
   return { token, hash: fastHash(token) };
 }
 
+/** `sessions.family_id` is a `uuid` column — a uuidv7, not an opaque token. */
 export function generateFamilyId(): string {
-  return randomToken(16);
+  return newId();
 }

@@ -13,13 +13,22 @@ export const SUBSCRIPTION_STATUSES = [
 ] as const;
 export type SubscriptionStatus = (typeof SUBSCRIPTION_STATUSES)[number];
 
+/** `code` and `interval` are plain strings, not restricted to the fixed
+ * `PLAN_CODES`/a 3-value interval enum — `plans` is admin-editable data
+ * (docs/05-subscriptions.md §1: admins can create plans with any code and
+ * any of the five DB-level interval values, e.g. a one-off
+ * `founders-2026` plan on a `week` interval), so this public DTO must be
+ * able to represent one. Code that specifically wants "one of the five
+ * fixed launch plans" imports `PLAN_CODES`/`isPlanCode` from
+ * `constants/plans.ts` and narrows there instead of relying on this schema
+ * to do it. */
 export const planDtoSchema = z.object({
   id: z.string().uuid(),
-  code: z.enum(PLAN_CODES),
+  code: z.string().min(1).max(40),
   name: z.string().min(1).max(80),
   priceCents: z.number().int().min(0),
   currency: z.string().length(3),
-  interval: z.enum(['month', 'year', 'one_time']),
+  interval: z.enum(['day', 'week', 'month', 'year', 'one_time']),
   deviceLimit: z.number().int().min(1),
   features: z.array(z.string()),
   isLifetime: z.boolean(),
@@ -72,6 +81,20 @@ export const billingPortalResponseSchema = z.object({
 });
 export type BillingPortalResponse = z.infer<typeof billingPortalResponseSchema>;
 
+export const PAYMENT_STATUSES = ['pending', 'succeeded', 'failed', 'refunded', 'disputed'] as const;
+export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
+
+export const paymentDtoSchema = z.object({
+  id: z.string().uuid(),
+  provider: z.enum(['stripe', 'manual']),
+  amountCents: z.number().int(),
+  currency: z.string(),
+  status: z.enum(PAYMENT_STATUSES),
+  invoiceUrl: z.string().url().nullable(),
+  createdAt: z.string().datetime(),
+});
+export type PaymentDto = z.infer<typeof paymentDtoSchema>;
+
 export const adminGrantSubscriptionRequestSchema = z.object({
   userId: z.string().uuid(),
   planCode: z.enum(PLAN_CODES),
@@ -111,7 +134,10 @@ export const couponDtoSchema = z.object({
   code: z.string(),
   type: z.enum(COUPON_TYPES),
   value: z.number(),
-  planCodes: z.array(z.enum(PLAN_CODES)),
+  /** Plain strings, not restricted to `PLAN_CODES` — a coupon can restrict
+   * itself to any admin-created plan (`planDtoSchema`'s `code` is widened
+   * for the same reason). Empty array = "every plan". */
+  planCodes: z.array(z.string()),
   maxRedemptions: z.number().int().positive().nullable(),
   redeemedCount: z.number().int().min(0),
   expiresAt: z.string().datetime().nullable(),

@@ -46,7 +46,14 @@ export interface AuthContext {
 
 const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000;
 const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000;
-const LOGIN_RATE_LIMIT_MAX = 5;
+// Deliberately looser than the 5-failure DB account lockout
+// (lib/lockout.ts's LOCKOUT_THRESHOLD): this Redis sliding window is a
+// coarser abuse guard (catches one IP hammering many *different* accounts,
+// which the per-account lockout can't see), not the primary brute-force
+// defence — the per-account lockout is. Keeping it above the lockout
+// threshold means the account-specific 423 fires before this 429 does for
+// the common "one attacker, one account" case.
+const LOGIN_RATE_LIMIT_MAX = 20;
 const LOGIN_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 
 function verifyTicketKey(ticket: string): string {
@@ -156,12 +163,21 @@ export async function completeLogin(
     expiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_MS),
   });
 
+  // `bump_row_version` fires on *every* UPDATE to `users`, including this
+  // benign lastLoginAt/lastIp bookkeeping one — so it must happen BEFORE the
+  // token is signed, using the row_version it returns, or the access token
+  // this call issues would carry an already-stale `ver` claim and fail
+  // `authenticate`'s row_version check on its very first use.
+  const [updated] = await ctx.db
+    .update(users)
+    .set({ lastLoginAt: new Date(), lastIp: ip })
+    .where(eq(users.id, user.id))
+    .returning({ rowVersion: users.rowVersion });
+
   const accessToken = await signAccessToken(
-    { sub: user.id, sid: sessionId, did: deviceId, role: user.role, plan: entitlements.plan, ver: user.rowVersion },
+    { sub: user.id, sid: sessionId, did: deviceId, role: user.role, plan: entitlements.plan, ver: updated?.rowVersion ?? user.rowVersion },
     ctx.jwtPrivateKey,
   );
-
-  await ctx.db.update(users).set({ lastLoginAt: new Date(), lastIp: ip }).where(eq(users.id, user.id));
 
   return { status: 'ok', accessToken, refreshToken: refresh.token, expiresIn: ACCESS_TOKEN_TTL_SECONDS };
 }
@@ -287,11 +303,16 @@ export async function refresh(
   if (!user || user.status !== 'active') throw AppErrors.sessionRevoked();
 
   const newRefresh = generateRefreshToken();
-  await repo.rotateSession(ctx.db, session.id, newRefresh.hash, new Date(Date.now() + REFRESH_TOKEN_TTL_MS));
+  const newSessionId = await repo.rotateSession(
+    ctx.db,
+    { id: session.id, userId: session.userId, deviceId: session.deviceId, familyId: session.familyId, ip: session.ip, userAgent: session.userAgent },
+    newRefresh.hash,
+    new Date(Date.now() + REFRESH_TOKEN_TTL_MS),
+  );
 
   const entitlements = await ctx.entitlements.getEntitlements(user.id);
   const accessToken = await signAccessToken(
-    { sub: user.id, sid: session.id, did: session.deviceId, role: user.role, plan: entitlements.plan, ver: user.rowVersion },
+    { sub: user.id, sid: newSessionId, did: session.deviceId, role: user.role, plan: entitlements.plan, ver: user.rowVersion },
     ctx.jwtPrivateKey,
   );
 
