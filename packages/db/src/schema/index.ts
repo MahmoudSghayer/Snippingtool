@@ -12,6 +12,7 @@ export * from './activity';
 export * from './trading';
 export * from './settings';
 export * from './system';
+export * from './types';
 
 import * as common from './common';
 import * as users from './users';
