@@ -15,13 +15,52 @@
 import { plans, type Database } from '@sl/db';
 import { eq } from 'drizzle-orm';
 
-
 const PLAN_SEEDS = [
-  { code: 'trial', name: 'Trial', priceCents: 0, interval: 'month', isLifetime: false, deviceLimit: 1, sortOrder: 0 },
-  { code: 'basic', name: 'Basic', priceCents: 499, interval: 'month', isLifetime: false, deviceLimit: 1, sortOrder: 1 },
-  { code: 'pro', name: 'Pro', priceCents: 999, interval: 'month', isLifetime: false, deviceLimit: 2, sortOrder: 2 },
-  { code: 'ultimate', name: 'Ultimate', priceCents: 1999, interval: 'month', isLifetime: false, deviceLimit: 3, sortOrder: 3 },
-  { code: 'lifetime', name: 'Lifetime (Founders)', priceCents: 9999, interval: 'one_time', isLifetime: true, deviceLimit: 3, sortOrder: 4 },
+  {
+    code: 'trial',
+    name: 'Trial',
+    priceCents: 0,
+    interval: 'month',
+    isLifetime: false,
+    deviceLimit: 1,
+    sortOrder: 0,
+  },
+  {
+    code: 'basic',
+    name: 'Basic',
+    priceCents: 499,
+    interval: 'month',
+    isLifetime: false,
+    deviceLimit: 1,
+    sortOrder: 1,
+  },
+  {
+    code: 'pro',
+    name: 'Pro',
+    priceCents: 999,
+    interval: 'month',
+    isLifetime: false,
+    deviceLimit: 2,
+    sortOrder: 2,
+  },
+  {
+    code: 'ultimate',
+    name: 'Ultimate',
+    priceCents: 1999,
+    interval: 'month',
+    isLifetime: false,
+    deviceLimit: 3,
+    sortOrder: 3,
+  },
+  {
+    code: 'lifetime',
+    name: 'Lifetime (Founders)',
+    priceCents: 9999,
+    interval: 'one_time',
+    isLifetime: true,
+    deviceLimit: 3,
+    sortOrder: 4,
+  },
 ] as const;
 
 export async function reseedPlans(db: Database): Promise<void> {

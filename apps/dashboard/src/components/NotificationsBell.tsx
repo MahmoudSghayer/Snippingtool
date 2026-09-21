@@ -1,8 +1,16 @@
-import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, EmptyState, IconButton , formatRelativeTime } from '@sl/ui';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+  EmptyState,
+  IconButton,
+  formatRelativeTime,
+} from '@sl/ui';
 import { useQuery } from '@tanstack/react-query';
 import { Bell } from 'lucide-react';
 import { useState } from 'react';
-
 
 import { api } from '@/api/client.js';
 
@@ -14,7 +22,9 @@ export function NotificationsBell() {
   const { data } = useQuery({
     queryKey: ['notifications'],
     queryFn: async () => {
-      const { data, error } = await api.GET('/api/v1/notifications', { params: { query: { limit: 10 } } });
+      const { data, error } = await api.GET('/api/v1/notifications', {
+        params: { query: { limit: 10 } },
+      });
       if (error) throw error;
       return data;
     },

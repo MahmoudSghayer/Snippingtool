@@ -113,14 +113,22 @@ export const adapterActRequestMessageSchema = z.object({
   channel: z.literal(ADAPTER_CHANNEL),
   kind: z.literal('act_request'),
   data: z.discriminatedUnion('action', [
-    z.object({ action: z.literal('search'), requestId: z.string().min(1), filter: filterCriteriaSchema }),
+    z.object({
+      action: z.literal('search'),
+      requestId: z.string().min(1),
+      filter: filterCriteriaSchema,
+    }),
     z.object({
       action: z.literal('buy'),
       requestId: z.string().min(1),
       tradeId: z.string().min(1),
       price: z.number().int().min(0),
     }),
-    z.object({ action: z.literal('readResult'), requestId: z.string().min(1), tradeId: z.string().min(1) }),
+    z.object({
+      action: z.literal('readResult'),
+      requestId: z.string().min(1),
+      tradeId: z.string().min(1),
+    }),
   ]),
 });
 export type AdapterActRequestMessage = z.infer<typeof adapterActRequestMessageSchema>;
@@ -331,8 +339,12 @@ export const extBackgroundTelemetryEnqueuePayloadSchema = z.discriminatedUnion('
   z.object({ kind: z.literal('sniping'), items: z.array(snipingAttemptSchema).max(500) }).strict(),
   z.object({ kind: z.literal('trades'), items: z.array(tradeSchema).max(500) }).strict(),
   z.object({ kind: z.literal('filterStats'), items: z.array(filterStatsSchema).max(200) }).strict(),
-  z.object({ kind: z.literal('riskEvents'), items: z.array(riskBudgetEventSchema).max(200) }).strict(),
-  z.object({ kind: z.literal('event'), items: z.array(extTelemetryPlainEventSchema).max(500) }).strict(),
+  z
+    .object({ kind: z.literal('riskEvents'), items: z.array(riskBudgetEventSchema).max(200) })
+    .strict(),
+  z
+    .object({ kind: z.literal('event'), items: z.array(extTelemetryPlainEventSchema).max(500) })
+    .strict(),
 ]);
 
 /** `governor.snapshotPush` — mirrors `engine/governor.ts`'s `RiskSnapshot`
@@ -364,4 +376,6 @@ export const extBackgroundGovernorSnapshotPushPayloadSchema = z
     killSwitchActive: z.boolean(),
   })
   .strict();
-export type ExtGovernorSnapshotPushPayload = z.infer<typeof extBackgroundGovernorSnapshotPushPayloadSchema>;
+export type ExtGovernorSnapshotPushPayload = z.infer<
+  typeof extBackgroundGovernorSnapshotPushPayloadSchema
+>;

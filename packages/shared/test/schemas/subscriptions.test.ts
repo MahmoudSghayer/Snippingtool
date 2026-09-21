@@ -181,7 +181,9 @@ describe('planCreateRequestSchema', () => {
 
 describe('planUpdateRequestSchema', () => {
   it('accepts a partial update', () => {
-    expect(planUpdateRequestSchema.safeParse({ isActive: false, reason: 'archiving' }).success).toBe(true);
+    expect(
+      planUpdateRequestSchema.safeParse({ isActive: false, reason: 'archiving' }).success,
+    ).toBe(true);
   });
 
   it('rejects an update missing a reason', () => {
@@ -191,7 +193,9 @@ describe('planUpdateRequestSchema', () => {
 
 describe('couponValidateRequestSchema / couponValidateResponseSchema', () => {
   it('accepts a validate request', () => {
-    expect(couponValidateRequestSchema.safeParse({ code: 'WELCOME10', planCode: 'pro' }).success).toBe(true);
+    expect(
+      couponValidateRequestSchema.safeParse({ code: 'WELCOME10', planCode: 'pro' }).success,
+    ).toBe(true);
   });
 
   it('accepts a valid response with no reason', () => {

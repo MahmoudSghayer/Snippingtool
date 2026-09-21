@@ -33,7 +33,11 @@ describe('open redirect: payments redirect targets must stay on DASHBOARD_ORIGIN
   });
 
   it('POST /payments/checkout rejects an off-origin successUrl', async () => {
-    const user = await createUserSession(app, 'redirect-checkout@example.com', 'redirect-fp-checkout-00000001');
+    const user = await createUserSession(
+      app,
+      'redirect-checkout@example.com',
+      'redirect-fp-checkout-00000001',
+    );
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/payments/checkout',
@@ -49,7 +53,11 @@ describe('open redirect: payments redirect targets must stay on DASHBOARD_ORIGIN
   });
 
   it('POST /payments/checkout rejects an off-origin cancelUrl even when successUrl is legitimate', async () => {
-    const user = await createUserSession(app, 'redirect-checkout-2@example.com', 'redirect-fp-checkout2-0000001');
+    const user = await createUserSession(
+      app,
+      'redirect-checkout-2@example.com',
+      'redirect-fp-checkout2-0000001',
+    );
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/payments/checkout',
@@ -65,7 +73,11 @@ describe('open redirect: payments redirect targets must stay on DASHBOARD_ORIGIN
   });
 
   it('rejects a successUrl that merely starts with a similar-looking string but is a different origin (e.g. DASHBOARD_ORIGIN as a subdomain suffix trick)', async () => {
-    const user = await createUserSession(app, 'redirect-checkout-3@example.com', 'redirect-fp-checkout3-0000001');
+    const user = await createUserSession(
+      app,
+      'redirect-checkout-3@example.com',
+      'redirect-fp-checkout3-0000001',
+    );
     const evilLookalike = `https://evil-${new URL(app.config.DASHBOARD_ORIGIN as string).host}.attacker.example`;
     const res = await app.inject({
       method: 'POST',
@@ -77,7 +89,11 @@ describe('open redirect: payments redirect targets must stay on DASHBOARD_ORIGIN
   });
 
   it('POST /payments/portal rejects an off-origin returnUrl', async () => {
-    const user = await createUserSession(app, 'redirect-portal@example.com', 'redirect-fp-portal-000000001');
+    const user = await createUserSession(
+      app,
+      'redirect-portal@example.com',
+      'redirect-fp-portal-000000001',
+    );
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/payments/portal',
@@ -92,7 +108,11 @@ describe('open redirect: payments redirect targets must stay on DASHBOARD_ORIGIN
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/payments/checkout',
-      payload: { planCode: 'basic', successUrl: 'https://evil.example.com', cancelUrl: 'https://evil.example.com' },
+      payload: {
+        planCode: 'basic',
+        successUrl: 'https://evil.example.com',
+        cancelUrl: 'https://evil.example.com',
+      },
     });
     expect(res.statusCode).toBe(401);
   });

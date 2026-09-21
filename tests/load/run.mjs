@@ -27,7 +27,13 @@ const dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(dirname, '..', '..');
 const artifactsDir = path.join(dirname, '.artifacts');
 
-const ALL_SCENARIOS = ['auth-login-refresh', 'activity-ingest', 'extension-heartbeat', 'admin-analytics-overview', 'profits-queries'];
+const ALL_SCENARIOS = [
+  'auth-login-refresh',
+  'activity-ingest',
+  'extension-heartbeat',
+  'admin-analytics-overview',
+  'profits-queries',
+];
 
 const [profile, ...requested] = process.argv.slice(2);
 if (!['smoke', 'soak', 'stress'].includes(profile)) {
@@ -50,7 +56,11 @@ async function main() {
 
   if (process.env.LOAD_SKIP_PROVISION !== '1') {
     console.warn('[load/run] provisioning fixtures...');
-    execFileSync('node', [path.join(dirname, 'setup', 'provision.mjs')], { stdio: 'inherit', cwd: dirname, env: process.env });
+    execFileSync('node', [path.join(dirname, 'setup', 'provision.mjs')], {
+      stdio: 'inherit',
+      cwd: dirname,
+      env: process.env,
+    });
   }
 
   const k6 = resolveK6();
@@ -59,7 +69,9 @@ async function main() {
   for (const scenario of scenarios) {
     const scriptPath = path.join(dirname, 'scenarios', `${scenario}.js`);
     if (!existsSync(scriptPath)) {
-      console.error(`[load/run] unknown scenario "${scenario}" (no ${path.relative(repoRoot, scriptPath)})`);
+      console.error(
+        `[load/run] unknown scenario "${scenario}" (no ${path.relative(repoRoot, scriptPath)})`,
+      );
       process.exitCode = 1;
       continue;
     }
@@ -67,11 +79,20 @@ async function main() {
     console.warn(`\n[load/run] === ${scenario} (${profile}) ===`);
 
     if (k6) {
-      const result = spawnSync(k6, ['run', `--summary-export=${summaryPath}`, scriptPath], { stdio: 'inherit', env });
+      const result = spawnSync(k6, ['run', `--summary-export=${summaryPath}`, scriptPath], {
+        stdio: 'inherit',
+        env,
+      });
       if (result.status !== 0) process.exitCode = 1;
     } else {
-      console.warn('[load/run] k6 not found ($K6_BIN / .tools/k6 / PATH) — falling back to autocannon. See tests/load/README.md "Installing k6".');
-      const result = spawnSync('node', [path.join(dirname, 'autocannon-fallback.mjs'), scenario, profile, summaryPath], { stdio: 'inherit', env });
+      console.warn(
+        '[load/run] k6 not found ($K6_BIN / .tools/k6 / PATH) — falling back to autocannon. See tests/load/README.md "Installing k6".',
+      );
+      const result = spawnSync(
+        'node',
+        [path.join(dirname, 'autocannon-fallback.mjs'), scenario, profile, summaryPath],
+        { stdio: 'inherit', env },
+      );
       if (result.status !== 0) process.exitCode = 1;
     }
   }

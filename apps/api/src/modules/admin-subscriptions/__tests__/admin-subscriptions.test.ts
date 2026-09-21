@@ -15,7 +15,11 @@ import { reseedPlans } from '../../../test/reseed-reference-data.js';
 
 import type { FastifyInstance } from 'fastify';
 
-async function createAdmin(app: FastifyInstance, adminRole: 'super_admin' | 'billing', email: string) {
+async function createAdmin(
+  app: FastifyInstance,
+  adminRole: 'super_admin' | 'billing',
+  email: string,
+) {
   const userId = newId();
   await app.db.insert(users).values({
     id: userId,
@@ -26,13 +30,21 @@ async function createAdmin(app: FastifyInstance, adminRole: 'super_admin' | 'bil
     totpEnabledAt: new Date(),
   });
   await app.db.insert(adminUsers).values({ id: newId(), userId, adminRole, permissions: {} });
-  const token = await signAccessToken({ sub: userId, sid: newId(), did: null, role: 'admin', plan: null, ver: 0 }, app.config.JWT_PRIVATE_KEY!);
+  const token = await signAccessToken(
+    { sub: userId, sid: newId(), did: null, role: 'admin', plan: null, ver: 0 },
+    app.config.JWT_PRIVATE_KEY!,
+  );
   return { userId, token };
 }
 
 async function createTargetUser(app: FastifyInstance, email: string) {
   const id = newId();
-  await app.db.insert(users).values({ id, email, passwordHash: await hashSecret('irrelevant-password-123'), emailVerifiedAt: new Date() });
+  await app.db.insert(users).values({
+    id,
+    email,
+    passwordHash: await hashSecret('irrelevant-password-123'),
+    emailVerifiedAt: new Date(),
+  });
   return id;
 }
 
@@ -70,7 +82,11 @@ describe('admin-subscriptions module', () => {
   });
 
   it('extend writes an audit_logs row with before/after reflecting the new current_period_end', async () => {
-    const { token, userId: adminUserId } = await createAdmin(app, 'super_admin', 'billing-admin2@example.com');
+    const { token, userId: adminUserId } = await createAdmin(
+      app,
+      'super_admin',
+      'billing-admin2@example.com',
+    );
     const targetId = await createTargetUser(app, 'extend-target@example.com');
 
     const activateRes = await app.inject({
@@ -81,7 +97,9 @@ describe('admin-subscriptions module', () => {
     });
     const subscriptionId = activateRes.json().id;
 
-    const beforeRow = await app.db.query.subscriptions.findFirst({ where: eq(subscriptions.id, subscriptionId) });
+    const beforeRow = await app.db.query.subscriptions.findFirst({
+      where: eq(subscriptions.id, subscriptionId),
+    });
 
     const extendRes = await app.inject({
       method: 'POST',
@@ -92,7 +110,8 @@ describe('admin-subscriptions module', () => {
     expect(extendRes.statusCode).toBe(200);
 
     const auditRows = await app.db.query.auditLogs.findMany({
-      where: (t, { eq: eqOp, and: andOp }) => andOp(eqOp(t.entityId, subscriptionId), eqOp(t.action, 'subscription.extend')),
+      where: (t, { eq: eqOp, and: andOp }) =>
+        andOp(eqOp(t.entityId, subscriptionId), eqOp(t.action, 'subscription.extend')),
     });
     expect(auditRows).toHaveLength(1);
     const row = auditRows[0]!;
@@ -105,7 +124,8 @@ describe('admin-subscriptions module', () => {
     expect(row.diff).toBeTruthy();
 
     const adminActionRows = await app.db.query.adminActions.findMany({
-      where: (t, { eq: eqOp, and: andOp }) => andOp(eqOp(t.targetId, subscriptionId), eqOp(t.action, 'subscription.extend')),
+      where: (t, { eq: eqOp, and: andOp }) =>
+        andOp(eqOp(t.targetId, subscriptionId), eqOp(t.action, 'subscription.extend')),
     });
     expect(adminActionRows).toHaveLength(1);
     expect(adminActionRows[0]!.reason).toBe('goodwill extension');

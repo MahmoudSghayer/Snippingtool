@@ -2,8 +2,8 @@
 
 Controls inventory for The Sniper's Ledger, mapped to code and tests.
 Companion documents: `docs/threat-model.md` (STRIDE decomposition, attack
-vectors, residual risks, non-goals — read that first for *why*; this
-document is *where and how*), `docs/01-architecture.md` §5 (trust-boundary
+vectors, residual risks, non-goals — read that first for _why_; this
+document is _where and how_), `docs/01-architecture.md` §5 (trust-boundary
 table), `docs/11-devops.md` (secrets management, TLS/network topology,
 backups, CI security jobs).
 
@@ -55,7 +55,7 @@ field has an explicit `.max()`.
   `packages/shared/test/strictness.test.ts` and
   `tests/security/src/mass-assignment.test.ts` both cover it now.
 - Route wiring: `apps/api/src/app.ts` sets `ajv: { customOptions:
-  { removeAdditional: false } }` — a request that fails validation 400s, it
+{ removeAdditional: false } }` — a request that fails validation 400s, it
   is never silently coerced into something the schema would have accepted.
 
 ## 2. SQL injection prevention
@@ -71,7 +71,7 @@ pressure only has to fail to notice one of three):
    `` sql`...${x}...` `` anywhere in the codebase. Runs in every package's
    `lint` script.
 2. **Semgrep** — `.github/semgrep/rules.yml`'s `no-raw-sql-string-
-   interpolation` rule (same pattern, different tool, catches anything the
+interpolation` rule (same pattern, different tool, catches anything the
    TS-aware ESLint rule might miss) — run in CI's `security-scan` job
    (`docs/11-devops.md`).
 3. **Runtime payload tests** — `tests/security/src/injection.test.ts`
@@ -145,13 +145,13 @@ cross-site form submission), so bearer sessions are exempt by construction.
 Tiered, composed (a request is checked against the global default **and**
 its route's own tier, not one or the other):
 
-| Tier | Scope | Limit | Source |
-|---|---|---|---|
-| Global default | Every route (per IP+user, `plugins/rate-limit.ts`) | `RATE_LIMIT_GLOBAL_MAX`/`_WINDOW_MS` (300/60s default) | `config/env.ts` |
-| Auth (tight) | `/auth/login`, `/auth/register`, `/auth/mfa/verify`, etc. | `RATE_LIMIT_LOGIN_MAX`/`_WINDOW_MS` (20/900s default) | `modules/auth/index.ts` |
-| Ingest (moderate) | Extension batch endpoints (`activity`, `sniping`, `trades`, `filters`, `risk-events`, `extension/telemetry`, `extension/errors`) | `INGEST_RATE_LIMIT` (120/60s) | `lib/rate-limit-tiers.ts` |
-| Admin (moderate) | Every admin mutation route | `ADMIN_RATE_LIMIT` (60/60s) | `lib/rate-limit-tiers.ts` |
-| Health (exempt) | `/health/live`, `/health/ready` | No limit — infra polls these by design | `lib/rate-limit-tiers.ts`'s `HEALTH_EXEMPT_ROUTE_CONFIG` |
+| Tier              | Scope                                                                                                                            | Limit                                                  | Source                                                   |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ | -------------------------------------------------------- |
+| Global default    | Every route (per IP+user, `plugins/rate-limit.ts`)                                                                               | `RATE_LIMIT_GLOBAL_MAX`/`_WINDOW_MS` (300/60s default) | `config/env.ts`                                          |
+| Auth (tight)      | `/auth/login`, `/auth/register`, `/auth/mfa/verify`, etc.                                                                        | `RATE_LIMIT_LOGIN_MAX`/`_WINDOW_MS` (20/900s default)  | `modules/auth/index.ts`                                  |
+| Ingest (moderate) | Extension batch endpoints (`activity`, `sniping`, `trades`, `filters`, `risk-events`, `extension/telemetry`, `extension/errors`) | `INGEST_RATE_LIMIT` (120/60s)                          | `lib/rate-limit-tiers.ts`                                |
+| Admin (moderate)  | Every admin mutation route                                                                                                       | `ADMIN_RATE_LIMIT` (60/60s)                            | `lib/rate-limit-tiers.ts`                                |
+| Health (exempt)   | `/health/live`, `/health/ready`                                                                                                  | No limit — infra polls these by design                 | `lib/rate-limit-tiers.ts`'s `HEALTH_EXEMPT_ROUTE_CONFIG` |
 
 Account **lockout** (distinct from rate limiting — protects one account
 even from a rotating-IP attacker) is DB-backed:
@@ -207,7 +207,7 @@ Test references: `apps/api/src/modules/auth/__tests__/ip-monitoring.test.ts`.
   issue time. Any account-affecting write (force logout, password change,
   an admin action) bumps `row_version` via the DB's `bump_row_version`
   trigger; `authenticate` (`plugins/auth.ts`) re-checks the token's `ver`
-  claim against the *current* DB row on every request, so a previously
+  claim against the _current_ DB row on every request, so a previously
   issued token is rejected even before its 15-minute expiry.
 - **Refresh token**: opaque 32 random bytes, SHA-256-hashed at rest, 30-day
   TTL, rotated on every use. **Bound to device fingerprint + UA family**
@@ -232,16 +232,16 @@ Test references: `apps/api/src/modules/auth/__tests__/ip-monitoring.test.ts`.
 
 `@fastify/helmet` (`apps/api/src/plugins/security.ts`):
 
-| Header | Value | Notes |
-|---|---|---|
-| `Content-Security-Policy` | `default-src 'none'; frame-ancestors 'none'` | JSON API, nothing to render |
-| `X-Frame-Options` | `DENY` | Added explicitly this pass — helmet's own default is `SAMEORIGIN`, which is weaker than this API (which has no "same origin" that should ever frame it either) needs; `frameAncestors: 'none'` above is the modern equivalent for CSP-aware clients |
-| `X-Content-Type-Options` | `nosniff` | helmet default |
-| `Referrer-Policy` | `no-referrer` | Explicit, not relying on helmet's default staying the same across majors |
-| `Cross-Origin-Resource-Policy` | `same-site` | |
-| `Permissions-Policy` | every feature denied (`camera=(), microphone=(), geolocation=(), ...`) | Hand-set (helmet doesn't ship this directive) |
-| `Strict-Transport-Security` | `max-age=15552000; includeSubDomains; preload` | **Production only** (`NODE_ENV === 'production'`) — never sent in dev/test, so a local run can never poison a browser's HSTS cache for `localhost` |
-| `X-Powered-By` | absent | Fastify never sets it in the first place (unlike Express) |
+| Header                         | Value                                                                  | Notes                                                                                                                                                                                                                                               |
+| ------------------------------ | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Content-Security-Policy`      | `default-src 'none'; frame-ancestors 'none'`                           | JSON API, nothing to render                                                                                                                                                                                                                         |
+| `X-Frame-Options`              | `DENY`                                                                 | Added explicitly this pass — helmet's own default is `SAMEORIGIN`, which is weaker than this API (which has no "same origin" that should ever frame it either) needs; `frameAncestors: 'none'` above is the modern equivalent for CSP-aware clients |
+| `X-Content-Type-Options`       | `nosniff`                                                              | helmet default                                                                                                                                                                                                                                      |
+| `Referrer-Policy`              | `no-referrer`                                                          | Explicit, not relying on helmet's default staying the same across majors                                                                                                                                                                            |
+| `Cross-Origin-Resource-Policy` | `same-site`                                                            |                                                                                                                                                                                                                                                     |
+| `Permissions-Policy`           | every feature denied (`camera=(), microphone=(), geolocation=(), ...`) | Hand-set (helmet doesn't ship this directive)                                                                                                                                                                                                       |
+| `Strict-Transport-Security`    | `max-age=15552000; includeSubDomains; preload`                         | **Production only** (`NODE_ENV === 'production'`) — never sent in dev/test, so a local run can never poison a browser's HSTS cache for `localhost`                                                                                                  |
+| `X-Powered-By`                 | absent                                                                 | Fastify never sets it in the first place (unlike Express)                                                                                                                                                                                           |
 
 Test reference: `tests/security/src/headers.test.ts` — asserts the full
 set on a public route, an authenticated route, and an error response
@@ -263,7 +263,7 @@ DENY`, `Referrer-Policy: strict-origin-when-cross-origin`.
     `COOKIE_SECRET` if unset) select the active encryption key.
   - **Rotation helper**: `reencryptTotpSecret(blob, cookieSecret)` decrypts
     under whichever key the blob was written with and re-encrypts under
-    the *current* active key — a no-op if already on the active key. Used
+    the _current_ active key — a no-op if already on the active key. Used
     to migrate existing rows forward after an operator adds a new key id
     and flips the active one.
   - **Rotation procedure**: (1) add the new key id + material to
@@ -410,7 +410,7 @@ rewrite history, only add to it.
   `script-src 'self'` only — nothing outside the packaged bundle can ever
   execute as script.
 - **Minimal permissions**: `permissions: ['storage', 'unlimitedStorage',
-  'alarms']` only — no `tabs`, no `scripting`, no `<all_urls>`.
+'alarms']` only — no `tabs`, no `scripting`, no `<all_urls>`.
   `host_permissions` is exactly the EA web-app origins plus this project's
   own API origin (`generate-manifest.mjs`) — nothing else is reachable.
 - **Error reports scrubbed of PII**: `background/errors.ts`'s
@@ -426,22 +426,22 @@ rewrite history, only add to it.
   well as in the threat model: nothing in `apps/extension/**` lifts an EA
   session header for a forged request, spoofs a browser fingerprint, or
   automates around a human-verification challenge. The governor
-  (`engine/governor.ts`) exists to keep the extension's *own* automated
+  (`engine/governor.ts`) exists to keep the extension's _own_ automated
   actions within a human-plausible envelope, not to evade EA's own
   anti-automation detection — see `docs/threat-model.md` §6.
 
 ## 14. Stripe webhook signature/replay/idempotency review
 
 - **Signature**: `stripe.webhooks.constructEvent(rawBody, signature,
-  webhookSecret)` — the real Stripe SDK's own HMAC verification, not a
+webhookSecret)` — the real Stripe SDK's own HMAC verification, not a
   hand-rolled check. A missing `stripe-signature` header, a forged one, or
   a misconfigured server (Stripe env vars unset) are now **uniformly** a
   400 with the standard `{code: 'VALIDATION_FAILED', message,
-  requestId}` envelope (`apps/api/src/modules/payments/index.ts`) —
+requestId}` envelope (`apps/api/src/modules/payments/index.ts`) —
   **fixed this pass**: the route previously declared its own bespoke
   `400: {received: boolean}` response schema and `reply.status(400)
-  .send({received: false})`-ed manually on a bad signature, while the
-  *missing-header* check a few lines above it already `throw`s an
+.send({received: false})`-ed manually on a bad signature, while the
+  _missing-header_ check a few lines above it already `throw`s an
   `AppError`. That mismatch meant the app-wide error envelope (rendered by
   `plugins/error-handler.ts` for the thrown case) got validated against a
   schema that only allows `{received: boolean}` and failed zod response
@@ -450,7 +450,7 @@ rewrite history, only add to it.
   declares only its success (`200`) shape.
 - A closely related, independently-discovered bug was fixed alongside it:
   `apps/api/src/lib/errors.ts`'s `isAppError()` relied on `instanceof
-  AppError` alone, which returns `false` when a module-loading setup ends
+AppError` alone, which returns `false` when a module-loading setup ends
   up with two distinct `AppError` class objects for the same compiled file
   (observed with `tests/security`, which loads the built `@sl/api/app`
   through Vitest's own module runner) — silently routing an intended 4xx
@@ -508,7 +508,7 @@ below). Two behaviour changes the bump surfaced, both fixed:
    error (with the "duplicate key"/constraint-name text these two tests
    assert on) moved to `.cause`. Fixed by asserting against
    `rejects.toMatchObject({ cause: { message: /duplicate key|unique
-   constraint/i } })` instead of `rejects.toThrow(...)` on the wrapper's
+constraint/i } })` instead of `rejects.toThrow(...)` on the wrapper's
    own message.
 2. **`apps/api`'s `payments/webhooks.ts#receiveWebhookEvent`**: its
    idempotency check read `(err as { code?: string }).code === '23505'`
@@ -521,7 +521,7 @@ below). Two behaviour changes the bump surfaced, both fixed:
    would have thrown instead of returning `{ alreadyProcessed: true }`,
    since the changed `.code` shape meant it fell through to `throw err`).
 
-This codebase's own mitigation against the *specific* advisory class
+This codebase's own mitigation against the _specific_ advisory class
 (improperly-escaped SQL identifiers) was already independent of the
 library-level fix and remains true post-bump: no code path in this repo
 builds a Drizzle identifier from untrusted input (§2) — the two
@@ -615,7 +615,7 @@ number. #4–#5 remain open, as before.
    `telemetry.flush`, `errors.report`, `engine.state`, `counts`) has
    nothing to validate and is deliberately left out of the map.
    **Build-safety note**: the `event`-kind item schema is a small
-   deliberate *duplicate* of `schemas/extension.ts`'s `telemetryEventSchema`
+   deliberate _duplicate_ of `schemas/extension.ts`'s `telemetryEventSchema`
    rather than an import of it — that module also builds
    `bootstrapResponseSchema`, which references `FEATURE_KEYS` (a plan
    feature-gate vocabulary that includes the literal string

@@ -39,8 +39,13 @@ describe('useAuthStore', () => {
     expect(state.admin).toBeNull();
   });
 
-  it("setSession grants an admin session reflecting the server-resolved adminRole/permissions", () => {
-    useAuthStore.getState().setSession({ ...baseUser, role: 'admin', adminRole: 'support', permissions: ['users.read', 'users.suspend'] });
+  it('setSession grants an admin session reflecting the server-resolved adminRole/permissions', () => {
+    useAuthStore.getState().setSession({
+      ...baseUser,
+      role: 'admin',
+      adminRole: 'support',
+      permissions: ['users.read', 'users.suspend'],
+    });
     const state = useAuthStore.getState();
     expect(state.admin).not.toBeNull();
     expect(state.admin?.adminRole).toBe('support');

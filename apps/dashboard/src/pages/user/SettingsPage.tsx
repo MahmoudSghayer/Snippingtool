@@ -1,5 +1,9 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { changePasswordRequestSchema, governorSettingsSchema, GOVERNOR_ABSOLUTE_LIMITS } from '@sl/shared';
+import {
+  changePasswordRequestSchema,
+  governorSettingsSchema,
+  GOVERNOR_ABSOLUTE_LIMITS,
+} from '@sl/shared';
 import {
   Badge,
   Button,
@@ -25,7 +29,6 @@ import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 import { z } from 'zod';
-
 
 import { api, apiErrorMessage } from '@/api/client.js';
 import { resetBootstrap } from '@/lib/authBootstrap.js';
@@ -65,7 +68,11 @@ const sessionColumns: ColumnDef<SessionRow, unknown>[] = [
     ),
   },
   { accessorKey: 'ip', header: 'IP', cell: (c) => (c.getValue() as string | null) ?? '—' },
-  { accessorKey: 'lastUsedAt', header: 'Last used', cell: (c) => formatDate(c.getValue() as string) },
+  {
+    accessorKey: 'lastUsedAt',
+    header: 'Last used',
+    cell: (c) => formatDate(c.getValue() as string),
+  },
 ];
 
 export function SettingsPage() {
@@ -74,7 +81,11 @@ export function SettingsPage() {
   const user = useAuthStore((s) => s.user);
 
   const [mfaEnrolling, setMfaEnrolling] = useState(false);
-  const [mfaSecret, setMfaSecret] = useState<{ secret: string; otpauthUrl: string; recoveryCodes: string[] } | null>(null);
+  const [mfaSecret, setMfaSecret] = useState<{
+    secret: string;
+    otpauthUrl: string;
+    recoveryCodes: string[];
+  } | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [mfaCode, setMfaCode] = useState('');
   const [disableOpen, setDisableOpen] = useState(false);
@@ -100,7 +111,9 @@ export function SettingsPage() {
 
   const profileForm = useForm<ProfileForm>({
     resolver: zodResolver(profileSchema),
-    values: user ? { timezone: user.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone } : undefined,
+    values: user
+      ? { timezone: user.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone }
+      : undefined,
   });
 
   const passwordForm = useForm<PasswordForm>({
@@ -117,7 +130,10 @@ export function SettingsPage() {
     defaultValues: { currentPassword: '', code: '' },
   });
 
-  const deleteForm = useForm<DeleteAccountForm>({ resolver: zodResolver(deleteAccountSchema), defaultValues: { password: '' } });
+  const deleteForm = useForm<DeleteAccountForm>({
+    resolver: zodResolver(deleteAccountSchema),
+    defaultValues: { password: '' },
+  });
 
   useEffect(() => {
     if (!mfaSecret) {
@@ -148,7 +164,8 @@ export function SettingsPage() {
       toast.success('Password changed. Please sign in again.');
       passwordForm.reset();
     },
-    onError: (error) => toast.error("Couldn't change password", { description: apiErrorMessage(error) }),
+    onError: (error) =>
+      toast.error("Couldn't change password", { description: apiErrorMessage(error) }),
   });
 
   const governorMutation = useMutation({
@@ -179,12 +196,15 @@ export function SettingsPage() {
       return data;
     },
     onSuccess: (data) => setMfaSecret(data),
-    onError: (error) => toast.error("Couldn't start 2FA enrolment", { description: apiErrorMessage(error) }),
+    onError: (error) =>
+      toast.error("Couldn't start 2FA enrolment", { description: apiErrorMessage(error) }),
   });
 
   const confirmMutation = useMutation({
     mutationFn: async () => {
-      const { error } = await api.POST('/api/v1/auth/totp/enroll/confirm', { body: { code: mfaCode } });
+      const { error } = await api.POST('/api/v1/auth/totp/enroll/confirm', {
+        body: { code: mfaCode },
+      });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -207,7 +227,8 @@ export function SettingsPage() {
       setDisableOpen(false);
       resetBootstrap();
     },
-    onError: (error) => toast.error("Couldn't disable 2FA", { description: apiErrorMessage(error) }),
+    onError: (error) =>
+      toast.error("Couldn't disable 2FA", { description: apiErrorMessage(error) }),
   });
 
   const revokeSessionMutation = useMutation({
@@ -219,7 +240,8 @@ export function SettingsPage() {
       toast.success('Session revoked');
       void queryClient.invalidateQueries({ queryKey: ['sessions'] });
     },
-    onError: (error) => toast.error("Couldn't revoke session", { description: apiErrorMessage(error) }),
+    onError: (error) =>
+      toast.error("Couldn't revoke session", { description: apiErrorMessage(error) }),
   });
 
   const deleteMutation = useMutation({
@@ -232,7 +254,8 @@ export function SettingsPage() {
       resetBootstrap();
       void navigate({ to: '/login' });
     },
-    onError: (error) => toast.error("Couldn't delete account", { description: apiErrorMessage(error) }),
+    onError: (error) =>
+      toast.error("Couldn't delete account", { description: apiErrorMessage(error) }),
   });
 
   return (
@@ -244,11 +267,18 @@ export function SettingsPage() {
           <CardTitle>Profile</CardTitle>
         </CardHeader>
         <CardContent>
-          <form className="flex max-w-sm flex-col gap-4" onSubmit={profileForm.handleSubmit((v) => profileMutation.mutate(v))}>
+          <form
+            className="flex max-w-sm flex-col gap-4"
+            onSubmit={profileForm.handleSubmit((v) => profileMutation.mutate(v))}
+          >
             <FormField label="Email" htmlFor="email-ro">
               <Input id="email-ro" value={user?.email ?? ''} disabled />
             </FormField>
-            <FormField label="Timezone" htmlFor="timezone" error={profileForm.formState.errors.timezone?.message}>
+            <FormField
+              label="Timezone"
+              htmlFor="timezone"
+              error={profileForm.formState.errors.timezone?.message}
+            >
               <Input id="timezone" {...profileForm.register('timezone')} />
             </FormField>
             <Button type="submit" size="sm" className="w-fit" loading={profileMutation.isPending}>
@@ -263,12 +293,31 @@ export function SettingsPage() {
           <CardTitle>Password</CardTitle>
         </CardHeader>
         <CardContent>
-          <form className="flex max-w-sm flex-col gap-4" onSubmit={passwordForm.handleSubmit((v) => passwordMutation.mutate(v))}>
-            <FormField label="Current password" htmlFor="currentPassword" error={passwordForm.formState.errors.currentPassword?.message}>
-              <PasswordInput id="currentPassword" autoComplete="current-password" {...passwordForm.register('currentPassword')} />
+          <form
+            className="flex max-w-sm flex-col gap-4"
+            onSubmit={passwordForm.handleSubmit((v) => passwordMutation.mutate(v))}
+          >
+            <FormField
+              label="Current password"
+              htmlFor="currentPassword"
+              error={passwordForm.formState.errors.currentPassword?.message}
+            >
+              <PasswordInput
+                id="currentPassword"
+                autoComplete="current-password"
+                {...passwordForm.register('currentPassword')}
+              />
             </FormField>
-            <FormField label="New password" htmlFor="newPassword" error={passwordForm.formState.errors.newPassword?.message}>
-              <PasswordInput id="newPassword" autoComplete="new-password" {...passwordForm.register('newPassword')} />
+            <FormField
+              label="New password"
+              htmlFor="newPassword"
+              error={passwordForm.formState.errors.newPassword?.message}
+            >
+              <PasswordInput
+                id="newPassword"
+                autoComplete="new-password"
+                {...passwordForm.register('newPassword')}
+              />
             </FormField>
             <Button type="submit" size="sm" className="w-fit" loading={passwordMutation.isPending}>
               Change password
@@ -280,7 +329,9 @@ export function SettingsPage() {
       <Card>
         <CardHeader>
           <CardTitle>Two-factor authentication</CardTitle>
-          <Badge tone={user?.totpEnabled ? 'positive' : 'neutral'}>{user?.totpEnabled ? 'Enabled' : 'Disabled'}</Badge>
+          <Badge tone={user?.totpEnabled ? 'positive' : 'neutral'}>
+            {user?.totpEnabled ? 'Enabled' : 'Disabled'}
+          </Badge>
         </CardHeader>
         <CardContent>
           {user?.totpEnabled ? (
@@ -290,15 +341,30 @@ export function SettingsPage() {
           ) : mfaEnrolling ? (
             <div className="flex flex-col gap-4">
               {!mfaSecret ? (
-                <Button size="sm" className="w-fit" loading={enrollMutation.isPending} onClick={() => enrollMutation.mutate()}>
+                <Button
+                  size="sm"
+                  className="w-fit"
+                  loading={enrollMutation.isPending}
+                  onClick={() => enrollMutation.mutate()}
+                >
                   Start enrolment
                 </Button>
               ) : (
                 <>
-                  {qrDataUrl && <img src={qrDataUrl} alt="Authenticator QR code" width={180} height={180} className="rounded-md border border-line" />}
+                  {qrDataUrl && (
+                    <img
+                      src={qrDataUrl}
+                      alt="Authenticator QR code"
+                      width={180}
+                      height={180}
+                      className="rounded-md border border-line"
+                    />
+                  )}
                   <CopyField label="Manual entry secret" value={mfaSecret.secret} />
                   <div>
-                    <p className="mb-1 text-xs font-medium text-ink-2">Recovery codes (save these somewhere safe — shown once)</p>
+                    <p className="mb-1 text-xs font-medium text-ink-2">
+                      Recovery codes (save these somewhere safe — shown once)
+                    </p>
                     <div className="grid grid-cols-2 gap-1 rounded-md border border-line bg-ground p-3 font-mono text-xs">
                       {mfaSecret.recoveryCodes.map((code) => (
                         <span key={code}>{code}</span>
@@ -309,7 +375,9 @@ export function SettingsPage() {
                       size="sm"
                       className="mt-1"
                       onClick={() => {
-                        const blob = new Blob([mfaSecret.recoveryCodes.join('\n')], { type: 'text/plain' });
+                        const blob = new Blob([mfaSecret.recoveryCodes.join('\n')], {
+                          type: 'text/plain',
+                        });
                         const url = URL.createObjectURL(blob);
                         const a = document.createElement('a');
                         a.href = url;
@@ -322,9 +390,19 @@ export function SettingsPage() {
                     </Button>
                   </div>
                   <FormField label="Enter the 6-digit code to confirm" htmlFor="mfaCode">
-                    <Input id="mfaCode" value={mfaCode} onChange={(e) => setMfaCode(e.target.value)} inputMode="numeric" />
+                    <Input
+                      id="mfaCode"
+                      value={mfaCode}
+                      onChange={(e) => setMfaCode(e.target.value)}
+                      inputMode="numeric"
+                    />
                   </FormField>
-                  <Button size="sm" className="w-fit" loading={confirmMutation.isPending} onClick={() => confirmMutation.mutate()}>
+                  <Button
+                    size="sm"
+                    className="w-fit"
+                    loading={confirmMutation.isPending}
+                    onClick={() => confirmMutation.mutate()}
+                  >
                     Confirm and enable
                   </Button>
                 </>
@@ -343,7 +421,10 @@ export function SettingsPage() {
           <CardTitle>Governor budgets</CardTitle>
         </CardHeader>
         <CardContent>
-          <form className="grid max-w-xl grid-cols-1 gap-4 sm:grid-cols-2" onSubmit={governorForm.handleSubmit((v) => governorMutation.mutate(v))}>
+          <form
+            className="grid max-w-xl grid-cols-1 gap-4 sm:grid-cols-2"
+            onSubmit={governorForm.handleSubmit((v) => governorMutation.mutate(v))}
+          >
             <FormField label="Actions / hour" htmlFor="actionsPerHour">
               <Input
                 id="actionsPerHour"
@@ -381,7 +462,11 @@ export function SettingsPage() {
                 {...governorForm.register('cooldownSeconds', { valueAsNumber: true })}
               />
             </FormField>
-            <FormField label="Max coin flow / hour" htmlFor="maxCoinFlowPerHour" className="sm:col-span-2">
+            <FormField
+              label="Max coin flow / hour"
+              htmlFor="maxCoinFlowPerHour"
+              className="sm:col-span-2"
+            >
               <Input
                 id="maxCoinFlowPerHour"
                 type="number"
@@ -390,7 +475,12 @@ export function SettingsPage() {
                 {...governorForm.register('maxCoinFlowPerHour', { valueAsNumber: true })}
               />
             </FormField>
-            <Button type="submit" size="sm" className="w-fit sm:col-span-2" loading={governorMutation.isPending}>
+            <Button
+              type="submit"
+              size="sm"
+              className="w-fit sm:col-span-2"
+              loading={governorMutation.isPending}
+            >
               Save budgets
             </Button>
           </form>
@@ -405,12 +495,23 @@ export function SettingsPage() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-ink">Telemetry opt-out</p>
-              <p className="text-xs text-ink-2">Stop sending account-agnostic product telemetry (search metadata, errors, version). Never affects the kill switch.</p>
+              <p className="text-xs text-ink-2">
+                Stop sending account-agnostic product telemetry (search metadata, errors, version).
+                Never affects the kill switch.
+              </p>
             </div>
-            <Switch checked={settingsQuery.data?.telemetryOptOut ?? false} onCheckedChange={(v) => void toggleSetting({ telemetryOptOut: v })} aria-label="Telemetry opt-out" />
+            <Switch
+              checked={settingsQuery.data?.telemetryOptOut ?? false}
+              onCheckedChange={(v) => void toggleSetting({ telemetryOptOut: v })}
+              aria-label="Telemetry opt-out"
+            />
           </div>
           {settingsQuery.data &&
-            (Object.keys(settingsQuery.data.notifications) as (keyof typeof settingsQuery.data.notifications)[]).map((key) => (
+            (
+              Object.keys(
+                settingsQuery.data.notifications,
+              ) as (keyof typeof settingsQuery.data.notifications)[]
+            ).map((key) => (
               <div key={key} className="flex items-center justify-between">
                 <p className="text-sm text-ink capitalize">{key.replace(/([A-Z])/g, ' $1')}</p>
                 <Switch
@@ -438,7 +539,12 @@ export function SettingsPage() {
             getRowId={(row) => row.id}
             rowActions={(row) =>
               !row.isCurrent && (
-                <Button size="sm" variant="outline" loading={revokeSessionMutation.isPending} onClick={() => revokeSessionMutation.mutate(row.id)}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  loading={revokeSessionMutation.isPending}
+                  onClick={() => revokeSessionMutation.mutate(row.id)}
+                >
                   Revoke
                 </Button>
               )
@@ -452,7 +558,9 @@ export function SettingsPage() {
           <CardTitle className="text-risk">Danger zone</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="mb-3 text-sm text-ink-2">Deleting your account is permanent and ends every active session and subscription.</p>
+          <p className="mb-3 text-sm text-ink-2">
+            Deleting your account is permanent and ends every active session and subscription.
+          </p>
           <Button variant="destructive" size="sm" onClick={() => setDeleteOpen(true)}>
             Delete account
           </Button>
@@ -468,7 +576,11 @@ export function SettingsPage() {
             <Button variant="outline" onClick={() => setDisableOpen(false)}>
               Cancel
             </Button>
-            <Button variant="destructive" loading={disableMutation.isPending} onClick={disableForm.handleSubmit((v) => disableMutation.mutate(v))}>
+            <Button
+              variant="destructive"
+              loading={disableMutation.isPending}
+              onClick={disableForm.handleSubmit((v) => disableMutation.mutate(v))}
+            >
               Disable
             </Button>
           </>
@@ -494,14 +606,22 @@ export function SettingsPage() {
             <Button variant="outline" onClick={() => setDeleteOpen(false)}>
               Cancel
             </Button>
-            <Button variant="destructive" loading={deleteMutation.isPending} onClick={deleteForm.handleSubmit((v) => deleteMutation.mutate(v))}>
+            <Button
+              variant="destructive"
+              loading={deleteMutation.isPending}
+              onClick={deleteForm.handleSubmit((v) => deleteMutation.mutate(v))}
+            >
               Delete my account
             </Button>
           </>
         }
       >
         <form className="flex flex-col gap-4">
-          <FormField label="Confirm your password" htmlFor="delete-password" error={deleteForm.formState.errors.password?.message}>
+          <FormField
+            label="Confirm your password"
+            htmlFor="delete-password"
+            error={deleteForm.formState.errors.password?.message}
+          >
             <PasswordInput id="delete-password" {...deleteForm.register('password')} />
           </FormField>
         </form>

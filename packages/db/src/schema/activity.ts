@@ -11,7 +11,13 @@ import { relations } from 'drizzle-orm';
 import { index, inet, integer, jsonb, pgTable, primaryKey, text, uuid } from 'drizzle-orm/pg-core';
 
 import { devices, sessions } from './auth.js';
-import { createdAt, riskEventKindEnum, snipingOutcomeEnum, timestamptz, userActivityTypeEnum } from './common.js';
+import {
+  createdAt,
+  riskEventKindEnum,
+  snipingOutcomeEnum,
+  timestamptz,
+  userActivityTypeEnum,
+} from './common.js';
 import { users } from './users.js';
 
 export const userActivity = pgTable(

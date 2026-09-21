@@ -9,7 +9,15 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { reseedPlans } from '../../../test/reseed-reference-data.js';
 import { newId } from '../../ids.js';
-import { getChurn, getConversion, getExtensionInstalls, getMrrArr, getRetentionCohorts, getTotalRevenueCents, getVersionDistribution } from '../kpi.js';
+import {
+  getChurn,
+  getConversion,
+  getExtensionInstalls,
+  getMrrArr,
+  getRetentionCohorts,
+  getTotalRevenueCents,
+  getVersionDistribution,
+} from '../kpi.js';
 
 import type { Database } from '@sl/db';
 
@@ -23,7 +31,13 @@ async function planId(database: Database, code: string): Promise<string> {
 
 async function createUser(database: Database, email: string, createdAt?: Date): Promise<string> {
   const id = newId();
-  await database.insert(users).values({ id, email, passwordHash: 'x', emailVerifiedAt: new Date(), ...(createdAt ? { createdAt } : {}) });
+  await database.insert(users).values({
+    id,
+    email,
+    passwordHash: 'x',
+    emailVerifiedAt: new Date(),
+    ...(createdAt ? { createdAt } : {}),
+  });
   return id;
 }
 
@@ -51,7 +65,13 @@ describe('lib/analytics/kpi', () => {
       { id: newId(), userId: u1, planId: proId, status: 'active' },
       { id: newId(), userId: u2, planId: ultimateId, status: 'active' },
       { id: newId(), userId: u3, planId: lifetimeId, status: 'lifetime', source: 'manual' }, // lifetime requires source manual/coupon
-      { id: newId(), userId: u4, planId: proId, status: 'trialing', trialEndsAt: new Date(Date.now() + 7 * 86_400_000) },
+      {
+        id: newId(),
+        userId: u4,
+        planId: proId,
+        status: 'trialing',
+        trialEndsAt: new Date(Date.now() + 7 * 86_400_000),
+      },
     ]);
 
     const { mrrCents, arrCents } = await getMrrArr(db);
@@ -63,10 +83,42 @@ describe('lib/analytics/kpi', () => {
     const u1 = await createUser(db, 'revenue-1@example.com');
 
     await db.insert(payments).values([
-      { id: newId(), userId: u1, provider: 'stripe', providerPaymentId: 'pay_in_range_1', amountCents: 500, status: 'succeeded', createdAt: new Date('2024-03-10T12:00:00Z') },
-      { id: newId(), userId: u1, provider: 'stripe', providerPaymentId: 'pay_in_range_2', amountCents: 250, status: 'succeeded', createdAt: new Date('2024-03-15T00:00:00Z') },
-      { id: newId(), userId: u1, provider: 'stripe', providerPaymentId: 'pay_failed', amountCents: 999, status: 'failed', createdAt: new Date('2024-03-12T00:00:00Z') },
-      { id: newId(), userId: u1, provider: 'stripe', providerPaymentId: 'pay_out_of_range', amountCents: 999, status: 'succeeded', createdAt: new Date('2024-04-01T00:00:00Z') },
+      {
+        id: newId(),
+        userId: u1,
+        provider: 'stripe',
+        providerPaymentId: 'pay_in_range_1',
+        amountCents: 500,
+        status: 'succeeded',
+        createdAt: new Date('2024-03-10T12:00:00Z'),
+      },
+      {
+        id: newId(),
+        userId: u1,
+        provider: 'stripe',
+        providerPaymentId: 'pay_in_range_2',
+        amountCents: 250,
+        status: 'succeeded',
+        createdAt: new Date('2024-03-15T00:00:00Z'),
+      },
+      {
+        id: newId(),
+        userId: u1,
+        provider: 'stripe',
+        providerPaymentId: 'pay_failed',
+        amountCents: 999,
+        status: 'failed',
+        createdAt: new Date('2024-03-12T00:00:00Z'),
+      },
+      {
+        id: newId(),
+        userId: u1,
+        provider: 'stripe',
+        providerPaymentId: 'pay_out_of_range',
+        amountCents: 999,
+        status: 'succeeded',
+        createdAt: new Date('2024-04-01T00:00:00Z'),
+      },
     ]);
 
     const total = await getTotalRevenueCents(db, { from: '2024-03-01', to: '2024-03-31' });
@@ -93,10 +145,41 @@ describe('lib/analytics/kpi', () => {
 
     // Trial rows (the cohort).
     await db.insert(subscriptions).values([
-      { id: newId(), userId: uConverted, planId: trialId, status: 'expired', trialEndsAt: null, endedAt: trialEndsBase, createdAt: inRangeCreatedAt },
-      { id: newId(), userId: uStillTrialing, planId: trialId, status: 'trialing', trialEndsAt: trialEndsBase, createdAt: inRangeCreatedAt },
-      { id: newId(), userId: uNeverConverted, planId: trialId, status: 'expired', trialEndsAt: null, endedAt: trialEndsBase, createdAt: inRangeCreatedAt },
-      { id: newId(), userId: uTooLate, planId: trialId, status: 'expired', trialEndsAt: null, endedAt: trialEndsBase, createdAt: inRangeCreatedAt },
+      {
+        id: newId(),
+        userId: uConverted,
+        planId: trialId,
+        status: 'expired',
+        trialEndsAt: null,
+        endedAt: trialEndsBase,
+        createdAt: inRangeCreatedAt,
+      },
+      {
+        id: newId(),
+        userId: uStillTrialing,
+        planId: trialId,
+        status: 'trialing',
+        trialEndsAt: trialEndsBase,
+        createdAt: inRangeCreatedAt,
+      },
+      {
+        id: newId(),
+        userId: uNeverConverted,
+        planId: trialId,
+        status: 'expired',
+        trialEndsAt: null,
+        endedAt: trialEndsBase,
+        createdAt: inRangeCreatedAt,
+      },
+      {
+        id: newId(),
+        userId: uTooLate,
+        planId: trialId,
+        status: 'expired',
+        trialEndsAt: null,
+        endedAt: trialEndsBase,
+        createdAt: inRangeCreatedAt,
+      },
       {
         id: newId(),
         userId: uOutsideCohort,
@@ -110,9 +193,27 @@ describe('lib/analytics/kpi', () => {
 
     // Paid rows (some convert, some don't).
     await db.insert(subscriptions).values([
-      { id: newId(), userId: uConverted, planId: proId, status: 'active', createdAt: new Date(trialEndsBase.getTime() + 5 * 86_400_000) }, // 5d after trial end: converted
-      { id: newId(), userId: uTooLate, planId: proId, status: 'active', createdAt: new Date(trialEndsBase.getTime() + 40 * 86_400_000) }, // 40d: too late
-      { id: newId(), userId: uOutsideCohort, planId: proId, status: 'active', createdAt: new Date(trialEndsBase.getTime() + 5 * 86_400_000) },
+      {
+        id: newId(),
+        userId: uConverted,
+        planId: proId,
+        status: 'active',
+        createdAt: new Date(trialEndsBase.getTime() + 5 * 86_400_000),
+      }, // 5d after trial end: converted
+      {
+        id: newId(),
+        userId: uTooLate,
+        planId: proId,
+        status: 'active',
+        createdAt: new Date(trialEndsBase.getTime() + 40 * 86_400_000),
+      }, // 40d: too late
+      {
+        id: newId(),
+        userId: uOutsideCohort,
+        planId: proId,
+        status: 'active',
+        createdAt: new Date(trialEndsBase.getTime() + 5 * 86_400_000),
+      },
     ]);
 
     const result = await getConversion(db, { from: '2024-02-01', to: '2024-02-28' });
@@ -132,7 +233,13 @@ describe('lib/analytics/kpi', () => {
     const uExpiredViaEndedAt = await createUser(db, 'churn-expired-endedat@example.com');
 
     await db.insert(subscriptions).values([
-      { id: newId(), userId: uStillActive, planId: proId, status: 'active', createdAt: new Date('2024-01-01T00:00:00Z') },
+      {
+        id: newId(),
+        userId: uStillActive,
+        planId: proId,
+        status: 'active',
+        createdAt: new Date('2024-01-01T00:00:00Z'),
+      },
       {
         id: newId(),
         userId: uChurned,
@@ -149,7 +256,13 @@ describe('lib/analytics/kpi', () => {
         createdAt: new Date('2024-01-01T00:00:00Z'),
         canceledAt: new Date('2024-04-01T00:00:00Z'), // canceled before `from` -> not active at start, not churned in range
       },
-      { id: newId(), userId: uStartedAfterRange, planId: proId, status: 'active', createdAt: new Date('2024-05-10T00:00:00Z') },
+      {
+        id: newId(),
+        userId: uStartedAfterRange,
+        planId: proId,
+        status: 'active',
+        createdAt: new Date('2024-05-10T00:00:00Z'),
+      },
       {
         id: newId(),
         userId: uExpiredViaEndedAt,
@@ -183,8 +296,18 @@ describe('lib/analytics/kpi', () => {
 
     // u1: active exactly on day+7 and day+30 -> retained both.
     await db.insert(userActivity).values([
-      { id: newId(), userId: u1, type: 'heartbeat', occurredAt: new Date(u1CreatedAt.getTime() + 7 * 86_400_000 + 5 * 3_600_000) },
-      { id: newId(), userId: u1, type: 'heartbeat', occurredAt: new Date(u1CreatedAt.getTime() + 30 * 86_400_000 + 2 * 3_600_000) },
+      {
+        id: newId(),
+        userId: u1,
+        type: 'heartbeat',
+        occurredAt: new Date(u1CreatedAt.getTime() + 7 * 86_400_000 + 5 * 3_600_000),
+      },
+      {
+        id: newId(),
+        userId: u1,
+        type: 'heartbeat',
+        occurredAt: new Date(u1CreatedAt.getTime() + 30 * 86_400_000 + 2 * 3_600_000),
+      },
     ]);
     // u2, u3: no activity at all -> not retained.
 
@@ -206,7 +329,13 @@ describe('lib/analytics/kpi', () => {
       { id: newId(), installId: 'install-1', version: '1.2.0', browser: 'chrome' },
       { id: newId(), installId: 'install-2', version: '1.2.0', browser: 'chrome' },
       { id: newId(), installId: 'install-3', version: '1.1.0', browser: 'firefox' },
-      { id: newId(), installId: 'install-4', version: '1.1.0', browser: 'firefox', uninstalledAt: new Date() },
+      {
+        id: newId(),
+        installId: 'install-4',
+        version: '1.1.0',
+        browser: 'firefox',
+        uninstalledAt: new Date(),
+      },
     ]);
 
     const installs = await getExtensionInstalls(db);

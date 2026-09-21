@@ -15,7 +15,11 @@ function presenceKey(userId: string): string {
 }
 
 export async function markOnline(redis: Redis, userId: string): Promise<void> {
-  await redis.multi().sadd(ONLINE_SET, userId).set(presenceKey(userId), '1', 'EX', PRESENCE_TTL_SECONDS).exec();
+  await redis
+    .multi()
+    .sadd(ONLINE_SET, userId)
+    .set(presenceKey(userId), '1', 'EX', PRESENCE_TTL_SECONDS)
+    .exec();
 }
 
 export async function touchPresence(redis: Redis, userId: string): Promise<void> {
@@ -40,7 +44,10 @@ const SCAN_BATCH_SIZE = 200;
  * connects or disconnects mid-scan may or may not be included, which is
  * fine for a broadcast (a client that connects moments later gets the
  * current state on its own initial bootstrap/heartbeat anyway). */
-export async function* scanOnlineUserIds(redis: Redis, batchSize: number = SCAN_BATCH_SIZE): AsyncGenerator<string[]> {
+export async function* scanOnlineUserIds(
+  redis: Redis,
+  batchSize: number = SCAN_BATCH_SIZE,
+): AsyncGenerator<string[]> {
   let cursor = '0';
   do {
     const [nextCursor, members] = await redis.sscan(ONLINE_SET, cursor, 'COUNT', batchSize);

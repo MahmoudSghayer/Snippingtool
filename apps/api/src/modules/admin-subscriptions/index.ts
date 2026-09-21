@@ -75,7 +75,8 @@ export default fp(
         onRequest: [fastify.requirePermission('subscriptions.read')],
         schema: {
           tags: ['admin-subscriptions'],
-          summary: 'List subscriptions (cursor-paginated), filterable by status/plan/userId/search (owner email).',
+          summary:
+            'List subscriptions (cursor-paginated), filterable by status/plan/userId/search (owner email).',
           querystring: adminSubscriptionListQuerySchema,
           response: { 200: paginatedResponseSchema(adminSubscriptionListItemSchema) },
         },
@@ -91,7 +92,10 @@ export default fp(
 
         let userIdsForSearch: string[] | null = null;
         if (search) {
-          const matches = await fastify.db.query.users.findMany({ where: ilike(users.email, `%${search}%`), columns: { id: true } });
+          const matches = await fastify.db.query.users.findMany({
+            where: ilike(users.email, `%${search}%`),
+            columns: { id: true },
+          });
           userIdsForSearch = matches.map((u) => u.id);
           if (userIdsForSearch.length === 0) return { items: [], nextCursor: null };
         }
@@ -108,7 +112,9 @@ export default fp(
         });
 
         const filtered = rows.filter(
-          (r) => (!planCode || r.plan.code === planCode) && (!userIdsForSearch || userIdsForSearch.includes(r.user.id)),
+          (r) =>
+            (!planCode || r.plan.code === planCode) &&
+            (!userIdsForSearch || userIdsForSearch.includes(r.user.id)),
         );
         const page = planCode || userIdsForSearch ? filtered.slice(0, limit + 1) : filtered;
 
@@ -118,7 +124,8 @@ export default fp(
 
         return {
           items: items.map(toListItem),
-          nextCursor: hasMore && last ? encodeCursor({ v: last.createdAt.toISOString(), id: last.id }) : null,
+          nextCursor:
+            hasMore && last ? encodeCursor({ v: last.createdAt.toISOString(), id: last.id }) : null,
         };
       },
     );
@@ -148,7 +155,9 @@ export default fp(
         const dtos = rows.map((r) => toSubscriptionDto(r, r.plan));
         const currentIndex = rows.findIndex((r) => isLiveStatus(r.status));
         const currentRow = currentIndex === -1 ? null : rows[currentIndex]!;
-        const currentLicense = currentRow ? await findActiveForSubscription(fastify.db, currentRow.id) : null;
+        const currentLicense = currentRow
+          ? await findActiveForSubscription(fastify.db, currentRow.id)
+          : null;
 
         return {
           current: currentIndex === -1 ? null : dtos[currentIndex]!,
@@ -187,7 +196,11 @@ export default fp(
           targetType: 'subscription',
           targetId: subscription.id,
           reason: request.body.reason,
-          metadata: { userId: request.params.userId, planCode: request.body.planCode, periodDays: request.body.periodDays },
+          metadata: {
+            userId: request.params.userId,
+            planCode: request.body.planCode,
+            periodDays: request.body.periodDays,
+          },
         });
         await recordAudit({
           db: fastify.db,
@@ -268,7 +281,12 @@ export default fp(
       },
       async (request) => {
         const adminUserRowId = await requireAdminUsersRowId(fastify.db, request.authUser!.id);
-        const { before, after } = await extendSubscription(fastify.db, fastify.redis, request.params.id, request.body.periodDays);
+        const { before, after } = await extendSubscription(
+          fastify.db,
+          fastify.redis,
+          request.params.id,
+          request.body.periodDays,
+        );
         const plan = await getPlanById(fastify.db, after.planId);
         if (!plan) throw AppErrors.internal('Plan not found for subscription.');
 
@@ -362,15 +380,28 @@ export default fp(
         const adminUserRowId = await requireAdminUsersRowId(fastify.db, request.authUser!.id);
 
         const lastSuspend = await fastify.db.query.adminActions.findFirst({
-          where: (t, { and, eq: eqOp }) => and(eqOp(t.targetType, 'subscription'), eqOp(t.targetId, request.params.id), eqOp(t.action, 'subscription.suspend')),
+          where: (t, { and, eq: eqOp }) =>
+            and(
+              eqOp(t.targetType, 'subscription'),
+              eqOp(t.targetId, request.params.id),
+              eqOp(t.action, 'subscription.suspend'),
+            ),
           orderBy: (t, { desc }) => [desc(t.occurredAt)],
         });
-        const previousStatus = (lastSuspend?.metadata as { previousStatus?: string } | undefined)?.previousStatus;
-        const targetStatus = SUBSCRIPTION_STATUSES.includes(previousStatus as (typeof SUBSCRIPTION_STATUSES)[number])
+        const previousStatus = (lastSuspend?.metadata as { previousStatus?: string } | undefined)
+          ?.previousStatus;
+        const targetStatus = SUBSCRIPTION_STATUSES.includes(
+          previousStatus as (typeof SUBSCRIPTION_STATUSES)[number],
+        )
           ? (previousStatus as (typeof SUBSCRIPTION_STATUSES)[number])
           : 'active';
 
-        const { before, after } = await unsuspend(fastify.db, fastify.redis, request.params.id, targetStatus);
+        const { before, after } = await unsuspend(
+          fastify.db,
+          fastify.redis,
+          request.params.id,
+          targetStatus,
+        );
         const plan = await getPlanById(fastify.db, after.planId);
         if (!plan) throw AppErrors.internal('Plan not found for subscription.');
 
@@ -415,7 +446,12 @@ export default fp(
       },
       async (request) => {
         const adminUserRowId = await requireAdminUsersRowId(fastify.db, request.authUser!.id);
-        const { before, after } = await cancelByAdmin(fastify.db, fastify.redis, request.params.id, request.body.immediate);
+        const { before, after } = await cancelByAdmin(
+          fastify.db,
+          fastify.redis,
+          request.params.id,
+          request.body.immediate,
+        );
         const plan = await getPlanById(fastify.db, after.planId);
         if (!plan) throw AppErrors.internal('Plan not found for subscription.');
 
@@ -461,7 +497,9 @@ export default fp(
       async (request) => {
         const adminUserRowId = await requireAdminUsersRowId(fastify.db, request.authUser!.id);
 
-        const before = await fastify.db.query.licenses.findFirst({ where: eq(licenses.id, request.params.id) });
+        const before = await fastify.db.query.licenses.findFirst({
+          where: eq(licenses.id, request.params.id),
+        });
         if (!before || before.deletedAt) throw AppErrors.notFound('license');
 
         const [after] = await fastify.db
@@ -477,7 +515,10 @@ export default fp(
           targetType: 'license',
           targetId: after!.id,
           reason: request.body.reason,
-          metadata: { previousMaxDevices: before.maxDevices, newMaxDevices: request.body.maxDevices },
+          metadata: {
+            previousMaxDevices: before.maxDevices,
+            newMaxDevices: request.body.maxDevices,
+          },
         });
         await recordAudit({
           db: fastify.db,

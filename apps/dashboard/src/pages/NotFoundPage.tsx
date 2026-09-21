@@ -2,7 +2,6 @@ import { Button, EmptyState } from '@sl/ui';
 import { Link } from '@tanstack/react-router';
 import { Compass } from 'lucide-react';
 
-
 export function NotFoundPage() {
   return (
     <div className="flex min-h-dvh items-center justify-center bg-ground px-4">

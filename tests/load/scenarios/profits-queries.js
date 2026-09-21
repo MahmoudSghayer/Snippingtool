@@ -15,7 +15,10 @@ import { BASE_URL, scenarioOptions, thresholds } from '../lib/config.js';
 const users = new SharedArray('users', () => JSON.parse(open('../.artifacts/fixtures.json')).users);
 const GRANULARITIES = ['daily', 'weekly', 'monthly', 'lifetime'];
 
-export const options = { ...scenarioOptions(), thresholds: thresholds({ http_req_duration: ['p(95)<1000'] }) };
+export const options = {
+  ...scenarioOptions(),
+  thresholds: thresholds({ http_req_duration: ['p(95)<1000'] }),
+};
 
 export default function () {
   const user = users[__VU % users.length];
@@ -23,12 +26,15 @@ export default function () {
   const to = new Date().toISOString().slice(0, 10);
   const from = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
-  const res = http.get(`${BASE_URL}/api/v1/profits?from=${from}&to=${to}&granularity=${granularity}`, {
-    headers: { authorization: `Bearer ${user.accessToken}` },
-    tags: { granularity },
-  });
+  const res = http.get(
+    `${BASE_URL}/api/v1/profits?from=${from}&to=${to}&granularity=${granularity}`,
+    {
+      headers: { authorization: `Bearer ${user.accessToken}` },
+      tags: { granularity },
+    },
+  );
   check(res, {
-    '200': (r) => r.status === 200,
+    200: (r) => r.status === 200,
     'has items array': (r) => {
       try {
         return Array.isArray(JSON.parse(r.body).items);

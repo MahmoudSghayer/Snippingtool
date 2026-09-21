@@ -52,7 +52,13 @@ export type BanCheckResult = z.infer<typeof banCheckResultSchema>;
 
 // ---------------------------------------------------------------------------
 
-export const FLAG_KINDS = ['trial_abuse', 'multi_account', 'velocity', 'chargeback', 'suspicious_ip'] as const;
+export const FLAG_KINDS = [
+  'trial_abuse',
+  'multi_account',
+  'velocity',
+  'chargeback',
+  'suspicious_ip',
+] as const;
 export type FlagKind = (typeof FLAG_KINDS)[number];
 
 export const FLAG_SEVERITIES = ['low', 'medium', 'high', 'critical'] as const;

@@ -11,9 +11,16 @@
 import { resetDatabase } from '@sl/db/test-utils';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { bearer, buildTestApp, createUserSession, NIL_LIKE_UUID, type TestApp, type UserSession } from './helpers.js';
+import {
+  bearer,
+  buildTestApp,
+  createUserSession,
+  NIL_LIKE_UUID,
+  type TestApp,
+  type UserSession,
+} from './helpers.js';
 
-describe('IDOR: user A cannot read or mutate user B\'s own-scoped resources', () => {
+describe("IDOR: user A cannot read or mutate user B's own-scoped resources", () => {
   let app: TestApp;
   let userA: UserSession;
   let userB: UserSession;
@@ -33,8 +40,12 @@ describe('IDOR: user A cannot read or mutate user B\'s own-scoped resources', ()
     userB = await createUserSession(app, 'idor-b@example.com', 'idor-fp-b-000000000000002');
   });
 
-  it('devices: B cannot rename or revoke A\'s device', async () => {
-    const listA = await app.inject({ method: 'GET', url: '/api/v1/devices', headers: bearer(userA.accessToken) });
+  it("devices: B cannot rename or revoke A's device", async () => {
+    const listA = await app.inject({
+      method: 'GET',
+      url: '/api/v1/devices',
+      headers: bearer(userA.accessToken),
+    });
     const [deviceA] = listA.json() as Array<{ id: string }>;
     expect(deviceA).toBeTruthy();
 
@@ -46,34 +57,60 @@ describe('IDOR: user A cannot read or mutate user B\'s own-scoped resources', ()
     });
     expect(renameRes.statusCode).toBe(404);
 
-    const revokeRes = await app.inject({ method: 'DELETE', url: `/api/v1/devices/${deviceA!.id}`, headers: bearer(userB.accessToken) });
+    const revokeRes = await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/devices/${deviceA!.id}`,
+      headers: bearer(userB.accessToken),
+    });
     expect(revokeRes.statusCode).toBe(404);
 
     // A's device is untouched — still listed, still active.
-    const listAAfter = await app.inject({ method: 'GET', url: '/api/v1/devices', headers: bearer(userA.accessToken) });
-    const stillThere = (listAAfter.json() as Array<{ id: string; status: string }>).find((d) => d.id === deviceA!.id);
+    const listAAfter = await app.inject({
+      method: 'GET',
+      url: '/api/v1/devices',
+      headers: bearer(userA.accessToken),
+    });
+    const stillThere = (listAAfter.json() as Array<{ id: string; status: string }>).find(
+      (d) => d.id === deviceA!.id,
+    );
     expect(stillThere?.status).toBe('active');
   });
 
-  it('sessions: B cannot list A\'s sessions by id or revoke them', async () => {
-    const listA = await app.inject({ method: 'GET', url: '/api/v1/sessions', headers: bearer(userA.accessToken) });
+  it("sessions: B cannot list A's sessions by id or revoke them", async () => {
+    const listA = await app.inject({
+      method: 'GET',
+      url: '/api/v1/sessions',
+      headers: bearer(userA.accessToken),
+    });
     const [sessionA] = listA.json() as Array<{ id: string }>;
     expect(sessionA).toBeTruthy();
 
     // B's own session list never contains A's session id.
-    const listB = await app.inject({ method: 'GET', url: '/api/v1/sessions', headers: bearer(userB.accessToken) });
+    const listB = await app.inject({
+      method: 'GET',
+      url: '/api/v1/sessions',
+      headers: bearer(userB.accessToken),
+    });
     const idsB = (listB.json() as Array<{ id: string }>).map((s) => s.id);
     expect(idsB).not.toContain(sessionA!.id);
 
-    const revokeRes = await app.inject({ method: 'DELETE', url: `/api/v1/sessions/${sessionA!.id}`, headers: bearer(userB.accessToken) });
+    const revokeRes = await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/sessions/${sessionA!.id}`,
+      headers: bearer(userB.accessToken),
+    });
     expect(revokeRes.statusCode).toBe(404);
 
     // A's session (and therefore A's access token) still works.
-    const stillWorks = await app.inject({ method: 'GET', url: '/api/v1/devices', headers: bearer(userA.accessToken) });
+    const stillWorks = await app.inject({
+      method: 'GET',
+      url: '/api/v1/devices',
+      headers: bearer(userA.accessToken),
+    });
     expect(stillWorks.statusCode).toBe(200);
   });
 
-  it('saved filters: B cannot read, rename, delete, or see A\'s filter in their own list', async () => {
+  it("saved filters: B cannot read, rename, delete, or see A's filter in their own list", async () => {
     const createRes = await app.inject({
       method: 'POST',
       url: '/api/v1/filters',
@@ -83,7 +120,11 @@ describe('IDOR: user A cannot read or mutate user B\'s own-scoped resources', ()
     expect(createRes.statusCode).toBe(201);
     const filterA = createRes.json() as { id: string };
 
-    const listB = await app.inject({ method: 'GET', url: '/api/v1/filters', headers: bearer(userB.accessToken) });
+    const listB = await app.inject({
+      method: 'GET',
+      url: '/api/v1/filters',
+      headers: bearer(userB.accessToken),
+    });
     const idsB = (listB.json() as Array<{ id: string }>).map((f) => f.id);
     expect(idsB).not.toContain(filterA.id);
 
@@ -95,16 +136,26 @@ describe('IDOR: user A cannot read or mutate user B\'s own-scoped resources', ()
     });
     expect(patchRes.statusCode).toBe(404);
 
-    const deleteRes = await app.inject({ method: 'DELETE', url: `/api/v1/filters/${filterA.id}`, headers: bearer(userB.accessToken) });
+    const deleteRes = await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/filters/${filterA.id}`,
+      headers: bearer(userB.accessToken),
+    });
     expect(deleteRes.statusCode).toBe(404);
 
     // A's filter is untouched, still there with its original name.
-    const listA = await app.inject({ method: 'GET', url: '/api/v1/filters', headers: bearer(userA.accessToken) });
-    const stillThere = (listA.json() as Array<{ id: string; name: string }>).find((f) => f.id === filterA.id);
+    const listA = await app.inject({
+      method: 'GET',
+      url: '/api/v1/filters',
+      headers: bearer(userA.accessToken),
+    });
+    const stillThere = (listA.json() as Array<{ id: string; name: string }>).find(
+      (f) => f.id === filterA.id,
+    );
     expect(stillThere?.name).toBe("A's secret filter");
   });
 
-  it('trades: B\'s trade list never includes A\'s trades, even after A reports several', async () => {
+  it("trades: B's trade list never includes A's trades, even after A reports several", async () => {
     const reportRes = await app.inject({
       method: 'POST',
       url: '/api/v1/trades/batch',
@@ -130,18 +181,30 @@ describe('IDOR: user A cannot read or mutate user B\'s own-scoped resources', ()
     });
     expect(reportRes.statusCode).toBe(200);
 
-    const listB = await app.inject({ method: 'GET', url: '/api/v1/trades', headers: bearer(userB.accessToken) });
+    const listB = await app.inject({
+      method: 'GET',
+      url: '/api/v1/trades',
+      headers: bearer(userB.accessToken),
+    });
     expect(listB.statusCode).toBe(200);
     const itemsB = (listB.json() as { items: Array<{ tradeId: string }> }).items;
     expect(itemsB.find((t) => t.tradeId === 'idor-trade-1')).toBeUndefined();
 
-    const listA = await app.inject({ method: 'GET', url: '/api/v1/trades', headers: bearer(userA.accessToken) });
+    const listA = await app.inject({
+      method: 'GET',
+      url: '/api/v1/trades',
+      headers: bearer(userA.accessToken),
+    });
     const itemsA = (listA.json() as { items: Array<{ tradeId: string }> }).items;
     expect(itemsA.find((t) => t.tradeId === 'idor-trade-1')).toBeTruthy();
   });
 
   it('a non-existent id 404s the same way a real-but-foreign one does (no existence oracle)', async () => {
-    const res = await app.inject({ method: 'DELETE', url: `/api/v1/devices/${NIL_LIKE_UUID}`, headers: bearer(userA.accessToken) });
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/devices/${NIL_LIKE_UUID}`,
+      headers: bearer(userA.accessToken),
+    });
     expect(res.statusCode).toBe(404);
   });
 });

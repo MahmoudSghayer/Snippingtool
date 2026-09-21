@@ -34,37 +34,45 @@ describe('env schema: production hardening', () => {
   });
 
   it('refuses the default dev COOKIE_SECRET in production', () => {
-    expect(() => loadEnv(baseProdSource({ COOKIE_SECRET: 'dev-cookie-secret-change-me-32-bytes-min' }))).toThrow(
-      /COOKIE_SECRET/,
-    );
+    expect(() =>
+      loadEnv(baseProdSource({ COOKIE_SECRET: 'dev-cookie-secret-change-me-32-bytes-min' })),
+    ).toThrow(/COOKIE_SECRET/);
   });
 
   it('refuses to boot without JWT keys in production', () => {
-    expect(() => loadEnv(baseProdSource({ JWT_PRIVATE_KEY: undefined, JWT_PUBLIC_KEY: undefined }))).toThrow(
-      /JWT_PRIVATE_KEY/,
-    );
+    expect(() =>
+      loadEnv(baseProdSource({ JWT_PRIVATE_KEY: undefined, JWT_PUBLIC_KEY: undefined })),
+    ).toThrow(/JWT_PRIVATE_KEY/);
   });
 
   it('refuses to boot without entitlement signing keys in production', () => {
     expect(() =>
-      loadEnv(baseProdSource({ ENTITLEMENT_SIGNING_KEY: undefined, ENTITLEMENT_PUBLIC_KEY: undefined })),
+      loadEnv(
+        baseProdSource({ ENTITLEMENT_SIGNING_KEY: undefined, ENTITLEMENT_PUBLIC_KEY: undefined }),
+      ),
     ).toThrow(/ENTITLEMENT_SIGNING_KEY/);
   });
 
   it('refuses a DATABASE_URL with no sslmode in production', () => {
-    expect(() => loadEnv(baseProdSource({ DATABASE_URL: 'postgres://sl:sl@db.internal:5432/sniper_ledger' }))).toThrow(
-      /sslmode/,
-    );
+    expect(() =>
+      loadEnv(baseProdSource({ DATABASE_URL: 'postgres://sl:sl@db.internal:5432/sniper_ledger' })),
+    ).toThrow(/sslmode/);
   });
 
   it('accepts sslmode=verify-full (stronger than require) too', () => {
     expect(() =>
-      loadEnv(baseProdSource({ DATABASE_URL: 'postgres://sl:sl@db.internal:5432/sniper_ledger?sslmode=verify-full' })),
+      loadEnv(
+        baseProdSource({
+          DATABASE_URL: 'postgres://sl:sl@db.internal:5432/sniper_ledger?sslmode=verify-full',
+        }),
+      ),
     ).not.toThrow();
   });
 
   it('refuses a plain (non-TLS) REDIS_URL in production', () => {
-    expect(() => loadEnv(baseProdSource({ REDIS_URL: 'redis://redis.internal:6379' }))).toThrow(/rediss/);
+    expect(() => loadEnv(baseProdSource({ REDIS_URL: 'redis://redis.internal:6379' }))).toThrow(
+      /rediss/,
+    );
   });
 
   it('never applies any of the above under development or test (defaults are fine there)', () => {
@@ -74,9 +82,9 @@ describe('env schema: production hardening', () => {
   });
 
   it('refuses COOKIE_SAME_SITE=none without COOKIE_SECURE in production', () => {
-    expect(() => loadEnv(baseProdSource({ COOKIE_SAME_SITE: 'none' } as Partial<NodeJS.ProcessEnv>))).toThrow(
-      /COOKIE_SAME_SITE=none requires COOKIE_SECURE/,
-    );
+    expect(() =>
+      loadEnv(baseProdSource({ COOKIE_SAME_SITE: 'none' } as Partial<NodeJS.ProcessEnv>)),
+    ).toThrow(/COOKIE_SAME_SITE=none requires COOKIE_SECURE/);
   });
 
   it('refuses COOKIE_SAME_SITE=none when APP_ORIGIN/DASHBOARD_ORIGIN are not https', () => {

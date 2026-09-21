@@ -1,9 +1,30 @@
 // Matches migrations/0012_trading.sql, 0013_filters.sql.
 
 import { isNull, relations } from 'drizzle-orm';
-import { bigint, boolean, date, index, integer, jsonb, numeric, pgTable, smallint, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import {
+  bigint,
+  boolean,
+  date,
+  index,
+  integer,
+  jsonb,
+  numeric,
+  pgTable,
+  smallint,
+  text,
+  uniqueIndex,
+  uuid,
+} from 'drizzle-orm/pg-core';
 
-import { createdAt, deletedAt, idPk, rowVersion, timestamptz, tradeStatusEnum, updatedAt } from './common.js';
+import {
+  createdAt,
+  deletedAt,
+  idPk,
+  rowVersion,
+  timestamptz,
+  tradeStatusEnum,
+  updatedAt,
+} from './common.js';
 import { users } from './users.js';
 
 export const trades = pgTable(
@@ -34,7 +55,9 @@ export const trades = pgTable(
     rowVersion: rowVersion(),
   },
   (t) => [
-    uniqueIndex('trades_user_id_trade_id_unique_live').on(t.userId, t.tradeId).where(isNull(t.deletedAt)),
+    uniqueIndex('trades_user_id_trade_id_unique_live')
+      .on(t.userId, t.tradeId)
+      .where(isNull(t.deletedAt)),
     index('trades_user_id_idx').on(t.userId).where(isNull(t.deletedAt)),
     index('trades_resource_id_idx').on(t.resourceId).where(isNull(t.deletedAt)),
     index('trades_status_idx').on(t.status).where(isNull(t.deletedAt)),
@@ -101,7 +124,9 @@ export const savedFilters = pgTable(
     rowVersion: rowVersion(),
   },
   (t) => [
-    uniqueIndex('saved_filters_user_filter_hash_unique_live').on(t.userId, t.filterHash).where(isNull(t.deletedAt)),
+    uniqueIndex('saved_filters_user_filter_hash_unique_live')
+      .on(t.userId, t.filterHash)
+      .where(isNull(t.deletedAt)),
     index('saved_filters_user_id_idx').on(t.userId, t.sortOrder).where(isNull(t.deletedAt)),
   ],
 );

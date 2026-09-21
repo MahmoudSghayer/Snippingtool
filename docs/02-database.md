@@ -39,18 +39,18 @@ of the system.
 
 Every table (unless noted otherwise) follows the same shape:
 
-| Convention | Detail |
-|---|---|
-| Primary key | `id uuid primary key default gen_random_uuid()`. The application generates a `uuidv7` value at insert time so IDs are roughly time-ordered (better index locality than v4); the column default is `gen_random_uuid()` as a safety net for direct SQL/seed inserts. |
-| `created_at` / `updated_at` | `timestamptz not null default now()`. `updated_at` is stamped by the `set_updated_at()` trigger (`migrations/0001`) — application code never sets it. |
-| `deleted_at` | `timestamptz`, nullable. Soft delete: rows are never `DELETE`d by the application (except a handful of append-only / ephemeral-token tables noted per table). Every uniqueness constraint that must not collide with a soft-deleted row is a **partial unique index** `WHERE deleted_at IS NULL` ("unique among live rows"). |
-| `row_version` | `integer not null default 0`, incremented by the `bump_row_version()` trigger on every `UPDATE`. Used for optimistic concurrency (`UPDATE ... WHERE id = $1 AND row_version = $2`). |
-| `created_by` / `updated_by` | `uuid references users(id) on delete set null`, present only on tables that have a meaningful actor (mostly admin-managed tables: `plans`, `subscriptions`, `licenses`, `admin_users`, `coupons`). |
-| Enums | Every closed set of states is a Postgres `ENUM` (`migrations/0002_enums.sql`), not a `text` + `CHECK`, so invalid values are rejected at the type level and `\dT+` self-documents the valid set. |
-| Money | Always integer **cents** (`price_cents`, `amount_cents`), never floating point. |
-| Game currency | Always integer **coins** (`buy_price`, `coins_spent`, …), never floating point. |
-| Foreign keys | `ON DELETE` behaviour is chosen deliberately per relationship, not defaulted — see the per-table tables below. The three patterns used: **RESTRICT** (financial/entitlement rows — a user can't be hard-deleted while they still have subscriptions, licenses, payments, trades, coupon redemptions, or open fraud flags), **CASCADE** (pure child rows that have no meaning without their parent — devices, sessions, activity telemetry, settings, notifications), **SET NULL** (optional actor references — `granted_by_admin_id`, `issued_by`, `reviewed_by`, `updated_by`, and a few "nice to have but not load-bearing" links like `devices.license_id`). |
-| Timestamps | Always `timestamptz`. Never bare `timestamp`. |
+| Convention                  | Detail                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Primary key                 | `id uuid primary key default gen_random_uuid()`. The application generates a `uuidv7` value at insert time so IDs are roughly time-ordered (better index locality than v4); the column default is `gen_random_uuid()` as a safety net for direct SQL/seed inserts.                                                                                                                                                                                                                                                                                                                                                                                              |
+| `created_at` / `updated_at` | `timestamptz not null default now()`. `updated_at` is stamped by the `set_updated_at()` trigger (`migrations/0001`) — application code never sets it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `deleted_at`                | `timestamptz`, nullable. Soft delete: rows are never `DELETE`d by the application (except a handful of append-only / ephemeral-token tables noted per table). Every uniqueness constraint that must not collide with a soft-deleted row is a **partial unique index** `WHERE deleted_at IS NULL` ("unique among live rows").                                                                                                                                                                                                                                                                                                                                    |
+| `row_version`               | `integer not null default 0`, incremented by the `bump_row_version()` trigger on every `UPDATE`. Used for optimistic concurrency (`UPDATE ... WHERE id = $1 AND row_version = $2`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `created_by` / `updated_by` | `uuid references users(id) on delete set null`, present only on tables that have a meaningful actor (mostly admin-managed tables: `plans`, `subscriptions`, `licenses`, `admin_users`, `coupons`).                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Enums                       | Every closed set of states is a Postgres `ENUM` (`migrations/0002_enums.sql`), not a `text` + `CHECK`, so invalid values are rejected at the type level and `\dT+` self-documents the valid set.                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Money                       | Always integer **cents** (`price_cents`, `amount_cents`), never floating point.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Game currency               | Always integer **coins** (`buy_price`, `coins_spent`, …), never floating point.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Foreign keys                | `ON DELETE` behaviour is chosen deliberately per relationship, not defaulted — see the per-table tables below. The three patterns used: **RESTRICT** (financial/entitlement rows — a user can't be hard-deleted while they still have subscriptions, licenses, payments, trades, coupon redemptions, or open fraud flags), **CASCADE** (pure child rows that have no meaning without their parent — devices, sessions, activity telemetry, settings, notifications), **SET NULL** (optional actor references — `granted_by_admin_id`, `issued_by`, `reviewed_by`, `updated_by`, and a few "nice to have but not load-bearing" links like `devices.license_id`). |
+| Timestamps                  | Always `timestamptz`. Never bare `timestamp`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 Naming: tables and columns are `snake_case`; the Drizzle layer maps every
 column to `camelCase` (e.g. `price_cents` ↔ `priceCents`). Table names are
@@ -191,7 +191,7 @@ migrate:down`):
 - Reads every `*.sql` file in `migrations/`, sorted lexically (the `NNNN_`
   prefix controls order).
 - Records each applied file in a `schema_migrations(filename, applied_at,
-  checksum)` table, created on first run.
+checksum)` table, created on first run.
 - Applies each file **inside its own transaction** (`BEGIN` implied by
   `sql.begin(...)`) — a migration either fully applies or fully rolls back,
   and the `schema_migrations` row is inserted in the same transaction.
@@ -221,7 +221,7 @@ Two database roles are created in `migrations/0001`:
   connections and read replicas.
 
 `migrations/0024_role_grants.sql` adds `ALTER DEFAULT PRIVILEGES` so any
-table created by the same owning role in a *future* migration automatically
+table created by the same owning role in a _future_ migration automatically
 grants the right access to both roles — except `audit_logs`-style
 append-only tables, which must still explicitly `REVOKE` in their own
 migration (defaults can't special-case one table).
@@ -238,24 +238,24 @@ The account root. Case-insensitive email uniqueness (via `citext`) is
 enforced only among live (`deleted_at IS NULL`) rows, so a deleted account's
 email can be reused by a new signup.
 
-| Column | Type | Notes |
-|---|---|---|
-| `id` | uuid PK | |
-| `email` | citext | unique among live rows |
-| `password_hash` | text | argon2id |
-| `email_verified_at` | timestamptz | null until verified |
-| `status` | `user_status` | active / suspended / banned / deleted |
-| `role` | `user_role` | user / admin (coarse; fine-grained admin permissions live in `admin_users`) |
-| `totp_secret_enc` | bytea | `pgp_sym_encrypt`-ed TOTP secret |
-| `totp_enabled_at` | timestamptz | null = 2FA off even if a secret exists |
-| `failed_login_count` | smallint | drives lockout |
-| `locked_until` | timestamptz | login rejected while `now() < locked_until` |
-| `last_login_at`, `last_ip` | timestamptz, inet | |
-| `timezone` | text | default `UTC` |
-| `referral_code` | text | unique among live rows, format-checked |
-| `stripe_customer_id` | text | (0025) unique among non-null values; the 4th trial-abuse vector (docs/05-subscriptions.md §5) — persisted the first time this user's Stripe Checkout completes or their Customer Portal session resolves a customer |
-| `email_normalised` | text, `GENERATED ALWAYS ... STORED` | (0025) SQL mirror of `normaliseEmailForAbuseCheck()`, indexed for the trial-abuse email check; never used for login/uniqueness |
-| `deleted_at`, `created_at`, `updated_at`, `row_version` | — | standard, but see `row_version`'s own note below |
+| Column                                                  | Type                                | Notes                                                                                                                                                                                                               |
+| ------------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                                                    | uuid PK                             |                                                                                                                                                                                                                     |
+| `email`                                                 | citext                              | unique among live rows                                                                                                                                                                                              |
+| `password_hash`                                         | text                                | argon2id                                                                                                                                                                                                            |
+| `email_verified_at`                                     | timestamptz                         | null until verified                                                                                                                                                                                                 |
+| `status`                                                | `user_status`                       | active / suspended / banned / deleted                                                                                                                                                                               |
+| `role`                                                  | `user_role`                         | user / admin (coarse; fine-grained admin permissions live in `admin_users`)                                                                                                                                         |
+| `totp_secret_enc`                                       | bytea                               | `pgp_sym_encrypt`-ed TOTP secret                                                                                                                                                                                    |
+| `totp_enabled_at`                                       | timestamptz                         | null = 2FA off even if a secret exists                                                                                                                                                                              |
+| `failed_login_count`                                    | smallint                            | drives lockout                                                                                                                                                                                                      |
+| `locked_until`                                          | timestamptz                         | login rejected while `now() < locked_until`                                                                                                                                                                         |
+| `last_login_at`, `last_ip`                              | timestamptz, inet                   |                                                                                                                                                                                                                     |
+| `timezone`                                              | text                                | default `UTC`                                                                                                                                                                                                       |
+| `referral_code`                                         | text                                | unique among live rows, format-checked                                                                                                                                                                              |
+| `stripe_customer_id`                                    | text                                | (0025) unique among non-null values; the 4th trial-abuse vector (docs/05-subscriptions.md §5) — persisted the first time this user's Stripe Checkout completes or their Customer Portal session resolves a customer |
+| `email_normalised`                                      | text, `GENERATED ALWAYS ... STORED` | (0025) SQL mirror of `normaliseEmailForAbuseCheck()`, indexed for the trial-abuse email check; never used for login/uniqueness                                                                                      |
+| `deleted_at`, `created_at`, `updated_at`, `row_version` | —                                   | standard, but see `row_version`'s own note below                                                                                                                                                                    |
 
 **Indexes:** partial unique on `email`; partial unique on `referral_code`;
 unique on `stripe_customer_id` (non-null only); btree on `email_normalised`
@@ -290,13 +290,13 @@ and a strict allow-list would have silently broken both).
 One row per user granted admin-panel access. `user_id` is `RESTRICT` —
 can't hard-delete a user who's still an admin.
 
-| Column | Type | Notes |
-|---|---|---|
-| `id` | uuid PK | |
-| `user_id` | uuid FK → users, **RESTRICT**, unique | |
-| `admin_role` | `admin_role` | super_admin / support / analyst / billing |
-| `permissions` | jsonb | override object layered on role defaults |
-| soft-delete + audit columns | — | standard incl. `created_by`/`updated_by` |
+| Column                      | Type                                  | Notes                                     |
+| --------------------------- | ------------------------------------- | ----------------------------------------- |
+| `id`                        | uuid PK                               |                                           |
+| `user_id`                   | uuid FK → users, **RESTRICT**, unique |                                           |
+| `admin_role`                | `admin_role`                          | super_admin / support / analyst / billing |
+| `permissions`               | jsonb                                 | override object layered on role defaults  |
+| soft-delete + audit columns | —                                     | standard incl. `created_by`/`updated_by`  |
 
 **Indexes:** partial btree on `admin_role`. **Constraints:** `permissions`
 must be a JSON object.
@@ -307,15 +307,15 @@ Append-oriented (not hard-enforced like `audit_logs` — see
 [§6.9](#69-audit) for why the two logs exist) log for the admin activity
 screen.
 
-| Column | Type | Notes |
-|---|---|---|
-| `id` | uuid PK | |
-| `admin_user_id` | uuid FK → admin_users, **RESTRICT** | |
-| `action`, `target_type` | text | e.g. `"subscription.suspend"`, `"user"` |
-| `target_id` | uuid | nullable (bulk/config actions have no single target) |
-| `reason` | text | |
-| `metadata` | jsonb | action-specific detail |
-| `occurred_at`, `created_at` | timestamptz | no `updated_at`/soft-delete — write-once |
+| Column                      | Type                                | Notes                                                |
+| --------------------------- | ----------------------------------- | ---------------------------------------------------- |
+| `id`                        | uuid PK                             |                                                      |
+| `admin_user_id`             | uuid FK → admin_users, **RESTRICT** |                                                      |
+| `action`, `target_type`     | text                                | e.g. `"subscription.suspend"`, `"user"`              |
+| `target_id`                 | uuid                                | nullable (bulk/config actions have no single target) |
+| `reason`                    | text                                |                                                      |
+| `metadata`                  | jsonb                               | action-specific detail                               |
+| `occurred_at`, `created_at` | timestamptz                         | no `updated_at`/soft-delete — write-once             |
 
 **Indexes:** `(admin_user_id, occurred_at desc)`, `(target_type,
 target_id)`, `action`, `occurred_at desc`, GIN on `metadata`.
@@ -330,17 +330,17 @@ Registered browser installs, for device-limit enforcement. Pure child of
 `users` (**CASCADE**); `license_id` is an optional pointer to the license
 currently validating it (**SET NULL**).
 
-| Column | Type | Notes |
-|---|---|---|
-| `id` | uuid PK | |
-| `user_id` | uuid FK → users, **CASCADE** | |
-| `license_id` | uuid FK → licenses, **SET NULL** | |
-| `fingerprint_hash` | text | hash of a stable client fingerprint |
-| `name`, `browser`, `os`, `extension_version` | text | |
-| `first_seen_at`, `last_seen_at`, `last_ip` | — | |
-| `status` | `device_status` | active / revoked |
-| `trusted_at` | timestamptz | reserved for step-up flows |
-| soft-delete + audit | — | standard (no `created_by`/`updated_by` — no meaningful third-party actor) |
+| Column                                       | Type                             | Notes                                                                     |
+| -------------------------------------------- | -------------------------------- | ------------------------------------------------------------------------- |
+| `id`                                         | uuid PK                          |                                                                           |
+| `user_id`                                    | uuid FK → users, **CASCADE**     |                                                                           |
+| `license_id`                                 | uuid FK → licenses, **SET NULL** |                                                                           |
+| `fingerprint_hash`                           | text                             | hash of a stable client fingerprint                                       |
+| `name`, `browser`, `os`, `extension_version` | text                             |                                                                           |
+| `first_seen_at`, `last_seen_at`, `last_ip`   | —                                |                                                                           |
+| `status`                                     | `device_status`                  | active / revoked                                                          |
+| `trusted_at`                                 | timestamptz                      | reserved for step-up flows                                                |
+| soft-delete + audit                          | —                                | standard (no `created_by`/`updated_by` — no meaningful third-party actor) |
 
 **Indexes:** partial unique `(user_id, fingerprint_hash)`; partial btree on
 `user_id`, `license_id`, `status`; btree on `last_seen_at`.
@@ -351,16 +351,16 @@ currently validating it (**SET NULL**).
 Opaque refresh-token sessions (access tokens are stateless JWTs, never
 persisted). Pure child of `users` (**CASCADE**); `device_id` **SET NULL**.
 
-| Column | Type | Notes |
-|---|---|---|
-| `id` | uuid PK | |
-| `user_id` | uuid FK, **CASCADE** | |
-| `device_id` | uuid FK, **SET NULL** | |
-| `refresh_token_hash` | text unique | SHA-256 of the 32-byte token |
-| `family_id` | uuid | shared across a rotation chain — a reused stale token revokes the whole family |
-| `ip`, `user_agent` | — | |
-| `expires_at`, `revoked_at`, `revoked_reason`, `last_used_at` | — | |
-| `created_at`, `updated_at`, `row_version` | — | no soft-delete — `revoked_at` is the terminal state; rows are pruned by a retention job |
+| Column                                                       | Type                  | Notes                                                                                   |
+| ------------------------------------------------------------ | --------------------- | --------------------------------------------------------------------------------------- |
+| `id`                                                         | uuid PK               |                                                                                         |
+| `user_id`                                                    | uuid FK, **CASCADE**  |                                                                                         |
+| `device_id`                                                  | uuid FK, **SET NULL** |                                                                                         |
+| `refresh_token_hash`                                         | text unique           | SHA-256 of the 32-byte token                                                            |
+| `family_id`                                                  | uuid                  | shared across a rotation chain — a reused stale token revokes the whole family          |
+| `ip`, `user_agent`                                           | —                     |                                                                                         |
+| `expires_at`, `revoked_at`, `revoked_reason`, `last_used_at` | —                     |                                                                                         |
+| `created_at`, `updated_at`, `row_version`                    | —                     | no soft-delete — `revoked_at` is the terminal state; rows are pruned by a retention job |
 
 **Indexes:** unique on `refresh_token_hash`; btree on `user_id`,
 `device_id`, `family_id`; partial `(user_id, expires_at) WHERE revoked_at IS
@@ -371,11 +371,11 @@ NULL`. **Constraints:** `expires_at > created_at`.
 Short-lived, single-use, hash-only tokens. All **CASCADE** on `users`, no
 soft-delete (ephemeral).
 
-| Table | Key columns | TTL / use |
-|---|---|---|
-| `email_verifications` | `token_hash` unique, `expires_at`, `consumed_at` | 24h, single use |
-| `password_resets` | `token_hash` unique, `expires_at`, `consumed_at`, `requested_ip` | 1h, single use; success revokes all sessions (app layer) |
-| `totp_recovery_codes` | `code_hash` unique, `used_at` | 10 generated per user at 2FA enrolment |
+| Table                 | Key columns                                                      | TTL / use                                                |
+| --------------------- | ---------------------------------------------------------------- | -------------------------------------------------------- |
+| `email_verifications` | `token_hash` unique, `expires_at`, `consumed_at`                 | 24h, single use                                          |
+| `password_resets`     | `token_hash` unique, `expires_at`, `consumed_at`, `requested_ip` | 1h, single use; success revokes all sessions (app layer) |
+| `totp_recovery_codes` | `code_hash` unique, `used_at`                                    | 10 generated per user at 2FA enrolment                   |
 
 ---
 
@@ -386,20 +386,20 @@ soft-delete (ephemeral).
 Data-driven catalogue — admins can create plans (including one-off lifetime
 plans) without a deploy.
 
-| Column | Type | Notes |
-|---|---|---|
-| `id` | uuid PK | |
-| `code` | text | unique among live rows, e.g. `trial`, `ultimate` |
-| `name`, `description` | text | |
-| `price_cents` | integer | 0 for trial |
-| `currency` | text | default `usd` |
-| `interval` | text | `day`/`week`/`month`/`year`/`one_time` |
-| `is_lifetime` | boolean | |
-| `device_limit` | smallint | 1–10 |
-| `features` | jsonb | feature-flag object |
-| `stripe_price_id` | text | null for manual/lifetime/coupon-only plans |
-| `is_active`, `sort_order` | — | |
-| soft-delete + audit | — | standard incl. `created_by`/`updated_by` |
+| Column                    | Type     | Notes                                            |
+| ------------------------- | -------- | ------------------------------------------------ |
+| `id`                      | uuid PK  |                                                  |
+| `code`                    | text     | unique among live rows, e.g. `trial`, `ultimate` |
+| `name`, `description`     | text     |                                                  |
+| `price_cents`             | integer  | 0 for trial                                      |
+| `currency`                | text     | default `usd`                                    |
+| `interval`                | text     | `day`/`week`/`month`/`year`/`one_time`           |
+| `is_lifetime`             | boolean  |                                                  |
+| `device_limit`            | smallint | 1–10                                             |
+| `features`                | jsonb    | feature-flag object                              |
+| `stripe_price_id`         | text     | null for manual/lifetime/coupon-only plans       |
+| `is_active`, `sort_order` | —        |                                                  |
+| soft-delete + audit       | —        | standard incl. `created_by`/`updated_by`         |
 
 **Constraints:** `price_cents >= 0`; `device_limit BETWEEN 1 AND 10`;
 `interval` in the five allowed values; a lifetime plan must have
@@ -414,20 +414,20 @@ reconciled from Stripe by webhook + nightly sync. `user_id`/`plan_id` are
 **RESTRICT** — financial/entitlement records are never silently orphaned.
 `granted_by_admin_id` is **SET NULL** (optional actor).
 
-| Column | Type | Notes |
-|---|---|---|
-| `id` | uuid PK | |
-| `user_id` | uuid FK, **RESTRICT** | |
-| `plan_id` | uuid FK, **RESTRICT** | |
-| `status` | `subscription_status` | trialing/active/past_due/canceled/suspended/expired/lifetime |
-| `current_period_start/end` | timestamptz | |
-| `trial_ends_at` | timestamptz | only populated while `status = trialing` |
-| `cancel_at_period_end`, `auto_renew` | boolean | |
-| `stripe_subscription_id` | text | unique; null unless `source = stripe` |
-| `source` | `subscription_source` | stripe / manual / coupon |
-| `granted_by_admin_id` | uuid FK → admin_users, **SET NULL** | |
-| `canceled_at`, `ended_at` | — | |
-| soft-delete + audit | — | standard incl. `created_by`/`updated_by` |
+| Column                               | Type                                | Notes                                                        |
+| ------------------------------------ | ----------------------------------- | ------------------------------------------------------------ |
+| `id`                                 | uuid PK                             |                                                              |
+| `user_id`                            | uuid FK, **RESTRICT**               |                                                              |
+| `plan_id`                            | uuid FK, **RESTRICT**               |                                                              |
+| `status`                             | `subscription_status`               | trialing/active/past_due/canceled/suspended/expired/lifetime |
+| `current_period_start/end`           | timestamptz                         |                                                              |
+| `trial_ends_at`                      | timestamptz                         | only populated while `status = trialing`                     |
+| `cancel_at_period_end`, `auto_renew` | boolean                             |                                                              |
+| `stripe_subscription_id`             | text                                | unique; null unless `source = stripe`                        |
+| `source`                             | `subscription_source`               | stripe / manual / coupon                                     |
+| `granted_by_admin_id`                | uuid FK → admin_users, **SET NULL** |                                                              |
+| `canceled_at`, `ended_at`            | —                                   |                                                              |
+| soft-delete + audit                  | —                                   | standard incl. `created_by`/`updated_by`                     |
 
 **Constraints:** `current_period_end > current_period_start` (when both
 set); `trial_ends_at` only when `status = trialing`; `stripe_subscription_id`
@@ -444,17 +444,17 @@ Issued license keys, format `SL-XXXX-XXXX-XXXX-XXXX` (Crockford base32 +
 checksum, generated in the API). Only the hash is stored.
 `subscription_id`/`user_id` are **RESTRICT**.
 
-| Column | Type | Notes |
-|---|---|---|
-| `id` | uuid PK | |
-| `subscription_id` | uuid FK, **RESTRICT** | |
-| `user_id` | uuid FK, **RESTRICT** | |
-| `key_hash` | text unique | hash of the full key |
-| `key_prefix` | text | non-secret display prefix |
-| `status` | `license_status` | active / revoked / expired |
-| `max_devices` | smallint | copied from `plans.device_limit` at issuance, 1–10 |
-| `expires_at`, `last_validated_at`, `revoked_at`, `revoked_reason` | — | |
-| soft-delete + audit | — | standard |
+| Column                                                            | Type                  | Notes                                              |
+| ----------------------------------------------------------------- | --------------------- | -------------------------------------------------- |
+| `id`                                                              | uuid PK               |                                                    |
+| `subscription_id`                                                 | uuid FK, **RESTRICT** |                                                    |
+| `user_id`                                                         | uuid FK, **RESTRICT** |                                                    |
+| `key_hash`                                                        | text unique           | hash of the full key                               |
+| `key_prefix`                                                      | text                  | non-secret display prefix                          |
+| `status`                                                          | `license_status`      | active / revoked / expired                         |
+| `max_devices`                                                     | smallint              | copied from `plans.device_limit` at issuance, 1–10 |
+| `expires_at`, `last_validated_at`, `revoked_at`, `revoked_reason` | —                     |                                                    |
+| soft-delete + audit                                               | —                     | standard                                           |
 
 **Constraints:** `max_devices BETWEEN 1 AND 10`; `status = revoked` iff
 `revoked_at IS NOT NULL`. **Indexes:** unique `key_hash`; partial btree on
@@ -469,18 +469,18 @@ checksum, generated in the API). Only the hash is stored.
 `coupons` created before `payments` in migration order since `payments`
 references it.
 
-| Table | Key columns | Notes |
-|---|---|---|
-| `coupons` | `code` (unique, live), `type` (`coupon_type`: percent/fixed/free_days/lifetime), `value`, `plan_ids uuid[]`, `max_redemptions`, `redeemed_count`, `expires_at`, `is_active`, `created_by` **SET NULL** | `value` range CHECK'd per `type` (percent 1–100, fixed/free_days ≥ 1, lifetime = 0 unused); `redeemed_count <= max_redemptions` |
-| `coupon_redemptions` | `coupon_id` **RESTRICT**, `user_id` **RESTRICT**, `subscription_id` **SET NULL**, `redeemed_at` | append-only; unique `(coupon_id, user_id)` — one redemption per coupon per user |
+| Table                | Key columns                                                                                                                                                                                            | Notes                                                                                                                           |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| `coupons`            | `code` (unique, live), `type` (`coupon_type`: percent/fixed/free_days/lifetime), `value`, `plan_ids uuid[]`, `max_redemptions`, `redeemed_count`, `expires_at`, `is_active`, `created_by` **SET NULL** | `value` range CHECK'd per `type` (percent 1–100, fixed/free_days ≥ 1, lifetime = 0 unused); `redeemed_count <= max_redemptions` |
+| `coupon_redemptions` | `coupon_id` **RESTRICT**, `user_id` **RESTRICT**, `subscription_id` **SET NULL**, `redeemed_at`                                                                                                        | append-only; unique `(coupon_id, user_id)` — one redemption per coupon per user                                                 |
 
 #### `payments` / `payment_history` / `stripe_webhook_events`
 
-| Table | Key columns | Notes |
-|---|---|---|
-| `payments` | `user_id` **RESTRICT**, `subscription_id` **RESTRICT**, `provider`, `provider_payment_id` (unique per provider — idempotency), `amount_cents >= 0`, `status`, `coupon_id` **SET NULL**, `invoice_url` | one row per charge/attempt |
-| `payment_history` | `payment_id` **CASCADE**, `event`, `raw_event jsonb`, `occurred_at` | append-only event trail per payment |
-| `stripe_webhook_events` | `event_id` unique, `type`, `payload jsonb`, `processed_at`, `error` | idempotency ledger — a re-delivered Stripe webhook is a no-op |
+| Table                   | Key columns                                                                                                                                                                                           | Notes                                                         |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `payments`              | `user_id` **RESTRICT**, `subscription_id` **RESTRICT**, `provider`, `provider_payment_id` (unique per provider — idempotency), `amount_cents >= 0`, `status`, `coupon_id` **SET NULL**, `invoice_url` | one row per charge/attempt                                    |
+| `payment_history`       | `payment_id` **CASCADE**, `event`, `raw_event jsonb`, `occurred_at`                                                                                                                                   | append-only event trail per payment                           |
+| `stripe_webhook_events` | `event_id` unique, `type`, `payload jsonb`, `processed_at`, `error`                                                                                                                                   | idempotency ledger — a re-delivered Stripe webhook is a no-op |
 
 ---
 
@@ -501,14 +501,14 @@ browser's IndexedDB, never uploaded, never pooled across users.
 
 #### `user_activity`
 
-| Column | Type | Notes |
-|---|---|---|
-| `id, occurred_at` | uuid, timestamptz | composite PK |
-| `user_id` | uuid FK, **CASCADE** | |
-| `device_id` | uuid FK, **SET NULL** | |
-| `type` | `user_activity_type` | login/logout/search/filter_change/settings_change/error/heartbeat/device_registered/device_revoked/password_changed/email_changed/mfa_enabled/mfa_disabled/kill_switch_triggered/other |
-| `ip` | inet | |
-| `metadata` | jsonb | type-specific payload |
+| Column            | Type                  | Notes                                                                                                                                                                                  |
+| ----------------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id, occurred_at` | uuid, timestamptz     | composite PK                                                                                                                                                                           |
+| `user_id`         | uuid FK, **CASCADE**  |                                                                                                                                                                                        |
+| `device_id`       | uuid FK, **SET NULL** |                                                                                                                                                                                        |
+| `type`            | `user_activity_type`  | login/logout/search/filter_change/settings_change/error/heartbeat/device_registered/device_revoked/password_changed/email_changed/mfa_enabled/mfa_disabled/kill_switch_triggered/other |
+| `ip`              | inet                  |                                                                                                                                                                                        |
+| `metadata`        | jsonb                 | type-specific payload                                                                                                                                                                  |
 
 **Indexes:** `(user_id, occurred_at desc)`, `(device_id, occurred_at desc)`,
 `(type, occurred_at desc)`, **BRIN** on `occurred_at`, **GIN** on
@@ -516,18 +516,18 @@ browser's IndexedDB, never uploaded, never pooled across users.
 
 #### `search_activity`
 
-Search *metadata* only (filter hash/shape, result count, observed floor
+Search _metadata_ only (filter hash/shape, result count, observed floor
 price) — never the raw listing set.
 
-| Column | Type | Notes |
-|---|---|---|
-| `id, occurred_at` | — | composite PK |
-| `user_id`, `device_id` | — | CASCADE / SET NULL |
-| `filter_hash` | text | correlates to `saved_filters.filter_hash` |
-| `filter` | jsonb | |
-| `results_count` | integer, ≥ 0 | |
-| `resource_id` | text | EA player/item resource, if applicable |
-| `floor_price` | integer, ≥ 0 or null | |
+| Column                 | Type                 | Notes                                     |
+| ---------------------- | -------------------- | ----------------------------------------- |
+| `id, occurred_at`      | —                    | composite PK                              |
+| `user_id`, `device_id` | —                    | CASCADE / SET NULL                        |
+| `filter_hash`          | text                 | correlates to `saved_filters.filter_hash` |
+| `filter`               | jsonb                |                                           |
+| `results_count`        | integer, ≥ 0         |                                           |
+| `resource_id`          | text                 | EA player/item resource, if applicable    |
+| `floor_price`          | integer, ≥ 0 or null |                                           |
 
 **Indexes:** `(user_id, occurred_at desc)`, `(device_id, occurred_at desc)`,
 `(filter_hash, occurred_at desc)`, `(resource_id, occurred_at desc)`, BRIN,
@@ -537,14 +537,14 @@ GIN on `filter`.
 
 One row per snipe attempt outcome, computed by the extension.
 
-| Column | Type | Notes |
-|---|---|---|
-| `id, occurred_at` | — | composite PK |
-| `user_id`, `device_id` | — | CASCADE / SET NULL |
-| `resource_id`, `trade_id` | text | `trade_id` correlates to `trades.trade_id` on success |
-| `target_price`, `listed_price` | integer, ≥ 0 | |
-| `outcome` | `sniping_outcome` | attempted/success/failed/too_slow/blocked/error — `blocked` = governor denied it |
-| `latency_ms`, `error_code` | — | |
+| Column                         | Type              | Notes                                                                            |
+| ------------------------------ | ----------------- | -------------------------------------------------------------------------------- |
+| `id, occurred_at`              | —                 | composite PK                                                                     |
+| `user_id`, `device_id`         | —                 | CASCADE / SET NULL                                                               |
+| `resource_id`, `trade_id`      | text              | `trade_id` correlates to `trades.trade_id` on success                            |
+| `target_price`, `listed_price` | integer, ≥ 0      |                                                                                  |
+| `outcome`                      | `sniping_outcome` | attempted/success/failed/too_slow/blocked/error — `blocked` = governor denied it |
+| `latency_ms`, `error_code`     | —                 |                                                                                  |
 
 **Indexes:** `(user_id, occurred_at desc)`, `(device_id, occurred_at desc)`,
 `(resource_id, occurred_at desc)`, partial `trade_id`, `(outcome,
@@ -557,14 +557,14 @@ coin flow, hard stop, kill switch), synced from the extension. **Not** one
 of the four declaratively-partitioned tables (not high-enough volume to
 warrant it at MVP scale) — a plain table with a BRIN index on `occurred_at`.
 
-| Column | Type | Notes |
-|---|---|---|
-| `id` | uuid PK | |
-| `user_id` | uuid FK, **CASCADE** | |
-| `device_id`, `session_id` | uuid FK, **SET NULL** | |
-| `kind` | `risk_event_kind` | actions_per_hour/session_length/buy_search_ratio/coin_flow/hard_stop/kill_switch |
-| `value`, `threshold` | numeric(14,4) | observed value vs. configured threshold |
-| `occurred_at`, `created_at` | — | |
+| Column                      | Type                  | Notes                                                                            |
+| --------------------------- | --------------------- | -------------------------------------------------------------------------------- |
+| `id`                        | uuid PK               |                                                                                  |
+| `user_id`                   | uuid FK, **CASCADE**  |                                                                                  |
+| `device_id`, `session_id`   | uuid FK, **SET NULL** |                                                                                  |
+| `kind`                      | `risk_event_kind`     | actions_per_hour/session_length/buy_search_ratio/coin_flow/hard_stop/kill_switch |
+| `value`, `threshold`        | numeric(14,4)         | observed value vs. configured threshold                                          |
+| `occurred_at`, `created_at` | —                     |                                                                                  |
 
 **Indexes:** `(user_id, occurred_at desc)`, `(device_id, occurred_at desc)`,
 `session_id`, `(kind, occurred_at desc)`, BRIN.
@@ -578,17 +578,17 @@ warrant it at MVP scale) — a plain table with a BRIN index on `occurred_at`.
 Individual buy→sell trades, computed and reported by the user's own
 extension. Financial record: `user_id` **RESTRICT**.
 
-| Column | Type | Notes |
-|---|---|---|
-| `id` | uuid PK | |
-| `user_id` | uuid FK, **RESTRICT** | |
-| `trade_id` | text | extension-generated id, unique per user (live rows) |
-| `resource_id`, `asset_id` | text | |
-| `rating` | smallint, 0–99 | |
-| `buy_price`, `sell_price`, `ea_tax`, `net_profit` | integer, ≥ 0 (except `net_profit`, which can be negative) | coins |
-| `status` | `trade_status` | bought/listed/sold/expired/unsold |
-| `bought_at`, `sold_at` | — | `sold_at >= bought_at` |
-| soft-delete + audit | — | standard, no `created_by`/`updated_by` |
+| Column                                            | Type                                                      | Notes                                               |
+| ------------------------------------------------- | --------------------------------------------------------- | --------------------------------------------------- |
+| `id`                                              | uuid PK                                                   |                                                     |
+| `user_id`                                         | uuid FK, **RESTRICT**                                     |                                                     |
+| `trade_id`                                        | text                                                      | extension-generated id, unique per user (live rows) |
+| `resource_id`, `asset_id`                         | text                                                      |                                                     |
+| `rating`                                          | smallint, 0–99                                            |                                                     |
+| `buy_price`, `sell_price`, `ea_tax`, `net_profit` | integer, ≥ 0 (except `net_profit`, which can be negative) | coins                                               |
+| `status`                                          | `trade_status`                                            | bought/listed/sold/expired/unsold                   |
+| `bought_at`, `sold_at`                            | —                                                         | `sold_at >= bought_at`                              |
+| soft-delete + audit                               | —                                                         | standard, no `created_by`/`updated_by`              |
 
 **Indexes:** partial unique `(user_id, trade_id)`; partial btree `user_id`,
 `resource_id`, `status`; partial `(user_id, sold_at) WHERE sold_at IS NOT
@@ -599,13 +599,13 @@ NULL`.
 Daily per-user rollup, maintained by the `profits.rollup` hourly job
 (upsert on `(user_id, day)`). Financial record: `user_id` **RESTRICT**.
 
-| Column | Type | Notes |
-|---|---|---|
-| `id` | uuid PK | |
-| `user_id` | uuid FK, **RESTRICT** | |
-| `day` | date | unique with `user_id` |
-| `coins_spent`, `coins_earned`, `net_profit` | bigint, ≥ 0 (net_profit unconstrained) | |
-| `snipes`, `successes`, `trades_closed` | integer, ≥ 0; `successes <= snipes` | |
+| Column                                      | Type                                   | Notes                 |
+| ------------------------------------------- | -------------------------------------- | --------------------- |
+| `id`                                        | uuid PK                                |                       |
+| `user_id`                                   | uuid FK, **RESTRICT**                  |                       |
+| `day`                                       | date                                   | unique with `user_id` |
+| `coins_spent`, `coins_earned`, `net_profit` | bigint, ≥ 0 (net_profit unconstrained) |                       |
+| `snipes`, `successes`, `trades_closed`      | integer, ≥ 0; `successes <= snipes`    |                       |
 
 **Indexes:** unique `(user_id, day)`; btree `day`; `(user_id, day desc)`.
 
@@ -615,20 +615,20 @@ The opportunity ranker's persisted filters and their realised-return
 history, synced from the extension so they survive reinstalls. Both
 **CASCADE** on their parent.
 
-| Table | Key columns | Notes |
-|---|---|---|
-| `saved_filters` | `user_id` **CASCADE**, `name`, `filter jsonb`, `filter_hash` (unique per user, live), `is_active`, `sort_order` | |
-| `filter_stats` | `filter_id` **CASCADE**, `window_start` (unique with `filter_id`), `searches`, `attempts`, `successes <= attempts`, `coins_spent`, `coins_earned`, `coins_per_hour numeric(14,2)` | the ranker's primary scoring signal |
+| Table           | Key columns                                                                                                                                                                       | Notes                               |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| `saved_filters` | `user_id` **CASCADE**, `name`, `filter jsonb`, `filter_hash` (unique per user, live), `is_active`, `sort_order`                                                                   |                                     |
+| `filter_stats`  | `filter_id` **CASCADE**, `window_start` (unique with `filter_id`), `searches`, `attempts`, `successes <= attempts`, `coins_spent`, `coins_earned`, `coins_per_hour numeric(14,2)` | the ranker's primary scoring signal |
 
 ---
 
 ### 6.7 Settings & notifications
 
-| Table | Key columns | Notes |
-|---|---|---|
-| `user_settings` | `user_id` **CASCADE**, unique; `settings jsonb`, `version` | current settings blob, validated by the shared Zod schema at the API boundary (not the DB); server version wins on sync conflicts |
-| `settings_history` | `user_id` **CASCADE**; `settings jsonb`, `version` (unique with `user_id`), `changed_by` **SET NULL** | append-only snapshot on every change |
-| `notifications` | `user_id` **CASCADE**; `type`, `title`, `body`, `data jsonb`, `read_at`, `delivered_via` (`notification_channel`: in_app/email/push/ws) | |
+| Table              | Key columns                                                                                                                             | Notes                                                                                                                             |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `user_settings`    | `user_id` **CASCADE**, unique; `settings jsonb`, `version`                                                                              | current settings blob, validated by the shared Zod schema at the API boundary (not the DB); server version wins on sync conflicts |
+| `settings_history` | `user_id` **CASCADE**; `settings jsonb`, `version` (unique with `user_id`), `changed_by` **SET NULL**                                   | append-only snapshot on every change                                                                                              |
+| `notifications`    | `user_id` **CASCADE**; `type`, `title`, `body`, `data jsonb`, `read_at`, `delivered_via` (`notification_channel`: in_app/email/push/ws) |                                                                                                                                   |
 
 ---
 
@@ -639,15 +639,15 @@ history, synced from the extension so they survive reinstalls. Both
 `user_id` **SET NULL** (an IP/device/hwid ban must survive account
 deletion); `issued_by` **SET NULL**.
 
-| Column | Type | Notes |
-|---|---|---|
-| `id` | uuid PK | |
-| `user_id` | uuid FK, **SET NULL**, nullable | required (CHECK) when `type = account` |
-| `type` | `ban_type` | account / ip / device / hwid |
-| `value` | text | the banned identifier itself |
-| `reason` | text | |
-| `issued_by` | uuid FK → users, **SET NULL** | |
-| `expires_at`, `lifted_at` | — | null `expires_at` = indefinite |
+| Column                    | Type                            | Notes                                  |
+| ------------------------- | ------------------------------- | -------------------------------------- |
+| `id`                      | uuid PK                         |                                        |
+| `user_id`                 | uuid FK, **SET NULL**, nullable | required (CHECK) when `type = account` |
+| `type`                    | `ban_type`                      | account / ip / device / hwid           |
+| `value`                   | text                            | the banned identifier itself           |
+| `reason`                  | text                            |                                        |
+| `issued_by`               | uuid FK → users, **SET NULL**   |                                        |
+| `expires_at`, `lifted_at` | —                               | null `expires_at` = indefinite         |
 
 **Indexes:** partial (`liftedAt IS NULL`) on `user_id`, `(type, value)`,
 `expires_at`.
@@ -658,15 +658,15 @@ Abuse/fraud flags from the `abuse.scan` job or an admin. `user_id`
 **RESTRICT** — a flag is evidence, must not be silently lost. `reviewed_by`
 **SET NULL**.
 
-| Column | Type | Notes |
-|---|---|---|
-| `id` | uuid PK | |
-| `user_id` | uuid FK, **RESTRICT** | |
-| `kind` | `flag_kind` | trial_abuse/multi_account/velocity/chargeback/suspicious_ip |
-| `severity` | `flag_severity` | low/medium/high/critical |
-| `evidence` | jsonb | |
-| `status` | `flag_status` | open/reviewed/dismissed — `reviewed_at` set exactly when status leaves `open` |
-| `reviewed_by`, `reviewed_at` | — | |
+| Column                       | Type                  | Notes                                                                         |
+| ---------------------------- | --------------------- | ----------------------------------------------------------------------------- |
+| `id`                         | uuid PK               |                                                                               |
+| `user_id`                    | uuid FK, **RESTRICT** |                                                                               |
+| `kind`                       | `flag_kind`           | trial_abuse/multi_account/velocity/chargeback/suspicious_ip                   |
+| `severity`                   | `flag_severity`       | low/medium/high/critical                                                      |
+| `evidence`                   | jsonb                 |                                                                               |
+| `status`                     | `flag_status`         | open/reviewed/dismissed — `reviewed_at` set exactly when status leaves `open` |
+| `reviewed_by`, `reviewed_at` | —                     |                                                                               |
 
 ---
 
@@ -681,29 +681,29 @@ Append-only, before/after-diffing audit trail for every mutating request
 **Why two logs exist:** `admin_actions` (§6.1) is a lightweight,
 query-optimised feed for the admin "recent actions" screen, written directly
 by the admin API. `audit_logs` is the hard-enforced, general-purpose,
-before/after diffing trail for *every* mutating request across the whole
+before/after diffing trail for _every_ mutating request across the whole
 system (not just admin ones), and is the one with database-level tamper
 resistance.
 
-| Column | Type | Notes |
-|---|---|---|
-| `id, occurred_at` | — | composite PK |
-| `actor_type` | `audit_actor_type` | user / admin / system |
-| `actor_id` | uuid, no FK | polymorphic (points into `users` or `admin_users`); null only if `actor_type = system` |
-| `action`, `entity_type` | text | |
-| `entity_id` | uuid, no FK | polymorphic; deliberately no FK on `actor_id`/`entity_id` — the audit trail must outlive the rows it describes |
-| `before`, `after`, `diff` | jsonb | |
-| `ip`, `user_agent`, `request_id` | — | `request_id` correlates to the API's `x-request-id` |
+| Column                           | Type               | Notes                                                                                                          |
+| -------------------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------- |
+| `id, occurred_at`                | —                  | composite PK                                                                                                   |
+| `actor_type`                     | `audit_actor_type` | user / admin / system                                                                                          |
+| `actor_id`                       | uuid, no FK        | polymorphic (points into `users` or `admin_users`); null only if `actor_type = system`                         |
+| `action`, `entity_type`          | text               |                                                                                                                |
+| `entity_id`                      | uuid, no FK        | polymorphic; deliberately no FK on `actor_id`/`entity_id` — the audit trail must outlive the rows it describes |
+| `before`, `after`, `diff`        | jsonb              |                                                                                                                |
+| `ip`, `user_agent`, `request_id` | —                  | `request_id` correlates to the API's `x-request-id`                                                            |
 
 **Append-only, enforced two ways:**
 
 1. **Grant-level:** `app_rw` (the API/worker role) is granted only `SELECT,
-   INSERT` on `audit_logs`; `UPDATE`/`DELETE` are explicitly `REVOKE`d
+INSERT` on `audit_logs`; `UPDATE`/`DELETE` are explicitly `REVOKE`d
    (`app_ro` never had them). A compromised or buggy API process physically
    cannot alter history.
 2. **Trigger-level:** a `BEFORE UPDATE OR DELETE` trigger
    (`reject_write()`) unconditionally raises, as a second line of defense
-   for any role/session that *does* hold the privilege (e.g. manual
+   for any role/session that _does_ hold the privilege (e.g. manual
    superuser maintenance without due care).
 
 Both are covered by `test/audit-logs.test.ts`.
@@ -716,26 +716,26 @@ entity_id, occurred_at desc)`, `(action, occurred_at desc)`, `request_id`,
 
 ### 6.10 System / feature flags / analytics
 
-| Table | Key columns | Notes |
-|---|---|---|
-| `feature_toggles` | `key` unique, `enabled`, `rollout_percent 0–100`, `plan_gate text[]`, `user_allowlist uuid[]`, `updated_by` | seeded: `automation.enabled`, `kill_switch`, `telemetry.enabled`, `trial.enabled`, `hibp_check` — see [§10](#10-seed-data) |
-| `system_config` | `key` unique, `value jsonb`, `is_secret`, `updated_by` | seeded: safety-governor defaults (`governor.max_actions_per_hour`, `governor.max_session_minutes`, `governor.max_buy_search_ratio`, `governor.max_coin_flow_per_hour`), `device_limits`, `offline_grace_hours`, `heartbeat_minutes` |
-| `ip_activity` | `ip`, `user_id` **SET NULL**, `device_id` **SET NULL**, `country`, `asn`, `first_seen`, `last_seen`, `request_count`, `flagged` | rolling per-(ip,user) counters for impossible-travel/velocity flagging; unique `(ip, user_id)` with `NULLS NOT DISTINCT` |
-| `extension_installs` | `install_id` unique, `user_id` **SET NULL** (nullable — pre-login installs), `version`, `browser`, `first_seen`, `last_seen`, `uninstalled_at` | install counts, version distribution |
-| `analytics_daily` | `day`, `metric`, `dimension` (default `''`), `value numeric(18,4)` | generic KPI store, unique `(day, metric, dimension)`, populated by the `analytics.daily` nightly job; every metric's formula is defined in `docs/08-analytics.md` |
+| Table                | Key columns                                                                                                                                    | Notes                                                                                                                                                                                                                               |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `feature_toggles`    | `key` unique, `enabled`, `rollout_percent 0–100`, `plan_gate text[]`, `user_allowlist uuid[]`, `updated_by`                                    | seeded: `automation.enabled`, `kill_switch`, `telemetry.enabled`, `trial.enabled`, `hibp_check` — see [§10](#10-seed-data)                                                                                                          |
+| `system_config`      | `key` unique, `value jsonb`, `is_secret`, `updated_by`                                                                                         | seeded: safety-governor defaults (`governor.max_actions_per_hour`, `governor.max_session_minutes`, `governor.max_buy_search_ratio`, `governor.max_coin_flow_per_hour`), `device_limits`, `offline_grace_hours`, `heartbeat_minutes` |
+| `ip_activity`        | `ip`, `user_id` **SET NULL**, `device_id` **SET NULL**, `country`, `asn`, `first_seen`, `last_seen`, `request_count`, `flagged`                | rolling per-(ip,user) counters for impossible-travel/velocity flagging; unique `(ip, user_id)` with `NULLS NOT DISTINCT`                                                                                                            |
+| `extension_installs` | `install_id` unique, `user_id` **SET NULL** (nullable — pre-login installs), `version`, `browser`, `first_seen`, `last_seen`, `uninstalled_at` | install counts, version distribution                                                                                                                                                                                                |
+| `analytics_daily`    | `day`, `metric`, `dimension` (default `''`), `value numeric(18,4)`                                                                             | generic KPI store, unique `(day, metric, dimension)`, populated by the `analytics.daily` nightly job; every metric's formula is defined in `docs/08-analytics.md`                                                                   |
 
 ---
 
 ## 7. Views and the materialized KPI store
 
-| Object | Formula |
-|---|---|
-| `v_active_subscriptions` | All subscriptions with `status IN (trialing, active, past_due, suspended, lifetime)`, joined to their plan. |
-| `v_mrr` | `SUM` over active, **non-lifetime** subscriptions of the plan price **normalised to monthly**: `month` price as-is, `year` price ÷ 12, `week` price × 4.345, `day` price × 30.44 (average weeks/days per month). Trialing/past_due/suspended/canceled/expired and lifetime plans contribute 0. |
-| `v_arr` | `v_mrr.mrr_cents × 12`. |
-| `v_user_lifetime_profit` | Per-user `SUM` of every column in `profits`, grouped by `user_id`, plus `MIN`/`MAX(day)`. |
-| `v_daily_profit` | Platform-wide `SUM` of `profits`, grouped by `day`, plus `COUNT(DISTINCT user_id)` as `active_traders`. Backs the admin date-range profit charts. |
-| `mv_kpi_daily` | **Materialized.** One row per calendar day from the earliest `profits.day` (or today, if empty) through today: `new_users` (from `users.created_at`), `active_users` (`COUNT(DISTINCT user_id)` from `user_activity`), `net_profit_cents`/`snipes`/`successes` (from `profits`), `revenue_cents` (`SUM(amount_cents)` from `payments WHERE status = 'succeeded'`). Refreshed via `SELECT refresh_mv_kpi_daily();`, which uses `REFRESH MATERIALIZED VIEW CONCURRENTLY` (needs — and has — a unique index on `day`) so readers are never blocked. Called by the `analytics.daily` nightly job. |
+| Object                   | Formula                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `v_active_subscriptions` | All subscriptions with `status IN (trialing, active, past_due, suspended, lifetime)`, joined to their plan.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `v_mrr`                  | `SUM` over active, **non-lifetime** subscriptions of the plan price **normalised to monthly**: `month` price as-is, `year` price ÷ 12, `week` price × 4.345, `day` price × 30.44 (average weeks/days per month). Trialing/past_due/suspended/canceled/expired and lifetime plans contribute 0.                                                                                                                                                                                                                                                                                                |
+| `v_arr`                  | `v_mrr.mrr_cents × 12`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `v_user_lifetime_profit` | Per-user `SUM` of every column in `profits`, grouped by `user_id`, plus `MIN`/`MAX(day)`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `v_daily_profit`         | Platform-wide `SUM` of `profits`, grouped by `day`, plus `COUNT(DISTINCT user_id)` as `active_traders`. Backs the admin date-range profit charts.                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `mv_kpi_daily`           | **Materialized.** One row per calendar day from the earliest `profits.day` (or today, if empty) through today: `new_users` (from `users.created_at`), `active_users` (`COUNT(DISTINCT user_id)` from `user_activity`), `net_profit_cents`/`snipes`/`successes` (from `profits`), `revenue_cents` (`SUM(amount_cents)` from `payments WHERE status = 'succeeded'`). Refreshed via `SELECT refresh_mv_kpi_daily();`, which uses `REFRESH MATERIALIZED VIEW CONCURRENTLY` (needs — and has — a unique index on `day`) so readers are never blocked. Called by the `analytics.daily` nightly job. |
 
 All are verified against seeded fixture data in `test/views.test.ts`
 (`v_mrr`/`v_arr`).
@@ -796,7 +796,7 @@ What matters here, at the schema level:
 
 - Every table uses soft delete (`deleted_at`) rather than hard delete, so a
   logical "undo" of a mistaken delete is a single `UPDATE ... SET deleted_at
-  = NULL` for most tables — no restore-from-backup needed for that class of
+= NULL` for most tables — no restore-from-backup needed for that class of
   mistake.
 - `audit_logs` (and `admin_actions`) exist specifically so "what changed and
   who did it" survives independently of whatever a restore recovers.
@@ -830,37 +830,37 @@ duplicates:
   (argon2id-hashed), `role=admin`, `admin_users.admin_role=super_admin`.
   Skipped with a warning if either env var is unset.
 - **Dev user:** `dev@sniperledger.local`, only when `NODE_ENV !=
-  production`.
+production`.
 
 ---
 
 ## 11. Query patterns each index serves
 
-| Index | Query it serves |
-|---|---|
-| `users_email_unique_live` | Login lookup by email; registration uniqueness check. |
-| `users_status_idx`, `users_role_idx` | Admin user list filters ("show suspended users", "show admins"). |
-| `subscriptions_one_live_per_user` | Enforces + fast-checks "does this user already have a live subscription" at checkout/grant time. |
-| `subscriptions_current_period_end_idx` | The `subscriptions.expire` job's "find subscriptions whose period just ended" sweep. |
-| `subscriptions_trial_ends_at_idx` | Trial-expiry sweep and "trial ending soon" notification job. |
-| `licenses_expires_at_idx` | License-expiry sweep. |
-| `licenses_key_prefix_idx` | Support lookup by the displayed key prefix without ever handling the full key. |
-| `devices_user_fingerprint_unique_live` | Device-limit enforcement at login (is this fingerprint already registered for this user?). |
-| `sessions_family_id_idx` | Refresh-token reuse detection — revoke the whole rotation family. |
-| `sessions_active_idx` | "Force logout" / active-session listing per user. |
-| `user_activity`/`search_activity`/`sniping_activity` `(user_id, occurred_at desc)` | Per-user activity timeline (dashboard "recent activity", support investigation). |
-| `*_occurred_at_brin` | Admin analytics date-range scans across a whole partitioned table — BRIN is cheap to maintain and effective because rows are naturally time-ordered within each monthly partition. |
-| `search_activity_filter_hash_idx`, `saved_filters_user_filter_hash_unique_live` | Correlating a live search back to a saved filter for the ranker. |
-| `sniping_activity_trade_id_idx` | Joining a snipe attempt to the `trades` row it became. |
-| `trades_user_id_trade_id_unique_live` | Idempotent upsert from the extension (same `trade_id` reported twice is a no-op/update, not a duplicate). |
-| `profits_user_id_day_unique` | The hourly `profits.rollup` job's upsert target. |
-| `filter_stats_coins_per_hour_idx` | Ranker "best filters right now" queries and admin filter-performance leaderboards. |
-| `coupon_redemptions_coupon_user_unique` | Enforces "one redemption per coupon per user" and doubles as the existence check before applying a coupon. |
-| `payments_provider_payment_id_unique` | Webhook-driven insert idempotency (a re-delivered Stripe event for the same payment is a no-op). |
-| `stripe_webhook_events_event_id_unique`, `stripe_webhook_events_unprocessed_idx` | Webhook idempotency + the retry sweep for events that didn't process cleanly. |
-| `bans_type_value_idx` | Login-time / request-time ban check by (type, value) — the hot path for every authenticated request. |
-| `flags_status_idx` | Admin fraud-review queue ("show open flags"). |
-| `audit_logs_entity_idx` | The admin "audit trail for this entity" diff-viewer screen. |
-| `audit_logs_actor_idx` | "Everything this admin/user did" investigation view. |
-| `feature_toggles_key_unique`, `system_config_key_unique` | Hot-path lookups on every `/extension/bootstrap` and heartbeat call. |
-| `mv_kpi_daily_day_unique` | Required by, and used for, `REFRESH MATERIALIZED VIEW CONCURRENTLY`; also the admin KPI chart's primary access pattern (range scan by `day`). |
+| Index                                                                              | Query it serves                                                                                                                                                                    |
+| ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `users_email_unique_live`                                                          | Login lookup by email; registration uniqueness check.                                                                                                                              |
+| `users_status_idx`, `users_role_idx`                                               | Admin user list filters ("show suspended users", "show admins").                                                                                                                   |
+| `subscriptions_one_live_per_user`                                                  | Enforces + fast-checks "does this user already have a live subscription" at checkout/grant time.                                                                                   |
+| `subscriptions_current_period_end_idx`                                             | The `subscriptions.expire` job's "find subscriptions whose period just ended" sweep.                                                                                               |
+| `subscriptions_trial_ends_at_idx`                                                  | Trial-expiry sweep and "trial ending soon" notification job.                                                                                                                       |
+| `licenses_expires_at_idx`                                                          | License-expiry sweep.                                                                                                                                                              |
+| `licenses_key_prefix_idx`                                                          | Support lookup by the displayed key prefix without ever handling the full key.                                                                                                     |
+| `devices_user_fingerprint_unique_live`                                             | Device-limit enforcement at login (is this fingerprint already registered for this user?).                                                                                         |
+| `sessions_family_id_idx`                                                           | Refresh-token reuse detection — revoke the whole rotation family.                                                                                                                  |
+| `sessions_active_idx`                                                              | "Force logout" / active-session listing per user.                                                                                                                                  |
+| `user_activity`/`search_activity`/`sniping_activity` `(user_id, occurred_at desc)` | Per-user activity timeline (dashboard "recent activity", support investigation).                                                                                                   |
+| `*_occurred_at_brin`                                                               | Admin analytics date-range scans across a whole partitioned table — BRIN is cheap to maintain and effective because rows are naturally time-ordered within each monthly partition. |
+| `search_activity_filter_hash_idx`, `saved_filters_user_filter_hash_unique_live`    | Correlating a live search back to a saved filter for the ranker.                                                                                                                   |
+| `sniping_activity_trade_id_idx`                                                    | Joining a snipe attempt to the `trades` row it became.                                                                                                                             |
+| `trades_user_id_trade_id_unique_live`                                              | Idempotent upsert from the extension (same `trade_id` reported twice is a no-op/update, not a duplicate).                                                                          |
+| `profits_user_id_day_unique`                                                       | The hourly `profits.rollup` job's upsert target.                                                                                                                                   |
+| `filter_stats_coins_per_hour_idx`                                                  | Ranker "best filters right now" queries and admin filter-performance leaderboards.                                                                                                 |
+| `coupon_redemptions_coupon_user_unique`                                            | Enforces "one redemption per coupon per user" and doubles as the existence check before applying a coupon.                                                                         |
+| `payments_provider_payment_id_unique`                                              | Webhook-driven insert idempotency (a re-delivered Stripe event for the same payment is a no-op).                                                                                   |
+| `stripe_webhook_events_event_id_unique`, `stripe_webhook_events_unprocessed_idx`   | Webhook idempotency + the retry sweep for events that didn't process cleanly.                                                                                                      |
+| `bans_type_value_idx`                                                              | Login-time / request-time ban check by (type, value) — the hot path for every authenticated request.                                                                               |
+| `flags_status_idx`                                                                 | Admin fraud-review queue ("show open flags").                                                                                                                                      |
+| `audit_logs_entity_idx`                                                            | The admin "audit trail for this entity" diff-viewer screen.                                                                                                                        |
+| `audit_logs_actor_idx`                                                             | "Everything this admin/user did" investigation view.                                                                                                                               |
+| `feature_toggles_key_unique`, `system_config_key_unique`                           | Hot-path lookups on every `/extension/bootstrap` and heartbeat call.                                                                                                               |
+| `mv_kpi_daily_day_unique`                                                          | Required by, and used for, `REFRESH MATERIALIZED VIEW CONCURRENTLY`; also the admin KPI chart's primary access pattern (range scan by `day`).                                      |

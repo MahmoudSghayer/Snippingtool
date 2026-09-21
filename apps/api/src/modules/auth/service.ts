@@ -3,22 +3,30 @@
 // easy to unit-test in isolation; modules/auth/index.ts wires these to
 // routes.
 
-
 import { devices, users, type Database, type User } from '@sl/db';
-import {
-  type DeviceFingerprint,
-  type LoginResponse,
-  type MfaEnrollResponse,
-} from '@sl/shared';
+import { type DeviceFingerprint, type LoginResponse, type MfaEnrollResponse } from '@sl/shared';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 
-import { verifySecret, hashSecret, randomToken, fastHash, encryptTotpSecret, decryptTotpSecret, reencryptTotpSecret } from '../../lib/crypto.js';
+import {
+  verifySecret,
+  hashSecret,
+  randomToken,
+  fastHash,
+  encryptTotpSecret,
+  decryptTotpSecret,
+  reencryptTotpSecret,
+} from '../../lib/crypto.js';
 import { findOrRegisterDevice } from '../../lib/devices.js';
 import { AppErrors } from '../../lib/errors.js';
 import { newId } from '../../lib/ids.js';
 import { recordSuspiciousIpIfAny, upsertIpActivity } from '../../lib/ip-activity.js';
-import { assertNotLocked, checkSlidingWindowRateLimit, recordFailedLogin, resetLoginFailures } from '../../lib/lockout.js';
+import {
+  assertNotLocked,
+  checkSlidingWindowRateLimit,
+  recordFailedLogin,
+  resetLoginFailures,
+} from '../../lib/lockout.js';
 import {
   MFA_TICKET_TTL_SECONDS,
   REFRESH_TOKEN_TTL_MS,
@@ -127,10 +135,19 @@ export async function register(
   return { userId: id };
 }
 
-export async function sendVerificationEmail(ctx: AuthContext, userId: string, email: string): Promise<void> {
+export async function sendVerificationEmail(
+  ctx: AuthContext,
+  userId: string,
+  email: string,
+): Promise<void> {
   const token = randomToken(32);
   const tokenHash = fastHash(token);
-  await repo.createEmailVerification(ctx.db, userId, tokenHash, new Date(Date.now() + EMAIL_VERIFICATION_TTL_MS));
+  await repo.createEmailVerification(
+    ctx.db,
+    userId,
+    tokenHash,
+    new Date(Date.now() + EMAIL_VERIFICATION_TTL_MS),
+  );
 
   const { verifyEmailHtml, verifyEmailText } = await import('../../emails/templates.js');
   await ctx.mailer.send({
@@ -154,7 +171,10 @@ export async function verifyEmail(ctx: AuthContext, token: string): Promise<void
     throw AppErrors.tokenInvalid('Verification link is invalid or has expired.');
   }
   await repo.consumeEmailVerification(ctx.db, record.id);
-  await ctx.db.update(users).set({ emailVerifiedAt: new Date() }).where(eq(users.id, record.userId));
+  await ctx.db
+    .update(users)
+    .set({ emailVerifiedAt: new Date() })
+    .where(eq(users.id, record.userId));
 }
 
 // ---------------------------------------------------------------------------
@@ -168,7 +188,13 @@ export async function completeLogin(
   ip: string | null,
   userAgent: string | null,
 ): Promise<Extract<LoginResponse, { status: 'ok' }>> {
-  const { id: deviceId } = await findOrRegisterDevice(ctx.db, ctx.entitlements, user.id, device, ip);
+  const { id: deviceId } = await findOrRegisterDevice(
+    ctx.db,
+    ctx.entitlements,
+    user.id,
+    device,
+    ip,
+  );
   const entitlements = await ctx.entitlements.getEntitlements(user.id);
 
   const familyId = generateFamilyId();
@@ -195,7 +221,14 @@ export async function completeLogin(
     .returning({ rowVersion: users.rowVersion });
 
   const accessToken = await signAccessToken(
-    { sub: user.id, sid: sessionId, did: deviceId, role: user.role, plan: entitlements.plan, ver: updated?.rowVersion ?? user.rowVersion },
+    {
+      sub: user.id,
+      sid: sessionId,
+      did: deviceId,
+      role: user.role,
+      plan: entitlements.plan,
+      ver: updated?.rowVersion ?? user.rowVersion,
+    },
     ctx.jwtPrivateKey,
   );
 
@@ -210,7 +243,12 @@ export async function completeLogin(
       .catch((err) => ctx.log?.warn({ err }, 'ip-activity monitoring failed (non-fatal)'));
   }
 
-  return { status: 'ok', accessToken, refreshToken: refresh.token, expiresIn: accessTokenTtlSeconds(user.role) };
+  return {
+    status: 'ok',
+    accessToken,
+    refreshToken: refresh.token,
+    expiresIn: accessTokenTtlSeconds(user.role),
+  };
 }
 
 export async function login(
@@ -221,8 +259,18 @@ export async function login(
 ): Promise<LoginResponse> {
   const rateLimitMax = ctx.loginRateLimit?.max ?? LOGIN_RATE_LIMIT_MAX;
   const rateLimitWindowMs = ctx.loginRateLimit?.windowMs ?? LOGIN_RATE_LIMIT_WINDOW_MS;
-  await checkSlidingWindowRateLimit(ctx.redis, `ratelimit:login:ip:${ip ?? 'unknown'}`, rateLimitMax, rateLimitWindowMs);
-  await checkSlidingWindowRateLimit(ctx.redis, `ratelimit:login:account:${input.email}`, rateLimitMax, rateLimitWindowMs);
+  await checkSlidingWindowRateLimit(
+    ctx.redis,
+    `ratelimit:login:ip:${ip ?? 'unknown'}`,
+    rateLimitMax,
+    rateLimitWindowMs,
+  );
+  await checkSlidingWindowRateLimit(
+    ctx.redis,
+    `ratelimit:login:account:${input.email}`,
+    rateLimitMax,
+    rateLimitWindowMs,
+  );
 
   const user = await repo.findUserByEmail(ctx.db, input.email);
   if (!user) throw AppErrors.invalidCredentials();
@@ -244,8 +292,13 @@ export async function login(
   // a superset of `users.status === 'banned'` (which is also covered above,
   // since an account ban sets that too, but IP/device/hwid bans never do).
   const { checkBans } = await import('../bans/service.js');
-  const banCheck = await checkBans(ctx.db, { userId: user.id, ip, deviceFingerprintHash: input.device.fingerprint });
-  if (banCheck.banned) throw AppErrors.forbidden('This account, device, or network has been banned.');
+  const banCheck = await checkBans(ctx.db, {
+    userId: user.id,
+    ip,
+    deviceFingerprintHash: input.device.fingerprint,
+  });
+  if (banCheck.banned)
+    throw AppErrors.forbidden('This account, device, or network has been banned.');
 
   await resetLoginFailures(ctx.db, user.id);
 
@@ -261,7 +314,12 @@ export async function login(
       userAgent,
       mode: requiresEnrollment ? 'enroll' : 'verify',
     };
-    await ctx.redis.set(verifyTicketKey(ticket), JSON.stringify(pending), 'EX', MFA_TICKET_TTL_SECONDS);
+    await ctx.redis.set(
+      verifyTicketKey(ticket),
+      JSON.stringify(pending),
+      'EX',
+      MFA_TICKET_TTL_SECONDS,
+    );
     return { status: 'mfa_required', mfaTicket: ticket, expiresIn: MFA_TICKET_TTL_SECONDS };
   }
 
@@ -270,7 +328,8 @@ export async function login(
 
 async function peekPendingLogin(ctx: AuthContext, ticket: string): Promise<PendingLogin> {
   const raw = await ctx.redis.get(verifyTicketKey(ticket));
-  if (!raw) throw AppErrors.tokenInvalid('MFA ticket is invalid or has expired. Please log in again.');
+  if (!raw)
+    throw AppErrors.tokenInvalid('MFA ticket is invalid or has expired. Please log in again.');
   return JSON.parse(raw) as PendingLogin;
 }
 
@@ -284,7 +343,8 @@ export async function mfaVerify(
   }
 
   const user = await repo.findUserById(ctx.db, pending.userId);
-  if (!user || !user.totpSecretEnc) throw AppErrors.tokenInvalid('Account no longer has 2FA enabled.');
+  if (!user || !user.totpSecretEnc)
+    throw AppErrors.tokenInvalid('Account no longer has 2FA enabled.');
 
   const attemptsKey = `${verifyTicketKey(input.mfaTicket)}:attempts`;
   const attempts = await ctx.redis.incr(attemptsKey);
@@ -316,7 +376,11 @@ export async function mfaVerify(
 
 /** See `reencryptTotpSecret` in lib/crypto.ts. Best-effort — never blocks or
  * fails the login/disable flow it's called from. */
-async function maybeReencryptTotpSecret(ctx: AuthContext, userId: string, blob: Buffer): Promise<void> {
+async function maybeReencryptTotpSecret(
+  ctx: AuthContext,
+  userId: string,
+  blob: Buffer,
+): Promise<void> {
   try {
     const rotated = reencryptTotpSecret(blob, ctx.cookieSecret);
     if (!rotated.equals(blob)) {
@@ -327,7 +391,11 @@ async function maybeReencryptTotpSecret(ctx: AuthContext, userId: string, blob: 
   }
 }
 
-async function tryConsumeRecoveryCode(db: Database, userId: string, code: string): Promise<boolean> {
+async function tryConsumeRecoveryCode(
+  db: Database,
+  userId: string,
+  code: string,
+): Promise<boolean> {
   const unused = await repo.findUnusedRecoveryCodes(db, userId);
   for (const row of unused) {
     if (await verifySecret(row.codeHash, code)) {
@@ -378,7 +446,9 @@ export async function refresh(
   // all, it must match the fingerprint the session's device was registered
   // under.
   if (presented?.device && session.deviceId) {
-    const boundDevice = await ctx.db.query.devices.findFirst({ where: eq(devices.id, session.deviceId) });
+    const boundDevice = await ctx.db.query.devices.findFirst({
+      where: eq(devices.id, session.deviceId),
+    });
     if (boundDevice && boundDevice.fingerprintHash !== presented.device.fingerprint) {
       await repo.revokeSessionFamily(ctx.db, session.familyId, 'device_binding_mismatch');
       throw AppErrors.tokenReused();
@@ -391,18 +461,36 @@ export async function refresh(
   const newRefresh = generateRefreshToken();
   const newSessionId = await repo.rotateSession(
     ctx.db,
-    { id: session.id, userId: session.userId, deviceId: session.deviceId, familyId: session.familyId, ip: session.ip, userAgent: session.userAgent },
+    {
+      id: session.id,
+      userId: session.userId,
+      deviceId: session.deviceId,
+      familyId: session.familyId,
+      ip: session.ip,
+      userAgent: session.userAgent,
+    },
     newRefresh.hash,
     new Date(Date.now() + REFRESH_TOKEN_TTL_MS),
   );
 
   const entitlements = await ctx.entitlements.getEntitlements(user.id);
   const accessToken = await signAccessToken(
-    { sub: user.id, sid: newSessionId, did: session.deviceId, role: user.role, plan: entitlements.plan, ver: user.rowVersion },
+    {
+      sub: user.id,
+      sid: newSessionId,
+      did: session.deviceId,
+      role: user.role,
+      plan: entitlements.plan,
+      ver: user.rowVersion,
+    },
     ctx.jwtPrivateKey,
   );
 
-  return { accessToken, refreshToken: newRefresh.token, expiresIn: accessTokenTtlSeconds(user.role) };
+  return {
+    accessToken,
+    refreshToken: newRefresh.token,
+    expiresIn: accessTokenTtlSeconds(user.role),
+  };
 }
 
 export async function logout(ctx: AuthContext, refreshToken: string | undefined): Promise<void> {
@@ -423,12 +511,22 @@ export async function logoutAll(ctx: AuthContext, userId: string): Promise<void>
 // Password reset / change
 // ---------------------------------------------------------------------------
 
-export async function requestPasswordReset(ctx: AuthContext, email: string, ip: string | null): Promise<void> {
+export async function requestPasswordReset(
+  ctx: AuthContext,
+  email: string,
+  ip: string | null,
+): Promise<void> {
   const user = await repo.findUserByEmail(ctx.db, email);
   if (!user) return; // never reveal account existence
   const token = randomToken(32);
   const tokenHash = fastHash(token);
-  await repo.createPasswordReset(ctx.db, user.id, tokenHash, new Date(Date.now() + PASSWORD_RESET_TTL_MS), ip);
+  await repo.createPasswordReset(
+    ctx.db,
+    user.id,
+    tokenHash,
+    new Date(Date.now() + PASSWORD_RESET_TTL_MS),
+    ip,
+  );
 
   const { resetPasswordHtml, resetPasswordText } = await import('../../emails/templates.js');
   await ctx.mailer.send({
@@ -439,7 +537,11 @@ export async function requestPasswordReset(ctx: AuthContext, email: string, ip: 
   });
 }
 
-export async function confirmPasswordReset(ctx: AuthContext, token: string, newPassword: string): Promise<void> {
+export async function confirmPasswordReset(
+  ctx: AuthContext,
+  token: string,
+  newPassword: string,
+): Promise<void> {
   const tokenHash = fastHash(token);
   const record = await repo.findValidPasswordReset(ctx.db, tokenHash);
   if (!record || record.expiresAt.getTime() < Date.now()) {
@@ -447,13 +549,21 @@ export async function confirmPasswordReset(ctx: AuthContext, token: string, newP
   }
 
   const passwordHash = await hashSecret(newPassword);
-  await ctx.db.update(users).set({ passwordHash, failedLoginCount: 0, lockedUntil: null }).where(eq(users.id, record.userId));
+  await ctx.db
+    .update(users)
+    .set({ passwordHash, failedLoginCount: 0, lockedUntil: null })
+    .where(eq(users.id, record.userId));
   await repo.consumePasswordReset(ctx.db, record.id);
   await repo.revokeAllUserSessions(ctx.db, record.userId, 'password_changed');
   await repo.bumpUserVersion(ctx.db, record.userId);
 }
 
-export async function changePassword(ctx: AuthContext, userId: string, currentPassword: string, newPassword: string): Promise<void> {
+export async function changePassword(
+  ctx: AuthContext,
+  userId: string,
+  currentPassword: string,
+  newPassword: string,
+): Promise<void> {
   const user = await repo.findUserById(ctx.db, userId);
   if (!user) throw AppErrors.notFound('user');
   const valid = await verifySecret(user.passwordHash, currentPassword);
@@ -469,7 +579,10 @@ export async function changePassword(ctx: AuthContext, userId: string, currentPa
 // TOTP enrollment / disable
 // ---------------------------------------------------------------------------
 
-const pendingEnrollmentSchema = z.object({ secret: z.string(), recoveryCodes: z.array(z.string()) });
+const pendingEnrollmentSchema = z.object({
+  secret: z.string(),
+  recoveryCodes: z.array(z.string()),
+});
 
 function pendingEnrollmentKey(userId: string): string {
   return `auth:totp-pending:${userId}`;
@@ -487,18 +600,28 @@ export async function resolveEnrollmentSubject(
   if (authUserId) return authUserId;
   if (!mfaTicket) throw AppErrors.tokenInvalid('Authentication or an MFA ticket is required.');
   const pending = await peekPendingLogin(ctx, mfaTicket);
-  if (pending.mode !== 'enroll') throw AppErrors.tokenInvalid('This ticket is not an enrollment ticket.');
+  if (pending.mode !== 'enroll')
+    throw AppErrors.tokenInvalid('This ticket is not an enrollment ticket.');
   return pending.userId;
 }
 
-export async function beginTotpEnrollment(ctx: AuthContext, userId: string, email: string): Promise<MfaEnrollResponse> {
+export async function beginTotpEnrollment(
+  ctx: AuthContext,
+  userId: string,
+  email: string,
+): Promise<MfaEnrollResponse> {
   const user = await repo.findUserById(ctx.db, userId);
   if (!user) throw AppErrors.notFound('user');
   if (user.totpEnabledAt) throw AppErrors.conflict('Two-factor authentication is already enabled.');
 
   const secret = generateTotpSecret();
   const recoveryCodes = generateRecoveryCodes(10);
-  await ctx.redis.set(pendingEnrollmentKey(userId), JSON.stringify({ secret, recoveryCodes }), 'EX', 10 * 60);
+  await ctx.redis.set(
+    pendingEnrollmentKey(userId),
+    JSON.stringify({ secret, recoveryCodes }),
+    'EX',
+    10 * 60,
+  );
 
   return { secret, otpauthUrl: totpKeyUri(secret, email), recoveryCodes };
 }
@@ -514,7 +637,8 @@ export async function confirmTotpEnrollment(
   mfaTicket: string | undefined,
 ): Promise<ConfirmEnrollmentResult> {
   const raw = await ctx.redis.get(pendingEnrollmentKey(userId));
-  if (!raw) throw AppErrors.tokenInvalid('No pending 2FA enrollment found. Start enrollment again.');
+  if (!raw)
+    throw AppErrors.tokenInvalid('No pending 2FA enrollment found. Start enrollment again.');
   const pending = pendingEnrollmentSchema.parse(JSON.parse(raw));
 
   if (!verifyTotpCode(pending.secret, code)) throw AppErrors.mfaInvalid();
@@ -522,7 +646,10 @@ export async function confirmTotpEnrollment(
   const encrypted = encryptTotpSecret(pending.secret, ctx.cookieSecret);
   const hashedCodes = await Promise.all(pending.recoveryCodes.map((c) => hashSecret(c)));
 
-  await ctx.db.update(users).set({ totpSecretEnc: encrypted, totpEnabledAt: new Date() }).where(eq(users.id, userId));
+  await ctx.db
+    .update(users)
+    .set({ totpSecretEnc: encrypted, totpEnabledAt: new Date() })
+    .where(eq(users.id, userId));
   await repo.insertRecoveryCodes(ctx.db, userId, hashedCodes);
   await ctx.redis.del(pendingEnrollmentKey(userId));
   await repo.bumpUserVersion(ctx.db, userId);
@@ -535,8 +662,20 @@ export async function confirmTotpEnrollment(
       await ctx.redis.del(verifyTicketKey(mfaTicket));
       const user = await repo.findUserById(ctx.db, userId);
       if (user) {
-        const result = await completeLogin(ctx, user, pending2.device, pending2.ip, pending2.userAgent);
-        return { tokens: { accessToken: result.accessToken, refreshToken: result.refreshToken, expiresIn: result.expiresIn } };
+        const result = await completeLogin(
+          ctx,
+          user,
+          pending2.device,
+          pending2.ip,
+          pending2.userAgent,
+        );
+        return {
+          tokens: {
+            accessToken: result.accessToken,
+            refreshToken: result.refreshToken,
+            expiresIn: result.expiresIn,
+          },
+        };
       }
     }
   }
@@ -544,18 +683,28 @@ export async function confirmTotpEnrollment(
   return {};
 }
 
-export async function disableTotp(ctx: AuthContext, userId: string, currentPassword: string, code: string): Promise<void> {
+export async function disableTotp(
+  ctx: AuthContext,
+  userId: string,
+  currentPassword: string,
+  code: string,
+): Promise<void> {
   const user = await repo.findUserById(ctx.db, userId);
-  if (!user || !user.totpSecretEnc) throw AppErrors.conflict('Two-factor authentication is not enabled.');
+  if (!user || !user.totpSecretEnc)
+    throw AppErrors.conflict('Two-factor authentication is not enabled.');
 
   const passwordValid = await verifySecret(user.passwordHash, currentPassword);
   if (!passwordValid) throw AppErrors.invalidCredentials();
 
   const secret = decryptTotpSecret(Buffer.from(user.totpSecretEnc), ctx.cookieSecret);
-  const codeValid = verifyTotpCode(secret, code) || (await tryConsumeRecoveryCode(ctx.db, userId, code));
+  const codeValid =
+    verifyTotpCode(secret, code) || (await tryConsumeRecoveryCode(ctx.db, userId, code));
   if (!codeValid) throw AppErrors.mfaInvalid();
 
-  await ctx.db.update(users).set({ totpSecretEnc: null, totpEnabledAt: null }).where(eq(users.id, userId));
+  await ctx.db
+    .update(users)
+    .set({ totpSecretEnc: null, totpEnabledAt: null })
+    .where(eq(users.id, userId));
   await repo.deleteAllRecoveryCodes(ctx.db, userId);
   await repo.bumpUserVersion(ctx.db, userId);
 }

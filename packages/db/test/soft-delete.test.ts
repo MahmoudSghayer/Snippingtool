@@ -22,16 +22,24 @@ describe('partial unique index on users.email (soft-delete aware)', () => {
     // own `.message` is the failed SQL text, not the Postgres error — the
     // original `postgres` error (with the "duplicate key"/constraint-name
     // message this test cares about) is preserved on `.cause` instead.
-    await expect(db.insert(users).values({ email: 'dupe@example.com', passwordHash: 'y' })).rejects.toMatchObject({
+    await expect(
+      db.insert(users).values({ email: 'dupe@example.com', passwordHash: 'y' }),
+    ).rejects.toMatchObject({
       cause: { message: expect.stringMatching(/duplicate key|unique constraint/i) },
     });
   });
 
   it('allows a new user to reuse an email once the original is soft-deleted', async () => {
-    const [first] = await db.insert(users).values({ email: 'reuse@example.com', passwordHash: 'x' }).returning();
+    const [first] = await db
+      .insert(users)
+      .values({ email: 'reuse@example.com', passwordHash: 'x' })
+      .returning();
     await db.update(users).set({ deletedAt: new Date() }).where(eq(users.id, first!.id));
 
-    const [second] = await db.insert(users).values({ email: 'reuse@example.com', passwordHash: 'y' }).returning();
+    const [second] = await db
+      .insert(users)
+      .values({ email: 'reuse@example.com', passwordHash: 'y' })
+      .returning();
     expect(second).toBeDefined();
     expect(second!.deletedAt).toBeNull();
 
@@ -41,11 +49,16 @@ describe('partial unique index on users.email (soft-delete aware)', () => {
   });
 
   it('still rejects a third live user once one live + one soft-deleted row exist for the email', async () => {
-    const [first] = await db.insert(users).values({ email: 'triple@example.com', passwordHash: 'x' }).returning();
+    const [first] = await db
+      .insert(users)
+      .values({ email: 'triple@example.com', passwordHash: 'x' })
+      .returning();
     await db.update(users).set({ deletedAt: new Date() }).where(eq(users.id, first!.id));
     await db.insert(users).values({ email: 'triple@example.com', passwordHash: 'y' });
 
-    await expect(db.insert(users).values({ email: 'triple@example.com', passwordHash: 'z' })).rejects.toMatchObject({
+    await expect(
+      db.insert(users).values({ email: 'triple@example.com', passwordHash: 'z' }),
+    ).rejects.toMatchObject({
       cause: { message: expect.stringMatching(/duplicate key|unique constraint/i) },
     });
   });

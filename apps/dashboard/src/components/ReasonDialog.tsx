@@ -1,7 +1,6 @@
 import { Button, FormField, Modal, Textarea } from '@sl/ui';
 import { useState } from 'react';
 
-
 import type { ReactNode } from 'react';
 
 export interface ReasonDialogProps {
@@ -21,7 +20,17 @@ export interface ReasonDialogProps {
  * server-side) — this is the one dialog every admin action in the dashboard
  * confirms through, so the requirement is never silently worked around by a
  * page that forgets to ask. */
-export function ReasonDialog({ open, onOpenChange, title, description, confirmLabel = 'Confirm', destructive, loading, onConfirm, extraFields }: ReasonDialogProps) {
+export function ReasonDialog({
+  open,
+  onOpenChange,
+  title,
+  description,
+  confirmLabel = 'Confirm',
+  destructive,
+  loading,
+  onConfirm,
+  extraFields,
+}: ReasonDialogProps) {
   const [reason, setReason] = useState('');
 
   return (
@@ -38,7 +47,12 @@ export function ReasonDialog({ open, onOpenChange, title, description, confirmLa
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button variant={destructive ? 'destructive' : 'primary'} disabled={reason.trim().length === 0} loading={loading} onClick={() => onConfirm(reason.trim())}>
+          <Button
+            variant={destructive ? 'destructive' : 'primary'}
+            disabled={reason.trim().length === 0}
+            loading={loading}
+            onClick={() => onConfirm(reason.trim())}
+          >
             {confirmLabel}
           </Button>
         </>
@@ -47,7 +61,13 @@ export function ReasonDialog({ open, onOpenChange, title, description, confirmLa
       <div className="flex flex-col gap-4">
         {extraFields}
         <FormField label="Reason" htmlFor="reason-dialog-reason" hint="Recorded in the audit log.">
-          <Textarea id="reason-dialog-reason" value={reason} onChange={(e) => setReason(e.target.value)} rows={3} autoFocus />
+          <Textarea
+            id="reason-dialog-reason"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            rows={3}
+            autoFocus
+          />
         </FormField>
       </div>
     </Modal>

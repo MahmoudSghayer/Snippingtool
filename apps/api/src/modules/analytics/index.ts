@@ -3,7 +3,13 @@
 // live in modules/admin-analytics. See docs/08-analytics.md for formulas.
 
 import { devices } from '@sl/db';
-import { activityAnalyticsResponseSchema, meActivityQuerySchema, meOverviewResponseSchema, meProfitsQuerySchema, profitAnalyticsPointSchema } from '@sl/shared';
+import {
+  activityAnalyticsResponseSchema,
+  meActivityQuerySchema,
+  meOverviewResponseSchema,
+  meProfitsQuerySchema,
+  profitAnalyticsPointSchema,
+} from '@sl/shared';
 import { and, eq } from 'drizzle-orm';
 import fp from 'fastify-plugin';
 import { z } from 'zod';
@@ -27,14 +33,28 @@ export default fp(
       async (request) => {
         const userId = request.authUser!.id;
         const today = new Date().toISOString().slice(0, 10);
-        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+          .toISOString()
+          .slice(0, 10);
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+          .toISOString()
+          .slice(0, 10);
 
         const [lifetime, last7dPoints, last30dPoints, activeDevices] = await Promise.all([
           getUserLifetimeProfit(fastify.db, userId),
-          getUserProfitSeries(fastify.db, userId, { from: sevenDaysAgo, to: today, granularity: 'lifetime' }),
-          getUserProfitSeries(fastify.db, userId, { from: thirtyDaysAgo, to: today, granularity: 'lifetime' }),
-          fastify.db.query.devices.findMany({ where: and(eq(devices.userId, userId), eq(devices.status, 'active')) }),
+          getUserProfitSeries(fastify.db, userId, {
+            from: sevenDaysAgo,
+            to: today,
+            granularity: 'lifetime',
+          }),
+          getUserProfitSeries(fastify.db, userId, {
+            from: thirtyDaysAgo,
+            to: today,
+            granularity: 'lifetime',
+          }),
+          fastify.db.query.devices.findMany({
+            where: and(eq(devices.userId, userId), eq(devices.status, 'active')),
+          }),
         ]);
 
         const last7d = last7dPoints[0]!;
@@ -45,8 +65,16 @@ export default fp(
           lifetimeCoinsTraded: lifetime.coinsSpent + lifetime.coinsEarned,
           lifetimeSnipes: lifetime.snipes,
           lifetimeSuccesses: lifetime.successes,
-          last7d: { netProfit: last7d.netProfit, snipes: last7d.snipes, successes: last7d.successes },
-          last30d: { netProfit: last30d.netProfit, snipes: last30d.snipes, successes: last30d.successes },
+          last7d: {
+            netProfit: last7d.netProfit,
+            snipes: last7d.snipes,
+            successes: last7d.successes,
+          },
+          last30d: {
+            netProfit: last30d.netProfit,
+            snipes: last30d.snipes,
+            successes: last30d.successes,
+          },
           activeDevices: activeDevices.length,
           snipeSuccessRateLifetime: lifetime.snipes > 0 ? lifetime.successes / lifetime.snipes : 0,
         };
@@ -60,7 +88,12 @@ export default fp(
         schema: {
           tags: ['analytics'],
           querystring: meProfitsQuerySchema,
-          response: { 200: z.object({ granularity: z.enum(['day', 'week', 'month', 'lifetime']), items: z.array(profitAnalyticsPointSchema) }) },
+          response: {
+            200: z.object({
+              granularity: z.enum(['day', 'week', 'month', 'lifetime']),
+              items: z.array(profitAnalyticsPointSchema),
+            }),
+          },
         },
       },
       async (request) => {

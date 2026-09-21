@@ -19,7 +19,12 @@ import { fileURLToPath } from 'node:url';
 import { chromium, expect, test } from '@playwright/test';
 
 import { EXTENSION_OUT_DIR } from '../build-extension.mjs';
-import { bearer, createAdminSession, registerAndVerifyOnly, TEST_PASSWORD } from '../helpers/auth.js';
+import {
+  bearer,
+  createAdminSession,
+  registerAndVerifyOnly,
+  TEST_PASSWORD,
+} from '../helpers/auth.js';
 import { connect, deleteUsersByEmailPrefix } from '../helpers/db.js';
 import { API_ORIGIN, EXTENSION_ID } from '../playwright.config.js';
 
@@ -56,27 +61,45 @@ async function routeMockEa(context: BrowserContext): Promise<void> {
       return;
     }
     if (url.pathname.endsWith('mock-service-layer.js')) {
-      await route.fulfill({ path: path.join(fixtureDir, 'mock-service-layer.js'), contentType: 'application/javascript' });
+      await route.fulfill({
+        path: path.join(fixtureDir, 'mock-service-layer.js'),
+        contentType: 'application/javascript',
+      });
       return;
     }
     if (url.pathname.endsWith('payloads.js')) {
-      await route.fulfill({ path: path.join(fixtureDir, 'payloads.js'), contentType: 'application/javascript' });
+      await route.fulfill({
+        path: path.join(fixtureDir, 'payloads.js'),
+        contentType: 'application/javascript',
+      });
       return;
     }
     await route.continue();
   });
 }
 
-test('extension: loads against the mock EA page, popup login against the real API, observation + telemetry reach it, kill switch halts the panel', async ({ request }) => {
-  test.skip(!existsSync(EXTENSION_OUT_DIR), 'extension not built — prepare.mjs should have built it; see build-extension.mjs');
+test('extension: loads against the mock EA page, popup login against the real API, observation + telemetry reach it, kill switch halts the panel', async ({
+  request,
+}) => {
+  test.skip(
+    !existsSync(EXTENSION_OUT_DIR),
+    'extension not built — prepare.mjs should have built it; see build-extension.mjs',
+  );
 
-  const targetUser = await test.step('a verified (but not yet logged in anywhere) user exists to log into the extension with', () => registerAndVerifyOnly(API_ORIGIN, EXT_EMAIL));
-  const admin = await test.step('an admin exists to flip the kill switch later', () => createAdminSession(API_ORIGIN, ADMIN_EMAIL, 'journey-b-admin'));
+  const targetUser =
+    await test.step('a verified (but not yet logged in anywhere) user exists to log into the extension with', () =>
+      registerAndVerifyOnly(API_ORIGIN, EXT_EMAIL));
+  const admin = await test.step('an admin exists to flip the kill switch later', () =>
+    createAdminSession(API_ORIGIN, ADMIN_EMAIL, 'journey-b-admin'));
 
   const context = await chromium.launchPersistentContext('', {
     headless: false,
     executablePath: existsSync(chromiumPath) ? chromiumPath : undefined,
-    args: [`--disable-extensions-except=${EXTENSION_OUT_DIR}`, `--load-extension=${EXTENSION_OUT_DIR}`, '--no-sandbox'],
+    args: [
+      `--disable-extensions-except=${EXTENSION_OUT_DIR}`,
+      `--load-extension=${EXTENSION_OUT_DIR}`,
+      '--no-sandbox',
+    ],
   });
 
   // Diagnostic instrumentation for Defect #9 (docs/12-testing.md "Defects
@@ -100,7 +123,9 @@ test('extension: loads against the mock EA page, popup login against the real AP
     // EXTENSION_IDS really is this install's id (see
     // helpers/extension-id.mjs's header for why it's computed rather than
     // read off the running context up front).
-    const sw = context.serviceWorkers()[0] ?? (await context.waitForEvent('serviceworker', { timeout: 15_000 }));
+    const sw =
+      context.serviceWorkers()[0] ??
+      (await context.waitForEvent('serviceworker', { timeout: 15_000 }));
     expect(new URL(sw.url()).hostname).toBe(EXTENSION_ID);
     if (swSightings.length === 0) swSightings.push(Date.now());
     // logger.ts's warn/error levels go to `console` (see that file) — the
@@ -143,7 +168,9 @@ test('extension: loads against the mock EA page, popup login against the real AP
     await test.step('bootstrap registered the device server-side', async () => {
       const db = connect();
       try {
-        const rows = await db<{ id: string }[]>`select id from devices where user_id = ${targetUser.userId} and status = 'active'`;
+        const rows = await db<
+          { id: string }[]
+        >`select id from devices where user_id = ${targetUser.userId} and status = 'active'`;
         expect(rows.length).toBeGreaterThanOrEqual(1);
       } finally {
         await db.end({ timeout: 5 });
@@ -156,14 +183,19 @@ test('extension: loads against the mock EA page, popup login against the real AP
     // note above) run in the EA page's own JS realm, not the service
     // worker's — captured here for the same reason.
     eaPage.on('console', (msg) => {
-      if (msg.type() === 'warning' || msg.type() === 'error') console.warn(`[ea-page console:${msg.type()}] ${msg.text()}`);
+      if (msg.type() === 'warning' || msg.type() === 'error')
+        console.warn(`[ea-page console:${msg.type()}] ${msg.text()}`);
     });
     await eaPage.goto(EA_PAGE_URL, { waitUntil: 'load' });
 
     const host = eaPage.locator('#ledger-root');
     await test.step('the panel appears against the mock EA page and the bundle probe reports ok', async () => {
       await expect(host).toHaveCount(1, { timeout: 15_000 });
-      const dotClass = await host.evaluate((el) => (el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.getElementById('dot')?.className);
+      const dotClass = await host.evaluate(
+        (el) =>
+          (el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.getElementById('dot')
+            ?.className,
+      );
       expect(dotClass).not.toContain('warn');
 
       // The mock page's own passive search happens shortly after load
@@ -174,7 +206,15 @@ test('extension: loads against the mock EA page, popup login against the real AP
       // the flush step consistently saw `sent: 0` because there was
       // nothing queued yet, not because flushing itself was broken).
       await expect
-        .poll(async () => host.evaluate((el) => (el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.getElementById('total')?.textContent), { timeout: 15_000 })
+        .poll(
+          async () =>
+            host.evaluate(
+              (el) =>
+                (el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.getElementById('total')
+                  ?.textContent,
+            ),
+          { timeout: 15_000 },
+        )
         .not.toBe('—');
     });
 
@@ -199,22 +239,34 @@ test('extension: loads against the mock EA page, popup login against the real AP
       await expect
         .poll(
           async () => {
-            const result = (await popup.evaluate(() => chrome.runtime.sendMessage({ type: 'telemetry.flush' }))) as { ok: boolean; data?: { ok: boolean; sent: number } };
+            const result = (await popup.evaluate(() =>
+              chrome.runtime.sendMessage({ type: 'telemetry.flush' }),
+            )) as { ok: boolean; data?: { ok: boolean; sent: number } };
             return result?.data?.sent ?? 0;
           },
-          { timeout: 20_000, message: 'waiting for the queued search activity event to exist and flush' },
+          {
+            timeout: 20_000,
+            message: 'waiting for the queued search activity event to exist and flush',
+          },
         )
         .toBeGreaterThan(0)
         .catch((err) => {
           // eslint-disable-next-line no-console -- diagnostic only
-          console.log(`[diag] flush poll gave up: ${swSightings.length} service worker context(s) seen total; currently live: ${context.serviceWorkers().length}`);
+          console.log(
+            `[diag] flush poll gave up: ${swSightings.length} service worker context(s) seen total; currently live: ${context.serviceWorkers().length}`,
+          );
           throw err;
         });
 
       const db = connect();
       try {
-        const rows = await db<{ id: string; user_id: string }[]>`select id, user_id from search_activity where user_id = ${targetUser.userId}`;
-        expect(rows.length, 'expected the flushed search event to land in search_activity').toBeGreaterThanOrEqual(1);
+        const rows = await db<
+          { id: string; user_id: string }[]
+        >`select id, user_id from search_activity where user_id = ${targetUser.userId}`;
+        expect(
+          rows.length,
+          'expected the flushed search event to land in search_activity',
+        ).toBeGreaterThanOrEqual(1);
       } finally {
         await db.end({ timeout: 5 });
       }
@@ -222,24 +274,38 @@ test('extension: loads against the mock EA page, popup login against the real AP
 
     await test.step('admin flips the kill switch -> the panel (popup) reports halted on its next bootstrap', async () => {
       try {
-        const patch = await request.patch(`${API_ORIGIN}/api/v1/admin/toggles/kill_switch`, { headers: bearer(admin.accessToken), data: { enabled: true } });
+        const patch = await request.patch(`${API_ORIGIN}/api/v1/admin/toggles/kill_switch`, {
+          headers: bearer(admin.accessToken),
+          data: { enabled: true },
+        });
         expect(patch.status(), await patch.text()).toBe(200);
 
         await popup.reload();
-        await expect(popup.getByText('Kill switch active', { exact: false })).toBeVisible({ timeout: 15_000 });
+        await expect(popup.getByText('Kill switch active', { exact: false })).toBeVisible({
+          timeout: 15_000,
+        });
 
         // Also verify the underlying contract directly (not just the UI
         // string): a fresh heartbeat's own response says the same thing.
         const heartbeat = (await popup.evaluate(() =>
-          chrome.runtime.sendMessage({ type: 'license.heartbeat', payload: { engineState: 'idle' } }),
+          chrome.runtime.sendMessage({
+            type: 'license.heartbeat',
+            payload: { engineState: 'idle' },
+          }),
         )) as { ok: boolean; data?: { killSwitchActive: boolean } };
         expect(heartbeat.data?.killSwitchActive).toBe(true);
       } finally {
         // Cleanup: kill_switch is a single global toggle shared by the whole
         // (dev) database — leaving it 'enabled' would halt every other
         // extension instance/test that reads it after this spec runs.
-        const reset = await request.patch(`${API_ORIGIN}/api/v1/admin/toggles/kill_switch`, { headers: bearer(admin.accessToken), data: { enabled: false } });
-        expect(reset.status(), 'failed to reset kill_switch back to disabled — see this step\'s try block').toBe(200);
+        const reset = await request.patch(`${API_ORIGIN}/api/v1/admin/toggles/kill_switch`, {
+          headers: bearer(admin.accessToken),
+          data: { enabled: false },
+        });
+        expect(
+          reset.status(),
+          "failed to reset kill_switch back to disabled — see this step's try block",
+        ).toBe(200);
       }
     });
   } finally {

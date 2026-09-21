@@ -21,12 +21,16 @@ test.afterAll(async () => {
   }
 });
 
-test('register -> verify -> login -> device registered -> trial -> license key shown', async ({ request }) => {
+test('register -> verify -> login -> device registered -> trial -> license key shown', async ({
+  request,
+}) => {
   const device = deviceFingerprint('journey-a');
   let userId = '';
 
   await test.step('register', async () => {
-    const res = await request.post(`${API_ORIGIN}/api/v1/auth/register`, { data: { email: EMAIL, password: TEST_PASSWORD, device } });
+    const res = await request.post(`${API_ORIGIN}/api/v1/auth/register`, {
+      data: { email: EMAIL, password: TEST_PASSWORD, device },
+    });
     expect(res.status(), await res.text()).toBe(201);
     const body = (await res.json()) as { userId: string };
     userId = body.userId;
@@ -34,9 +38,13 @@ test('register -> verify -> login -> device registered -> trial -> license key s
   });
 
   await test.step('login before verification is blocked (AUTH_EMAIL_NOT_VERIFIED)', async () => {
-    const res = await request.post(`${API_ORIGIN}/api/v1/auth/login`, { data: { email: EMAIL, password: TEST_PASSWORD, device } });
+    const res = await request.post(`${API_ORIGIN}/api/v1/auth/login`, {
+      data: { email: EMAIL, password: TEST_PASSWORD, device },
+    });
     expect(res.status()).toBe(403);
-    expect((await res.json()) as { code: string }).toMatchObject({ code: 'AUTH_EMAIL_NOT_VERIFIED' });
+    expect((await res.json()) as { code: string }).toMatchObject({
+      code: 'AUTH_EMAIL_NOT_VERIFIED',
+    });
   });
 
   await test.step('verify email (see helpers/db.ts for why this is a direct DB write, not a token round-trip)', async () => {
@@ -51,7 +59,9 @@ test('register -> verify -> login -> device registered -> trial -> license key s
 
   let accessToken = '';
   await test.step('login now succeeds', async () => {
-    const res = await request.post(`${API_ORIGIN}/api/v1/auth/login`, { data: { email: EMAIL, password: TEST_PASSWORD, device } });
+    const res = await request.post(`${API_ORIGIN}/api/v1/auth/login`, {
+      data: { email: EMAIL, password: TEST_PASSWORD, device },
+    });
     expect(res.status(), await res.text()).toBe(200);
     const body = (await res.json()) as { status: string; accessToken: string };
     expect(body.status).toBe('ok');
@@ -59,15 +69,23 @@ test('register -> verify -> login -> device registered -> trial -> license key s
   });
 
   await test.step('device registered', async () => {
-    const res = await request.get(`${API_ORIGIN}/api/v1/devices`, { headers: { authorization: `Bearer ${accessToken}` } });
+    const res = await request.get(`${API_ORIGIN}/api/v1/devices`, {
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
     expect(res.status()).toBe(200);
-    const devices = (await res.json()) as Array<{ fingerprint?: string; isCurrent: boolean; name: string | null }>;
+    const devices = (await res.json()) as Array<{
+      fingerprint?: string;
+      isCurrent: boolean;
+      name: string | null;
+    }>;
     expect(devices.length).toBeGreaterThanOrEqual(1);
     expect(devices.some((d) => d.isCurrent)).toBe(true);
   });
 
   await test.step('trial starts', async () => {
-    const res = await request.post(`${API_ORIGIN}/api/v1/subscriptions/trial`, { headers: { authorization: `Bearer ${accessToken}` } });
+    const res = await request.post(`${API_ORIGIN}/api/v1/subscriptions/trial`, {
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
     expect(res.status(), await res.text()).toBe(201);
     const body = (await res.json()) as {
       subscription: { status: string; plan: { code: string } };
@@ -84,7 +102,9 @@ test('register -> verify -> login -> device registered -> trial -> license key s
   });
 
   await test.step('GET /licenses/me shows only the prefix + status, never the full key again', async () => {
-    const res = await request.get(`${API_ORIGIN}/api/v1/licenses/me`, { headers: { authorization: `Bearer ${accessToken}` } });
+    const res = await request.get(`${API_ORIGIN}/api/v1/licenses/me`, {
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
     expect(res.status(), await res.text()).toBe(200);
     const body = (await res.json()) as { keyPrefix: string; status: string };
     expect(body.status).toBe('active');
@@ -93,7 +113,9 @@ test('register -> verify -> login -> device registered -> trial -> license key s
   });
 
   await test.step('a second trial for the same account is denied (one live subscription per user)', async () => {
-    const res = await request.post(`${API_ORIGIN}/api/v1/subscriptions/trial`, { headers: { authorization: `Bearer ${accessToken}` } });
+    const res = await request.post(`${API_ORIGIN}/api/v1/subscriptions/trial`, {
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
     expect(res.status()).toBe(409);
   });
 });

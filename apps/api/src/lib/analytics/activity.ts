@@ -8,7 +8,14 @@
 import { searchActivity, snipingActivity, userActivity, type Database } from '@sl/db';
 import { and, eq, gte, inArray, lt } from 'drizzle-orm';
 
-import { bucketKeyFor, endOfDayUtc, formatDayUtc, listBuckets, parseDayUtc, type Granularity } from './dates.js';
+import {
+  bucketKeyFor,
+  endOfDayUtc,
+  formatDayUtc,
+  listBuckets,
+  parseDayUtc,
+  type Granularity,
+} from './dates.js';
 
 export interface ActivityRangeParams {
   from: string;
@@ -32,7 +39,10 @@ export interface ActivityPoint {
   activeIps: number;
 }
 
-export async function getActivitySeries(db: Database, params: ActivityRangeParams): Promise<ActivityPoint[]> {
+export async function getActivitySeries(
+  db: Database,
+  params: ActivityRangeParams,
+): Promise<ActivityPoint[]> {
   const start = parseDayUtc(params.from);
   const end = endOfDayUtc(params.to);
 
@@ -47,11 +57,19 @@ export async function getActivitySeries(db: Database, params: ActivityRangeParam
       columns: { type: true, occurredAt: true, deviceId: true, ip: true },
     }),
     db.query.searchActivity.findMany({
-      where: and(gte(searchActivity.occurredAt, start), lt(searchActivity.occurredAt, end), params.userId ? eq(searchActivity.userId, params.userId) : undefined),
+      where: and(
+        gte(searchActivity.occurredAt, start),
+        lt(searchActivity.occurredAt, end),
+        params.userId ? eq(searchActivity.userId, params.userId) : undefined,
+      ),
       columns: { occurredAt: true, deviceId: true },
     }),
     db.query.snipingActivity.findMany({
-      where: and(gte(snipingActivity.occurredAt, start), lt(snipingActivity.occurredAt, end), params.userId ? eq(snipingActivity.userId, params.userId) : undefined),
+      where: and(
+        gte(snipingActivity.occurredAt, start),
+        lt(snipingActivity.occurredAt, end),
+        params.userId ? eq(snipingActivity.userId, params.userId) : undefined,
+      ),
       columns: { occurredAt: true, outcome: true, deviceId: true },
     }),
   ]);
@@ -73,7 +91,10 @@ export async function getActivitySeries(db: Database, params: ActivityRangeParam
   const ipsByBucket: Array<Set<string>> = buckets.map(() => new Set());
 
   const bucketOf = (occurredAt: Date): number | undefined => {
-    const key = params.granularity === 'lifetime' ? 'lifetime' : bucketKeyFor(formatDayUtc(occurredAt), params.granularity);
+    const key =
+      params.granularity === 'lifetime'
+        ? 'lifetime'
+        : bucketKeyFor(formatDayUtc(occurredAt), params.granularity);
     return idx.get(key);
   };
 
@@ -100,5 +121,9 @@ export async function getActivitySeries(db: Database, params: ActivityRangeParam
     if (row.deviceId) devicesByBucket[i]!.add(row.deviceId);
   }
 
-  return points.map((p, i) => ({ ...p, activeDevices: devicesByBucket[i]!.size, activeIps: ipsByBucket[i]!.size }));
+  return points.map((p, i) => ({
+    ...p,
+    activeDevices: devicesByBucket[i]!.size,
+    activeIps: ipsByBucket[i]!.size,
+  }));
 }

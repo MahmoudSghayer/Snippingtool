@@ -27,12 +27,18 @@ const GRANULARITY_LEGACY_ALIASES: Record<string, 'day' | 'week' | 'month'> = {
  * `/profits` caller; this is a **deprecated** input alias only, never
  * returned in a response or used internally past parse time, and should be
  * removed once nothing depends on it (docs/08-analytics.md). */
-export const granularitySchema = z.preprocess((value) => {
-  if (typeof value === 'string' && Object.prototype.hasOwnProperty.call(GRANULARITY_LEGACY_ALIASES, value)) {
-    return GRANULARITY_LEGACY_ALIASES[value];
-  }
-  return value;
-}, z.enum(['day', 'week', 'month', 'lifetime']));
+export const granularitySchema = z.preprocess(
+  (value) => {
+    if (
+      typeof value === 'string' &&
+      Object.prototype.hasOwnProperty.call(GRANULARITY_LEGACY_ALIASES, value)
+    ) {
+      return GRANULARITY_LEGACY_ALIASES[value];
+    }
+    return value;
+  },
+  z.enum(['day', 'week', 'month', 'lifetime']),
+);
 export type Granularity = z.infer<typeof granularitySchema>;
 
 /** `from`/`to` are calendar-day strings (UTC), inclusive on both ends.
@@ -245,8 +251,16 @@ export const meOverviewResponseSchema = z.object({
   lifetimeCoinsTraded: z.number().int().min(0),
   lifetimeSnipes: z.number().int().min(0),
   lifetimeSuccesses: z.number().int().min(0),
-  last7d: z.object({ netProfit: z.number().int(), snipes: z.number().int().min(0), successes: z.number().int().min(0) }),
-  last30d: z.object({ netProfit: z.number().int(), snipes: z.number().int().min(0), successes: z.number().int().min(0) }),
+  last7d: z.object({
+    netProfit: z.number().int(),
+    snipes: z.number().int().min(0),
+    successes: z.number().int().min(0),
+  }),
+  last30d: z.object({
+    netProfit: z.number().int(),
+    snipes: z.number().int().min(0),
+    successes: z.number().int().min(0),
+  }),
   activeDevices: z.number().int().min(0),
   snipeSuccessRateLifetime: z.number().min(0).max(1),
 });

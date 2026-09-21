@@ -1,12 +1,21 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { BAN_TYPES } from '@sl/shared';
-import { Badge, Button, DataTable, formatDate, FormField, Input, PageHeader, Select, type ColumnDef } from '@sl/ui';
+import {
+  Badge,
+  Button,
+  DataTable,
+  formatDate,
+  FormField,
+  Input,
+  PageHeader,
+  Select,
+  type ColumnDef,
+} from '@sl/ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 import { z } from 'zod';
-
 
 import { api, apiErrorMessage } from '@/api/client.js';
 import { ReasonDialog } from '@/components/ReasonDialog.js';
@@ -33,7 +42,10 @@ export function BansPage() {
 
   const bansQuery = useQuery({ queryKey: ['admin', 'bans'], queryFn: fetchBans });
 
-  const createForm = useForm<CreateBanForm>({ resolver: zodResolver(createBanFormSchema), defaultValues: { type: 'account', userId: '', value: '' } });
+  const createForm = useForm<CreateBanForm>({
+    resolver: zodResolver(createBanFormSchema),
+    defaultValues: { type: 'account', userId: '', value: '' },
+  });
 
   const createMutation = useMutation({
     mutationFn: async (reason: string) => {
@@ -59,7 +71,10 @@ export function BansPage() {
 
   const liftMutation = useMutation({
     mutationFn: async ({ id, reason }: { id: string; reason: string }) => {
-      const { error } = await api.POST('/api/v1/admin/bans/{id}/lift', { params: { path: { id } }, body: { reason } });
+      const { error } = await api.POST('/api/v1/admin/bans/{id}/lift', {
+        params: { path: { id } },
+        body: { reason },
+      });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -72,15 +87,35 @@ export function BansPage() {
 
   const columns: ColumnDef<BanRow, unknown>[] = [
     { accessorKey: 'type', header: 'Type' },
-    { accessorKey: 'value', header: 'Value', cell: (c) => <span className="font-mono text-xs">{(c.getValue() as string) || '—'}</span> },
+    {
+      accessorKey: 'value',
+      header: 'Value',
+      cell: (c) => <span className="font-mono text-xs">{(c.getValue() as string) || '—'}</span>,
+    },
     { accessorKey: 'reason', header: 'Reason' },
-    { accessorKey: 'expiresAt', header: 'Expires', cell: (c) => (c.getValue() ? formatDate(c.getValue() as string) : 'Never') },
-    { accessorKey: 'liftedAt', header: 'Status', cell: (c) => <Badge tone={c.getValue() ? 'neutral' : 'negative'}>{c.getValue() ? 'Lifted' : 'Active'}</Badge> },
+    {
+      accessorKey: 'expiresAt',
+      header: 'Expires',
+      cell: (c) => (c.getValue() ? formatDate(c.getValue() as string) : 'Never'),
+    },
+    {
+      accessorKey: 'liftedAt',
+      header: 'Status',
+      cell: (c) => (
+        <Badge tone={c.getValue() ? 'neutral' : 'negative'}>
+          {c.getValue() ? 'Lifted' : 'Active'}
+        </Badge>
+      ),
+    },
   ];
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title="Bans" description="Account, IP, device and hardware bans." actions={<Button onClick={() => setCreateOpen(true)}>New ban</Button>} />
+      <PageHeader
+        title="Bans"
+        description="Account, IP, device and hardware bans."
+        actions={<Button onClick={() => setCreateOpen(true)}>New ban</Button>}
+      />
 
       <DataTable
         columns={columns}
@@ -123,7 +158,11 @@ export function BansPage() {
               <Input id="ban-userId" {...createForm.register('userId')} />
             </FormField>
             {createForm.watch('type') !== 'account' && (
-              <FormField label="Value" htmlFor="ban-value" hint="IP address, device fingerprint or HWID">
+              <FormField
+                label="Value"
+                htmlFor="ban-value"
+                hint="IP address, device fingerprint or HWID"
+              >
                 <Input id="ban-value" {...createForm.register('value')} />
               </FormField>
             )}

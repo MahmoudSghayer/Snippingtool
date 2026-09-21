@@ -34,7 +34,10 @@ export interface CreateDbOptions {
  * connection (exposed for raw queries — LISTEN/NOTIFY, `REFRESH MATERIALIZED
  * VIEW CONCURRENTLY`, etc. — and for closing the pool on shutdown).
  */
-export function createDb(connectionString: string, options: CreateDbOptions = {}): { db: Database; sql: Sql } {
+export function createDb(
+  connectionString: string,
+  options: CreateDbOptions = {},
+): { db: Database; sql: Sql } {
   const sql = postgres(connectionString, {
     max: options.max ?? 10,
     debug: options.debug ?? false,

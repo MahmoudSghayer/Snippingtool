@@ -1,11 +1,22 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { planCreateRequestSchema } from '@sl/shared';
-import { Badge, Button, DataTable, formatCurrencyFromCents, FormField, Input, Modal, PageHeader, Select, Switch, type ColumnDef } from '@sl/ui';
+import {
+  Badge,
+  Button,
+  DataTable,
+  formatCurrencyFromCents,
+  FormField,
+  Input,
+  Modal,
+  PageHeader,
+  Select,
+  Switch,
+  type ColumnDef,
+} from '@sl/ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
-
 
 import { api, apiErrorMessage } from '@/api/client.js';
 import { ReasonDialog } from '@/components/ReasonDialog.js';
@@ -55,12 +66,16 @@ export function PlansPage() {
       createForm.reset();
       void queryClient.invalidateQueries({ queryKey: ['admin', 'plans'] });
     },
-    onError: (error) => toast.error("Couldn't create plan", { description: apiErrorMessage(error) }),
+    onError: (error) =>
+      toast.error("Couldn't create plan", { description: apiErrorMessage(error) }),
   });
 
   const archiveMutation = useMutation({
     mutationFn: async ({ id, reason }: { id: string; reason: string }) => {
-      const { error } = await api.POST('/api/v1/admin/plans/{id}/archive', { params: { path: { id } }, body: { reason } });
+      const { error } = await api.POST('/api/v1/admin/plans/{id}/archive', {
+        params: { path: { id } },
+        body: { reason },
+      });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -68,22 +83,47 @@ export function PlansPage() {
       setArchiveTarget(null);
       void queryClient.invalidateQueries({ queryKey: ['admin', 'plans'] });
     },
-    onError: (error) => toast.error("Couldn't archive plan", { description: apiErrorMessage(error) }),
+    onError: (error) =>
+      toast.error("Couldn't archive plan", { description: apiErrorMessage(error) }),
   });
 
   const columns: ColumnDef<PlanRow, unknown>[] = [
-    { accessorKey: 'code', header: 'Code', cell: (c) => <span className="font-mono">{c.getValue() as string}</span> },
+    {
+      accessorKey: 'code',
+      header: 'Code',
+      cell: (c) => <span className="font-mono">{c.getValue() as string}</span>,
+    },
     { accessorKey: 'name', header: 'Name' },
-    { accessorKey: 'priceCents', header: 'Price', cell: (c) => formatCurrencyFromCents(c.getValue() as number) },
+    {
+      accessorKey: 'priceCents',
+      header: 'Price',
+      cell: (c) => formatCurrencyFromCents(c.getValue() as number),
+    },
     { accessorKey: 'interval', header: 'Interval' },
     { accessorKey: 'deviceLimit', header: 'Devices' },
-    { accessorKey: 'isLifetime', header: 'Lifetime', cell: (c) => (c.getValue() ? <Badge tone="accent">Lifetime</Badge> : '—') },
-    { accessorKey: 'isActive', header: 'Status', cell: (c) => <Badge tone={c.getValue() ? 'positive' : 'neutral'}>{c.getValue() ? 'Active' : 'Archived'}</Badge> },
+    {
+      accessorKey: 'isLifetime',
+      header: 'Lifetime',
+      cell: (c) => (c.getValue() ? <Badge tone="accent">Lifetime</Badge> : '—'),
+    },
+    {
+      accessorKey: 'isActive',
+      header: 'Status',
+      cell: (c) => (
+        <Badge tone={c.getValue() ? 'positive' : 'neutral'}>
+          {c.getValue() ? 'Active' : 'Archived'}
+        </Badge>
+      ),
+    },
   ];
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title="Plans" description="Every plan, including lifetime and archived ones." actions={<Button onClick={() => setCreateOpen(true)}>New plan</Button>} />
+      <PageHeader
+        title="Plans"
+        description="Every plan, including lifetime and archived ones."
+        actions={<Button onClick={() => setCreateOpen(true)}>New plan</Button>}
+      />
 
       <DataTable
         columns={columns}
@@ -112,21 +152,37 @@ export function PlansPage() {
             <Button variant="outline" onClick={() => setCreateOpen(false)}>
               Cancel
             </Button>
-            <Button loading={createMutation.isPending} onClick={createForm.handleSubmit((v) => createMutation.mutate(v))}>
+            <Button
+              loading={createMutation.isPending}
+              onClick={createForm.handleSubmit((v) => createMutation.mutate(v))}
+            >
               Create
             </Button>
           </>
         }
       >
         <form className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <FormField label="Code" htmlFor="code" hint="lowercase-with-dashes" error={createForm.formState.errors.code?.message}>
+          <FormField
+            label="Code"
+            htmlFor="code"
+            hint="lowercase-with-dashes"
+            error={createForm.formState.errors.code?.message}
+          >
             <Input id="code" {...createForm.register('code')} />
           </FormField>
           <FormField label="Name" htmlFor="name" error={createForm.formState.errors.name?.message}>
             <Input id="name" {...createForm.register('name')} />
           </FormField>
-          <FormField label="Price (cents)" htmlFor="priceCents" error={createForm.formState.errors.priceCents?.message}>
-            <Input id="priceCents" type="number" {...createForm.register('priceCents', { valueAsNumber: true })} />
+          <FormField
+            label="Price (cents)"
+            htmlFor="priceCents"
+            error={createForm.formState.errors.priceCents?.message}
+          >
+            <Input
+              id="priceCents"
+              type="number"
+              {...createForm.register('priceCents', { valueAsNumber: true })}
+            />
           </FormField>
           <FormField label="Interval" htmlFor="interval">
             <Select
@@ -141,8 +197,18 @@ export function PlansPage() {
               ]}
             />
           </FormField>
-          <FormField label="Device limit" htmlFor="deviceLimit" error={createForm.formState.errors.deviceLimit?.message}>
-            <Input id="deviceLimit" type="number" min={1} max={10} {...createForm.register('deviceLimit', { valueAsNumber: true })} />
+          <FormField
+            label="Device limit"
+            htmlFor="deviceLimit"
+            error={createForm.formState.errors.deviceLimit?.message}
+          >
+            <Input
+              id="deviceLimit"
+              type="number"
+              min={1}
+              max={10}
+              {...createForm.register('deviceLimit', { valueAsNumber: true })}
+            />
           </FormField>
           <FormField label="Features (comma-separated)" htmlFor="features">
             <Input
@@ -150,15 +216,26 @@ export function PlansPage() {
               onChange={(e) =>
                 createForm.setValue(
                   'features',
-                  e.target.value.split(',').map((s) => s.trim()).filter(Boolean),
+                  e.target.value
+                    .split(',')
+                    .map((s) => s.trim())
+                    .filter(Boolean),
                 )
               }
             />
           </FormField>
           <FormField label="Lifetime plan" htmlFor="isLifetime">
-            <Switch checked={createForm.watch('isLifetime')} onCheckedChange={(v) => createForm.setValue('isLifetime', v)} />
+            <Switch
+              checked={createForm.watch('isLifetime')}
+              onCheckedChange={(v) => createForm.setValue('isLifetime', v)}
+            />
           </FormField>
-          <FormField label="Reason" htmlFor="reason" className="sm:col-span-2" error={createForm.formState.errors.reason?.message}>
+          <FormField
+            label="Reason"
+            htmlFor="reason"
+            className="sm:col-span-2"
+            error={createForm.formState.errors.reason?.message}
+          >
             <Input id="reason" {...createForm.register('reason')} />
           </FormField>
         </form>
@@ -171,7 +248,9 @@ export function PlansPage() {
         destructive
         confirmLabel="Archive"
         loading={archiveMutation.isPending}
-        onConfirm={(reason) => archiveTarget && archiveMutation.mutate({ id: archiveTarget.id, reason })}
+        onConfirm={(reason) =>
+          archiveTarget && archiveMutation.mutate({ id: archiveTarget.id, reason })
+        }
       />
     </div>
   );

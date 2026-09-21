@@ -8,7 +8,7 @@ everything below that level of detail: token formats/lifetimes, storage
 rules, lockout math, the device model, 2FA (including the admin-bootstrap
 edge case), the admin permission matrix, and the CSRF model. Route
 signatures (bodies/responses/permissions) are in
-[`03-api.md`](./03-api.md#auth); this document is *why* they work the way
+[`03-api.md`](./03-api.md#auth); this document is _why_ they work the way
 they do.
 
 ## Contents
@@ -53,7 +53,7 @@ flowchart LR
 ```
 
 Both token shapes are **literally the same JWT** — a dashboard login sets it
-as the `sl_at` httpOnly cookie *and* returns it in the response body (the
+as the `sl_at` httpOnly cookie _and_ returns it in the response body (the
 body is what the extension reads; the dashboard's fetch wrapper ignores the
 body and relies on the cookie). There is no separate "web session" format.
 `request.authMethod` (`'bearer' | 'cookie'`) records which path was used,
@@ -71,18 +71,18 @@ EdDSA (Ed25519) JWT, signed with `JWT_PRIVATE_KEY`, verified with
 `JWT_PUBLIC_KEY` (`lib/tokens.ts`). **15 minute** lifetime
 (`ACCESS_TOKEN_TTL_SECONDS`). Claims:
 
-| Claim | Meaning |
-|---|---|
-| `sub` | `users.id`. |
-| `sid` | `sessions.id` — the *current* session row (changes on every refresh rotation, §3). |
-| `did` | `devices.id`, or `null` (never set for a route that doesn't register a device). |
-| `role` | `'user' \| 'admin'`, from `users.role` at issue time. |
-| `plan` | The resolved plan code (`EntitlementProvider.getEntitlements().plan`) at issue time, or `null`. Informational only — no route trusts this claim for entitlement decisions; they always re-check the DB via `fastify.entitlements`. |
-| `ver` | `users.row_version` at issue time. |
-| `iat`/`exp` | Standard JWT, 15 min from issue. |
+| Claim       | Meaning                                                                                                                                                                                                                            |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sub`       | `users.id`.                                                                                                                                                                                                                        |
+| `sid`       | `sessions.id` — the _current_ session row (changes on every refresh rotation, §3).                                                                                                                                                 |
+| `did`       | `devices.id`, or `null` (never set for a route that doesn't register a device).                                                                                                                                                    |
+| `role`      | `'user' \| 'admin'`, from `users.role` at issue time.                                                                                                                                                                              |
+| `plan`      | The resolved plan code (`EntitlementProvider.getEntitlements().plan`) at issue time, or `null`. Informational only — no route trusts this claim for entitlement decisions; they always re-check the DB via `fastify.entitlements`. |
+| `ver`       | `users.row_version` at issue time.                                                                                                                                                                                                 |
+| `iat`/`exp` | Standard JWT, 15 min from issue.                                                                                                                                                                                                   |
 
 **Why `ver` matters**: `bump_row_version()` (a Postgres trigger — see
-`02-database.md` §1) increments `users.row_version` on *every* `UPDATE` to
+`02-database.md` §1) increments `users.row_version` on _every_ `UPDATE` to
 that row, not just security-relevant ones. `authenticate` re-checks
 `row_version === claims.ver` on every request, so any account-affecting
 write — force logout, password change, 2FA enable/disable, an admin
@@ -113,8 +113,8 @@ via a plain unique index instead of scanning). **30 day** lifetime
    `family_id` is revoked (every session sharing it), and the caller gets
    `401 AUTH_TOKEN_REUSED`.
 3. If found, not revoked, and expired → `401 AUTH_TOKEN_EXPIRED`.
-4. Otherwise: the *old* session row is marked `revoked_at`/`revoked_reason =
-   'rotated'`, and a **new** session row is inserted (new id, new
+4. Otherwise: the _old_ session row is marked `revoked_at`/`revoked_reason =
+'rotated'`, and a **new** session row is inserted (new id, new
    `refresh_token_hash`, same `family_id`/`user_id`/`device_id`). A fresh
    access token is signed with the new session's id as `sid`.
 
@@ -138,7 +138,7 @@ sequenceDiagram
 
 This is why rotation **must not** overwrite the hash on the same row: doing
 so (an earlier version of this code did, and it was caught by this module's
-own reuse-detection test) makes a reused token match *no* row at all after
+own reuse-detection test) makes a reused token match _no_ row at all after
 rotation — indistinguishable from "never existed" — instead of "found, but
 already revoked", which is what actually triggers the family-wide
 revocation. The insert-new-row approach is what makes reuse detectable at
@@ -162,7 +162,7 @@ threshold:
    timestamp, trimmed and counted on every check). Default 20 requests per
    15 minutes for each of `login`/`register`/`mfa/verify`/
    `resend-verification`/`password/reset-request`. Deliberately set
-   *above* the 5-failure lockout threshold: this layer's job is catching
+   _above_ the 5-failure lockout threshold: this layer's job is catching
    one IP hammering the route at all (potentially across many different
    accounts, which per-account lockout can't see), not being the primary
    per-account brute-force defence — if it were tighter than 5, a
@@ -198,7 +198,7 @@ through:
 - **New fingerprint, or an existing-but-revoked one** → the plan's device
   limit (`EntitlementProvider.getEntitlements().deviceLimit`, defaulting to
   the `trial` limit — 1 — for a user with no subscription at all) is
-  checked against the count of currently-*active* devices. Under the limit:
+  checked against the count of currently-_active_ devices. Under the limit:
   a new row is inserted (or the revoked row is reactivated). At the limit:
   `409 DEVICE_LIMIT_REACHED`, with `details.devices` listing every active
   device (`id`, `name`, `browser`, `os`, `lastSeenAt`) so the client can
@@ -220,12 +220,12 @@ deliberate choice over adding a second required secret env var, while still
 never reusing `COOKIE_SECRET`'s raw bytes for a different purpose than its
 name implies.
 
-**Enrollment is two calls**, because a client always needs to *show* the
+**Enrollment is two calls**, because a client always needs to _show_ the
 secret/QR before the user can prove they've saved it:
 
 1. `POST /auth/totp/enroll` — generates a secret + 10 recovery codes,
-   stashes them in Redis (10 min TTL, keyed by user id — *not yet
-   persisted*), returns them to the client (once — the API never returns a
+   stashes them in Redis (10 min TTL, keyed by user id — _not yet
+   persisted_), returns them to the client (once — the API never returns a
    plaintext secret or recovery code again after this call).
 2. `POST /auth/totp/enroll/confirm` — the user types back a current 6-digit
    code; if it validates against the pending secret, the secret is
@@ -256,7 +256,7 @@ resolves this with a **second ticket mode**: if `role === 'admin'` and
 authenticated session (`resolveEnrollmentSubject` in
 `modules/auth/service.ts`); `confirm`, on the ticket path, both persists the
 new 2FA secret **and** completes the pending login in the same response
-(`{enabled: true, tokens: {...}}`) — so enrolling *is* logging in, for that
+(`{enabled: true, tokens: {...}}`) — so enrolling _is_ logging in, for that
 one first time.
 
 ```mermaid
@@ -288,12 +288,12 @@ the single source of truth; `fastify.requirePermission(permission)`
 `authenticate`) plus the caller's `admin_users.admin_role` granting that
 permission.
 
-| Role | Gets |
-|---|---|
-| `super_admin` | Every permission. |
-| `support` | `users.read`, `users.write`, `users.suspend`, `users.force_logout`, `users.reset_password`, `subscriptions.read`, `audit.read`. Never money (`subscriptions.write`, `coupons.write`, `plans.write`) or config/system/analytics. |
-| `analyst` | `users.read`, `subscriptions.read`, `audit.read`, `analytics.read`, `system.read`. Read-only everywhere, including audit — safe for reporting with zero write risk. |
-| `billing` | `users.read`, `subscriptions.read`, `subscriptions.write`, `coupons.write`, `plans.write`, `audit.read`. The money-shaped surface, plus enough user read access to look up an account — but never `users.suspend`/`.ban`/`.force_logout`. |
+| Role          | Gets                                                                                                                                                                                                                                      |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `super_admin` | Every permission.                                                                                                                                                                                                                         |
+| `support`     | `users.read`, `users.write`, `users.suspend`, `users.force_logout`, `users.reset_password`, `subscriptions.read`, `audit.read`. Never money (`subscriptions.write`, `coupons.write`, `plans.write`) or config/system/analytics.           |
+| `analyst`     | `users.read`, `subscriptions.read`, `audit.read`, `analytics.read`, `system.read`. Read-only everywhere, including audit — safe for reporting with zero write risk.                                                                       |
+| `billing`     | `users.read`, `subscriptions.read`, `subscriptions.write`, `coupons.write`, `plans.write`, `audit.read`. The money-shaped surface, plus enough user read access to look up an account — but never `users.suspend`/`.ban`/`.force_logout`. |
 
 The caller's own resolved `admin_role`/permission set (this table, applied)
 is exposed client-side on `GET /users/me` (`userDtoSchema.adminRole`/
@@ -357,7 +357,7 @@ waiting for a `done()` that never comes.
 **Bearer-authenticated requests (`request.headers.authorization` present)
 skip the check entirely** — `verifyCsrf`'s first line is exactly that
 condition. This is safe, not a hole: CSRF is fundamentally about a
-cross-site page making the *browser* attach ambient credentials (cookies)
+cross-site page making the _browser_ attach ambient credentials (cookies)
 to a request the page didn't construct the headers for; a custom
 `Authorization` header can only be set by JavaScript that already has the
 bearer token in hand (same-origin, or the extension's own privileged
@@ -374,10 +374,10 @@ Routes that mutate state under a cookie session add
 `lib/cookie-options.ts`'s `resolveCookieAttrs()`, driven by two env vars
 (`config/env.ts`):
 
-| Var | Default | Meaning |
-|---|---|---|
-| `COOKIE_SAME_SITE` | `lax` | `lax` \| `strict` \| `none`. `Lax` (the default) is correct for a same-site or subdomain-shared dashboard/API topology — same-origin `fetch`/XHR always carries `Lax` cookies. A **genuinely cross-site** deployment (e.g. the dashboard on Vercel, the API on its own origin — the documented MVP topology, [`11-devops.md`](./11-devops.md) §6) needs `none`: `SameSite=Lax` cookies are **not** sent on a cross-site `fetch`/XHR (only a top-level navigation), so a cross-site dashboard would silently fail to authenticate via cookies with `lax`. |
-| `COOKIE_SECURE` | `false` | Forces `Secure` outside `NODE_ENV=production` (e.g. an HTTPS staging/preview deploy that isn't `production`). Cookies are `Secure` whenever `isProd \|\| COOKIE_SECURE`. |
+| Var                | Default | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------ | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `COOKIE_SAME_SITE` | `lax`   | `lax` \| `strict` \| `none`. `Lax` (the default) is correct for a same-site or subdomain-shared dashboard/API topology — same-origin `fetch`/XHR always carries `Lax` cookies. A **genuinely cross-site** deployment (e.g. the dashboard on Vercel, the API on its own origin — the documented MVP topology, [`11-devops.md`](./11-devops.md) §6) needs `none`: `SameSite=Lax` cookies are **not** sent on a cross-site `fetch`/XHR (only a top-level navigation), so a cross-site dashboard would silently fail to authenticate via cookies with `lax`. |
+| `COOKIE_SECURE`    | `false` | Forces `Secure` outside `NODE_ENV=production` (e.g. an HTTPS staging/preview deploy that isn't `production`). Cookies are `Secure` whenever `isProd \|\| COOKIE_SECURE`.                                                                                                                                                                                                                                                                                                                                                                                 |
 
 `COOKIE_SAME_SITE=none` **always** sets `Secure: true` regardless of
 `COOKIE_SECURE`/`NODE_ENV` — required by spec (browsers reject
@@ -393,12 +393,12 @@ covers the production refusal cases.
 
 ## 11. Token/secret storage rules
 
-| What | Where (API side) | Where (client side, per `01-architecture.md`) |
-|---|---|---|
-| Access token | Never stored — 15 min, re-issued on refresh/login. | Dashboard: `sl_at` httpOnly cookie. Extension: `storage.session` (cleared on browser restart). |
-| Refresh token | `sessions.refresh_token_hash` (SHA-256, not the plaintext). | Dashboard: `sl_rt` httpOnly cookie, `path=/api/v1/auth` (never sent to non-auth routes). Extension: encrypted in `storage.local`. |
-| Password | `users.password_hash` (argon2id). | Never stored client-side beyond the in-flight request. |
-| TOTP secret | `users.totp_secret_enc` (AES-256-GCM, §6). | Never stored client-side after enrollment's one-time display. |
-| Recovery codes | `totp_recovery_codes.code_hash` (argon2, one row per code). | Never stored client-side after enrollment's one-time display (the user is expected to save them out-of-band). |
-| Email verification / password reset tokens | `*.token_hash` (SHA-256 — high-entropy random data already, §9). | Only ever exist as a URL query param in a one-time email link. |
-| Entitlement blob | Not stored server-side (stateless, signed on demand). | Extension: `storage.local`, used only during the 24h offline-grace window; verified locally, never re-parsed for anything beyond "was this issued and is it still within its own expiry". |
+| What                                       | Where (API side)                                                 | Where (client side, per `01-architecture.md`)                                                                                                                                             |
+| ------------------------------------------ | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Access token                               | Never stored — 15 min, re-issued on refresh/login.               | Dashboard: `sl_at` httpOnly cookie. Extension: `storage.session` (cleared on browser restart).                                                                                            |
+| Refresh token                              | `sessions.refresh_token_hash` (SHA-256, not the plaintext).      | Dashboard: `sl_rt` httpOnly cookie, `path=/api/v1/auth` (never sent to non-auth routes). Extension: encrypted in `storage.local`.                                                         |
+| Password                                   | `users.password_hash` (argon2id).                                | Never stored client-side beyond the in-flight request.                                                                                                                                    |
+| TOTP secret                                | `users.totp_secret_enc` (AES-256-GCM, §6).                       | Never stored client-side after enrollment's one-time display.                                                                                                                             |
+| Recovery codes                             | `totp_recovery_codes.code_hash` (argon2, one row per code).      | Never stored client-side after enrollment's one-time display (the user is expected to save them out-of-band).                                                                             |
+| Email verification / password reset tokens | `*.token_hash` (SHA-256 — high-entropy random data already, §9). | Only ever exist as a URL query param in a one-time email link.                                                                                                                            |
+| Entitlement blob                           | Not stored server-side (stateless, signed on demand).            | Extension: `storage.local`, used only during the 24h offline-grace window; verified locally, never re-parsed for anything beyond "was this issued and is it still within its own expiry". |

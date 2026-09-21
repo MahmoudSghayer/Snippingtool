@@ -16,13 +16,23 @@ const { db, sql } = createTestDb();
 
 async function createUser(email: string, createdAt?: Date): Promise<string> {
   const id = newId();
-  await db.insert(users).values({ id, email, passwordHash: 'x', emailVerifiedAt: new Date(), ...(createdAt ? { createdAt } : {}) });
+  await db.insert(users).values({
+    id,
+    email,
+    passwordHash: 'x',
+    emailVerifiedAt: new Date(),
+    ...(createdAt ? { createdAt } : {}),
+  });
   return id;
 }
 
 async function metricValue(day: string, metric: string, dimension = ''): Promise<number | null> {
   const row = await db.query.analyticsDaily.findFirst({
-    where: and(eq(analyticsDaily.day, day), eq(analyticsDaily.metric, metric), eq(analyticsDaily.dimension, dimension)),
+    where: and(
+      eq(analyticsDaily.day, day),
+      eq(analyticsDaily.metric, metric),
+      eq(analyticsDaily.dimension, dimension),
+    ),
   });
   return row ? Number(row.value) : null;
 }
@@ -36,15 +46,27 @@ describe('lib/analytics/materialize', () => {
     await closeTestDb(sql);
   });
 
-  it('computeDailyMetrics: produces new_users and profit metrics matching the day\'s fixtures', async () => {
+  it("computeDailyMetrics: produces new_users and profit metrics matching the day's fixtures", async () => {
     const day = '2024-09-10';
     await createUser('materialize-new-user@example.com', new Date(`${day}T05:00:00Z`));
 
     const u2 = await createUser('materialize-trader@example.com', new Date('2024-01-01T00:00:00Z'));
-    await db.insert(profits).values({ id: newId(), userId: u2, day, netProfit: 500, coinsSpent: 100, coinsEarned: 700, snipes: 4, successes: 2, tradesClosed: 2 });
+    await db.insert(profits).values({
+      id: newId(),
+      userId: u2,
+      day,
+      netProfit: 500,
+      coinsSpent: 100,
+      coinsEarned: 700,
+      snipes: 4,
+      successes: 2,
+      tradesClosed: 2,
+    });
 
     const rows = await computeDailyMetrics(db, day);
-    const byMetric = new Map(rows.filter((r) => r.dimension === '').map((r) => [r.metric, r.value]));
+    const byMetric = new Map(
+      rows.filter((r) => r.dimension === '').map((r) => [r.metric, r.value]),
+    );
 
     expect(byMetric.get('new_users')).toBe(1);
     expect(byMetric.get('net_profit_cents')).toBe(500);
@@ -58,15 +80,32 @@ describe('lib/analytics/materialize', () => {
 
   it('materializeDay: upserts on (day, metric, dimension) — running twice with unchanged data yields identical rows, not duplicates', async () => {
     const day = '2024-09-11';
-    const u = await createUser('materialize-idempotent@example.com', new Date('2024-01-01T00:00:00Z'));
-    await db.insert(profits).values({ id: newId(), userId: u, day, netProfit: 250, coinsSpent: 50, coinsEarned: 350, snipes: 2, successes: 1, tradesClosed: 1 });
+    const u = await createUser(
+      'materialize-idempotent@example.com',
+      new Date('2024-01-01T00:00:00Z'),
+    );
+    await db.insert(profits).values({
+      id: newId(),
+      userId: u,
+      day,
+      netProfit: 250,
+      coinsSpent: 50,
+      coinsEarned: 350,
+      snipes: 2,
+      successes: 1,
+      tradesClosed: 1,
+    });
 
     const firstRowCount = await materializeDay(db, day);
-    const afterFirst = await db.query.analyticsDaily.findMany({ where: eq(analyticsDaily.day, day) });
+    const afterFirst = await db.query.analyticsDaily.findMany({
+      where: eq(analyticsDaily.day, day),
+    });
     expect(afterFirst.length).toBe(firstRowCount);
 
     const secondRowCount = await materializeDay(db, day);
-    const afterSecond = await db.query.analyticsDaily.findMany({ where: eq(analyticsDaily.day, day) });
+    const afterSecond = await db.query.analyticsDaily.findMany({
+      where: eq(analyticsDaily.day, day),
+    });
 
     expect(secondRowCount).toBe(firstRowCount);
     expect(afterSecond.length).toBe(afterFirst.length); // no duplicate rows
@@ -74,10 +113,17 @@ describe('lib/analytics/materialize', () => {
 
     // Now change the underlying data and re-materialize: the same row
     // should be overwritten (upsert), not a second row appended.
-    await db.update(profits).set({ netProfit: 999 }).where(and(eq(profits.userId, u), eq(profits.day, day)));
+    await db
+      .update(profits)
+      .set({ netProfit: 999 })
+      .where(and(eq(profits.userId, u), eq(profits.day, day)));
     await materializeDay(db, day);
     const afterUpdate = await db.query.analyticsDaily.findMany({
-      where: and(eq(analyticsDaily.day, day), eq(analyticsDaily.metric, 'net_profit_cents'), eq(analyticsDaily.dimension, '')),
+      where: and(
+        eq(analyticsDaily.day, day),
+        eq(analyticsDaily.metric, 'net_profit_cents'),
+        eq(analyticsDaily.dimension, ''),
+      ),
     });
     expect(afterUpdate).toHaveLength(1);
     expect(Number(afterUpdate[0]!.value)).toBe(999);

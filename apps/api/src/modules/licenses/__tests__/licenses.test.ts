@@ -45,7 +45,13 @@ describe('licenses module', () => {
   });
 
   async function registerVerifyLogin(email: string, ip: string, fingerprint: string) {
-    const device = { fingerprint, name: 'Test Device', browser: 'chrome', os: 'linux', extensionVersion: '1.0.0' };
+    const device = {
+      fingerprint,
+      name: 'Test Device',
+      browser: 'chrome',
+      os: 'linux',
+      extensionVersion: '1.0.0',
+    };
     const registerRes = await app.inject({
       method: 'POST',
       url: '/api/v1/auth/register',
@@ -55,7 +61,12 @@ describe('licenses module', () => {
     expect(registerRes.statusCode).toBe(201);
     const mail = app.mailer.sentEmails.at(-1);
     const token = extractToken(mail!.html);
-    const verifyRes = await app.inject({ method: 'POST', url: '/api/v1/auth/verify-email', remoteAddress: ip, payload: { token } });
+    const verifyRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/verify-email',
+      remoteAddress: ip,
+      payload: { token },
+    });
     expect(verifyRes.statusCode).toBe(200);
 
     const loginRes = await app.inject({
@@ -76,12 +87,19 @@ describe('licenses module', () => {
       headers: { authorization: `Bearer ${accessToken}` },
     });
     expect(res.statusCode).toBe(201);
-    return res.json() as { subscription: { plan: { deviceLimit: number } }; license: { key: string; keyPrefix: string } };
+    return res.json() as {
+      subscription: { plan: { deviceLimit: number } };
+      license: { key: string; keyPrefix: string };
+    };
   }
 
   it('GET /licenses/me shows only the prefix + status, never the full key', async () => {
     const ip = nextIp();
-    const accessToken = await registerVerifyLogin('license-me@example.com', ip, 'fp-licenseme-0000000001');
+    const accessToken = await registerVerifyLogin(
+      'license-me@example.com',
+      ip,
+      'fp-licenseme-0000000001',
+    );
     const { license } = await startTrial(ip, accessToken);
 
     const res = await app.inject({
@@ -100,7 +118,11 @@ describe('licenses module', () => {
 
   it('POST /licenses/validate: happy path returns entitlements + a JWS that verifies against ENTITLEMENT_PUBLIC_KEY', async () => {
     const ip = nextIp();
-    const accessToken = await registerVerifyLogin('validate-happy@example.com', ip, 'fp-validatehappy-000001');
+    const accessToken = await registerVerifyLogin(
+      'validate-happy@example.com',
+      ip,
+      'fp-validatehappy-000001',
+    );
     const { license } = await startTrial(ip, accessToken);
 
     const res = await app.inject({
@@ -124,7 +146,11 @@ describe('licenses module', () => {
 
   it('POST /licenses/validate: normalises a messy key (lowercase, no dashes, look-alike chars)', async () => {
     const ip = nextIp();
-    const accessToken = await registerVerifyLogin('validate-messy@example.com', ip, 'fp-validatemessy-00001');
+    const accessToken = await registerVerifyLogin(
+      'validate-messy@example.com',
+      ip,
+      'fp-validatemessy-00001',
+    );
     const { license } = await startTrial(ip, accessToken);
 
     const messy = license.key.toLowerCase().replace(/-/g, '').replace(/0/g, 'o');
@@ -143,7 +169,10 @@ describe('licenses module', () => {
       method: 'POST',
       url: '/api/v1/licenses/validate',
       remoteAddress: ip,
-      payload: { licenseKey: 'SL-0000-0000-0000-0001', device: { fingerprint: 'fp-unknown-0000000000001' } },
+      payload: {
+        licenseKey: 'SL-0000-0000-0000-0001',
+        device: { fingerprint: 'fp-unknown-0000000000001' },
+      },
     });
     expect(res.statusCode).toBe(402);
     expect(res.json().code).toBe('LICENSE_INVALID');
@@ -151,7 +180,11 @@ describe('licenses module', () => {
 
   it('POST /licenses/validate: enforces the plan device limit (trial = 1 device)', async () => {
     const ip = nextIp();
-    const accessToken = await registerVerifyLogin('devicelimit-license@example.com', ip, 'fp-devlimit-0000000001');
+    const accessToken = await registerVerifyLogin(
+      'devicelimit-license@example.com',
+      ip,
+      'fp-devlimit-0000000001',
+    );
     const { license } = await startTrial(ip, accessToken);
 
     // First device (this is the fingerprint already used at login/trial
@@ -177,7 +210,11 @@ describe('licenses module', () => {
 
   it('POST /licenses/regenerate revokes the old key and issues a new one that validates; the old key is rejected', async () => {
     const ip = nextIp();
-    const accessToken = await registerVerifyLogin('regenerate@example.com', ip, 'fp-regenerate-00000001');
+    const accessToken = await registerVerifyLogin(
+      'regenerate@example.com',
+      ip,
+      'fp-regenerate-00000001',
+    );
     const { license: oldLicense } = await startTrial(ip, accessToken);
 
     const regenRes = await app.inject({
@@ -190,7 +227,9 @@ describe('licenses module', () => {
     const newLicense = regenRes.json();
     expect(newLicense.licenseKey).not.toBe(oldLicense.key);
 
-    const oldRow = await app.db.query.licenses.findFirst({ where: eq(licenses.keyPrefix, oldLicense.keyPrefix) });
+    const oldRow = await app.db.query.licenses.findFirst({
+      where: eq(licenses.keyPrefix, oldLicense.keyPrefix),
+    });
     expect(oldRow!.status).toBe('revoked');
     expect(oldRow!.revokedReason).toBe('regenerated_by_user');
 
@@ -207,7 +246,10 @@ describe('licenses module', () => {
       method: 'POST',
       url: '/api/v1/licenses/validate',
       remoteAddress: ip,
-      payload: { licenseKey: newLicense.licenseKey, device: { fingerprint: 'fp-regenerate-00000001' } },
+      payload: {
+        licenseKey: newLicense.licenseKey,
+        device: { fingerprint: 'fp-regenerate-00000001' },
+      },
     });
     expect(newValidate.statusCode).toBe(200);
   });

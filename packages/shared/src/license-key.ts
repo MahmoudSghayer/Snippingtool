@@ -94,7 +94,9 @@ function bytesToBase32(bytes: Uint8Array, count: number): string {
  */
 export function computeChecksum(payload: string): string {
   if (payload.length !== PAYLOAD_LENGTH) {
-    throw new Error(`computeChecksum expects a ${PAYLOAD_LENGTH}-character payload, got ${payload.length}`);
+    throw new Error(
+      `computeChecksum expects a ${PAYLOAD_LENGTH}-character payload, got ${payload.length}`,
+    );
   }
   let sum = 0;
   for (let i = 0; i < payload.length; i++) {

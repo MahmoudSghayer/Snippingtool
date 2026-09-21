@@ -17,7 +17,12 @@ import { z } from 'zod';
 
 import { AppErrors } from '../../lib/errors.js';
 
-import { createCheckoutSession, createPortalSession, listPaymentHistory, type PaymentRow } from './service.js';
+import {
+  createCheckoutSession,
+  createPortalSession,
+  listPaymentHistory,
+  type PaymentRow,
+} from './service.js';
 import { getStripeClient } from './stripe-client.js';
 import { getStripeConfig } from './stripe-config.js';
 import { receiveWebhookEvent } from './webhooks.js';
@@ -38,7 +43,10 @@ import type { FastifyInstance } from 'fastify';
 function assertDashboardOrigin(fastify: FastifyInstance, url: string, field: string): void {
   const dashboardOrigin = fastify.config.DASHBOARD_ORIGIN;
   if (!url.startsWith(dashboardOrigin)) {
-    throw AppErrors.validation(`${field} must start with the configured dashboard origin.`, { field, dashboardOrigin });
+    throw AppErrors.validation(`${field} must start with the configured dashboard origin.`, {
+      field,
+      dashboardOrigin,
+    });
   }
 }
 
@@ -74,7 +82,9 @@ export default fp(
         assertDashboardOrigin(fastify, request.body.successUrl, 'successUrl');
         assertDashboardOrigin(fastify, request.body.cancelUrl, 'cancelUrl');
 
-        const user = await fastify.db.query.users.findFirst({ where: eq(users.id, request.authUser!.id) });
+        const user = await fastify.db.query.users.findFirst({
+          where: eq(users.id, request.authUser!.id),
+        });
         if (!user) throw AppErrors.notFound('user');
 
         const stripe = getStripeClient(fastify.config);
@@ -93,7 +103,9 @@ export default fp(
         // no Stripe round trip (docs/05-subscriptions.md §8) — the client
         // still expects a URL to redirect to, so it gets the caller's own
         // successUrl, exactly as if a real Checkout session had completed.
-        return { checkoutUrl: result.kind === 'checkout' ? result.checkoutUrl : request.body.successUrl };
+        return {
+          checkoutUrl: result.kind === 'checkout' ? result.checkoutUrl : request.body.successUrl,
+        };
       },
     );
 
@@ -112,7 +124,9 @@ export default fp(
       async (request) => {
         assertDashboardOrigin(fastify, request.body.returnUrl, 'returnUrl');
 
-        const user = await fastify.db.query.users.findFirst({ where: eq(users.id, request.authUser!.id) });
+        const user = await fastify.db.query.users.findFirst({
+          where: eq(users.id, request.authUser!.id),
+        });
         if (!user) throw AppErrors.notFound('user');
 
         const stripe = getStripeClient(fastify.config);
@@ -137,7 +151,12 @@ export default fp(
         },
       },
       async (request) => {
-        const page = await listPaymentHistory(fastify.db, request.authUser!.id, request.query.limit, request.query.cursor);
+        const page = await listPaymentHistory(
+          fastify.db,
+          request.authUser!.id,
+          request.query.limit,
+          request.query.cursor,
+        );
         return { items: page.items.map(toPaymentDto), nextCursor: page.nextCursor };
       },
     );
@@ -199,9 +218,16 @@ export default fp(
           try {
             stripe = getStripeClient(fastify.config);
             const config = getStripeConfig(fastify.config);
-            event = stripe.webhooks.constructEvent(request.body as Buffer, signature, config.webhookSecret);
+            event = stripe.webhooks.constructEvent(
+              request.body as Buffer,
+              signature,
+              config.webhookSecret,
+            );
           } catch (err) {
-            fastify.log.warn({ err }, 'stripe webhook signature verification failed (or Stripe is not configured)');
+            fastify.log.warn(
+              { err },
+              'stripe webhook signature verification failed (or Stripe is not configured)',
+            );
             throw AppErrors.validation('Stripe signature verification failed.');
           }
 

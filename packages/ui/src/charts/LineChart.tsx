@@ -31,13 +31,32 @@ export interface LineChartProps {
   connectNulls?: boolean;
 }
 
-export function LineChart({ data, xKey, series, valueFormatter, connectNulls = true }: LineChartProps) {
+export function LineChart({
+  data,
+  xKey,
+  series,
+  valueFormatter,
+  connectNulls = true,
+}: LineChartProps) {
   return (
     <ResponsiveContainer width="100%" height="100%">
       <RLineChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
         <CartesianGrid stroke={GRID_COLOR} strokeDasharray="3 3" vertical={false} />
-        <XAxis dataKey={xKey} stroke={AXIS_COLOR} fontSize={11} tickLine={false} axisLine={{ stroke: GRID_COLOR }} />
-        <YAxis stroke={AXIS_COLOR} fontSize={11} tickLine={false} axisLine={false} width={48} tickFormatter={valueFormatter} />
+        <XAxis
+          dataKey={xKey}
+          stroke={AXIS_COLOR}
+          fontSize={11}
+          tickLine={false}
+          axisLine={{ stroke: GRID_COLOR }}
+        />
+        <YAxis
+          stroke={AXIS_COLOR}
+          fontSize={11}
+          tickLine={false}
+          axisLine={false}
+          width={48}
+          tickFormatter={valueFormatter}
+        />
         <Tooltip content={<ChartTooltip valueFormatter={valueFormatter} />} />
         {series.map((s, i) => (
           <Line

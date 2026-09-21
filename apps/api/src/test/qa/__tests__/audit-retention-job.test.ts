@@ -12,7 +12,11 @@ import auditRetentionJob from '../../../jobs/audit.retention.job.js';
 import type { JobContext } from '../../../jobs/types.js';
 import type { FastifyInstance } from 'fastify';
 
-const noopLog: JobContext['log'] = { info: () => undefined, warn: () => undefined, error: () => undefined };
+const noopLog: JobContext['log'] = {
+  info: () => undefined,
+  warn: () => undefined,
+  error: () => undefined,
+};
 
 function jobContext(app: FastifyInstance): JobContext {
   return { db: app.db, redis: app.redis, env: app.config, mailer: app.mailer, log: noopLog };
@@ -50,8 +54,13 @@ async function createAuditPartition(app: FastifyInstance, monthsAgo: number): Pr
 // all, so a value comparison like this one goes through `sql.raw()` with a
 // validated literal instead, same convention as jobs/audit.retention.job.ts.
 async function tableExists(app: FastifyInstance, name: string): Promise<boolean> {
-  if (!/^audit_logs_y\d{4}m\d{2}$/.test(name)) throw new Error(`refusing to interpolate an unexpected identifier-shaped string into SQL: ${name}`);
-  const rows = (await app.db.execute(sql.raw(`SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = '${name}'`))) as unknown as unknown[];
+  if (!/^audit_logs_y\d{4}m\d{2}$/.test(name))
+    throw new Error(
+      `refusing to interpolate an unexpected identifier-shaped string into SQL: ${name}`,
+    );
+  const rows = (await app.db.execute(
+    sql.raw(`SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = '${name}'`),
+  )) as unknown as unknown[];
   return rows.length > 0;
 }
 
@@ -74,15 +83,23 @@ describe('audit.retention job', () => {
   });
 
   it('drops a partition older than the configured retention window and keeps one inside it', async () => {
-    await app.db.insert(systemConfig).values({ key: 'audit.retention_months', value: 6, isSecret: false });
+    await app.db
+      .insert(systemConfig)
+      .values({ key: 'audit.retention_months', value: 6, isSecret: false });
 
     const oldPartition = await createAuditPartition(app, 10); // older than 6-month retention -> should be dropped
     const recentPartition = await createAuditPartition(app, 2); // inside retention -> must survive
 
     await runJob(app);
 
-    expect(await tableExists(app, oldPartition), `expected ${oldPartition} (older than retention) to be dropped`).toBe(false);
-    expect(await tableExists(app, recentPartition), `expected ${recentPartition} (inside retention) to survive`).toBe(true);
+    expect(
+      await tableExists(app, oldPartition),
+      `expected ${oldPartition} (older than retention) to be dropped`,
+    ).toBe(false);
+    expect(
+      await tableExists(app, recentPartition),
+      `expected ${recentPartition} (inside retention) to survive`,
+    ).toBe(true);
   });
 
   it('falls back to the documented 13-month default when system_config has no configured value', async () => {
@@ -96,13 +113,18 @@ describe('audit.retention job', () => {
     expect(await tableExists(app, withinDefault)).toBe(true);
   });
 
-  it('is idempotent and never touches the current month\'s partition', async () => {
-    await app.db.insert(systemConfig).values({ key: 'audit.retention_months', value: 1, isSecret: false });
+  it("is idempotent and never touches the current month's partition", async () => {
+    await app.db
+      .insert(systemConfig)
+      .values({ key: 'audit.retention_months', value: 1, isSecret: false });
     const current = await createAuditPartition(app, 0);
 
     await runJob(app);
     await expect(runJob(app)).resolves.toBeUndefined();
 
-    expect(await tableExists(app, current), 'the current month partition must never be dropped by retention').toBe(true);
+    expect(
+      await tableExists(app, current),
+      'the current month partition must never be dropped by retention',
+    ).toBe(true);
   });
 });

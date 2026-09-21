@@ -31,7 +31,17 @@ import { describe, expect, it } from 'vitest';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OPENAPI_PATH = join(__dirname, '..', '..', '..', '..', 'openapi', 'openapi.json');
 const EXTENSION_LIB_DIR = join(__dirname, '..', '..', '..', '..', '..', 'extension', 'src', 'lib');
-const EXTENSION_BACKGROUND_DIR = join(__dirname, '..', '..', '..', '..', '..', 'extension', 'src', 'background');
+const EXTENSION_BACKGROUND_DIR = join(
+  __dirname,
+  '..',
+  '..',
+  '..',
+  '..',
+  '..',
+  'extension',
+  'src',
+  'background',
+);
 
 interface MinimalOpenApiDoc {
   paths?: Record<string, Record<string, unknown> | undefined>;
@@ -45,7 +55,9 @@ interface ClientCall {
 
 function listTsFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts'))
+    .filter(
+      (entry) => entry.isFile() && entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts'),
+    )
     .map((entry) => join(dir, entry.name));
 }
 
@@ -61,7 +73,8 @@ function extractCallArgs(src: string, openParenIdx: number): string {
   for (; i < src.length && depth > 0; i += 1) {
     const c = src[i];
     if (inString) {
-      if (c === '\\') i += 1; // skip escaped char
+      if (c === '\\')
+        i += 1; // skip escaped char
       else if (c === inString) inString = null;
       continue;
     }
@@ -105,11 +118,14 @@ describe('extension API client vs. apps/api/openapi/openapi.json (defect #4 regr
   const registered = new Set<string>();
   for (const [routePath, methods] of Object.entries(spec.paths ?? {})) {
     if (!methods) continue;
-    for (const method of Object.keys(methods)) registered.add(`${method.toUpperCase()} ${routePath}`);
+    for (const method of Object.keys(methods))
+      registered.add(`${method.toUpperCase()} ${routePath}`);
   }
 
   const files = [...listTsFiles(EXTENSION_LIB_DIR), ...listTsFiles(EXTENSION_BACKGROUND_DIR)];
-  const calls = files.flatMap((file) => findClientCalls(file, ['apiJson', 'apiFetch', 'retryFetch', 'postBatch']));
+  const calls = files.flatMap((file) =>
+    findClientCalls(file, ['apiJson', 'apiFetch', 'retryFetch', 'postBatch']),
+  );
 
   it('found a non-trivial number of literal API calls to check (scanner sanity check)', () => {
     // If this ever drops near zero, the scanner itself broke (a helper was
@@ -156,6 +172,9 @@ describe('extension API client vs. apps/api/openapi/openapi.json (defect #4 regr
     ['POST /api/v1/risk-events'],
   ])('the extension client actually calls %s somewhere', (key) => {
     const found = calls.some((c) => `${c.method} ${c.path}` === key);
-    expect(found, `expected to find a call to ${key} in ${EXTENSION_LIB_DIR} or ${EXTENSION_BACKGROUND_DIR}`).toBe(true);
+    expect(
+      found,
+      `expected to find a call to ${key} in ${EXTENSION_LIB_DIR} or ${EXTENSION_BACKGROUND_DIR}`,
+    ).toBe(true);
   });
 });

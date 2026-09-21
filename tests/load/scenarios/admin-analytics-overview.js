@@ -12,7 +12,10 @@ import { BASE_URL, scenarioOptions, thresholds } from '../lib/config.js';
 
 const fixtures = JSON.parse(open('../.artifacts/fixtures.json'));
 
-export const options = { ...scenarioOptions(), thresholds: thresholds({ http_req_duration: ['p(95)<1500'] }) };
+export const options = {
+  ...scenarioOptions(),
+  thresholds: thresholds({ http_req_duration: ['p(95)<1500'] }),
+};
 
 export default function () {
   const to = new Date().toISOString().slice(0, 10);
@@ -24,11 +27,14 @@ export default function () {
   // a real, if minor, cross-endpoint naming inconsistency for what is
   // conceptually the same query param; see docs/12-testing.md "Defects
   // found".
-  const res = http.get(`${BASE_URL}/api/v1/admin/analytics/overview?from=${from}&to=${to}&granularity=day`, {
-    headers: { authorization: `Bearer ${fixtures.admin.accessToken}` },
-  });
+  const res = http.get(
+    `${BASE_URL}/api/v1/admin/analytics/overview?from=${from}&to=${to}&granularity=day`,
+    {
+      headers: { authorization: `Bearer ${fixtures.admin.accessToken}` },
+    },
+  );
   check(res, {
-    '200': (r) => r.status === 200,
+    200: (r) => r.status === 200,
     'not rate-limited': (r) => r.status !== 429,
   });
   sleep(1);

@@ -5,7 +5,6 @@ import { and, desc, eq, isNull } from 'drizzle-orm';
 import fp from 'fastify-plugin';
 import { z } from 'zod';
 
-
 import { AppErrors } from '../../lib/errors.js';
 
 import type { FastifyInstance } from 'fastify';
@@ -28,7 +27,10 @@ export default fp(
 
     app.get(
       '/api/v1/sessions',
-      { onRequest: [fastify.authenticate], schema: { tags: ['sessions'], response: { 200: z.array(sessionDtoSchema) } } },
+      {
+        onRequest: [fastify.authenticate],
+        schema: { tags: ['sessions'], response: { 200: z.array(sessionDtoSchema) } },
+      },
       async (request) => {
         const rows = await fastify.db.query.sessions.findMany({
           where: and(eq(sessions.userId, request.authUser!.id), isNull(sessions.revokedAt)),
@@ -52,15 +54,26 @@ export default fp(
       {
         onRequest: [fastify.authenticate],
         preHandler: [fastify.verifyCsrf],
-        schema: { tags: ['sessions'], params: z.object({ id: z.string().uuid() }), response: { 200: z.object({ revoked: z.literal(true) }) } },
+        schema: {
+          tags: ['sessions'],
+          params: z.object({ id: z.string().uuid() }),
+          response: { 200: z.object({ revoked: z.literal(true) }) },
+        },
       },
       async (request) => {
         const session = await fastify.db.query.sessions.findFirst({
-          where: and(eq(sessions.id, request.params.id), eq(sessions.userId, request.authUser!.id), isNull(sessions.revokedAt)),
+          where: and(
+            eq(sessions.id, request.params.id),
+            eq(sessions.userId, request.authUser!.id),
+            isNull(sessions.revokedAt),
+          ),
         });
         if (!session) throw AppErrors.notFound('session');
 
-        await fastify.db.update(sessions).set({ revokedAt: new Date(), revokedReason: 'user' }).where(eq(sessions.id, session.id));
+        await fastify.db
+          .update(sessions)
+          .set({ revokedAt: new Date(), revokedReason: 'user' })
+          .where(eq(sessions.id, session.id));
         return { revoked: true as const };
       },
     );

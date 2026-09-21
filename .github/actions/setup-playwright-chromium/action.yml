@@ -31,9 +31,10 @@ runs:
         pnpm --filter '${{ inputs.workspace-filter }}' exec playwright install --with-deps chromium
 
         # `playwright install` lays the browser down at
-        # /opt/pw-browsers/chromium-<rev>/chrome-linux/chrome; both configs
+        # /opt/pw-browsers/chromium-<rev>/chrome-linux64/chrome (older releases:
+        # chrome-linux/chrome); both configs
         # expect it at exactly /opt/pw-browsers/chromium, so symlink it.
-        chromium_bin="$(find /opt/pw-browsers -maxdepth 3 -type f -name chrome -path '*/chrome-linux/*' | head -n1)"
+        chromium_bin="$(find /opt/pw-browsers -maxdepth 4 -type f -name chrome \( -path '*/chromium-*/chrome-linux/*' -o -path '*/chromium-*/chrome-linux64/*' \) | head -n1)"
         if [ -z "$chromium_bin" ]; then
           echo "::error::Playwright Chromium binary not found under /opt/pw-browsers after install" >&2
           exit 1

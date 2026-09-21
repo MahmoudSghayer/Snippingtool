@@ -11,15 +11,15 @@ name: Release
 on:
   push:
     branches: [main]
-    tags: ["v*.*.*"]
+    tags: ['v*.*.*']
 
 permissions:
   contents: write # create the GitHub Release + upload assets
   packages: write # push images to GHCR
 
 env:
-  NODE_VERSION: "22"
-  PNPM_VERSION: "12.5.1"
+  NODE_VERSION: '22'
+  PNPM_VERSION: '12.5.1'
   REGISTRY: ghcr.io
   IMAGE_NAMESPACE: ${{ github.repository_owner }}
 
@@ -39,13 +39,13 @@ jobs:
             target: worker
           - image: db-migrator
             dockerfile: infra/docker/db-migrator.Dockerfile
-            target: ""
+            target: ''
           - image: backup
             dockerfile: infra/docker/backup.Dockerfile
-            target: ""
+            target: ''
           - image: dashboard
             dockerfile: infra/docker/dashboard.Dockerfile
-            target: ""
+            target: ''
     steps:
       - uses: actions/checkout@v4
 

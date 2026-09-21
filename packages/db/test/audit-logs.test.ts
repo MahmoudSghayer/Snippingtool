@@ -24,7 +24,9 @@ describe('audit_logs is append-only', () => {
   });
 
   it('rejects UPDATE via both the trigger and the revoked privilege', async () => {
-    await db.insert(auditLogs).values({ actorType: 'system', action: 'test.update-target', entityType: 'user' });
+    await db
+      .insert(auditLogs)
+      .values({ actorType: 'system', action: 'test.update-target', entityType: 'user' });
 
     await expect(
       sql`UPDATE audit_logs SET action = 'hacked' WHERE action = 'test.update-target'`,
@@ -32,7 +34,9 @@ describe('audit_logs is append-only', () => {
   });
 
   it('rejects DELETE via both the trigger and the revoked privilege', async () => {
-    await db.insert(auditLogs).values({ actorType: 'system', action: 'test.delete-target', entityType: 'user' });
+    await db
+      .insert(auditLogs)
+      .values({ actorType: 'system', action: 'test.delete-target', entityType: 'user' });
 
     await expect(sql`DELETE FROM audit_logs WHERE action = 'test.delete-target'`).rejects.toThrow(
       /append-only|permission denied/i,

@@ -7,19 +7,24 @@ import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 import { z } from 'zod';
 
-
 import { api, apiErrorMessage } from '@/api/client.js';
 
 const formSchema = z
   .object({ password: passwordSchema, confirmPassword: z.string() })
-  .refine((v) => v.password === v.confirmPassword, { message: 'Passwords do not match', path: ['confirmPassword'] });
+  .refine((v) => v.password === v.confirmPassword, {
+    message: 'Passwords do not match',
+    path: ['confirmPassword'],
+  });
 type FormValues = z.infer<typeof formSchema>;
 
 export function ResetPasswordPage() {
   const search = useSearch({ strict: false }) as { token?: string };
   const navigate = useNavigate();
   const [submitting, setSubmitting] = useState(false);
-  const form = useForm<FormValues>({ resolver: zodResolver(formSchema), defaultValues: { password: '', confirmPassword: '' } });
+  const form = useForm<FormValues>({
+    resolver: zodResolver(formSchema),
+    defaultValues: { password: '', confirmPassword: '' },
+  });
 
   if (!search.token) {
     return (
@@ -28,8 +33,13 @@ export function ResetPasswordPage() {
           <CardTitle>Invalid reset link</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-ink-2">This password reset link is missing its token. Request a new one.</p>
-          <Link to="/forgot-password" className="mt-4 inline-block text-sm text-gold underline underline-offset-2 hover:text-gold/80">
+          <p className="text-sm text-ink-2">
+            This password reset link is missing its token. Request a new one.
+          </p>
+          <Link
+            to="/forgot-password"
+            className="mt-4 inline-block text-sm text-gold underline underline-offset-2 hover:text-gold/80"
+          >
             Request a new link
           </Link>
         </CardContent>
@@ -67,10 +77,23 @@ export function ResetPasswordPage() {
             hint="At least 12 characters, with a letter and a digit."
             error={form.formState.errors.password?.message}
           >
-            <PasswordInput id="password" autoComplete="new-password" autoFocus {...form.register('password')} />
+            <PasswordInput
+              id="password"
+              autoComplete="new-password"
+              autoFocus
+              {...form.register('password')}
+            />
           </FormField>
-          <FormField label="Confirm password" htmlFor="confirmPassword" error={form.formState.errors.confirmPassword?.message}>
-            <PasswordInput id="confirmPassword" autoComplete="new-password" {...form.register('confirmPassword')} />
+          <FormField
+            label="Confirm password"
+            htmlFor="confirmPassword"
+            error={form.formState.errors.confirmPassword?.message}
+          >
+            <PasswordInput
+              id="confirmPassword"
+              autoComplete="new-password"
+              {...form.register('confirmPassword')}
+            />
           </FormField>
           <Button type="submit" loading={submitting} className="w-full">
             Update password

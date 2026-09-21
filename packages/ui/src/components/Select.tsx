@@ -37,7 +37,13 @@ export function Select({
   ...aria
 }: SelectProps) {
   return (
-    <SelectPrimitive.Root value={value} defaultValue={defaultValue} onValueChange={onValueChange} disabled={disabled} name={name}>
+    <SelectPrimitive.Root
+      value={value}
+      defaultValue={defaultValue}
+      onValueChange={onValueChange}
+      disabled={disabled}
+      name={name}
+    >
       <SelectPrimitive.Trigger
         className={cn(
           'flex h-10 w-full items-center justify-between gap-2 rounded-[--sl-radius-sm] border bg-[--sl-ground] px-3 text-sm text-[--sl-fg]',

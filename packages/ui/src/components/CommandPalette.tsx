@@ -33,7 +33,16 @@ export interface CommandPaletteProps {
  * `onSelect` does (navigate, run a command, …). Register the Cmd/Ctrl+K
  * shortcut yourself (a two-line `keydown` listener); it isn't baked in here
  * so a host app can scope it to when its own shell is mounted. */
-export function CommandPalette({ open, onOpenChange, query, onQueryChange, placeholder = 'Search…', description, items, emptyMessage = 'No matches.' }: CommandPaletteProps) {
+export function CommandPalette({
+  open,
+  onOpenChange,
+  query,
+  onQueryChange,
+  placeholder = 'Search…',
+  description,
+  items,
+  emptyMessage = 'No matches.',
+}: CommandPaletteProps) {
   const [activeIndex, setActiveIndex] = useState(0);
 
   useEffect(() => {
@@ -76,7 +85,11 @@ export function CommandPalette({ open, onOpenChange, query, onQueryChange, place
           onKeyDown={onKeyDown}
         >
           <DialogPrimitive.Title className="sr-only">Command palette</DialogPrimitive.Title>
-          {description && <DialogPrimitive.Description className="sr-only">{description}</DialogPrimitive.Description>}
+          {description && (
+            <DialogPrimitive.Description className="sr-only">
+              {description}
+            </DialogPrimitive.Description>
+          )}
           <div className="flex items-center gap-2 border-b border-[--sl-border] px-4 py-3">
             <Search className="size-4 shrink-0 text-[--sl-fg-muted]" aria-hidden="true" />
             <input
@@ -89,7 +102,9 @@ export function CommandPalette({ open, onOpenChange, query, onQueryChange, place
               role="combobox"
               aria-expanded="true"
               aria-controls="command-palette-list"
-              aria-activedescendant={items[activeIndex] ? `cmdk-${items[activeIndex].key}` : undefined}
+              aria-activedescendant={
+                items[activeIndex] ? `cmdk-${items[activeIndex].key}` : undefined
+              }
             />
             <kbd className="hidden shrink-0 rounded border border-[--sl-border] px-1.5 py-0.5 font-mono text-[10px] text-[--sl-fg-muted] sm:inline">
               Esc
@@ -110,12 +125,22 @@ export function CommandPalette({ open, onOpenChange, query, onQueryChange, place
                   onClick={() => activate(i)}
                   className={
                     'flex w-full items-center gap-2.5 rounded-[--sl-radius-sm] px-3 py-2 text-left text-sm transition-colors ' +
-                    (i === activeIndex ? 'bg-[--sl-accent]/15 text-[--sl-accent]' : 'text-[--sl-fg] hover:bg-[--sl-card-2]')
+                    (i === activeIndex
+                      ? 'bg-[--sl-accent]/15 text-[--sl-accent]'
+                      : 'text-[--sl-fg] hover:bg-[--sl-card-2]')
                   }
                 >
-                  {item.icon && <span className={i === activeIndex ? 'text-[--sl-accent]' : 'text-[--sl-fg-muted]'}>{item.icon}</span>}
+                  {item.icon && (
+                    <span
+                      className={i === activeIndex ? 'text-[--sl-accent]' : 'text-[--sl-fg-muted]'}
+                    >
+                      {item.icon}
+                    </span>
+                  )}
                   <span className="flex-1 truncate">{item.label}</span>
-                  {item.sub && <span className="shrink-0 text-xs text-[--sl-fg-muted]">{item.sub}</span>}
+                  {item.sub && (
+                    <span className="shrink-0 text-xs text-[--sl-fg-muted]">{item.sub}</span>
+                  )}
                 </button>
               ))
             )}

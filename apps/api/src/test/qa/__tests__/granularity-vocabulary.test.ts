@@ -12,8 +12,13 @@
 import { resetDatabase } from '@sl/db/test-utils';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-
-import { bearer, buildTestApp, createAdminSession, createUserSession, type TestApp } from '../helpers.js';
+import {
+  bearer,
+  buildTestApp,
+  createAdminSession,
+  createUserSession,
+  type TestApp,
+} from '../helpers.js';
 
 describe('granularity vocabulary is unified across /profits and /admin|me analytics (defect #6)', () => {
   let app: TestApp;
@@ -32,7 +37,11 @@ describe('granularity vocabulary is unified across /profits and /admin|me analyt
   });
 
   it('/api/v1/profits accepts the canonical vocabulary (day/week/month/lifetime)', async () => {
-    const user = await createUserSession(app, 'gran-canonical@example.com', 'fp-gran-canonical-001');
+    const user = await createUserSession(
+      app,
+      'gran-canonical@example.com',
+      'fp-gran-canonical-001',
+    );
     for (const granularity of ['day', 'week', 'month', 'lifetime']) {
       const res = await app.inject({
         method: 'GET',
@@ -97,7 +106,12 @@ describe('granularity vocabulary is unified across /profits and /admin|me analyt
   });
 
   it('/api/v1/admin/analytics/profits already used the canonical vocabulary and still does', async () => {
-    const admin = await createAdminSession(app, 'super_admin', 'gran-admin@example.com', 'fp-gran-admin-000001');
+    const admin = await createAdminSession(
+      app,
+      'super_admin',
+      'gran-admin@example.com',
+      'fp-gran-admin-000001',
+    );
     const res = await app.inject({
       method: 'GET',
       url: '/api/v1/admin/analytics/profits?from=2026-01-01&to=2026-01-31&granularity=month',

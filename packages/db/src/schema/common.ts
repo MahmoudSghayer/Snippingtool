@@ -81,7 +81,13 @@ export const snipingOutcomeEnum = pgEnum('sniping_outcome', [
   'error',
 ]);
 
-export const tradeStatusEnum = pgEnum('trade_status', ['bought', 'listed', 'sold', 'expired', 'unsold']);
+export const tradeStatusEnum = pgEnum('trade_status', [
+  'bought',
+  'listed',
+  'sold',
+  'expired',
+  'unsold',
+]);
 
 export const riskEventKindEnum = pgEnum('risk_event_kind', [
   'actions_per_hour',
@@ -92,7 +98,12 @@ export const riskEventKindEnum = pgEnum('risk_event_kind', [
   'kill_switch',
 ]);
 
-export const notificationChannelEnum = pgEnum('notification_channel', ['in_app', 'email', 'push', 'ws']);
+export const notificationChannelEnum = pgEnum('notification_channel', [
+  'in_app',
+  'email',
+  'push',
+  'ws',
+]);
 
 export const paymentProviderEnum = pgEnum('payment_provider', ['stripe', 'manual']);
 export const paymentStatusEnum = pgEnum('payment_status', [

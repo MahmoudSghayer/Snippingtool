@@ -48,7 +48,12 @@ export async function up(connectionString: string = getDatabaseUrl()) {
   const sql = postgres(url, { max: 1 });
   try {
     await ensureMigrationsTable(sql);
-    const applied = new Map((await sql`SELECT filename, checksum FROM schema_migrations`).map((r) => [r.filename as string, r.checksum as string]));
+    const applied = new Map(
+      (await sql`SELECT filename, checksum FROM schema_migrations`).map((r) => [
+        r.filename as string,
+        r.checksum as string,
+      ]),
+    );
 
     const files = listUpMigrations();
     let appliedCount = 0;
@@ -60,7 +65,9 @@ export async function up(connectionString: string = getDatabaseUrl()) {
       if (applied.has(file)) {
         const prevSum = applied.get(file);
         if (prevSum !== sum) {
-          console.warn(`WARNING: ${file} was already applied but its content on disk has changed since. Not re-applying (migrations are immutable once applied). Create a new migration instead.`);
+          console.warn(
+            `WARNING: ${file} was already applied but its content on disk has changed since. Not re-applying (migrations are immutable once applied). Create a new migration instead.`,
+          );
         }
         continue;
       }
@@ -89,7 +96,9 @@ export async function status(connectionString: string = getDatabaseUrl()) {
   const sql = postgres(url, { max: 1 });
   try {
     await ensureMigrationsTable(sql);
-    const applied = new Set((await sql`SELECT filename FROM schema_migrations`).map((r) => r.filename as string));
+    const applied = new Set(
+      (await sql`SELECT filename FROM schema_migrations`).map((r) => r.filename as string),
+    );
     const files = listUpMigrations();
 
     console.log('Migration status:');
@@ -108,7 +117,9 @@ export async function down(connectionString: string = getDatabaseUrl()) {
   const sql = postgres(url, { max: 1 });
   try {
     await ensureMigrationsTable(sql);
-    const applied = (await sql`SELECT filename FROM schema_migrations ORDER BY filename DESC`).map((r) => r.filename as string);
+    const applied = (await sql`SELECT filename FROM schema_migrations ORDER BY filename DESC`).map(
+      (r) => r.filename as string,
+    );
 
     if (applied.length === 0) {
       console.log('No applied migrations to roll back.');

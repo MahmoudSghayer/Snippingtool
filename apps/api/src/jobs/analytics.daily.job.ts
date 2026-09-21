@@ -13,7 +13,9 @@ import { materializeDay, refreshMvKpiDaily } from '../lib/analytics/materialize.
 import { defineJob } from './types.js';
 
 function yesterdayUtc(now: Date): string {
-  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - 24 * 60 * 60 * 1000);
+  const d = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - 24 * 60 * 60 * 1000,
+  );
   return d.toISOString().slice(0, 10);
 }
 

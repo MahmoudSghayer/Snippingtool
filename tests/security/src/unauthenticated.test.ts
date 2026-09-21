@@ -7,7 +7,10 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { NIL_LIKE_UUID, buildTestApp, type TestApp } from './helpers.js';
 
-const PROTECTED_ROUTES: Array<{ method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'; path: string }> = [
+const PROTECTED_ROUTES: Array<{
+  method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
+  path: string;
+}> = [
   { method: 'GET', path: '/api/v1/users/me' },
   { method: 'PATCH', path: '/api/v1/users/me' },
   { method: 'DELETE', path: '/api/v1/users/me' },
@@ -62,11 +65,17 @@ describe('unauthenticated access → 401 on every non-public route', () => {
       const res = await app.inject({ method: route.method, url: route.path });
       expect(res.statusCode, `expected 401, got ${res.statusCode}: ${res.body}`).toBe(401);
       const body = res.json();
-      expect(['AUTH_TOKEN_INVALID', 'AUTH_TOKEN_EXPIRED', 'AUTH_SESSION_REVOKED']).toContain(body.code);
+      expect(['AUTH_TOKEN_INVALID', 'AUTH_TOKEN_EXPIRED', 'AUTH_SESSION_REVOKED']).toContain(
+        body.code,
+      );
     });
 
     it(`401s (not just rejected differently) with a garbage bearer token: ${route.method} ${route.path}`, async () => {
-      const res = await app.inject({ method: route.method, url: route.path, headers: { authorization: 'Bearer not-a-real-token' } });
+      const res = await app.inject({
+        method: route.method,
+        url: route.path,
+        headers: { authorization: 'Bearer not-a-real-token' },
+      });
       expect(res.statusCode).toBe(401);
     });
   }

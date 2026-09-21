@@ -44,7 +44,12 @@ export function setUnauthorizedHandler(handler: (path: string) => void): void {
 /** Paths that must not trigger the 401 redirect loop: login itself
  * legitimately 401s on bad credentials, and refresh/logout run during the
  * redirect flow itself. */
-const AUTH_EXEMPT_PATH_FRAGMENTS = ['/auth/login', '/auth/refresh', '/auth/logout', '/auth/mfa/verify'];
+const AUTH_EXEMPT_PATH_FRAGMENTS = [
+  '/auth/login',
+  '/auth/refresh',
+  '/auth/logout',
+  '/auth/mfa/verify',
+];
 
 // `credentials` is a read-only property on a constructed `Request`, so it
 // can't be set from inside `onRequest` — it's passed to `createClient`
@@ -59,7 +64,9 @@ const csrfAndCredentialsMiddleware: Middleware = {
   },
   async onResponse({ request, response }) {
     if (response.status === 401) {
-      const isExempt = AUTH_EXEMPT_PATH_FRAGMENTS.some((fragment) => request.url.includes(fragment));
+      const isExempt = AUTH_EXEMPT_PATH_FRAGMENTS.some((fragment) =>
+        request.url.includes(fragment),
+      );
       if (!isExempt && unauthorizedHandler) {
         unauthorizedHandler(window.location.pathname + window.location.search);
       }
@@ -84,7 +91,10 @@ export function isApiErrorBody(value: unknown): value is ApiErrorBody {
   return typeof value === 'object' && value !== null && 'code' in value && 'message' in value;
 }
 
-export function apiErrorMessage(error: unknown, fallback = 'Something went wrong. Please try again.'): string {
+export function apiErrorMessage(
+  error: unknown,
+  fallback = 'Something went wrong. Please try again.',
+): string {
   if (isApiErrorBody(error)) return error.message;
   return fallback;
 }

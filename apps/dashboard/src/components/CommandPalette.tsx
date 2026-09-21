@@ -36,22 +36,115 @@ interface PaletteRoute {
 }
 
 const ROUTES: PaletteRoute[] = [
-  { key: 'dashboard', label: 'Dashboard', href: '/dashboard', icon: <LayoutDashboard className="size-4" /> },
-  { key: 'analytics', label: 'Analytics', href: '/analytics', icon: <BarChart3 className="size-4" /> },
-  { key: 'subscriptions', label: 'Subscription', href: '/subscriptions', icon: <Wallet className="size-4" /> },
-  { key: 'settings', label: 'Settings', href: '/settings', icon: <SettingsIcon className="size-4" /> },
-  { key: 'admin-overview', label: 'Admin · Overview', href: '/admin', icon: <Gauge className="size-4" />, adminOnly: true },
-  { key: 'admin-users', label: 'Admin · Users', href: '/admin/users', icon: <UsersIcon className="size-4" />, adminOnly: true, keywords: 'search find' },
-  { key: 'admin-profits', label: 'Admin · Profits', href: '/admin/profits', icon: <BarChart3 className="size-4" />, adminOnly: true },
-  { key: 'admin-activity', label: 'Admin · Activity', href: '/admin/activity', icon: <Gauge className="size-4" />, adminOnly: true },
-  { key: 'admin-system', label: 'Admin · System', href: '/admin/system', icon: <Server className="size-4" />, adminOnly: true },
-  { key: 'admin-audit', label: 'Admin · Audit log', href: '/admin/audit', icon: <FileClock className="size-4" />, adminOnly: true },
-  { key: 'admin-subscriptions', label: 'Admin · Subscriptions', href: '/admin/subscriptions', icon: <CreditCard className="size-4" />, adminOnly: true },
-  { key: 'admin-coupons', label: 'Admin · Coupons', href: '/admin/coupons', icon: <Ticket className="size-4" />, adminOnly: true },
-  { key: 'admin-plans', label: 'Admin · Plans', href: '/admin/plans', icon: <Gift className="size-4" />, adminOnly: true },
-  { key: 'admin-flags', label: 'Admin · Flags', href: '/admin/flags', icon: <Flag className="size-4" />, adminOnly: true },
-  { key: 'admin-bans', label: 'Admin · Bans', href: '/admin/bans', icon: <Ban className="size-4" />, adminOnly: true },
-  { key: 'admin-toggles', label: 'Admin · Feature toggles', href: '/admin/feature-toggles', icon: <Sliders className="size-4" />, adminOnly: true },
+  {
+    key: 'dashboard',
+    label: 'Dashboard',
+    href: '/dashboard',
+    icon: <LayoutDashboard className="size-4" />,
+  },
+  {
+    key: 'analytics',
+    label: 'Analytics',
+    href: '/analytics',
+    icon: <BarChart3 className="size-4" />,
+  },
+  {
+    key: 'subscriptions',
+    label: 'Subscription',
+    href: '/subscriptions',
+    icon: <Wallet className="size-4" />,
+  },
+  {
+    key: 'settings',
+    label: 'Settings',
+    href: '/settings',
+    icon: <SettingsIcon className="size-4" />,
+  },
+  {
+    key: 'admin-overview',
+    label: 'Admin · Overview',
+    href: '/admin',
+    icon: <Gauge className="size-4" />,
+    adminOnly: true,
+  },
+  {
+    key: 'admin-users',
+    label: 'Admin · Users',
+    href: '/admin/users',
+    icon: <UsersIcon className="size-4" />,
+    adminOnly: true,
+    keywords: 'search find',
+  },
+  {
+    key: 'admin-profits',
+    label: 'Admin · Profits',
+    href: '/admin/profits',
+    icon: <BarChart3 className="size-4" />,
+    adminOnly: true,
+  },
+  {
+    key: 'admin-activity',
+    label: 'Admin · Activity',
+    href: '/admin/activity',
+    icon: <Gauge className="size-4" />,
+    adminOnly: true,
+  },
+  {
+    key: 'admin-system',
+    label: 'Admin · System',
+    href: '/admin/system',
+    icon: <Server className="size-4" />,
+    adminOnly: true,
+  },
+  {
+    key: 'admin-audit',
+    label: 'Admin · Audit log',
+    href: '/admin/audit',
+    icon: <FileClock className="size-4" />,
+    adminOnly: true,
+  },
+  {
+    key: 'admin-subscriptions',
+    label: 'Admin · Subscriptions',
+    href: '/admin/subscriptions',
+    icon: <CreditCard className="size-4" />,
+    adminOnly: true,
+  },
+  {
+    key: 'admin-coupons',
+    label: 'Admin · Coupons',
+    href: '/admin/coupons',
+    icon: <Ticket className="size-4" />,
+    adminOnly: true,
+  },
+  {
+    key: 'admin-plans',
+    label: 'Admin · Plans',
+    href: '/admin/plans',
+    icon: <Gift className="size-4" />,
+    adminOnly: true,
+  },
+  {
+    key: 'admin-flags',
+    label: 'Admin · Flags',
+    href: '/admin/flags',
+    icon: <Flag className="size-4" />,
+    adminOnly: true,
+  },
+  {
+    key: 'admin-bans',
+    label: 'Admin · Bans',
+    href: '/admin/bans',
+    icon: <Ban className="size-4" />,
+    adminOnly: true,
+  },
+  {
+    key: 'admin-toggles',
+    label: 'Admin · Feature toggles',
+    href: '/admin/feature-toggles',
+    icon: <Sliders className="size-4" />,
+    adminOnly: true,
+  },
 ];
 
 export interface CommandPaletteProps {
@@ -68,7 +161,9 @@ export function CommandPalette({ open, onOpenChange, isAdmin }: CommandPalettePr
   const userSearchQuery = useQuery({
     queryKey: ['command-palette', 'users', query],
     queryFn: async () => {
-      const { data, error } = await api.GET('/api/v1/admin/users', { params: { query: { q: query, limit: 5 } } });
+      const { data, error } = await api.GET('/api/v1/admin/users', {
+        params: { query: { q: query, limit: 5 } },
+      });
       if (error) throw error;
       return data;
     },

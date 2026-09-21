@@ -26,7 +26,16 @@ const widthClasses = { md: 'max-w-md', lg: 'max-w-xl', xl: 'max-w-3xl', nav: 'ma
  * the default) and for off-canvas navigation on narrow viewports
  * (`side="left"`, e.g. the mobile sidebar) — wider and scrollable, unlike
  * Modal. */
-export function Drawer({ open, onOpenChange, title, description, children, footer, width = 'lg', side = 'right' }: DrawerProps) {
+export function Drawer({
+  open,
+  onOpenChange,
+  title,
+  description,
+  children,
+  footer,
+  width = 'lg',
+  side = 'right',
+}: DrawerProps) {
   const isLeft = side === 'left';
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
@@ -35,7 +44,9 @@ export function Drawer({ open, onOpenChange, title, description, children, foote
         <DialogPrimitive.Content
           className={cn(
             'fixed inset-y-0 z-50 flex w-full flex-col shadow-2xl',
-            isLeft ? 'left-0 border-r border-[--sl-border] bg-[--sl-surface]' : 'right-0 border-l border-[--sl-border] bg-[--sl-surface]',
+            isLeft
+              ? 'left-0 border-r border-[--sl-border] bg-[--sl-surface]'
+              : 'right-0 border-l border-[--sl-border] bg-[--sl-surface]',
             isLeft
               ? 'data-[state=open]:animate-in data-[state=open]:slide-in-from-left data-[state=closed]:animate-out data-[state=closed]:slide-out-to-left'
               : 'data-[state=open]:animate-in data-[state=open]:slide-in-from-right data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right',
@@ -45,7 +56,9 @@ export function Drawer({ open, onOpenChange, title, description, children, foote
           {title ? (
             <div className="flex items-start justify-between gap-4 border-b border-[--sl-border] px-5 py-4">
               <div>
-                <DialogPrimitive.Title className="text-base font-semibold text-[--sl-fg]">{title}</DialogPrimitive.Title>
+                <DialogPrimitive.Title className="text-base font-semibold text-[--sl-fg]">
+                  {title}
+                </DialogPrimitive.Title>
                 {description && (
                   <DialogPrimitive.Description className="mt-1 text-sm text-[--sl-fg-muted]">
                     {description}
@@ -64,8 +77,14 @@ export function Drawer({ open, onOpenChange, title, description, children, foote
             // the content supplies its own header (the mobile nav's brand row).
             <DialogPrimitive.Title className="sr-only">Navigation</DialogPrimitive.Title>
           )}
-          <div className={title ? 'flex-1 overflow-y-auto px-5 py-4' : 'flex-1 overflow-y-auto'}>{children}</div>
-          {footer && <div className="flex items-center justify-end gap-2 border-t border-[--sl-border] px-5 py-3">{footer}</div>}
+          <div className={title ? 'flex-1 overflow-y-auto px-5 py-4' : 'flex-1 overflow-y-auto'}>
+            {children}
+          </div>
+          {footer && (
+            <div className="flex items-center justify-end gap-2 border-t border-[--sl-border] px-5 py-3">
+              {footer}
+            </div>
+          )}
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>

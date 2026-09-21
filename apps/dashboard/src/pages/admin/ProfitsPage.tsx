@@ -23,7 +23,6 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 
-
 import { api } from '@/api/client.js';
 import { downloadCsv } from '@/lib/csv.js';
 
@@ -32,8 +31,20 @@ import type { ProfitLeaderboardEntry } from '@sl/shared';
 const leaderboardColumns: ColumnDef<ProfitLeaderboardEntry, unknown>[] = [
   { accessorKey: 'rank', header: '#' },
   { accessorKey: 'email', header: 'User' },
-  { accessorKey: 'netProfit', header: 'Net profit', cell: (c) => <span className="font-mono tabular-nums">{formatCoins(c.getValue() as number)}</span> },
-  { accessorKey: 'coinsTraded', header: 'Coins traded', cell: (c) => <span className="font-mono tabular-nums">{formatCoins(c.getValue() as number)}</span> },
+  {
+    accessorKey: 'netProfit',
+    header: 'Net profit',
+    cell: (c) => (
+      <span className="font-mono tabular-nums">{formatCoins(c.getValue() as number)}</span>
+    ),
+  },
+  {
+    accessorKey: 'coinsTraded',
+    header: 'Coins traded',
+    cell: (c) => (
+      <span className="font-mono tabular-nums">{formatCoins(c.getValue() as number)}</span>
+    ),
+  },
   { accessorKey: 'snipes', header: 'Snipes' },
   { accessorKey: 'successes', header: 'Successes' },
 ];
@@ -46,7 +57,9 @@ export function ProfitsPage() {
   const profitsQuery = useQuery({
     queryKey: ['admin', 'analytics', 'profits', range],
     queryFn: async () => {
-      const { data, error } = await api.GET('/api/v1/admin/analytics/profits', { params: { query: range } });
+      const { data, error } = await api.GET('/api/v1/admin/analytics/profits', {
+        params: { query: range },
+      });
       if (error) throw error;
       return data;
     },
@@ -55,7 +68,9 @@ export function ProfitsPage() {
   const topQuery = useQuery({
     queryKey: ['admin', 'analytics', 'leaderboard', range, 'top'],
     queryFn: async () => {
-      const { data, error } = await api.GET('/api/v1/admin/analytics/profits/leaderboard', { params: { query: { ...range, order: 'top', limit: 20 } } });
+      const { data, error } = await api.GET('/api/v1/admin/analytics/profits/leaderboard', {
+        params: { query: { ...range, order: 'top', limit: 20 } },
+      });
       if (error) throw error;
       return data;
     },
@@ -64,7 +79,9 @@ export function ProfitsPage() {
   const leastQuery = useQuery({
     queryKey: ['admin', 'analytics', 'leaderboard', range, 'least'],
     queryFn: async () => {
-      const { data, error } = await api.GET('/api/v1/admin/analytics/profits/leaderboard', { params: { query: { ...range, order: 'least', limit: 20 } } });
+      const { data, error } = await api.GET('/api/v1/admin/analytics/profits/leaderboard', {
+        params: { query: { ...range, order: 'least', limit: 20 } },
+      });
       if (error) throw error;
       return data;
     },
@@ -93,11 +110,21 @@ export function ProfitsPage() {
       />
 
       <KpiGrid>
-        <StatTile label="Total net profit" value={profitsQuery.data ? formatCoins(profitsQuery.data.lifetime.netProfit) : '—'} />
-        <StatTile label="Coins traded" value={profitsQuery.data ? formatCoins(profitsQuery.data.lifetime.coinsTraded) : '—'} />
+        <StatTile
+          label="Total net profit"
+          value={profitsQuery.data ? formatCoins(profitsQuery.data.lifetime.netProfit) : '—'}
+        />
+        <StatTile
+          label="Coins traded"
+          value={profitsQuery.data ? formatCoins(profitsQuery.data.lifetime.coinsTraded) : '—'}
+        />
         <StatTile
           label="Avg profit / active trader"
-          value={profitsQuery.data ? formatCoins(Math.round(profitsQuery.data.lifetime.avgProfitPerActiveTrader)) : '—'}
+          value={
+            profitsQuery.data
+              ? formatCoins(Math.round(profitsQuery.data.lifetime.avgProfitPerActiveTrader))
+              : '—'
+          }
         />
         <StatTile label="Days in range" value={items.length} />
       </KpiGrid>
@@ -106,9 +133,18 @@ export function ProfitsPage() {
         title="Net profit over time"
         isLoading={profitsQuery.isLoading}
         isEmpty={!profitsQuery.isLoading && !profitsQuery.isError && items.length === 0}
-        emptyMessage={profitsQuery.isError ? "Couldn't load profit analytics." : 'No profit recorded for this range.'}
+        emptyMessage={
+          profitsQuery.isError
+            ? "Couldn't load profit analytics."
+            : 'No profit recorded for this range.'
+        }
       >
-        <AreaChart data={items} xKey="bucket" series={[{ key: 'netProfit', label: 'Net profit', colorIndex: 0 }]} valueFormatter={formatCoins} />
+        <AreaChart
+          data={items}
+          xKey="bucket"
+          series={[{ key: 'netProfit', label: 'Net profit', colorIndex: 0 }]}
+          valueFormatter={formatCoins}
+        />
       </ChartCard>
 
       <Card>

@@ -3,7 +3,15 @@
 import { isNull, relations } from 'drizzle-orm';
 import { index, inet, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
-import { createdAt, deletedAt, deviceStatusEnum, idPk, rowVersion, timestamptz, updatedAt } from './common.js';
+import {
+  createdAt,
+  deletedAt,
+  deviceStatusEnum,
+  idPk,
+  rowVersion,
+  timestamptz,
+  updatedAt,
+} from './common.js';
 import { licenses } from './subscriptions.js';
 import { users } from './users.js';
 
@@ -35,7 +43,9 @@ export const devices = pgTable(
     rowVersion: rowVersion(),
   },
   (t) => [
-    uniqueIndex('devices_user_fingerprint_unique_live').on(t.userId, t.fingerprintHash).where(isNull(t.deletedAt)),
+    uniqueIndex('devices_user_fingerprint_unique_live')
+      .on(t.userId, t.fingerprintHash)
+      .where(isNull(t.deletedAt)),
     index('devices_user_id_idx').on(t.userId).where(isNull(t.deletedAt)),
     index('devices_license_id_idx').on(t.licenseId).where(isNull(t.deletedAt)),
     index('devices_status_idx').on(t.status).where(isNull(t.deletedAt)),

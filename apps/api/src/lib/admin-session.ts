@@ -17,7 +17,11 @@ export interface AdminSessionInfo {
 
 export const NO_ADMIN_SESSION: AdminSessionInfo = { adminRole: null, permissions: [] };
 
-export async function resolveAdminSession(db: Database, userId: string, role: string): Promise<AdminSessionInfo> {
+export async function resolveAdminSession(
+  db: Database,
+  userId: string,
+  role: string,
+): Promise<AdminSessionInfo> {
   if (role !== 'admin') return NO_ADMIN_SESSION;
   const row = await db.query.adminUsers.findFirst({ where: eq(adminUsers.userId, userId) });
   if (!row || row.deletedAt || !isAdminRole(row.adminRole)) return NO_ADMIN_SESSION;

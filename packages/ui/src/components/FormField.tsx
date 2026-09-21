@@ -14,7 +14,15 @@ export interface FormFieldProps {
 
 /** Label + control + error/hint, wired for react-hook-form: pass the
  * field's error message (`formState.errors.x?.message`) as `error`. */
-export function FormField({ label, htmlFor, error, hint, required, children, className }: FormFieldProps) {
+export function FormField({
+  label,
+  htmlFor,
+  error,
+  hint,
+  required,
+  children,
+  className,
+}: FormFieldProps) {
   return (
     <div className={cn('flex flex-col gap-1.5', className)}>
       <label htmlFor={htmlFor} className="text-sm font-medium text-[--sl-fg]">

@@ -20,13 +20,11 @@ import { useSearch } from '@tanstack/react-router';
 import { useState } from 'react';
 import { toast } from 'sonner';
 
-
 import { api, apiErrorMessage } from '@/api/client.js';
 import { ReasonDialog } from '@/components/ReasonDialog.js';
 import { SubscriptionActions } from '@/components/SubscriptionActions.js';
 
 import type { FlagDto, UserDto } from '@sl/shared';
-
 
 const ANY = 'any';
 
@@ -37,12 +35,20 @@ const columns: ColumnDef<UserDto, unknown>[] = [
     header: 'Status',
     cell: (c) => {
       const v = c.getValue() as string;
-      return <Badge tone={v === 'active' ? 'positive' : v === 'banned' ? 'negative' : 'warning'}>{v}</Badge>;
+      return (
+        <Badge tone={v === 'active' ? 'positive' : v === 'banned' ? 'negative' : 'warning'}>
+          {v}
+        </Badge>
+      );
     },
   },
   { accessorKey: 'role', header: 'Role' },
   { accessorKey: 'totpEnabled', header: '2FA', cell: (c) => (c.getValue() ? 'On' : 'Off') },
-  { accessorKey: 'lastLoginAt', header: 'Last login', cell: (c) => (c.getValue() ? formatDate(c.getValue() as string) : 'Never') },
+  {
+    accessorKey: 'lastLoginAt',
+    header: 'Last login',
+    cell: (c) => (c.getValue() ? formatDate(c.getValue() as string) : 'Never'),
+  },
   { accessorKey: 'createdAt', header: 'Joined', cell: (c) => formatDate(c.getValue() as string) },
 ];
 
@@ -61,7 +67,14 @@ export function UsersPage() {
     queryKey: ['admin', 'users', q, status, cursor],
     queryFn: async () => {
       const { data, error } = await api.GET('/api/v1/admin/users', {
-        params: { query: { q: q || undefined, status: status === ANY ? undefined : (status as never), cursor, limit: 50 } },
+        params: {
+          query: {
+            q: q || undefined,
+            status: status === ANY ? undefined : (status as never),
+            cursor,
+            limit: 50,
+          },
+        },
       });
       if (error) throw error;
       return data;
@@ -79,13 +92,29 @@ export function UsersPage() {
 
       <div className="flex flex-wrap items-end gap-3">
         <FormField label="Search" htmlFor="q" className="w-64">
-          <Input id="q" placeholder="Email contains…" value={q} onChange={(e) => { setQ(e.target.value); setCursor(undefined); setCursorStack([]); }} />
+          <Input
+            id="q"
+            placeholder="Email contains…"
+            value={q}
+            onChange={(e) => {
+              setQ(e.target.value);
+              setCursor(undefined);
+              setCursorStack([]);
+            }}
+          />
         </FormField>
         <FormField label="Status" htmlFor="status" className="w-44">
           <Select
             value={status}
-            onValueChange={(v) => { setStatus(v); setCursor(undefined); setCursorStack([]); }}
-            options={[{ value: ANY, label: 'Any status' }, ...USER_STATUSES.map((s) => ({ value: s, label: s }))]}
+            onValueChange={(v) => {
+              setStatus(v);
+              setCursor(undefined);
+              setCursorStack([]);
+            }}
+            options={[
+              { value: ANY, label: 'Any status' },
+              ...USER_STATUSES.map((s) => ({ value: s, label: s })),
+            ]}
           />
         </FormField>
       </div>
@@ -127,7 +156,15 @@ export function UsersPage() {
   );
 }
 
-function UserDetailDrawer({ user, onClose, onChanged }: { user: UserDto; onClose: () => void; onChanged: () => void }) {
+function UserDetailDrawer({
+  user,
+  onClose,
+  onChanged,
+}: {
+  user: UserDto;
+  onClose: () => void;
+  onChanged: () => void;
+}) {
   const queryClient = useQueryClient();
   const [timezone, setTimezone] = useState(user.timezone ?? '');
   const [suspendOpen, setSuspendOpen] = useState(false);
@@ -138,7 +175,9 @@ function UserDetailDrawer({ user, onClose, onChanged }: { user: UserDto; onClose
   const flagsQuery = useQuery({
     queryKey: ['admin', 'flags', 'user', user.id],
     queryFn: async () => {
-      const { data, error } = await api.GET('/api/v1/admin/flags', { params: { query: { userId: user.id } } });
+      const { data, error } = await api.GET('/api/v1/admin/flags', {
+        params: { query: { userId: user.id } },
+      });
       if (error) throw error;
       return data.items as FlagDto[];
     },
@@ -147,7 +186,9 @@ function UserDetailDrawer({ user, onClose, onChanged }: { user: UserDto; onClose
   const bansQuery = useQuery({
     queryKey: ['admin', 'bans', 'active'],
     queryFn: async () => {
-      const { data, error } = await api.GET('/api/v1/admin/bans', { params: { query: { active: true } } });
+      const { data, error } = await api.GET('/api/v1/admin/bans', {
+        params: { query: { active: true } },
+      });
       if (error) throw error;
       return data.items;
     },
@@ -161,7 +202,10 @@ function UserDetailDrawer({ user, onClose, onChanged }: { user: UserDto; onClose
 
   const updateProfileMutation = useMutation({
     mutationFn: async () => {
-      const { error } = await api.PATCH('/api/v1/admin/users/{id}', { params: { path: { id: user.id } }, body: { timezone } });
+      const { error } = await api.PATCH('/api/v1/admin/users/{id}', {
+        params: { path: { id: user.id } },
+        body: { timezone },
+      });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -173,8 +217,14 @@ function UserDetailDrawer({ user, onClose, onChanged }: { user: UserDto; onClose
 
   const suspendMutation = useMutation({
     mutationFn: async (reason: string) => {
-      const path = user.status === 'suspended' ? '/api/v1/admin/users/{id}/unsuspend' : '/api/v1/admin/users/{id}/suspend';
-      const { error } = await api.POST(path, { params: { path: { id: user.id } }, body: { reason } });
+      const path =
+        user.status === 'suspended'
+          ? '/api/v1/admin/users/{id}/unsuspend'
+          : '/api/v1/admin/users/{id}/suspend';
+      const { error } = await api.POST(path, {
+        params: { path: { id: user.id } },
+        body: { reason },
+      });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -187,7 +237,9 @@ function UserDetailDrawer({ user, onClose, onChanged }: { user: UserDto; onClose
 
   const banMutation = useMutation({
     mutationFn: async (reason: string) => {
-      const { error } = await api.POST('/api/v1/admin/bans', { body: { type: 'account', userId: user.id, reason } });
+      const { error } = await api.POST('/api/v1/admin/bans', {
+        body: { type: 'account', userId: user.id, reason },
+      });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -201,7 +253,10 @@ function UserDetailDrawer({ user, onClose, onChanged }: { user: UserDto; onClose
   const unbanMutation = useMutation({
     mutationFn: async (reason: string) => {
       if (!activeBan) return;
-      const { error } = await api.POST('/api/v1/admin/bans/{id}/lift', { params: { path: { id: activeBan.id } }, body: { reason } });
+      const { error } = await api.POST('/api/v1/admin/bans/{id}/lift', {
+        params: { path: { id: activeBan.id } },
+        body: { reason },
+      });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -213,7 +268,10 @@ function UserDetailDrawer({ user, onClose, onChanged }: { user: UserDto; onClose
 
   const resetPasswordMutation = useMutation({
     mutationFn: async (reason: string) => {
-      const { error } = await api.POST('/api/v1/admin/users/{id}/reset-password', { params: { path: { id: user.id } }, body: { reason } });
+      const { error } = await api.POST('/api/v1/admin/users/{id}/reset-password', {
+        params: { path: { id: user.id } },
+        body: { reason },
+      });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -225,7 +283,10 @@ function UserDetailDrawer({ user, onClose, onChanged }: { user: UserDto; onClose
 
   const forceLogoutMutation = useMutation({
     mutationFn: async (reason: string) => {
-      const { error } = await api.POST('/api/v1/admin/users/{id}/force-logout', { params: { path: { id: user.id } }, body: { reason } });
+      const { error } = await api.POST('/api/v1/admin/users/{id}/force-logout', {
+        params: { path: { id: user.id } },
+        body: { reason },
+      });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -236,27 +297,55 @@ function UserDetailDrawer({ user, onClose, onChanged }: { user: UserDto; onClose
   });
 
   return (
-    <Drawer open onOpenChange={(open) => !open && onClose()} title={user.email} description={`Joined ${formatDate(user.createdAt)}`} width="xl">
+    <Drawer
+      open
+      onOpenChange={(open) => !open && onClose()}
+      title={user.email}
+      description={`Joined ${formatDate(user.createdAt)}`}
+      width="xl"
+    >
       <Tabs defaultValue="profile">
         <TabsList>
           <TabsTrigger value="profile">Profile</TabsTrigger>
           <TabsTrigger value="subscription">Subscription</TabsTrigger>
-          <TabsTrigger value="flags">Flags {flagsQuery.data?.length ? `(${flagsQuery.data.length})` : ''}</TabsTrigger>
+          <TabsTrigger value="flags">
+            Flags {flagsQuery.data?.length ? `(${flagsQuery.data.length})` : ''}
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="profile">
           <div className="flex flex-col gap-5">
             <div className="flex flex-wrap gap-2">
-              <Badge tone={user.status === 'active' ? 'positive' : user.status === 'banned' ? 'negative' : 'warning'}>{user.status}</Badge>
+              <Badge
+                tone={
+                  user.status === 'active'
+                    ? 'positive'
+                    : user.status === 'banned'
+                      ? 'negative'
+                      : 'warning'
+                }
+              >
+                {user.status}
+              </Badge>
               <Badge tone={user.role === 'admin' ? 'accent' : 'neutral'}>{user.role}</Badge>
-              <Badge tone={user.totpEnabled ? 'positive' : 'neutral'}>{user.totpEnabled ? '2FA on' : '2FA off'}</Badge>
+              <Badge tone={user.totpEnabled ? 'positive' : 'neutral'}>
+                {user.totpEnabled ? '2FA on' : '2FA off'}
+              </Badge>
               {activeBan && <Badge tone="negative">Banned</Badge>}
             </div>
 
             <FormField label="Timezone" htmlFor="edit-timezone">
               <div className="flex gap-2">
-                <Input id="edit-timezone" value={timezone} onChange={(e) => setTimezone(e.target.value)} />
-                <Button size="sm" loading={updateProfileMutation.isPending} onClick={() => updateProfileMutation.mutate()}>
+                <Input
+                  id="edit-timezone"
+                  value={timezone}
+                  onChange={(e) => setTimezone(e.target.value)}
+                />
+                <Button
+                  size="sm"
+                  loading={updateProfileMutation.isPending}
+                  onClick={() => updateProfileMutation.mutate()}
+                >
                   Save
                 </Button>
               </div>
@@ -267,7 +356,12 @@ function UserDetailDrawer({ user, onClose, onChanged }: { user: UserDto; onClose
                 {user.status === 'suspended' ? 'Unsuspend' : 'Suspend'}
               </Button>
               {activeBan ? (
-                <Button size="sm" variant="outline" loading={unbanMutation.isPending} onClick={() => unbanMutation.mutate('Unbanned by admin')}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  loading={unbanMutation.isPending}
+                  onClick={() => unbanMutation.mutate('Unbanned by admin')}
+                >
                   Unban
                 </Button>
               ) : (
@@ -292,14 +386,28 @@ function UserDetailDrawer({ user, onClose, onChanged }: { user: UserDto; onClose
         <TabsContent value="flags">
           <div className="flex flex-col gap-2">
             {flagsQuery.isLoading && <p className="text-sm text-ink-2">Loading…</p>}
-            {!flagsQuery.isLoading && flagsQuery.data?.length === 0 && <p className="text-sm text-ink-2">No flags for this user.</p>}
+            {!flagsQuery.isLoading && flagsQuery.data?.length === 0 && (
+              <p className="text-sm text-ink-2">No flags for this user.</p>
+            )}
             {flagsQuery.data?.map((flag) => (
               <div key={flag.id} className="rounded-md border border-line p-3 text-sm">
                 <div className="flex items-center justify-between">
                   <span className="font-medium text-ink">{flag.kind}</span>
-                  <Badge tone={flag.severity === 'low' ? 'neutral' : flag.severity === 'medium' ? 'warning' : 'negative'}>{flag.severity}</Badge>
+                  <Badge
+                    tone={
+                      flag.severity === 'low'
+                        ? 'neutral'
+                        : flag.severity === 'medium'
+                          ? 'warning'
+                          : 'negative'
+                    }
+                  >
+                    {flag.severity}
+                  </Badge>
                 </div>
-                <p className="mt-1 text-xs text-ink-2">{formatDateTime(flag.createdAt)} · {flag.status}</p>
+                <p className="mt-1 text-xs text-ink-2">
+                  {formatDateTime(flag.createdAt)} · {flag.status}
+                </p>
               </div>
             ))}
           </div>
@@ -314,9 +422,31 @@ function UserDetailDrawer({ user, onClose, onChanged }: { user: UserDto; onClose
         loading={suspendMutation.isPending}
         onConfirm={(reason) => suspendMutation.mutate(reason)}
       />
-      <ReasonDialog open={banOpen} onOpenChange={setBanOpen} title="Ban user" destructive confirmLabel="Ban" loading={banMutation.isPending} onConfirm={(reason) => banMutation.mutate(reason)} />
-      <ReasonDialog open={resetOpen} onOpenChange={setResetOpen} title="Send password reset" loading={resetPasswordMutation.isPending} onConfirm={(reason) => resetPasswordMutation.mutate(reason)} />
-      <ReasonDialog open={logoutOpen} onOpenChange={setLogoutOpen} title="Force logout" destructive confirmLabel="Force logout" loading={forceLogoutMutation.isPending} onConfirm={(reason) => forceLogoutMutation.mutate(reason)} />
+      <ReasonDialog
+        open={banOpen}
+        onOpenChange={setBanOpen}
+        title="Ban user"
+        destructive
+        confirmLabel="Ban"
+        loading={banMutation.isPending}
+        onConfirm={(reason) => banMutation.mutate(reason)}
+      />
+      <ReasonDialog
+        open={resetOpen}
+        onOpenChange={setResetOpen}
+        title="Send password reset"
+        loading={resetPasswordMutation.isPending}
+        onConfirm={(reason) => resetPasswordMutation.mutate(reason)}
+      />
+      <ReasonDialog
+        open={logoutOpen}
+        onOpenChange={setLogoutOpen}
+        title="Force logout"
+        destructive
+        confirmLabel="Force logout"
+        loading={forceLogoutMutation.isPending}
+        onConfirm={(reason) => forceLogoutMutation.mutate(reason)}
+      />
     </Drawer>
   );
 }

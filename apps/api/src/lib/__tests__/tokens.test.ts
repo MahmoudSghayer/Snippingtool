@@ -1,20 +1,36 @@
 import { generateKeyPair, exportPKCS8, exportSPKI } from 'jose';
 import { describe, expect, it, beforeAll } from 'vitest';
 
-import { generateFamilyId, generateRefreshToken, signAccessToken, verifyAccessToken, type AccessTokenClaims } from '../tokens.js';
+import {
+  generateFamilyId,
+  generateRefreshToken,
+  signAccessToken,
+  verifyAccessToken,
+  type AccessTokenClaims,
+} from '../tokens.js';
 
 describe('token helpers', () => {
   let privateKeyPem: string;
   let publicKeyPem: string;
 
   beforeAll(async () => {
-    const { privateKey, publicKey } = await generateKeyPair('EdDSA', { crv: 'Ed25519', extractable: true });
+    const { privateKey, publicKey } = await generateKeyPair('EdDSA', {
+      crv: 'Ed25519',
+      extractable: true,
+    });
     privateKeyPem = await exportPKCS8(privateKey);
     publicKeyPem = await exportSPKI(publicKey);
   });
 
   it('signs and verifies an access token, round-tripping every claim', async () => {
-    const claims: AccessTokenClaims = { sub: 'user-1', sid: 'session-1', did: 'device-1', role: 'user', plan: 'pro', ver: 3 };
+    const claims: AccessTokenClaims = {
+      sub: 'user-1',
+      sid: 'session-1',
+      did: 'device-1',
+      role: 'user',
+      plan: 'pro',
+      ver: 3,
+    };
     const token = await signAccessToken(claims, privateKeyPem);
     const decoded = await verifyAccessToken(token, publicKeyPem);
     expect(decoded.sub).toBe('user-1');
@@ -26,9 +42,19 @@ describe('token helpers', () => {
   });
 
   it('rejects a token signed by a different key', async () => {
-    const { privateKey: otherPrivate } = await generateKeyPair('EdDSA', { crv: 'Ed25519', extractable: true });
+    const { privateKey: otherPrivate } = await generateKeyPair('EdDSA', {
+      crv: 'Ed25519',
+      extractable: true,
+    });
     const otherPem = await exportPKCS8(otherPrivate);
-    const claims: AccessTokenClaims = { sub: 'user-1', sid: 's', did: null, role: 'user', plan: null, ver: 0 };
+    const claims: AccessTokenClaims = {
+      sub: 'user-1',
+      sid: 's',
+      did: null,
+      role: 'user',
+      plan: null,
+      ver: 0,
+    };
     const token = await signAccessToken(claims, otherPem);
     await expect(verifyAccessToken(token, publicKeyPem)).rejects.toThrow();
   });

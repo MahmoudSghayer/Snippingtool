@@ -25,7 +25,6 @@ import {
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
-
 import { api } from '@/api/client.js';
 import { CommandPalette, useCommandPaletteShortcut } from '@/components/CommandPalette.js';
 import { NotificationsBell } from '@/components/NotificationsBell.js';
@@ -62,26 +61,91 @@ export function PublicLayout() {
 }
 
 const userNav = [
-  { key: 'dashboard', label: 'Dashboard', href: '/dashboard', icon: <LayoutDashboard className="size-4" /> },
-  { key: 'analytics', label: 'Analytics', href: '/analytics', icon: <BarChart3 className="size-4" /> },
-  { key: 'subscriptions', label: 'Subscription', href: '/subscriptions', icon: <Wallet className="size-4" /> },
-  { key: 'settings', label: 'Settings', href: '/settings', icon: <SettingsIcon className="size-4" /> },
+  {
+    key: 'dashboard',
+    label: 'Dashboard',
+    href: '/dashboard',
+    icon: <LayoutDashboard className="size-4" />,
+  },
+  {
+    key: 'analytics',
+    label: 'Analytics',
+    href: '/analytics',
+    icon: <BarChart3 className="size-4" />,
+  },
+  {
+    key: 'subscriptions',
+    label: 'Subscription',
+    href: '/subscriptions',
+    icon: <Wallet className="size-4" />,
+  },
+  {
+    key: 'settings',
+    label: 'Settings',
+    href: '/settings',
+    icon: <SettingsIcon className="size-4" />,
+  },
 ];
 
 const adminNav = [
   { key: 'admin-overview', label: 'Overview', href: '/admin', icon: <Gauge className="size-4" /> },
-  { key: 'admin-users', label: 'Users', href: '/admin/users', icon: <UsersIcon className="size-4" /> },
-  { key: 'admin-profits', label: 'Profits', href: '/admin/profits', icon: <BarChart3 className="size-4" /> },
-  { key: 'admin-activity', label: 'Activity', href: '/admin/activity', icon: <Activity className="size-4" /> },
-  { key: 'admin-system', label: 'System', href: '/admin/system', icon: <Server className="size-4" /> },
-  { key: 'admin-audit', label: 'Audit log', href: '/admin/audit', icon: <FileClock className="size-4" /> },
-  { key: 'admin-subscriptions', label: 'Subscriptions', href: '/admin/subscriptions', icon: <CreditCard className="size-4" /> },
-  { key: 'admin-coupons', label: 'Coupons', href: '/admin/coupons', icon: <Ticket className="size-4" /> },
+  {
+    key: 'admin-users',
+    label: 'Users',
+    href: '/admin/users',
+    icon: <UsersIcon className="size-4" />,
+  },
+  {
+    key: 'admin-profits',
+    label: 'Profits',
+    href: '/admin/profits',
+    icon: <BarChart3 className="size-4" />,
+  },
+  {
+    key: 'admin-activity',
+    label: 'Activity',
+    href: '/admin/activity',
+    icon: <Activity className="size-4" />,
+  },
+  {
+    key: 'admin-system',
+    label: 'System',
+    href: '/admin/system',
+    icon: <Server className="size-4" />,
+  },
+  {
+    key: 'admin-audit',
+    label: 'Audit log',
+    href: '/admin/audit',
+    icon: <FileClock className="size-4" />,
+  },
+  {
+    key: 'admin-subscriptions',
+    label: 'Subscriptions',
+    href: '/admin/subscriptions',
+    icon: <CreditCard className="size-4" />,
+  },
+  {
+    key: 'admin-coupons',
+    label: 'Coupons',
+    href: '/admin/coupons',
+    icon: <Ticket className="size-4" />,
+  },
   { key: 'admin-plans', label: 'Plans', href: '/admin/plans', icon: <Gift className="size-4" /> },
   { key: 'admin-flags', label: 'Flags', href: '/admin/flags', icon: <Flag className="size-4" /> },
   { key: 'admin-bans', label: 'Bans', href: '/admin/bans', icon: <Ban className="size-4" /> },
-  { key: 'admin-toggles', label: 'Feature toggles', href: '/admin/feature-toggles', icon: <Sliders className="size-4" /> },
-  { key: 'admin-config', label: 'Config', href: '/admin/config', icon: <AlertTriangle className="size-4" /> },
+  {
+    key: 'admin-toggles',
+    label: 'Feature toggles',
+    href: '/admin/feature-toggles',
+    icon: <Sliders className="size-4" />,
+  },
+  {
+    key: 'admin-config',
+    label: 'Config',
+    href: '/admin/config',
+    icon: <AlertTriangle className="size-4" />,
+  },
 ];
 
 /** Authenticated shell: sidebar + topbar. Mounted by every `/dashboard`,
@@ -122,7 +186,12 @@ export function AppLayout() {
   );
 
   const sections = [
-    { items: userNav.map((item) => ({ ...item, active: !!matchRoute({ to: item.href, fuzzy: item.href !== '/dashboard' }) })) },
+    {
+      items: userNav.map((item) => ({
+        ...item,
+        active: !!matchRoute({ to: item.href, fuzzy: item.href !== '/dashboard' }),
+      })),
+    },
     ...(isAdmin && visibleAdminNav.length > 0
       ? [
           {
@@ -154,8 +223,18 @@ export function AppLayout() {
     </button>
   );
 
-  const connectionLabel = connectionStatus === 'open' ? 'Online' : connectionStatus === 'connecting' ? 'Connecting…' : 'Offline';
-  const connectionDotClass = connectionStatus === 'open' ? 'bg-live' : connectionStatus === 'connecting' ? 'bg-gold animate-pulse' : 'bg-risk';
+  const connectionLabel =
+    connectionStatus === 'open'
+      ? 'Online'
+      : connectionStatus === 'connecting'
+        ? 'Connecting…'
+        : 'Offline';
+  const connectionDotClass =
+    connectionStatus === 'open'
+      ? 'bg-live'
+      : connectionStatus === 'connecting'
+        ? 'bg-gold animate-pulse'
+        : 'bg-risk';
 
   return (
     <div className="flex h-dvh overflow-hidden bg-ground text-ink">
@@ -204,7 +283,10 @@ export function AppLayout() {
               <Menu className="size-5" aria-hidden="true" />
             </button>
             <div className="hidden items-center gap-2 sm:flex">
-              <span className={`inline-flex size-2 rounded-full ${connectionDotClass}`} aria-hidden="true" />
+              <span
+                className={`inline-flex size-2 rounded-full ${connectionDotClass}`}
+                aria-hidden="true"
+              />
               <span className="text-xs text-ink-2">{connectionLabel}</span>
             </div>
             {isAdmin && (

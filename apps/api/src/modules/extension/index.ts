@@ -3,7 +3,6 @@
 // points (docs/01-architecture.md, "license bootstrap + heartbeat + offline
 // grace").
 
-
 import { devices, featureToggles, licenses, plans, subscriptions, userActivity } from '@sl/db';
 import {
   bootstrapRequestSchema,
@@ -31,7 +30,9 @@ import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 
 async function isKillSwitchActive(fastify: FastifyInstance): Promise<boolean> {
-  const row = await fastify.db.query.featureToggles.findFirst({ where: eq(featureToggles.key, 'kill_switch') });
+  const row = await fastify.db.query.featureToggles.findFirst({
+    where: eq(featureToggles.key, 'kill_switch'),
+  });
   return row?.enabled ?? false;
 }
 
@@ -94,11 +95,21 @@ export default fp(
       {
         onRequest: [fastify.authenticate],
         preHandler: [fastify.verifyCsrf],
-        schema: { tags: ['extension'], body: bootstrapRequestSchema, response: { 200: bootstrapResponseSchema } },
+        schema: {
+          tags: ['extension'],
+          body: bootstrapRequestSchema,
+          response: { 200: bootstrapResponseSchema },
+        },
       },
       async (request): Promise<BootstrapResponse> => {
         const userId = request.authUser!.id;
-        const { id: deviceId } = await findOrRegisterDevice(fastify.db, fastify.entitlements, userId, request.body.device, request.ip);
+        const { id: deviceId } = await findOrRegisterDevice(
+          fastify.db,
+          fastify.entitlements,
+          userId,
+          request.body.device,
+          request.ip,
+        );
 
         await fastify.db
           .update(devices)
@@ -112,14 +123,20 @@ export default fp(
           loadSubscriptionAndLicenseDto(fastify, userId),
         ]);
 
-        const entitlementBlob = await fastify.entitlements.signEntitlementBlob(entitlementSnapshot, userId, deviceId);
+        const entitlementBlob = await fastify.entitlements.signEntitlementBlob(
+          entitlementSnapshot,
+          userId,
+          deviceId,
+        );
 
         return {
           userId,
           deviceId,
           subscription: dtos.subscription,
           license: dtos.license,
-          features: entitlementSnapshot.features.filter((f): f is (typeof FEATURE_KEYS)[number] => (FEATURE_KEYS as readonly string[]).includes(f)),
+          features: entitlementSnapshot.features.filter((f): f is (typeof FEATURE_KEYS)[number] =>
+            (FEATURE_KEYS as readonly string[]).includes(f),
+          ),
           settings,
           killSwitchActive,
           entitlementBlob,
@@ -133,17 +150,28 @@ export default fp(
       {
         onRequest: [fastify.authenticate],
         preHandler: [fastify.verifyCsrf],
-        schema: { tags: ['extension'], body: heartbeatRequestSchema, response: { 200: heartbeatResponseSchema } },
+        schema: {
+          tags: ['extension'],
+          body: heartbeatRequestSchema,
+          response: { 200: heartbeatResponseSchema },
+        },
       },
       async (request) => {
         const userId = request.authUser!.id;
         const { deviceId, extensionVersion, engineState } = request.body;
 
         const device = await fastify.db.query.devices.findFirst({
-          where: and(eq(devices.id, deviceId), eq(devices.userId, userId), isNull(devices.deletedAt)),
+          where: and(
+            eq(devices.id, deviceId),
+            eq(devices.userId, userId),
+            isNull(devices.deletedAt),
+          ),
         });
         if (device) {
-          await fastify.db.update(devices).set({ lastSeenAt: new Date(), extensionVersion, lastIp: request.ip }).where(eq(devices.id, deviceId));
+          await fastify.db
+            .update(devices)
+            .set({ lastSeenAt: new Date(), extensionVersion, lastIp: request.ip })
+            .where(eq(devices.id, deviceId));
         }
 
         await fastify.db.insert(userActivity).values({
@@ -160,13 +188,19 @@ export default fp(
           isKillSwitchActive(fastify),
           loadSubscriptionAndLicenseDto(fastify, userId),
         ]);
-        const entitlementBlob = await fastify.entitlements.signEntitlementBlob(entitlementSnapshot, userId, deviceId);
+        const entitlementBlob = await fastify.entitlements.signEntitlementBlob(
+          entitlementSnapshot,
+          userId,
+          deviceId,
+        );
 
         return {
           deviceId,
           subscription: dtos.subscription,
           license: dtos.license,
-          features: entitlementSnapshot.features.filter((f): f is (typeof FEATURE_KEYS)[number] => (FEATURE_KEYS as readonly string[]).includes(f)),
+          features: entitlementSnapshot.features.filter((f): f is (typeof FEATURE_KEYS)[number] =>
+            (FEATURE_KEYS as readonly string[]).includes(f),
+          ),
           settings,
           killSwitchActive,
           entitlementBlob,
@@ -181,7 +215,11 @@ export default fp(
         onRequest: [fastify.authenticate],
         preHandler: [fastify.verifyCsrf],
         config: { rateLimit: INGEST_RATE_LIMIT },
-        schema: { tags: ['extension'], body: telemetryFlushRequestSchema, response: { 200: z.object({ accepted: z.number() }) } },
+        schema: {
+          tags: ['extension'],
+          body: telemetryFlushRequestSchema,
+          response: { 200: z.object({ accepted: z.number() }) },
+        },
       },
       async (request) => {
         const userId = request.authUser!.id;
@@ -204,7 +242,11 @@ export default fp(
         onRequest: [fastify.authenticate],
         preHandler: [fastify.verifyCsrf],
         config: { rateLimit: INGEST_RATE_LIMIT },
-        schema: { tags: ['extension'], body: extensionErrorReportSchema, response: { 200: z.object({ accepted: z.number() }) } },
+        schema: {
+          tags: ['extension'],
+          body: extensionErrorReportSchema,
+          response: { 200: z.object({ accepted: z.number() }) },
+        },
       },
       async (request) => {
         const userId = request.authUser!.id;
@@ -213,7 +255,12 @@ export default fp(
           userId,
           deviceId: request.body.deviceId,
           type: 'error' as const,
-          metadata: { message: e.message, stack: e.stack ?? null, context: e.context ?? null, extensionVersion: request.body.extensionVersion },
+          metadata: {
+            message: e.message,
+            stack: e.stack ?? null,
+            context: e.context ?? null,
+            extensionVersion: request.body.extensionVersion,
+          },
           occurredAt: new Date(e.occurredAt),
         }));
         if (rows.length > 0) await fastify.db.insert(userActivity).values(rows);
@@ -223,8 +270,16 @@ export default fp(
 
     app.get(
       '/api/v1/extension/version',
-      { schema: { tags: ['extension'], response: { 200: z.object({ latestVersion: z.string(), updateUrl: z.string() }) } } },
-      async () => ({ latestVersion: fastify.config.EXTENSION_LATEST_VERSION, updateUrl: fastify.config.EXTENSION_UPDATE_URL }),
+      {
+        schema: {
+          tags: ['extension'],
+          response: { 200: z.object({ latestVersion: z.string(), updateUrl: z.string() }) },
+        },
+      },
+      async () => ({
+        latestVersion: fastify.config.EXTENSION_LATEST_VERSION,
+        updateUrl: fastify.config.EXTENSION_UPDATE_URL,
+      }),
     );
 
     app.get(

@@ -28,14 +28,24 @@ async function createAdmin(app: FastifyInstance, email: string) {
     emailVerifiedAt: new Date(),
     totpEnabledAt: new Date(),
   });
-  await app.db.insert(adminUsers).values({ id: newId(), userId, adminRole: 'super_admin', permissions: {} });
-  const token = await signAccessToken({ sub: userId, sid: newId(), did: null, role: 'admin', plan: null, ver: 0 }, app.config.JWT_PRIVATE_KEY!);
+  await app.db
+    .insert(adminUsers)
+    .values({ id: newId(), userId, adminRole: 'super_admin', permissions: {} });
+  const token = await signAccessToken(
+    { sub: userId, sid: newId(), did: null, role: 'admin', plan: null, ver: 0 },
+    app.config.JWT_PRIVATE_KEY!,
+  );
   return { userId, token };
 }
 
 async function createVerifiedUser(app: FastifyInstance, email: string): Promise<string> {
   const id = newId();
-  await app.db.insert(users).values({ id, email, passwordHash: await hashSecret('irrelevant-password-123'), emailVerifiedAt: new Date() });
+  await app.db.insert(users).values({
+    id,
+    email,
+    passwordHash: await hashSecret('irrelevant-password-123'),
+    emailVerifiedAt: new Date(),
+  });
   return id;
 }
 
@@ -98,14 +108,20 @@ describe('plans, admin-plans, admin-bans, admin-flags', () => {
     expect(archiveRes.json().isActive).toBe(false);
 
     // Archived, not deleted: still visible to the admin listing.
-    const listRes = await app.inject({ method: 'GET', url: '/api/v1/admin/plans', headers: { authorization: `Bearer ${token}` } });
+    const listRes = await app.inject({
+      method: 'GET',
+      url: '/api/v1/admin/plans',
+      headers: { authorization: `Bearer ${token}` },
+    });
     const found = listRes.json().items.find((p: { code: string }) => p.code === 'founders-2026');
     expect(found).toBeTruthy();
     expect(found.isActive).toBe(false);
 
     // No longer on the public listing.
     const publicRes = await app.inject({ method: 'GET', url: '/api/v1/plans' });
-    expect(publicRes.json().items.some((p: { code: string }) => p.code === 'founders-2026')).toBe(false);
+    expect(publicRes.json().items.some((p: { code: string }) => p.code === 'founders-2026')).toBe(
+      false,
+    );
   });
 
   it('admin-bans: an account ban revokes every active session; checkBans reports it; lifting clears it', async () => {
@@ -129,7 +145,9 @@ describe('plans, admin-plans, admin-bans, admin-flags', () => {
     expect(createRes.statusCode).toBe(201);
     const ban = createRes.json();
 
-    const activeSessions = await app.db.query.sessions.findMany({ where: and(eq(sessions.userId, targetId), isNull(sessions.revokedAt)) });
+    const activeSessions = await app.db.query.sessions.findMany({
+      where: and(eq(sessions.userId, targetId), isNull(sessions.revokedAt)),
+    });
     expect(activeSessions).toHaveLength(0);
 
     const check = await checkBans(app.db, { userId: targetId });

@@ -19,19 +19,44 @@ describe('v_mrr / v_arr', () => {
   it('sums only active, non-lifetime subscriptions, normalised to monthly', async () => {
     const [monthlyPlan] = await db
       .insert(plans)
-      .values({ code: 'mrr-monthly', name: 'Monthly', priceCents: 1000, interval: 'month', deviceLimit: 1 })
+      .values({
+        code: 'mrr-monthly',
+        name: 'Monthly',
+        priceCents: 1000,
+        interval: 'month',
+        deviceLimit: 1,
+      })
       .returning();
     const [yearlyPlan] = await db
       .insert(plans)
-      .values({ code: 'mrr-yearly', name: 'Yearly', priceCents: 12000, interval: 'year', deviceLimit: 1 })
+      .values({
+        code: 'mrr-yearly',
+        name: 'Yearly',
+        priceCents: 12000,
+        interval: 'year',
+        deviceLimit: 1,
+      })
       .returning();
     const [lifetimePlan] = await db
       .insert(plans)
-      .values({ code: 'mrr-lifetime', name: 'Lifetime', priceCents: 99999, interval: 'one_time', isLifetime: true, deviceLimit: 3 })
+      .values({
+        code: 'mrr-lifetime',
+        name: 'Lifetime',
+        priceCents: 99999,
+        interval: 'one_time',
+        isLifetime: true,
+        deviceLimit: 3,
+      })
       .returning();
     const [trialingPlan] = await db
       .insert(plans)
-      .values({ code: 'mrr-trialing-plan', name: 'Trialing', priceCents: 5000, interval: 'month', deviceLimit: 1 })
+      .values({
+        code: 'mrr-trialing-plan',
+        name: 'Trialing',
+        priceCents: 5000,
+        interval: 'month',
+        deviceLimit: 1,
+      })
       .returning();
 
     const userRows = await db

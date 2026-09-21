@@ -90,11 +90,11 @@ node infra/scripts/check-env.mjs <path>   # any other file
 
 ## 2. Environments
 
-| Environment | Compose file | Env file (from `.example`) | Deployed by | Trigger |
-| --- | --- | --- | --- | --- |
-| development | `infra/docker-compose.yml` | `.env` (repo root) or `apps/api/.env` | developer, locally | manual |
-| staging | `infra/docker-compose.staging.yml` | `infra/.env.staging` | `.github/workflows/release.yml` `deploy-staging` | push to `main` |
-| production | `infra/docker-compose.prod.yml` | `infra/.env.production` | `.github/workflows/release.yml` `deploy-production` | push tag `vX.Y.Z`, gated by the `production` GitHub Environment's required reviewers |
+| Environment | Compose file                       | Env file (from `.example`)            | Deployed by                                         | Trigger                                                                              |
+| ----------- | ---------------------------------- | ------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| development | `infra/docker-compose.yml`         | `.env` (repo root) or `apps/api/.env` | developer, locally                                  | manual                                                                               |
+| staging     | `infra/docker-compose.staging.yml` | `infra/.env.staging`                  | `.github/workflows/release.yml` `deploy-staging`    | push to `main`                                                                       |
+| production  | `infra/docker-compose.prod.yml`    | `infra/.env.production`               | `.github/workflows/release.yml` `deploy-production` | push tag `vX.Y.Z`, gated by the `production` GitHub Environment's required reviewers |
 
 Every `.env.*.example` documents every variable `apps/api/src/config/env.ts`
 declares (Zod schema — validated by `check-env.mjs`), plus the compose
@@ -116,13 +116,13 @@ Five images, all multi-stage, `node:22-alpine` (or `postgres:16-alpine` for
 `corepack pnpm@12.5.1`, OCI labels (`org.opencontainers.image.*` — title,
 description, revision, version, created, source):
 
-| Image | Dockerfile | Targets |
-| --- | --- | --- |
-| `api` | `infra/docker/api.Dockerfile` | `server` (Fastify REST/WS, `HEALTHCHECK` on `/health/live`), `worker` (BullMQ, `HEALTHCHECK` opens a raw TCP connection to Redis) — same pruned `pnpm deploy` output, different `CMD` |
-| `dashboard` | `infra/docker/dashboard.Dockerfile` | nginx SPA (self-host option only — Vercel, §6, is primary) |
-| `db-migrator` | `infra/docker/db-migrator.Dockerfile` | one-shot: `@sl/db migrate` then optional seed (`RUN_SEED=true`) |
-| `backup` | `infra/docker/backup.Dockerfile` | supercronic running `infra/backups/*.sh` on a schedule |
-| `caddy` | `infra/docker/caddy.Dockerfile` | Caddy + the `caddy-ratelimit` plugin (not in the stock image) |
+| Image         | Dockerfile                            | Targets                                                                                                                                                                               |
+| ------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `api`         | `infra/docker/api.Dockerfile`         | `server` (Fastify REST/WS, `HEALTHCHECK` on `/health/live`), `worker` (BullMQ, `HEALTHCHECK` opens a raw TCP connection to Redis) — same pruned `pnpm deploy` output, different `CMD` |
+| `dashboard`   | `infra/docker/dashboard.Dockerfile`   | nginx SPA (self-host option only — Vercel, §6, is primary)                                                                                                                            |
+| `db-migrator` | `infra/docker/db-migrator.Dockerfile` | one-shot: `@sl/db migrate` then optional seed (`RUN_SEED=true`)                                                                                                                       |
+| `backup`      | `infra/docker/backup.Dockerfile`      | supercronic running `infra/backups/*.sh` on a schedule                                                                                                                                |
+| `caddy`       | `infra/docker/caddy.Dockerfile`       | Caddy + the `caddy-ratelimit` plugin (not in the stock image)                                                                                                                         |
 
 **Local build** (no push): `pnpm docker:build:api` / `:worker` / `:dashboard`
 / `:migrator` / `:backup` (root `package.json`), or directly:
@@ -323,7 +323,7 @@ semantics). Two honest options, in increasing order of guarantee:
    (`docker swarm init`), then deploy with
    `docker stack deploy -c infra/docker-compose.prod.yml sniper-ledger`
    instead of `docker compose up -d` (same file, no changes needed) — this
-   *does* honor `update_config` (`parallelism: 1`, `order: start-first`,
+   _does_ honor `update_config` (`parallelism: 1`, `order: start-first`,
    automatic `failure_action: rollback`). Adopt this if `API_REPLICAS>=2`
    downtime during option 1 is ever measured as a real problem; until then
    it's added operational complexity (Swarm's own `docker stack` commands
@@ -352,7 +352,7 @@ migration rollback can't cleanly undo.
 
 Vercel is the **primary** dashboard host (`infra/docker-compose.{staging,
 prod}.yml`'s `dashboard` + Caddy's `dashboard.$DOMAIN` site block are a
-self-host *option*, not the default path). `vercel.json` (repo root)
+self-host _option_, not the default path). `vercel.json` (repo root)
 already points `installCommand`/`buildCommand` at the pinned
 `pnpm@12.5.1`/`pnpm --filter @sl/dashboard... build`, `outputDirectory` at
 `apps/dashboard/dist`, and its `ignoreCommand` builds once `apps/dashboard/`
@@ -367,7 +367,7 @@ exists (it does). One-time setup in the Vercel project:
    Vercel origin as the API, which doesn't exist there — see
    `docs/07-dashboard.md` §9.
 3. On the API side, set **`DASHBOARD_ORIGIN`** (`infra/.env.{staging,
-   production}`) to the *exact* dashboard origin Vercel serves — the API's
+production}`) to the _exact_ dashboard origin Vercel serves — the API's
    CORS allowlist (`apps/api/src/plugins/cors.ts`) matches the `Origin`
    header by exact string, and it's also what the API sends as
    `Access-Control-Allow-Origin`/embeds in cookie-scoping logic.
@@ -386,7 +386,7 @@ the API follow-ups pass, docs/09-security.md's former open finding #1):
   entirely, so there's no `Secure`/HTTPS-both-origins constraint to keep
   satisfied).
 - **Cross-site** (dashboard on a Vercel-issued domain like `*.vercel.app`
-  or any domain that does *not* share a registrable apex with the API):
+  or any domain that does _not_ share a registrable apex with the API):
   `SameSite=Lax` cookies are **not** sent on cross-site fetch/XHR
   requests, so login would appear to succeed (the response sets the
   cookie) but every subsequent authenticated request would look
@@ -506,7 +506,7 @@ paging). **Response**: `docker compose logs backup` for
 unreachable, disk full — cross-check `DBDown`/`DiskSpaceLow`) or an S3
 upload failure (non-fatal to the metric by design — check for the
 `WARNING: S3 upload failed` line specifically, since that alone would
-*not* trigger this alert; if the alert *is* firing, the local dump itself
+_not_ trigger this alert; if the alert _is_ firing, the local dump itself
 failed). Run `docker compose exec backup /app/pg-backup.sh` by hand to see
 the failure live.
 
@@ -518,7 +518,7 @@ means the backup that exists **may not be usable** — treat as urgent even
 though it isn't paired with data loss yet. `docker compose logs backup |
 grep verify-backup` for which check failed. Run
 `docker compose exec backup /app/verify-backup.sh` by hand for full output.
-If it's a corrupt dump specifically, the *previous* day's backup is the
+If it's a corrupt dump specifically, the _previous_ day's backup is the
 last known-good restore point until the next successful one — see §9's
 drill checklist for confirming that one is actually restorable too.
 
@@ -556,7 +556,7 @@ env vars — `PGHOST`/`PGPORT`/`PGUSER`/`PGDATABASE`/`PGPASSWORD`, set by the
 export the same vars, e.g. `PGHOST=127.0.0.1 PGUSER=sl PGPASSWORD=sl`):
 
 - **`pg-backup.sh`** — `pg_dump -Fc` (custom format, `--no-owner
-  --no-privileges`), gzip, sha256 sidecar. **Retention: 7 daily / 4 weekly
+--no-privileges`), gzip, sha256 sidecar. **Retention: 7 daily / 4 weekly
   (every Sunday) / 6 monthly (the 1st)**, independently pruned tiers under
   `$BACKUP_DIR/postgres/{daily,weekly,monthly}/`. Optional S3(-compatible)
   upload via `rclone` if `BACKUP_S3_REMOTE`/`BACKUP_S3_BUCKET` are set (an
@@ -607,16 +607,16 @@ Run this quarterly against **staging**, not production, and whenever
 someone new joins the on-call rotation:
 
 1. `docker compose -f infra/docker-compose.staging.yml exec backup ls -la
-   /backups/postgres/daily/` — confirm a recent dump exists.
+/backups/postgres/daily/` — confirm a recent dump exists.
 2. `docker compose -f infra/docker-compose.staging.yml exec backup
-   /app/verify-backup.sh` — confirm it passes (it also runs automatically
+/app/verify-backup.sh` — confirm it passes (it also runs automatically
    at 03:30 UTC daily, but run it live for the drill).
 3. Pick an actual restore target: either a **new** scratch database (safe,
    repeatable, what step 2 already does under the hood) or, for a fuller
    drill, spin up a **throwaway Postgres container** entirely
    (`docker run --rm -e POSTGRES_PASSWORD=sl -p 5433:5432 postgres:16-alpine`)
    and `PGHOST=127.0.0.1 PGPORT=5433 ./infra/backups/pg-restore.sh
-   <dump> sniper_ledger --create` against it — this also exercises "restore
+<dump> sniper_ledger --create` against it — this also exercises "restore
    onto a brand-new instance", the actual disaster scenario, not just
    "restore onto the existing instance".
 4. Spot-check business data, not just table existence: row counts roughly
@@ -657,7 +657,7 @@ Operational how-to for the levers `docs/01-architecture.md` §7 explains the
 reasoning behind:
 
 - **API replicas.** Bump `API_REPLICAS` in `infra/.env.{staging,
-  production}`, then `docker compose up -d` (§5.5 for the zero-downtime
+production}`, then `docker compose up -d` (§5.5 for the zero-downtime
   caveat). Caddy's `reverse_proxy api:3000` block resolves `api` to every
   replica container via Docker's embedded DNS and load-balances
   round-robin with active health checks (`health_uri /health/live`) —
@@ -714,7 +714,7 @@ and edit the file":
 - **SOPS** (+ age or KMS-backed keys): keep an **encrypted** version of
   `infra/.env.{staging,production}` committed to the repo (`sops -e`),
   decrypt it at deploy time (`sops -d infra/.env.production.enc >
-  infra/.env.production`) in the CI job or on the VM. This is the better
+infra/.env.production`) in the CI job or on the VM. This is the better
   fit if secrets should be reviewable in a PR diff (encrypted) and
   version-controlled alongside the infra that consumes them, rather than
   living only in a third-party dashboard.
@@ -739,8 +739,8 @@ rotate during low traffic and expect a support-ticket blip regardless.
 
 ## 12. Production readiness checklist
 
-- [ ] `infra/.env.production` filled in, `check-env.mjs` passes, `chmod
-      600`, not committed (`git status` clean in `infra/`).
+- [ ] `infra/.env.production` filled in, `check-env.mjs` passes, mode
+      `0600`, not committed (`git status` clean in `infra/`).
 - [ ] DNS for `api.<domain>`/`dashboard.<domain>` (if self-hosting)/
       `grafana.<domain>` resolves to the VM before first Caddy start.
 - [ ] Firewall: only 22/80/443(+443/udp) open (§5.1); Grafana's public

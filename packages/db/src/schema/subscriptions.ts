@@ -1,7 +1,17 @@
 // Matches migrations/0005_plans.sql, 0006_subscriptions.sql, 0007_licenses.sql.
 
 import { isNull, relations } from 'drizzle-orm';
-import { boolean, index, integer, jsonb, pgTable, smallint, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import {
+  boolean,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  smallint,
+  text,
+  uniqueIndex,
+  uuid,
+} from 'drizzle-orm/pg-core';
 
 import { adminUsers } from './admin.js';
 import {
@@ -78,7 +88,9 @@ export const subscriptions = pgTable(
 
     stripeSubscriptionId: text('stripe_subscription_id'),
     source: subscriptionSourceEnum('source').notNull().default('stripe'),
-    grantedByAdminId: uuid('granted_by_admin_id').references(() => adminUsers.id, { onDelete: 'set null' }),
+    grantedByAdminId: uuid('granted_by_admin_id').references(() => adminUsers.id, {
+      onDelete: 'set null',
+    }),
 
     canceledAt: timestamptz('canceled_at'),
     endedAt: timestamptz('ended_at'),
@@ -103,7 +115,10 @@ export const subscriptions = pgTable(
 export const subscriptionsRelations = relations(subscriptions, ({ one, many }) => ({
   user: one(users, { fields: [subscriptions.userId], references: [users.id] }),
   plan: one(plans, { fields: [subscriptions.planId], references: [plans.id] }),
-  grantedByAdmin: one(adminUsers, { fields: [subscriptions.grantedByAdminId], references: [adminUsers.id] }),
+  grantedByAdmin: one(adminUsers, {
+    fields: [subscriptions.grantedByAdminId],
+    references: [adminUsers.id],
+  }),
   licenses: many(licenses),
 }));
 
@@ -149,6 +164,9 @@ export const licenses = pgTable(
 );
 
 export const licensesRelations = relations(licenses, ({ one }) => ({
-  subscription: one(subscriptions, { fields: [licenses.subscriptionId], references: [subscriptions.id] }),
+  subscription: one(subscriptions, {
+    fields: [licenses.subscriptionId],
+    references: [subscriptions.id],
+  }),
   user: one(users, { fields: [licenses.userId], references: [users.id] }),
 }));

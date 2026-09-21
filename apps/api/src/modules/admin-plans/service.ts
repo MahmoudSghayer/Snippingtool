@@ -19,7 +19,9 @@ export function featuresArrayToJsonb(features: readonly string[]): Record<string
   return obj;
 }
 
-export function featuresJsonbToArray(features: Record<string, unknown> | null | undefined): string[] {
+export function featuresJsonbToArray(
+  features: Record<string, unknown> | null | undefined,
+): string[] {
   return Object.entries(features ?? {})
     .filter(([, enabled]) => Boolean(enabled))
     .map(([key]) => key);
@@ -43,7 +45,11 @@ function assertIntervalMatchesLifetime(input: { isLifetime: boolean; interval: s
   }
 }
 
-export async function createPlan(db: Database, input: PlanCreateRequest, actorId: string): Promise<PlanRow> {
+export async function createPlan(
+  db: Database,
+  input: PlanCreateRequest,
+  actorId: string,
+): Promise<PlanRow> {
   assertIntervalMatchesLifetime(input);
 
   const existing = await db.query.plans.findFirst({

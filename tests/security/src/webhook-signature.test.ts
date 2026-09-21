@@ -44,8 +44,15 @@ describe('Stripe webhook: signature verification', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/webhooks/stripe',
-      headers: { 'content-type': 'application/json', 'stripe-signature': 't=1,v1=not-a-real-signature' },
-      payload: JSON.stringify({ id: 'evt_fake', type: 'checkout.session.completed', data: { object: {} } }),
+      headers: {
+        'content-type': 'application/json',
+        'stripe-signature': 't=1,v1=not-a-real-signature',
+      },
+      payload: JSON.stringify({
+        id: 'evt_fake',
+        type: 'checkout.session.completed',
+        data: { object: {} },
+      }),
     });
     expect(res.statusCode).toBe(400);
     expect(res.json().code).toBe('VALIDATION_FAILED');
@@ -57,7 +64,11 @@ describe('Stripe webhook: signature verification', () => {
       method: 'POST',
       url: '/api/v1/webhooks/stripe',
       headers: { 'content-type': 'application/json', 'stripe-signature': 't=1,v1=forged' },
-      payload: JSON.stringify({ id: 'evt_should_not_persist', type: 'checkout.session.completed', data: { object: {} } }),
+      payload: JSON.stringify({
+        id: 'evt_should_not_persist',
+        type: 'checkout.session.completed',
+        data: { object: {} },
+      }),
     });
     const after = await app.db.query.stripeWebhookEvents.findMany();
     expect(after.length).toBe(before.length);

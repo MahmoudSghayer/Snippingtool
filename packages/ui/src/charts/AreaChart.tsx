@@ -23,7 +23,14 @@ export interface AreaChartProps {
   connectNulls?: boolean;
 }
 
-export function AreaChart({ data, xKey, series, valueFormatter, stacked, connectNulls = true }: AreaChartProps) {
+export function AreaChart({
+  data,
+  xKey,
+  series,
+  valueFormatter,
+  stacked,
+  connectNulls = true,
+}: AreaChartProps) {
   return (
     <ResponsiveContainer width="100%" height="100%">
       <RAreaChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
@@ -36,8 +43,21 @@ export function AreaChart({ data, xKey, series, valueFormatter, stacked, connect
           ))}
         </defs>
         <CartesianGrid stroke={GRID_COLOR} strokeDasharray="3 3" vertical={false} />
-        <XAxis dataKey={xKey} stroke={AXIS_COLOR} fontSize={11} tickLine={false} axisLine={{ stroke: GRID_COLOR }} />
-        <YAxis stroke={AXIS_COLOR} fontSize={11} tickLine={false} axisLine={false} width={48} tickFormatter={valueFormatter} />
+        <XAxis
+          dataKey={xKey}
+          stroke={AXIS_COLOR}
+          fontSize={11}
+          tickLine={false}
+          axisLine={{ stroke: GRID_COLOR }}
+        />
+        <YAxis
+          stroke={AXIS_COLOR}
+          fontSize={11}
+          tickLine={false}
+          axisLine={false}
+          width={48}
+          tickFormatter={valueFormatter}
+        />
         <Tooltip content={<ChartTooltip valueFormatter={valueFormatter} />} />
         {series.map((s, i) => (
           <Area

@@ -63,18 +63,18 @@ Two consumption paths read the same functions:
 
 All in `lib/analytics/kpi.ts`. `from`/`to` are inclusive UTC calendar days.
 
-| Metric | Formula | Notes |
-|---|---|---|
-| `totalUsers` | `COUNT(*) FROM users WHERE deleted_at IS NULL AND created_at <= end_of(to)` | Cumulative signups as of the end of `to`. |
-| `activeUsers7d` / `activeUsers30d` | `COUNT(DISTINCT user_id) FROM user_activity WHERE occurred_at IN [end_of(to) - N days, end_of(to))` | N = 7 or 30. Any `user_activity` row counts (login, search, heartbeat, …). |
-| `onlineUsers` | `SCARD presence:online` (Redis, `src/ws/presence.ts`) | Real-time only — reflects "now", not `to`. Reused read-only, not re-implemented. |
-| `totalRevenueCents` | `SUM(amount_cents) FROM payments WHERE status='succeeded' AND created_at IN [from, end_of(to))` | |
-| `mrrCents` / `arrCents` | `v_mrr.mrr_cents` / `v_arr.arr_cents` | Point-in-time snapshot of *now*, not range-dependent — see `02-database.md` for the view's own formula (active, non-lifetime subscriptions, price normalised to monthly: year÷12, week×4.345, day×30.44). |
-| `conversion.rate` | see below | |
-| `churn.rate` | see below | |
-| `retention[]` | see below | |
-| `extensionInstalls` | `COUNT(*) FROM extension_installs WHERE uninstalled_at IS NULL`, plus a `byBrowser` breakdown | Not range-dependent — always "installs live right now". |
-| `versionDistribution` | same install set, grouped by `version` | |
+| Metric                             | Formula                                                                                             | Notes                                                                                                                                                                                                     |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `totalUsers`                       | `COUNT(*) FROM users WHERE deleted_at IS NULL AND created_at <= end_of(to)`                         | Cumulative signups as of the end of `to`.                                                                                                                                                                 |
+| `activeUsers7d` / `activeUsers30d` | `COUNT(DISTINCT user_id) FROM user_activity WHERE occurred_at IN [end_of(to) - N days, end_of(to))` | N = 7 or 30. Any `user_activity` row counts (login, search, heartbeat, …).                                                                                                                                |
+| `onlineUsers`                      | `SCARD presence:online` (Redis, `src/ws/presence.ts`)                                               | Real-time only — reflects "now", not `to`. Reused read-only, not re-implemented.                                                                                                                          |
+| `totalRevenueCents`                | `SUM(amount_cents) FROM payments WHERE status='succeeded' AND created_at IN [from, end_of(to))`     |                                                                                                                                                                                                           |
+| `mrrCents` / `arrCents`            | `v_mrr.mrr_cents` / `v_arr.arr_cents`                                                               | Point-in-time snapshot of _now_, not range-dependent — see `02-database.md` for the view's own formula (active, non-lifetime subscriptions, price normalised to monthly: year÷12, week×4.345, day×30.44). |
+| `conversion.rate`                  | see below                                                                                           |                                                                                                                                                                                                           |
+| `churn.rate`                       | see below                                                                                           |                                                                                                                                                                                                           |
+| `retention[]`                      | see below                                                                                           |                                                                                                                                                                                                           |
+| `extensionInstalls`                | `COUNT(*) FROM extension_installs WHERE uninstalled_at IS NULL`, plus a `byBrowser` breakdown       | Not range-dependent — always "installs live right now".                                                                                                                                                   |
+| `versionDistribution`              | same install set, grouped by `version`                                                              |                                                                                                                                                                                                           |
 
 ### Conversion (trial → paid within 30 days)
 
@@ -87,7 +87,7 @@ place**. Two facts force that:
    clears it in the same `UPDATE` that sets `status = 'expired'`.
 2. `subscriptions_one_live_per_user` (a partial unique index) means the
    checkout/admin-activate code paths refuse to touch a user who still has
-   *any* live subscription — so a paid subscription is always a **separate
+   _any_ live subscription — so a paid subscription is always a **separate
    row**, created only after the trial row has stopped being live.
 
 So conversion is computed by correlating two rows per user, not one row's
@@ -98,7 +98,7 @@ field mutation:
 - For each cohort row, its **trial-end reference** is `ended_at` if the
   trial has already run its course (set by the expiry sweep), else
   `trial_ends_at` for one still in progress at query time.
-- **Converted**: the same `user_id` has at least one *other* subscription
+- **Converted**: the same `user_id` has at least one _other_ subscription
   row (different `id`, a non-`trial` plan) whose `created_at` falls in
   `[reference, reference + 30 days]`.
 - `rate = converted / cohortSize` (`0` when the cohort is empty).
@@ -111,7 +111,7 @@ count); one never converts. `cohortSize = 4`, `converted = 1`, `rate = 0.25`.
 
 ### Churn
 
-Also deliberately avoids reading a subscription row's *current* `status` —
+Also deliberately avoids reading a subscription row's _current_ `status` —
 a single mutable-state column can't answer "was this live at a past
 instant" once it's been overwritten. Only lifecycle timestamps are used,
 since those are set once and never reverted:
@@ -119,7 +119,7 @@ since those are set once and never reverted:
 - **`activeAtStart`**: subscriptions created before `from` whose
   cancellation/end (if any) had not yet happened as of the instant `from`
   begins: `created_at <= from AND (canceled_at IS NULL OR canceled_at >
-  from) AND (ended_at IS NULL OR ended_at > from)`. `canceled_at` is set
+from) AND (ended_at IS NULL OR ended_at > from)`. `canceled_at` is set
   the instant a user requests cancellation (even though `status` itself
   often doesn't flip to `'canceled'` until the current period actually
   ends), so this correctly counts a "pending cancellation" row as live at
@@ -134,11 +134,11 @@ since those are set once and never reverted:
 
 - **Cohort**: users whose `created_at` falls within `[from, to]`, grouped
   by the Monday (UTC) of their signup week — `cohortWeek`.
-- **D7 retained**: cohort member has ≥1 `user_activity` row on the *exact*
+- **D7 retained**: cohort member has ≥1 `user_activity` row on the _exact_
   calendar day `signup_day + 7` (a fixed 24h UTC window, not "any activity
   since"). **D30 retained**: same test at `signup_day + 30`.
 - `retentionD7 = retainedD7 / cohortSize`, `retentionD30 = retainedD30 /
-  cohortSize`, per cohort week.
+cohortSize`, per cohort week.
 
 This is "N-day retention" (active on exactly day N after signup), the
 simplest and most common definition — not "N-day rolling retention" (active
@@ -154,13 +154,13 @@ table (maintained by the `profits.rollup` hourly job — see
 `02-database.md` §6.6) — never by `trades` directly, so these numbers
 always match what a user's own `/api/v1/profits` shows for the same range.
 
-| Function | What it computes |
-|---|---|
+| Function                                               | What it computes                                                                                                                                                                                                                                                                                                                                |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `getPlatformProfitSeries(db, {from, to, granularity})` | Platform-wide series, bucketed (§7) and zero-filled. Each point: `netProfit`, `coinsSpent`, `coinsEarned`, `coinsTraded` (`coinsSpent + coinsEarned` — "total coins traded"), `snipes`, `successes`, `tradesClosed`, `activeTraders` (distinct `user_id` count in that bucket), `snipeSuccessRate` (`successes / snipes`, `0` if `snipes = 0`). |
-| `getUserProfitSeries(db, userId, params)` | Same shape, scoped to one user. Backs `/api/v1/analytics/me/profits`. |
-| `getUserLifetimeProfit(db, userId)` | All-time per-user totals, from `v_user_lifetime_profit`. |
-| `getPlatformLifetimeSummary(db, {from, to})` | `netProfit` and `coinsTraded` summed over the whole range, plus `avgProfitPerActiveTrader = netProfit / distinct active traders in range`. |
-| `getProfitLeaderboard(db, {from, to, limit, order})` | Top-N (`order: 'top'`) or least-N (`order: 'least'`) users by `SUM(net_profit)` over `[from, to]`, computed in Postgres via `GROUP BY` + `sum()`/`ORDER BY`, not by loading every row into the app. Ties broken by `user_id` ascending for a stable, deterministic order. |
+| `getUserProfitSeries(db, userId, params)`              | Same shape, scoped to one user. Backs `/api/v1/analytics/me/profits`.                                                                                                                                                                                                                                                                           |
+| `getUserLifetimeProfit(db, userId)`                    | All-time per-user totals, from `v_user_lifetime_profit`.                                                                                                                                                                                                                                                                                        |
+| `getPlatformLifetimeSummary(db, {from, to})`           | `netProfit` and `coinsTraded` summed over the whole range, plus `avgProfitPerActiveTrader = netProfit / distinct active traders in range`.                                                                                                                                                                                                      |
+| `getProfitLeaderboard(db, {from, to, limit, order})`   | Top-N (`order: 'top'`) or least-N (`order: 'least'`) users by `SUM(net_profit)` over `[from, to]`, computed in Postgres via `GROUP BY` + `sum()`/`ORDER BY`, not by loading every row into the app. Ties broken by `user_id` ascending for a stable, deterministic order.                                                                       |
 
 ---
 
@@ -170,16 +170,16 @@ always match what a user's own `/api/v1/profits` shows for the same range.
 granularity, userId?})` (`userId` omitted = platform-wide, admin view; set =
 scoped, `/api/v1/analytics/me/activity`), sourced from three tables:
 
-| Field | Source |
-|---|---|
-| `logins` | `user_activity` rows with `type = 'login'` |
-| `filterChanges` | `user_activity` rows with `type = 'filter_change'` |
-| `errors` | `user_activity` rows with `type = 'error'` |
-| `searches` | one row per `search_activity` row |
-| `snipeAttempts` | one row per `sniping_activity` row (every outcome, including `'attempted'`/`'blocked'`/`'error'`, counts as an attempt) |
-| `snipeSuccesses` | `sniping_activity` rows with `outcome = 'success'` |
-| `activeDevices` | distinct `device_id` across all three source tables in the bucket |
-| `activeIps` | distinct `ip` from `user_activity` rows in the bucket (the only one of the three tables that carries an IP) |
+| Field            | Source                                                                                                                  |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `logins`         | `user_activity` rows with `type = 'login'`                                                                              |
+| `filterChanges`  | `user_activity` rows with `type = 'filter_change'`                                                                      |
+| `errors`         | `user_activity` rows with `type = 'error'`                                                                              |
+| `searches`       | one row per `search_activity` row                                                                                       |
+| `snipeAttempts`  | one row per `sniping_activity` row (every outcome, including `'attempted'`/`'blocked'`/`'error'`, counts as an attempt) |
+| `snipeSuccesses` | `sniping_activity` rows with `outcome = 'success'`                                                                      |
+| `activeDevices`  | distinct `device_id` across all three source tables in the bucket                                                       |
+| `activeIps`      | distinct `ip` from `user_activity` rows in the bucket (the only one of the three tables that carries an IP)             |
 
 ---
 
@@ -187,15 +187,15 @@ scoped, `/api/v1/analytics/me/activity`), sourced from three tables:
 
 `lib/analytics/subscriptions.ts`.
 
-| Field | Formula |
-|---|---|
-| `newSubscriptions` (per bucket) | subscriptions whose `created_at` falls in that bucket |
-| `canceledSubscriptions` (per bucket) | subscriptions whose `canceled_at` falls in that bucket |
-| `trialStarts` (per bucket) | of the above "new" subscriptions, those with `trial_ends_at` set (i.e. plan = `trial`) |
-| `trialConversions` (per bucket) | subscriptions passing the §2 conversion test, bucketed by *when billing started* (`current_period_start`) rather than by trial-cohort week — "conversions that happened in this bucket" |
-| `couponRedemptions` (per bucket) | `coupon_redemptions` rows whose `redeemed_at` falls in that bucket |
-| `planMix` | current (as of "now") distribution of live subscriptions (`v_active_subscriptions`' status set) by `plans.code` — a snapshot, not range-dependent |
-| `pastDueCount` | current count of subscriptions with `status = 'past_due'` — a snapshot |
+| Field                                | Formula                                                                                                                                                                                 |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `newSubscriptions` (per bucket)      | subscriptions whose `created_at` falls in that bucket                                                                                                                                   |
+| `canceledSubscriptions` (per bucket) | subscriptions whose `canceled_at` falls in that bucket                                                                                                                                  |
+| `trialStarts` (per bucket)           | of the above "new" subscriptions, those with `trial_ends_at` set (i.e. plan = `trial`)                                                                                                  |
+| `trialConversions` (per bucket)      | subscriptions passing the §2 conversion test, bucketed by _when billing started_ (`current_period_start`) rather than by trial-cohort week — "conversions that happened in this bucket" |
+| `couponRedemptions` (per bucket)     | `coupon_redemptions` rows whose `redeemed_at` falls in that bucket                                                                                                                      |
+| `planMix`                            | current (as of "now") distribution of live subscriptions (`v_active_subscriptions`' status set) by `plans.code` — a snapshot, not range-dependent                                       |
+| `pastDueCount`                       | current count of subscriptions with `status = 'past_due'` — a snapshot                                                                                                                  |
 
 ---
 
@@ -214,7 +214,7 @@ scoped, `/api/v1/analytics/me/activity`), sourced from three tables:
   `extension_installs` rows.
 - **Error rates** (`lib/analytics/errors.ts`): `extensionErrorsInRange` =
   `COUNT(*) FROM user_activity WHERE type = 'error' AND occurred_at IN
-  [from, to)` (written by `POST /api/v1/extension/errors`);
+[from, to)` (written by `POST /api/v1/extension/errors`);
   `apiServerErrorsLast5Min` = the existing rolling Redis 5xx counter
   (`src/lib/error-rate.ts`'s `getErrorRate`, already used by
   `admin-system`'s health endpoint — read-only reuse here, real-time only,
@@ -240,13 +240,13 @@ scoped, `/api/v1/analytics/me/activity`), sourced from three tables:
 function shares.
 
 **One vocabulary, everywhere**: `granularity` is `'day'|'week'|'month'|
-'lifetime'` on every endpoint in this document *and* on `GET /api/v1/profits`
+'lifetime'` on every endpoint in this document _and_ on `GET /api/v1/profits`
 (`apps/api/src/modules/profits`) — `packages/shared/src/schemas/trades.ts`'s
 `profitQuerySchema` shares `schemas/analytics.ts`'s `granularitySchema` for
 this field. This was previously a defect (docs/12-testing.md "Defects
 found" #6): `/profits` used its own `'daily'|'weekly'|'monthly'|'lifetime'`
 enum, out of step with every other granularity-taking route. `/profits`
-still *accepts* the legacy `'daily'/'weekly'/'monthly'` strings on input —
+still _accepts_ the legacy `'daily'/'weekly'/'monthly'` strings on input —
 normalised to the canonical value before validation — for backwards
 compatibility with any existing caller; this is a **deprecated** input
 alias only, never returned in a response (every response always echoes the
@@ -259,7 +259,7 @@ it.
 - **`month`**: the 1st of that UTC month.
 - **`lifetime`**: the entire `[from, to]` range collapses into one bucket
   keyed `"lifetime"`.
-- **Gap-filling**: every series is computed over the *complete* bucket axis
+- **Gap-filling**: every series is computed over the _complete_ bucket axis
   for `[from, to]` at the requested granularity — a day/week/month with no
   underlying rows still appears in the output with every numeric field at
   `0` (and `snipeSuccessRate` at `0`, not `NaN`), never omitted.
@@ -283,9 +283,9 @@ ownership. This is a documented limitation (§11), not silently ignored.
 - `computeDailyMetrics(db, day)` — pure; computes every metric below for
   one UTC day and returns `{ day, metric, dimension, value }[]`.
 - `upsertAnalyticsDaily(db, rows)` — `INSERT … ON CONFLICT (day, metric,
-  dimension) DO UPDATE SET value = excluded.value`. Idempotent: re-running
+dimension) DO UPDATE SET value = excluded.value`. Idempotent: re-running
   for a day whose underlying data hasn't changed produces byte-identical
-  rows; re-running after the data *has* changed overwrites in place
+  rows; re-running after the data _has_ changed overwrites in place
   (upsert), never appends a duplicate.
 - `materializeDay(db, day)` — `computeDailyMetrics` + `upsertAnalyticsDaily`
   in one call; returns the row count written.
@@ -307,9 +307,9 @@ no historical meaning (§11).
 
 ### Jobs
 
-| Job | Schedule | What it does |
-|---|---|---|
-| `analytics.daily` (`src/jobs/analytics.daily.job.ts`) | `0 2 * * *` (02:00 UTC nightly) | `materializeDay` for **yesterday** (UTC), then `refreshMvKpiDaily`. Runs after `profits.rollup` (hourly) and the 5-minute subscription/license jobs, so yesterday's data is long finalised. |
+| Job                                                     | Schedule                                                                  | What it does                                                                                                                                                                                                                                                                  |
+| ------------------------------------------------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `analytics.daily` (`src/jobs/analytics.daily.job.ts`)   | `0 2 * * *` (02:00 UTC nightly)                                           | `materializeDay` for **yesterday** (UTC), then `refreshMvKpiDaily`. Runs after `profits.rollup` (hourly) and the 5-minute subscription/license jobs, so yesterday's data is long finalised.                                                                                   |
 | `analytics.hourly` (`src/jobs/analytics.hourly.job.ts`) | `20 * * * *` (hourly, offset a few minutes past `profits.rollup`'s `:07`) | `materializeDay` for **today** (UTC) — a partial-day snapshot that converges to the full day's numbers as more of today's data lands, the same self-healing idempotent-upsert pattern as `profits.rollup.job.ts`. Does **not** refresh `mv_kpi_daily` (once/night is enough). |
 
 ### Backfill
@@ -333,25 +333,25 @@ schemas from `@sl/shared`'s `schemas/analytics.ts`.
 
 ### User-facing — `modules/analytics` (auth: bearer/cookie session, `fastify.authenticate`; always scoped to `request.authUser.id`)
 
-| Method & path | Query | Notes |
-|---|---|---|
-| `GET /api/v1/analytics/me/overview` | — | Lifetime profit/coins/snipes, last-7d/30d net profit & snipes, active device count, lifetime snipe success rate. |
-| `GET /api/v1/analytics/me/profits` | `from`, `to`, `granularity` | §3, scoped to the caller. |
-| `GET /api/v1/analytics/me/activity` | `from`, `to`, `granularity`, `tz` | §4, scoped to the caller. |
+| Method & path                       | Query                             | Notes                                                                                                            |
+| ----------------------------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `GET /api/v1/analytics/me/overview` | —                                 | Lifetime profit/coins/snipes, last-7d/30d net profit & snipes, active device count, lifetime snipe success rate. |
+| `GET /api/v1/analytics/me/profits`  | `from`, `to`, `granularity`       | §3, scoped to the caller.                                                                                        |
+| `GET /api/v1/analytics/me/activity` | `from`, `to`, `granularity`, `tz` | §4, scoped to the caller.                                                                                        |
 
 ### Admin — `modules/admin-analytics` (auth: `fastify.requirePermission('analytics.read')`)
 
-| Method & path | Query | Notes |
-|---|---|---|
-| `GET /api/v1/admin/analytics/overview` | `from`, `to`, `granularity`, `tz` | §2 KPI overview. |
-| `GET /api/v1/admin/analytics/profits` | `from`, `to`, `granularity`, `tz` | §3 platform series + lifetime summary. |
-| `GET /api/v1/admin/analytics/profits/leaderboard` | `from`, `to`, `limit` (1–100, default 10), `order` (`top`\|`least`) | §3 leaderboard. |
-| `GET /api/v1/admin/analytics/activity` | `from`, `to`, `granularity`, `tz` | §4, platform-wide. |
-| `GET /api/v1/admin/analytics/subscriptions` | `from`, `to`, `granularity`, `tz` | §5. |
-| `GET /api/v1/admin/analytics/feature-usage` | `from`, `to` | §6. |
-| `GET /api/v1/admin/analytics/extension` | `from`, `to` | §6. |
-| `GET /api/v1/admin/analytics/errors` | `from`, `to` | §6. |
-| `GET /api/v1/admin/analytics/performance` | — | §6, real-time. |
+| Method & path                                     | Query                                                               | Notes                                  |
+| ------------------------------------------------- | ------------------------------------------------------------------- | -------------------------------------- |
+| `GET /api/v1/admin/analytics/overview`            | `from`, `to`, `granularity`, `tz`                                   | §2 KPI overview.                       |
+| `GET /api/v1/admin/analytics/profits`             | `from`, `to`, `granularity`, `tz`                                   | §3 platform series + lifetime summary. |
+| `GET /api/v1/admin/analytics/profits/leaderboard` | `from`, `to`, `limit` (1–100, default 10), `order` (`top`\|`least`) | §3 leaderboard.                        |
+| `GET /api/v1/admin/analytics/activity`            | `from`, `to`, `granularity`, `tz`                                   | §4, platform-wide.                     |
+| `GET /api/v1/admin/analytics/subscriptions`       | `from`, `to`, `granularity`, `tz`                                   | §5.                                    |
+| `GET /api/v1/admin/analytics/feature-usage`       | `from`, `to`                                                        | §6.                                    |
+| `GET /api/v1/admin/analytics/extension`           | `from`, `to`                                                        | §6.                                    |
+| `GET /api/v1/admin/analytics/errors`              | `from`, `to`                                                        | §6.                                    |
+| `GET /api/v1/admin/analytics/performance`         | —                                                                   | §6, real-time.                         |
 
 Rate limiting: every route above falls under the global default
 (`RATE_LIMIT_GLOBAL_MAX` / `RATE_LIMIT_GLOBAL_WINDOW_MS`, per IP —
@@ -369,7 +369,7 @@ format=json|csv` (same `analytics.read` permission). `format` defaults to
 - **`json`**: `{ items: [...] }`, one row per UTC day in `[from, to]`
   (`kpi` report is a single summary row today — see below).
 - **`csv`**: `text/csv; charset=utf-8`, `Content-Disposition: attachment;
-  filename="<report>-report-<from>-to-<to>.csv"`, **streamed** via
+filename="<report>-report-<from>-to-<to>.csv"`, **streamed** via
   `lib/analytics/csv.ts`'s `csvStream()` — a Node `Readable` built from an
   async generator that yields the header line and then one line per row,
   handed straight to `reply.send()` (chunked transfer encoding). The
@@ -386,7 +386,7 @@ format=json|csv` (same `analytics.read` permission). `format` defaults to
   sending: `actorType: 'admin'`, `actorId` = the calling admin's `users.id`,
   `action: 'analytics.export'`, `entityType: 'analytics_report'`,
   `entityId: null` (no single target entity), `after: { report, from, to,
-  format }` — via the skeleton's `recordAudit()` helper
+format }` — via the skeleton's `recordAudit()` helper
   (`src/lib/audit.ts`), same convention as every other admin mutation.
 
 ---
@@ -398,7 +398,7 @@ format=json|csv` (same `analytics.read` permission). `format` defaults to
 - **`mrr_cents`/`arr_cents`/`plan_mix`/`past_due_count` are point-in-time
   snapshots**, not day-accurate historical reconstructions — `subscriptions`
   is a single mutable-state table with no history log, so a materialised
-  row for a past day reflects subscription state *as of when the job ran*,
+  row for a past day reflects subscription state _as of when the job ran_,
   not as of that historical day. Re-running `analytics.daily`/
   `analytics.hourly` every day keeps them fresh going forward; a backfill
   run long after the fact will show "now"'s snapshot under every past day's

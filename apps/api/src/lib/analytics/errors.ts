@@ -7,7 +7,6 @@
 import { userActivity, type Database } from '@sl/db';
 import { and, count, eq, gte, lt } from 'drizzle-orm';
 
-
 import { getErrorRate } from '../error-rate.js';
 
 import { endOfDayUtc, parseDayUtc } from './dates.js';
@@ -24,12 +23,22 @@ export interface ErrorRates {
   apiServerErrorsLast5Min: number;
 }
 
-export async function getErrorRates(db: Database, redis: Redis, params: ErrorRateParams): Promise<ErrorRates> {
+export async function getErrorRates(
+  db: Database,
+  redis: Redis,
+  params: ErrorRateParams,
+): Promise<ErrorRates> {
   const [[row], apiServerErrorsLast5Min] = await Promise.all([
     db
       .select({ n: count() })
       .from(userActivity)
-      .where(and(eq(userActivity.type, 'error'), gte(userActivity.occurredAt, parseDayUtc(params.from)), lt(userActivity.occurredAt, endOfDayUtc(params.to)))),
+      .where(
+        and(
+          eq(userActivity.type, 'error'),
+          gte(userActivity.occurredAt, parseDayUtc(params.from)),
+          lt(userActivity.occurredAt, endOfDayUtc(params.to)),
+        ),
+      ),
     getErrorRate(redis, 5),
   ]);
   return { extensionErrorsInRange: row?.n ?? 0, apiServerErrorsLast5Min };

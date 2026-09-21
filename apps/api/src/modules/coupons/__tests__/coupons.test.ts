@@ -20,13 +20,24 @@ import type Stripe from 'stripe';
 async function createVerifiedUser(app: FastifyInstance, email: string): Promise<string> {
   const { users } = await import('@sl/db');
   const id = newId();
-  await app.db.insert(users).values({ id, email, passwordHash: await hashSecret('irrelevant-password-123'), emailVerifiedAt: new Date() });
+  await app.db.insert(users).values({
+    id,
+    email,
+    passwordHash: await hashSecret('irrelevant-password-123'),
+    emailVerifiedAt: new Date(),
+  });
   return id;
 }
 
 async function insertCoupon(
   app: FastifyInstance,
-  input: { code: string; type: 'percent' | 'fixed' | 'free_days' | 'lifetime'; value: number; planIds?: string[]; maxRedemptions?: number | null },
+  input: {
+    code: string;
+    type: 'percent' | 'fixed' | 'free_days' | 'lifetime';
+    value: number;
+    planIds?: string[];
+    maxRedemptions?: number | null;
+  },
 ) {
   const [row] = await app.db
     .insert(coupons)
@@ -64,7 +75,11 @@ describe('coupons module', () => {
   it('POST /coupons/validate previews a percent coupon with a discount description', async () => {
     await insertCoupon(app, { code: 'TENOFF', type: 'percent', value: 10 });
 
-    const res = await app.inject({ method: 'POST', url: '/api/v1/coupons/validate', payload: { code: 'TENOFF', planCode: 'pro' } });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/coupons/validate',
+      payload: { code: 'TENOFF', planCode: 'pro' },
+    });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.valid).toBe(true);
@@ -73,7 +88,11 @@ describe('coupons module', () => {
   });
 
   it('POST /coupons/validate reports NOT_FOUND for an unknown code', async () => {
-    const res = await app.inject({ method: 'POST', url: '/api/v1/coupons/validate', payload: { code: 'NOPE', planCode: 'pro' } });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/coupons/validate',
+      payload: { code: 'NOPE', planCode: 'pro' },
+    });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.valid).toBe(false);
@@ -82,9 +101,18 @@ describe('coupons module', () => {
 
   it('POST /coupons/validate reports PLAN_NOT_ELIGIBLE when the coupon is restricted to a different plan', async () => {
     const ultimatePlan = await app.db.query.plans.findFirst({ where: eq(plans.code, 'ultimate') });
-    await insertCoupon(app, { code: 'ULTIMATEONLY', type: 'percent', value: 20, planIds: [ultimatePlan!.id] });
+    await insertCoupon(app, {
+      code: 'ULTIMATEONLY',
+      type: 'percent',
+      value: 20,
+      planIds: [ultimatePlan!.id],
+    });
 
-    const res = await app.inject({ method: 'POST', url: '/api/v1/coupons/validate', payload: { code: 'ULTIMATEONLY', planCode: 'basic' } });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/coupons/validate',
+      payload: { code: 'ULTIMATEONLY', planCode: 'basic' },
+    });
     const body = res.json();
     expect(body.valid).toBe(false);
     expect(body.reason).toBe('PLAN_NOT_ELIGIBLE');
@@ -92,7 +120,12 @@ describe('coupons module', () => {
 
   it('checkCouponEligibility reports MAX_REDEMPTIONS once the cap is reached', async () => {
     const proPlan = await app.db.query.plans.findFirst({ where: eq(plans.code, 'pro') });
-    const coupon = await insertCoupon(app, { code: 'LIMITED1', type: 'fixed', value: 500, maxRedemptions: 1 });
+    const coupon = await insertCoupon(app, {
+      code: 'LIMITED1',
+      type: 'fixed',
+      value: 500,
+      maxRedemptions: 1,
+    });
 
     const userId = await createVerifiedUser(app, 'redeemer@example.com');
     const [sub] = await app.db
@@ -133,15 +166,33 @@ describe('coupons module', () => {
     const userId = await createVerifiedUser(app, 'free-days@example.com');
     let stripeCheckoutCalled = false;
     const fakeStripe = {
-      checkout: { sessions: { create: async () => { stripeCheckoutCalled = true; return { id: 'cs_should_not_be_called', url: 'https://irrelevant' }; } } },
+      checkout: {
+        sessions: {
+          create: async () => {
+            stripeCheckoutCalled = true;
+            return { id: 'cs_should_not_be_called', url: 'https://irrelevant' };
+          },
+        },
+      },
     } as unknown as Stripe;
 
     const result = await createCheckoutSession(
       fakeStripe,
       app.db,
       app.redis,
-      { secretKey: 'sk_test', webhookSecret: 'whsec_test', priceIds: { basic: 'p', pro: 'p', ultimate: 'p', lifetime: 'p' } },
-      { userId, email: 'free-days@example.com', planCode: 'pro', successUrl: 'https://app/success', cancelUrl: 'https://app/cancel', couponCode: 'WELCOME14' },
+      {
+        secretKey: 'sk_test',
+        webhookSecret: 'whsec_test',
+        priceIds: { basic: 'p', pro: 'p', ultimate: 'p', lifetime: 'p' },
+      },
+      {
+        userId,
+        email: 'free-days@example.com',
+        planCode: 'pro',
+        successUrl: 'https://app/success',
+        cancelUrl: 'https://app/cancel',
+        couponCode: 'WELCOME14',
+      },
     );
 
     expect(stripeCheckoutCalled).toBe(false);
@@ -151,7 +202,9 @@ describe('coupons module', () => {
       expect(result.subscription.plan.code).toBe('pro');
     }
 
-    const couponRow = await app.db.query.coupons.findFirst({ where: eq(coupons.code, 'WELCOME14') });
+    const couponRow = await app.db.query.coupons.findFirst({
+      where: eq(coupons.code, 'WELCOME14'),
+    });
     expect(couponRow!.redeemedCount).toBe(1);
   });
 });

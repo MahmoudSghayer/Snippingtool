@@ -8,7 +8,7 @@ on:
     # Nightly load smoke (see the `load-smoke` job below) — 03:17 UTC,
     # off-the-hour on purpose so it doesn't pile up with every other repo's
     # on-the-hour cron jobs on GitHub's shared runners.
-    - cron: "17 3 * * *"
+    - cron: '17 3 * * *'
   workflow_dispatch: {} # lets a human fire `load-smoke` on demand from the Actions tab
 
 # Cancel superseded runs on the same ref (a new push to a PR branch makes
@@ -18,8 +18,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  NODE_VERSION: "22"
-  PNPM_VERSION: "12.5.1"
+  NODE_VERSION: '22'
+  PNPM_VERSION: '12.5.1'
 
 jobs:
   # -------------------------------------------------------------------------
@@ -38,7 +38,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-pnpm
-      - run: pnpm -r typecheck
+      # turbo's typecheck task depends on ^build, so workspace deps (@sl/shared,
+      # @sl/db, @sl/ui) are compiled to dist before their consumers typecheck.
+      - run: pnpm typecheck
 
   # -------------------------------------------------------------------------
   # Everything that needs no external service: packages/shared,
@@ -63,7 +65,7 @@ jobs:
           POSTGRES_USER: sl
           POSTGRES_PASSWORD: sl
           POSTGRES_DB: sniper_ledger
-        ports: ["5432:5432"]
+        ports: ['5432:5432']
         options: >-
           --health-cmd "pg_isready -U sl -d sniper_ledger"
           --health-interval 5s --health-timeout 5s --health-retries 10
@@ -100,13 +102,13 @@ jobs:
           POSTGRES_USER: sl
           POSTGRES_PASSWORD: sl
           POSTGRES_DB: sniper_ledger
-        ports: ["5432:5432"]
+        ports: ['5432:5432']
         options: >-
           --health-cmd "pg_isready -U sl -d sniper_ledger"
           --health-interval 5s --health-timeout 5s --health-retries 10
       redis:
         image: redis:7-alpine
-        ports: ["6379:6379"]
+        ports: ['6379:6379']
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 5s --health-timeout 5s --health-retries 10
@@ -141,13 +143,13 @@ jobs:
           POSTGRES_USER: sl
           POSTGRES_PASSWORD: sl
           POSTGRES_DB: sniper_ledger
-        ports: ["5432:5432"]
+        ports: ['5432:5432']
         options: >-
           --health-cmd "pg_isready -U sl -d sniper_ledger"
           --health-interval 5s --health-timeout 5s --health-retries 10
       redis:
         image: redis:7-alpine
-        ports: ["6379:6379"]
+        ports: ['6379:6379']
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 5s --health-timeout 5s --health-retries 10
@@ -164,7 +166,7 @@ jobs:
         env:
           NODE_ENV: test
           TEST_DATABASE_URL: postgres://sl:sl@localhost:5432/sniper_ledger_test_security
-          REDIS_TEST_DB: "13"
+          REDIS_TEST_DB: '13'
 
   # -------------------------------------------------------------------------
   extension-build:
@@ -208,6 +210,9 @@ jobs:
   security-scan:
     name: Security scan
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read # gitleaks-action lists the PR's commits
     steps:
       - uses: actions/checkout@v4
         with:
@@ -305,13 +310,13 @@ jobs:
           POSTGRES_USER: sl
           POSTGRES_PASSWORD: sl
           POSTGRES_DB: sniper_ledger
-        ports: ["5432:5432"]
+        ports: ['5432:5432']
         options: >-
           --health-cmd "pg_isready -U sl -d sniper_ledger"
           --health-interval 5s --health-timeout 5s --health-retries 10
       redis:
         image: redis:7-alpine
-        ports: ["6379:6379"]
+        ports: ['6379:6379']
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 5s --health-timeout 5s --health-retries 10
@@ -323,7 +328,7 @@ jobs:
       - uses: ./.github/actions/setup-pnpm
       - uses: ./.github/actions/setup-playwright-chromium
         with:
-          workspace-filter: "@sl/dashboard"
+          workspace-filter: '@sl/dashboard'
       - name: write apps/api/.env (the e2e-spawned api process reads this via dotenv/config)
         run: cp infra/env/.env.development.example apps/api/.env
       - name: build @sl/api's deps (the e2e webServer runs apps/api from source via tsx, but @sl/db/@sl/shared resolve through their built dist)
@@ -333,7 +338,7 @@ jobs:
       - run: pnpm --filter @sl/db seed
         env:
           SEED_ADMIN_EMAIL: admin@sniperledger.local
-          SEED_ADMIN_PASSWORD: "Admin-Passw0rd!"
+          SEED_ADMIN_PASSWORD: 'Admin-Passw0rd!'
       - name: playwright e2e (xvfb)
         run: xvfb-run -a pnpm --filter @sl/dashboard test:e2e
         env:
@@ -362,7 +367,7 @@ jobs:
       - uses: ./.github/actions/setup-pnpm
       - uses: ./.github/actions/setup-playwright-chromium
         with:
-          workspace-filter: "@sl/extension"
+          workspace-filter: '@sl/extension'
       - name: build the ledger (listable) target — the e2e suite loads dist/ledger
         run: pnpm exec turbo run build --filter=@sl/extension...
       - name: playwright e2e (xvfb)
@@ -403,13 +408,13 @@ jobs:
           POSTGRES_USER: sl
           POSTGRES_PASSWORD: sl
           POSTGRES_DB: sniper_ledger
-        ports: ["5432:5432"]
+        ports: ['5432:5432']
         options: >-
           --health-cmd "pg_isready -U sl -d sniper_ledger"
           --health-interval 5s --health-timeout 5s --health-retries 10
       redis:
         image: redis:7-alpine
-        ports: ["6379:6379"]
+        ports: ['6379:6379']
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 5s --health-timeout 5s --health-retries 10
@@ -417,13 +422,13 @@ jobs:
       DATABASE_URL: postgres://sl:sl@localhost:5432/sniper_ledger
       REDIS_URL: redis://localhost:6379
       SEED_ADMIN_EMAIL: admin@sniperledger.local
-      SEED_ADMIN_PASSWORD: "Admin-Passw0rd!"
+      SEED_ADMIN_PASSWORD: 'Admin-Passw0rd!'
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-pnpm
       - uses: ./.github/actions/setup-playwright-chromium
         with:
-          workspace-filter: "@sl/tests"
+          workspace-filter: '@sl/tests'
       - name: write apps/api/.env (dotenv'd by the tsx-spawned api/worker processes — see tests/e2e/playwright.config.ts's webServer env)
         run: cp infra/env/.env.development.example apps/api/.env
       - name: build @sl/api's deps (webServer runs apps/api from source via tsx, but @sl/db/@sl/shared resolve through their built dist)
@@ -462,13 +467,13 @@ jobs:
           POSTGRES_USER: sl
           POSTGRES_PASSWORD: sl
           POSTGRES_DB: sniper_ledger
-        ports: ["5432:5432"]
+        ports: ['5432:5432']
         options: >-
           --health-cmd "pg_isready -U sl -d sniper_ledger"
           --health-interval 5s --health-timeout 5s --health-retries 10
       redis:
         image: redis:7-alpine
-        ports: ["6379:6379"]
+        ports: ['6379:6379']
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 5s --health-timeout 5s --health-retries 10
@@ -524,13 +529,13 @@ jobs:
           POSTGRES_USER: sl
           POSTGRES_PASSWORD: sl
           POSTGRES_DB: sniper_ledger
-        ports: ["5432:5432"]
+        ports: ['5432:5432']
         options: >-
           --health-cmd "pg_isready -U sl -d sniper_ledger"
           --health-interval 5s --health-timeout 5s --health-retries 10
       redis:
         image: redis:7-alpine
-        ports: ["6379:6379"]
+        ports: ['6379:6379']
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 5s --health-timeout 5s --health-retries 10
@@ -548,8 +553,8 @@ jobs:
       # auth-login-refresh.js's own threshold to legitimately fail past ~20
       # requests; see the same doc section for how that's interpreted (not a
       # release blocker on its own).
-      RATE_LIMIT_LOGIN_MAX: "5000"
-      RATE_LIMIT_GLOBAL_MAX: "100000"
+      RATE_LIMIT_LOGIN_MAX: '5000'
+      RATE_LIMIT_GLOBAL_MAX: '100000'
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-pnpm
@@ -561,7 +566,7 @@ jobs:
           pnpm --filter @sl/db seed
         env:
           SEED_ADMIN_EMAIL: admin@sniperledger.local
-          SEED_ADMIN_PASSWORD: "Admin-Passw0rd!"
+          SEED_ADMIN_PASSWORD: 'Admin-Passw0rd!'
       - name: build @sl/api's deps
         run: pnpm exec turbo run build --filter=@sl/api^...
       - name: start apps/api on :3100 (background)

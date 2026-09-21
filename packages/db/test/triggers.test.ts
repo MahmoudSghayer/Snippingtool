@@ -61,7 +61,10 @@ describe('set_updated_at / bump_row_version triggers', () => {
         .returning();
       expect(inserted!.rowVersion).toBe(0);
 
-      await db.update(users).set({ stripeCustomerId: 'cus_test_only_billing' }).where(eq(users.id, inserted!.id));
+      await db
+        .update(users)
+        .set({ stripeCustomerId: 'cus_test_only_billing' })
+        .where(eq(users.id, inserted!.id));
 
       const [after] = await db.select().from(users).where(eq(users.id, inserted!.id));
       expect(after!.stripeCustomerId).toBe('cus_test_only_billing');
@@ -71,11 +74,18 @@ describe('set_updated_at / bump_row_version triggers', () => {
     it('a second, later stripe_customer_id-only write still does not bump it', async () => {
       const [inserted] = await db
         .insert(users)
-        .values({ email: 'trigger-stripe-twice@example.com', passwordHash: 'x', stripeCustomerId: 'cus_test_first' })
+        .values({
+          email: 'trigger-stripe-twice@example.com',
+          passwordHash: 'x',
+          stripeCustomerId: 'cus_test_first',
+        })
         .returning();
       expect(inserted!.rowVersion).toBe(0);
 
-      await db.update(users).set({ stripeCustomerId: 'cus_test_second' }).where(eq(users.id, inserted!.id));
+      await db
+        .update(users)
+        .set({ stripeCustomerId: 'cus_test_second' })
+        .where(eq(users.id, inserted!.id));
 
       const [after] = await db.select().from(users).where(eq(users.id, inserted!.id));
       expect(after!.stripeCustomerId).toBe('cus_test_second');
@@ -110,7 +120,10 @@ describe('set_updated_at / bump_row_version triggers', () => {
         .returning();
       expect(inserted!.rowVersion).toBe(0);
 
-      await db.update(users).set({ stripeCustomerId: 'cus_test_combo', passwordHash: 'new-hash-combo' }).where(eq(users.id, inserted!.id));
+      await db
+        .update(users)
+        .set({ stripeCustomerId: 'cus_test_combo', passwordHash: 'new-hash-combo' })
+        .where(eq(users.id, inserted!.id));
 
       const [after] = await db.select().from(users).where(eq(users.id, inserted!.id));
       expect(after!.stripeCustomerId).toBe('cus_test_combo');

@@ -42,7 +42,11 @@ export default fp(
           response: {
             200: z.object({
               status: z.literal('ok'),
-              checks: z.object({ db: z.literal('ok'), redis: z.literal('ok'), queue: z.literal('ok') }),
+              checks: z.object({
+                db: z.literal('ok'),
+                redis: z.literal('ok'),
+                queue: z.literal('ok'),
+              }),
             }),
             503: z.object({
               status: z.literal('error'),
@@ -52,7 +56,11 @@ export default fp(
         },
       },
       async (_request, reply) => {
-        const checks: Record<string, 'ok' | 'error'> = { db: 'error', redis: 'error', queue: 'error' };
+        const checks: Record<string, 'ok' | 'error'> = {
+          db: 'error',
+          redis: 'error',
+          queue: 'error',
+        };
 
         try {
           await fastify.db.execute(sql`SELECT 1`);

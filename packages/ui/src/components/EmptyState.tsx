@@ -17,9 +17,21 @@ export interface EmptyStateProps {
   titleAs?: 'p' | 'h1' | 'h2';
 }
 
-export function EmptyState({ icon, title, description, action, className, titleAs: TitleTag = 'p' }: EmptyStateProps) {
+export function EmptyState({
+  icon,
+  title,
+  description,
+  action,
+  className,
+  titleAs: TitleTag = 'p',
+}: EmptyStateProps) {
   return (
-    <div className={cn('flex flex-col items-center justify-center gap-2 px-6 py-14 text-center', className)}>
+    <div
+      className={cn(
+        'flex flex-col items-center justify-center gap-2 px-6 py-14 text-center',
+        className,
+      )}
+    >
       {icon && <div className="mb-1 text-[--sl-fg-muted]">{icon}</div>}
       <TitleTag className="text-sm font-medium text-[--sl-fg]">{title}</TitleTag>
       {description && <p className="max-w-sm text-sm text-[--sl-fg-muted]">{description}</p>}

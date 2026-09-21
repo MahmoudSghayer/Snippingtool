@@ -12,7 +12,6 @@ import {
 } from '@sl/db';
 import { and, eq, isNull } from 'drizzle-orm';
 
-
 import { newId } from '../../lib/ids.js';
 
 export async function findUserByEmail(db: Database, email: string): Promise<User | undefined> {
@@ -23,7 +22,12 @@ export async function findUserById(db: Database, id: string): Promise<User | und
   return db.query.users.findFirst({ where: and(eq(users.id, id), isNull(users.deletedAt)) });
 }
 
-export async function createEmailVerification(db: Database, userId: string, tokenHash: string, expiresAt: Date): Promise<void> {
+export async function createEmailVerification(
+  db: Database,
+  userId: string,
+  tokenHash: string,
+  expiresAt: Date,
+): Promise<void> {
   await db.insert(emailVerifications).values({ id: newId(), userId, tokenHash, expiresAt });
 }
 
@@ -34,11 +38,22 @@ export async function findValidEmailVerification(db: Database, tokenHash: string
 }
 
 export async function consumeEmailVerification(db: Database, id: string): Promise<void> {
-  await db.update(emailVerifications).set({ consumedAt: new Date() }).where(eq(emailVerifications.id, id));
+  await db
+    .update(emailVerifications)
+    .set({ consumedAt: new Date() })
+    .where(eq(emailVerifications.id, id));
 }
 
-export async function createPasswordReset(db: Database, userId: string, tokenHash: string, expiresAt: Date, ip: string | null): Promise<void> {
-  await db.insert(passwordResets).values({ id: newId(), userId, tokenHash, expiresAt, requestedIp: ip });
+export async function createPasswordReset(
+  db: Database,
+  userId: string,
+  tokenHash: string,
+  expiresAt: Date,
+  ip: string | null,
+): Promise<void> {
+  await db
+    .insert(passwordResets)
+    .values({ id: newId(), userId, tokenHash, expiresAt, requestedIp: ip });
 }
 
 export async function findValidPasswordReset(db: Database, tokenHash: string) {
@@ -53,7 +68,15 @@ export async function consumePasswordReset(db: Database, id: string): Promise<vo
 
 export async function createSession(
   db: Database,
-  params: { userId: string; deviceId: string | null; refreshTokenHash: string; familyId: string; ip: string | null; userAgent: string | null; expiresAt: Date },
+  params: {
+    userId: string;
+    deviceId: string | null;
+    refreshTokenHash: string;
+    familyId: string;
+    ip: string | null;
+    userAgent: string | null;
+    expiresAt: Date;
+  },
 ): Promise<string> {
   const id = newId();
   await db.insert(sessions).values({
@@ -90,7 +113,14 @@ export async function findSessionById(db: Database, id: string) {
  */
 export async function rotateSession(
   db: Database,
-  previous: { id: string; userId: string; deviceId: string | null; familyId: string; ip: string | null; userAgent: string | null },
+  previous: {
+    id: string;
+    userId: string;
+    deviceId: string | null;
+    familyId: string;
+    ip: string | null;
+    userAgent: string | null;
+  },
   newRefreshTokenHash: string,
   expiresAt: Date,
 ): Promise<string> {
@@ -106,17 +136,40 @@ export async function rotateSession(
   });
 }
 
-export async function revokeSession(db: Database, sessionId: string, reason: string): Promise<void> {
-  await db.update(sessions).set({ revokedAt: new Date(), revokedReason: reason }).where(eq(sessions.id, sessionId));
+export async function revokeSession(
+  db: Database,
+  sessionId: string,
+  reason: string,
+): Promise<void> {
+  await db
+    .update(sessions)
+    .set({ revokedAt: new Date(), revokedReason: reason })
+    .where(eq(sessions.id, sessionId));
 }
 
-export async function revokeSessionFamily(db: Database, familyId: string, reason: string): Promise<void> {
-  await db.update(sessions).set({ revokedAt: new Date(), revokedReason: reason }).where(eq(sessions.familyId, familyId));
+export async function revokeSessionFamily(
+  db: Database,
+  familyId: string,
+  reason: string,
+): Promise<void> {
+  await db
+    .update(sessions)
+    .set({ revokedAt: new Date(), revokedReason: reason })
+    .where(eq(sessions.familyId, familyId));
 }
 
-export async function revokeAllUserSessions(db: Database, userId: string, reason: string): Promise<string[]> {
-  const active = await db.query.sessions.findMany({ where: and(eq(sessions.userId, userId), isNull(sessions.revokedAt)) });
-  await db.update(sessions).set({ revokedAt: new Date(), revokedReason: reason }).where(eq(sessions.userId, userId));
+export async function revokeAllUserSessions(
+  db: Database,
+  userId: string,
+  reason: string,
+): Promise<string[]> {
+  const active = await db.query.sessions.findMany({
+    where: and(eq(sessions.userId, userId), isNull(sessions.revokedAt)),
+  });
+  await db
+    .update(sessions)
+    .set({ revokedAt: new Date(), revokedReason: reason })
+    .where(eq(sessions.userId, userId));
   return active.map((s) => s.id);
 }
 
@@ -132,7 +185,10 @@ export async function revokeAllUserSessions(db: Database, userId: string, reason
  * the route still notify any live WS connection for the user regardless of
  * whether the DB-level revoke was a no-op this time. */
 export async function listAllUserSessionIds(db: Database, userId: string): Promise<string[]> {
-  const all = await db.query.sessions.findMany({ where: eq(sessions.userId, userId), columns: { id: true } });
+  const all = await db.query.sessions.findMany({
+    where: eq(sessions.userId, userId),
+    columns: { id: true },
+  });
   return all.map((s) => s.id);
 }
 
@@ -144,21 +200,36 @@ export async function bumpUserVersion(db: Database, userId: string): Promise<num
   // `set_updated_at` always overwrites this to now() regardless of the value
   // given — the point of this call is only to trigger an UPDATE so
   // `bump_row_version` fires.
-  const [row] = await db.update(users).set({ updatedAt: new Date() }).where(eq(users.id, userId)).returning({ rowVersion: users.rowVersion });
+  const [row] = await db
+    .update(users)
+    .set({ updatedAt: new Date() })
+    .where(eq(users.id, userId))
+    .returning({ rowVersion: users.rowVersion });
   return row?.rowVersion ?? 0;
 }
 
-export async function insertRecoveryCodes(db: Database, userId: string, codeHashes: string[]): Promise<void> {
+export async function insertRecoveryCodes(
+  db: Database,
+  userId: string,
+  codeHashes: string[],
+): Promise<void> {
   if (codeHashes.length === 0) return;
-  await db.insert(totpRecoveryCodes).values(codeHashes.map((codeHash) => ({ id: newId(), userId, codeHash })));
+  await db
+    .insert(totpRecoveryCodes)
+    .values(codeHashes.map((codeHash) => ({ id: newId(), userId, codeHash })));
 }
 
 export async function findUnusedRecoveryCodes(db: Database, userId: string) {
-  return db.query.totpRecoveryCodes.findMany({ where: and(eq(totpRecoveryCodes.userId, userId), isNull(totpRecoveryCodes.usedAt)) });
+  return db.query.totpRecoveryCodes.findMany({
+    where: and(eq(totpRecoveryCodes.userId, userId), isNull(totpRecoveryCodes.usedAt)),
+  });
 }
 
 export async function consumeRecoveryCode(db: Database, id: string): Promise<void> {
-  await db.update(totpRecoveryCodes).set({ usedAt: new Date() }).where(eq(totpRecoveryCodes.id, id));
+  await db
+    .update(totpRecoveryCodes)
+    .set({ usedAt: new Date() })
+    .where(eq(totpRecoveryCodes.id, id));
 }
 
 export async function deleteAllRecoveryCodes(db: Database, userId: string): Promise<void> {

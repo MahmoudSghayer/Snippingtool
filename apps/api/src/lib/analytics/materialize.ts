@@ -40,7 +40,13 @@ async function getNewUsersCount(db: Database, day: string): Promise<number> {
   const [row] = await db
     .select({ n: count() })
     .from(users)
-    .where(and(isNull(users.deletedAt), gte(users.createdAt, parseDayUtc(day)), lt(users.createdAt, endOfDayUtc(day))));
+    .where(
+      and(
+        isNull(users.deletedAt),
+        gte(users.createdAt, parseDayUtc(day)),
+        lt(users.createdAt, endOfDayUtc(day)),
+      ),
+    );
   return row?.n ?? 0;
 }
 
@@ -48,28 +54,41 @@ async function getNewUsersCount(db: Database, day: string): Promise<number> {
 export async function computeDailyMetrics(db: Database, day: string): Promise<DailyMetricRow[]> {
   const dayRange = { from: day, to: day, granularity: 'day' as const };
 
-  const [newUsers, activeUsers7d, activeUsers30d, revenueCents, mrrArr, profitPoints, activityPoints, subscriptionPoints, installs, planMix, pastDueCount, featureUsage] =
-    await Promise.all([
-      getNewUsersCount(db, day),
-      getActiveUsers(db, day, 7),
-      getActiveUsers(db, day, 30),
-      getTotalRevenueCents(db, { from: day, to: day }),
-      getMrrArr(db),
-      getPlatformProfitSeries(db, dayRange),
-      getActivitySeries(db, dayRange),
-      getSubscriptionSeries(db, dayRange),
-      getExtensionInstalls(db),
-      getPlanMix(db),
-      getPastDueCount(db),
-      getFeatureUsage(db, { from: day, to: day }),
-    ]);
+  const [
+    newUsers,
+    activeUsers7d,
+    activeUsers30d,
+    revenueCents,
+    mrrArr,
+    profitPoints,
+    activityPoints,
+    subscriptionPoints,
+    installs,
+    planMix,
+    pastDueCount,
+    featureUsage,
+  ] = await Promise.all([
+    getNewUsersCount(db, day),
+    getActiveUsers(db, day, 7),
+    getActiveUsers(db, day, 30),
+    getTotalRevenueCents(db, { from: day, to: day }),
+    getMrrArr(db),
+    getPlatformProfitSeries(db, dayRange),
+    getActivitySeries(db, dayRange),
+    getSubscriptionSeries(db, dayRange),
+    getExtensionInstalls(db),
+    getPlanMix(db),
+    getPastDueCount(db),
+    getFeatureUsage(db, { from: day, to: day }),
+  ]);
 
   const profitPoint = profitPoints[0]!;
   const activityPoint = activityPoints[0]!;
   const subscriptionPoint = subscriptionPoints[0]!;
 
   const rows: DailyMetricRow[] = [];
-  const put = (metric: string, value: number, dimension = '') => rows.push({ day, metric, dimension, value });
+  const put = (metric: string, value: number, dimension = '') =>
+    rows.push({ day, metric, dimension, value });
 
   put('new_users', newUsers);
   put('active_users_7d', activeUsers7d);
@@ -101,7 +120,8 @@ export async function computeDailyMetrics(db: Database, day: string): Promise<Da
   put('coupon_redemptions', subscriptionPoint.couponRedemptions);
 
   put('extension_installs_total', installs.total);
-  for (const [browser, n] of Object.entries(installs.byBrowser)) put('extension_installs', n, browser);
+  for (const [browser, n] of Object.entries(installs.byBrowser))
+    put('extension_installs', n, browser);
   for (const [code, n] of Object.entries(planMix)) put('plan_mix', n, code);
   put('past_due_count', pastDueCount);
   for (const [feature, n] of Object.entries(featureUsage)) put('feature_usage', n, feature);
@@ -116,7 +136,13 @@ export async function upsertAnalyticsDaily(db: Database, rows: DailyMetricRow[])
   for (const row of rows) {
     await db
       .insert(analyticsDaily)
-      .values({ id: newId(), day: row.day, metric: row.metric, dimension: row.dimension, value: row.value.toString() })
+      .values({
+        id: newId(),
+        day: row.day,
+        metric: row.metric,
+        dimension: row.dimension,
+        value: row.value.toString(),
+      })
       .onConflictDoUpdate({
         target: [analyticsDaily.day, analyticsDaily.metric, analyticsDaily.dimension],
         set: { value: row.value.toString() },

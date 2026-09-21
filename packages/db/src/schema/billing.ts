@@ -1,7 +1,16 @@
 // Matches migrations/0017_coupons.sql, 0018_billing.sql.
 
 import { isNull, relations } from 'drizzle-orm';
-import { boolean, index, integer, jsonb, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import {
+  boolean,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  text,
+  uniqueIndex,
+  uuid,
+} from 'drizzle-orm/pg-core';
 
 import {
   couponTypeEnum,
@@ -64,7 +73,9 @@ export const couponRedemptions = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),
-    subscriptionId: uuid('subscription_id').references(() => subscriptions.id, { onDelete: 'set null' }),
+    subscriptionId: uuid('subscription_id').references(() => subscriptions.id, {
+      onDelete: 'set null',
+    }),
 
     redeemedAt: timestamptz('redeemed_at').notNull().defaultNow(),
     createdAt: createdAt(),
@@ -80,7 +91,10 @@ export const couponRedemptions = pgTable(
 export const couponRedemptionsRelations = relations(couponRedemptions, ({ one }) => ({
   coupon: one(coupons, { fields: [couponRedemptions.couponId], references: [coupons.id] }),
   user: one(users, { fields: [couponRedemptions.userId], references: [users.id] }),
-  subscription: one(subscriptions, { fields: [couponRedemptions.subscriptionId], references: [subscriptions.id] }),
+  subscription: one(subscriptions, {
+    fields: [couponRedemptions.subscriptionId],
+    references: [subscriptions.id],
+  }),
 }));
 
 // ---------------------------------------------------------------------------
@@ -92,7 +106,9 @@ export const payments = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),
-    subscriptionId: uuid('subscription_id').references(() => subscriptions.id, { onDelete: 'restrict' }),
+    subscriptionId: uuid('subscription_id').references(() => subscriptions.id, {
+      onDelete: 'restrict',
+    }),
 
     provider: paymentProviderEnum('provider').notNull().default('stripe'),
     providerPaymentId: text('provider_payment_id').notNull(),
@@ -119,7 +135,10 @@ export const payments = pgTable(
 
 export const paymentsRelations = relations(payments, ({ one, many }) => ({
   user: one(users, { fields: [payments.userId], references: [users.id] }),
-  subscription: one(subscriptions, { fields: [payments.subscriptionId], references: [subscriptions.id] }),
+  subscription: one(subscriptions, {
+    fields: [payments.subscriptionId],
+    references: [subscriptions.id],
+  }),
   coupon: one(coupons, { fields: [payments.couponId], references: [coupons.id] }),
   history: many(paymentHistory),
 }));

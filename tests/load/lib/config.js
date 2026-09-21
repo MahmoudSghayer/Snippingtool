@@ -34,7 +34,9 @@ const PROFILES = {
 
 export const PROFILE = (__ENV.LOAD_PROFILE || 'smoke').toLowerCase();
 if (!PROFILES[PROFILE]) {
-  throw new Error(`Unknown LOAD_PROFILE "${PROFILE}" — expected one of: ${Object.keys(PROFILES).join(', ')}`);
+  throw new Error(
+    `Unknown LOAD_PROFILE "${PROFILE}" — expected one of: ${Object.keys(PROFILES).join(', ')}`,
+  );
 }
 
 /** A scenario file calls this once for its default-exported `options`.

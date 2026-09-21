@@ -14,7 +14,13 @@
 import { resetDatabase } from '@sl/db/test-utils';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { bearer, buildTestApp, createAdminSession, createUserSession, type TestApp } from './helpers.js';
+import {
+  bearer,
+  buildTestApp,
+  createAdminSession,
+  createUserSession,
+  type TestApp,
+} from './helpers.js';
 
 describe('mass assignment: unrecognised extra keys are rejected, never silently applied', () => {
   let app: TestApp;
@@ -33,25 +39,47 @@ describe('mass assignment: unrecognised extra keys are rejected, never silently 
   });
 
   it('PATCH /users/me: a plain user cannot smuggle role/status/id/emailVerifiedAt onto their own profile', async () => {
-    const user = await createUserSession(app, 'mass-assign-user@example.com', 'mass-fp-user-0000000000001');
+    const user = await createUserSession(
+      app,
+      'mass-assign-user@example.com',
+      'mass-fp-user-0000000000001',
+    );
 
     const res = await app.inject({
       method: 'PATCH',
       url: '/api/v1/users/me',
       headers: bearer(user.accessToken),
-      payload: { timezone: 'UTC', role: 'admin', status: 'active', id: '00000000-0000-0000-0000-000000000099' },
+      payload: {
+        timezone: 'UTC',
+        role: 'admin',
+        status: 'active',
+        id: '00000000-0000-0000-0000-000000000099',
+      },
     });
     expect(res.statusCode).toBe(400);
     expect(res.json().code).toBe('VALIDATION_FAILED');
 
     // Confirm nothing was applied even partially — the user is still 'user'.
-    const meRes = await app.inject({ method: 'GET', url: '/api/v1/users/me', headers: bearer(user.accessToken) });
+    const meRes = await app.inject({
+      method: 'GET',
+      url: '/api/v1/users/me',
+      headers: bearer(user.accessToken),
+    });
     expect(meRes.json().role).toBe('user');
   });
 
   it('PATCH /admin/users/:id: an admin cannot smuggle role onto a target user via the profile-update route (no such field exists on it by design)', async () => {
-    const admin = await createAdminSession(app, 'super_admin', 'mass-assign-admin@example.com', 'mass-fp-admin-000000000001');
-    const target = await createUserSession(app, 'mass-assign-target@example.com', 'mass-fp-target-00000000001');
+    const admin = await createAdminSession(
+      app,
+      'super_admin',
+      'mass-assign-admin@example.com',
+      'mass-fp-admin-000000000001',
+    );
+    const target = await createUserSession(
+      app,
+      'mass-assign-target@example.com',
+      'mass-fp-target-00000000001',
+    );
 
     const res = await app.inject({
       method: 'PATCH',
@@ -64,7 +92,11 @@ describe('mass assignment: unrecognised extra keys are rejected, never silently 
   });
 
   it('POST /filters: an extra top-level key (e.g. userId, trying to write into another account) is rejected', async () => {
-    const user = await createUserSession(app, 'mass-assign-filter@example.com', 'mass-fp-filter-000000000001');
+    const user = await createUserSession(
+      app,
+      'mass-assign-filter@example.com',
+      'mass-fp-filter-000000000001',
+    );
 
     const res = await app.inject({
       method: 'POST',
@@ -77,14 +109,24 @@ describe('mass assignment: unrecognised extra keys are rejected, never silently 
   });
 
   it('POST /activity/batch: an unrecognised top-level key is rejected (fixed — see packages/shared/src/schemas/activity.ts)', async () => {
-    const user = await createUserSession(app, 'mass-assign-activity@example.com', 'mass-fp-activity-00000000001');
+    const user = await createUserSession(
+      app,
+      'mass-assign-activity@example.com',
+      'mass-fp-activity-00000000001',
+    );
 
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/activity/batch',
       headers: bearer(user.accessToken),
       payload: {
-        events: [{ type: 'heartbeat', occurredAt: new Date().toISOString(), metadata: { extensionVersion: '1.0.0' } }],
+        events: [
+          {
+            type: 'heartbeat',
+            occurredAt: new Date().toISOString(),
+            metadata: { extensionVersion: '1.0.0' },
+          },
+        ],
         notARealField: 'sneaky',
       },
     });
@@ -93,7 +135,11 @@ describe('mass assignment: unrecognised extra keys are rejected, never silently 
   });
 
   it('PUT /settings: an unrecognised nested key inside a partial section is rejected, not merged in', async () => {
-    const user = await createUserSession(app, 'mass-assign-settings@example.com', 'mass-fp-settings-0000000001');
+    const user = await createUserSession(
+      app,
+      'mass-assign-settings@example.com',
+      'mass-fp-settings-0000000001',
+    );
 
     const res = await app.inject({
       method: 'PUT',

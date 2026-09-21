@@ -72,7 +72,7 @@ test/
 ```
 
 **Two worlds, one rule.** `main/adapter.ts` runs in the page's `MAIN` world
-(`document_start`) and is the *only* file in the whole codebase that reads
+(`document_start`) and is the _only_ file in the whole codebase that reads
 EA's network traffic or drives EA's service layer. `content/index.ts` (plus
 everything it imports — `engine/*`, `ui/panel.ts`, `store/db.ts`, the
 messaging helpers) runs in the `ISOLATED` world (`document_idle`) and knows
@@ -125,11 +125,11 @@ MV3 content scripts cannot be ES modules (no code-splitting is possible for
 them) while the service worker + popup + options page are ordinary ES
 modules that benefit from shared chunks:
 
-| Call | Entry | Format | Output |
-| --- | --- | --- | --- |
-| 1 | `src/main/adapter.ts` | `lib` (IIFE, single entry) | `adapter.js` |
-| 2 | `src/content/index.ts` | `lib` (IIFE, single entry) | `content.js` |
-| 3 | `src/background/index.ts` + `src/popup/index.html` + `src/options/index.html` | ES, multi-entry | `background.js`, `src/popup/index.html`, `src/options/index.html` |
+| Call | Entry                                                                         | Format                     | Output                                                            |
+| ---- | ----------------------------------------------------------------------------- | -------------------------- | ----------------------------------------------------------------- |
+| 1    | `src/main/adapter.ts`                                                         | `lib` (IIFE, single entry) | `adapter.js`                                                      |
+| 2    | `src/content/index.ts`                                                        | `lib` (IIFE, single entry) | `content.js`                                                      |
+| 3    | `src/background/index.ts` + `src/popup/index.html` + `src/options/index.html` | ES, multi-entry            | `background.js`, `src/popup/index.html`, `src/options/index.html` |
 
 `scripts/generate-manifest.mjs` then writes `manifest.json` from the two
 targets' env (`VITE_API_ORIGIN`, `VITE_UPDATE_URL`, the package version).
@@ -140,14 +140,14 @@ pnpm --filter @sl/extension build:auto      # dist/ledger-auto — self-hosted
 pnpm --filter @sl/extension build           # both
 ```
 
-| | `ledger` | `ledger-auto` |
-| --- | --- | --- |
-| Contains | M1 recorder + M2 assist | M1 + M2 + M3 automation |
-| `name` | "Sniper's Ledger" | "Sniper's Ledger (Automation)" |
-| `VITE_AUTOMATION` | `'0'` | `'1'` |
-| `update_url` | absent (Chrome Web Store owns updates) | set from `VITE_UPDATE_URL` |
-| `version_name` | absent | `"<version>-auto"` |
-| `engine/autobuyer.ts` | **never in the module graph at all** | included |
+|                       | `ledger`                               | `ledger-auto`                  |
+| --------------------- | -------------------------------------- | ------------------------------ |
+| Contains              | M1 recorder + M2 assist                | M1 + M2 + M3 automation        |
+| `name`                | "Sniper's Ledger"                      | "Sniper's Ledger (Automation)" |
+| `VITE_AUTOMATION`     | `'0'`                                  | `'1'`                          |
+| `update_url`          | absent (Chrome Web Store owns updates) | set from `VITE_UPDATE_URL`     |
+| `version_name`        | absent                                 | `"<version>-auto"`             |
+| `engine/autobuyer.ts` | **never in the module graph at all**   | included                       |
 
 **How the exclusion is actually guaranteed.** `content/index.ts` imports
 `loadAutobuyer` from the bare specifier `virtual:autobuyer-loader`, never
@@ -217,22 +217,22 @@ reachable:
 
 `engine/governor.ts`'s `Governor.allow(action)` is the single gate every
 `adapter.act()` call passes through — `assist.ts` and `autobuyer.ts` both
-call it before *every* attempt, never once per session. Four thresholds,
+call it before _every_ attempt, never once per session. Four thresholds,
 all from `GovernorSettings` (`packages/shared/src/schemas/settings.ts`,
 user-tunable within `GOVERNOR_ABSOLUTE_LIMITS`, the hard floor/ceiling
 independent of any user or admin setting):
 
-| Threshold | Default | Absolute bounds | Kind |
-| --- | --- | --- | --- |
-| `actionsPerHour` | 30 | 1–120 | **hard stop** |
-| `sessionLengthMinutes` | 90 | 5–240 | **hard stop** |
-| `buyToSearchRatio` | 0.35 | 0.01–1 | soft deny |
-| `maxCoinFlowPerHour` | 300,000 | 1,000–5,000,000 | soft deny |
+| Threshold              | Default | Absolute bounds | Kind          |
+| ---------------------- | ------- | --------------- | ------------- |
+| `actionsPerHour`       | 30      | 1–120           | **hard stop** |
+| `sessionLengthMinutes` | 90      | 5–240           | **hard stop** |
+| `buyToSearchRatio`     | 0.35    | 0.01–1          | soft deny     |
+| `maxCoinFlowPerHour`   | 300,000 | 1,000–5,000,000 | soft deny     |
 
 - **`actionsPerHour`** — sliding one-hour window over every action (search
-  *and* buy both count — a burst of very fast searching is itself a
+  _and_ buy both count — a burst of very fast searching is itself a
   suspicious shape, not just buying). Checked against what the count
-  *would become* if the action were allowed, so the limit is never exceeded
+  _would become_ if the action were allowed, so the limit is never exceeded
   by even one action.
 - **`sessionLengthMinutes`** — wall-clock time since the `Governor` instance
   was created. Crash recovery (§7) carries this across a page reload within
@@ -248,7 +248,7 @@ independent of any user or admin setting):
 
 `actionsPerHour` and `sessionLengthMinutes` are **hard stops**: exceeding
 either puts the governor into a cooldown (`cooldownSeconds`, default 20,
-bounds 0–3600) during which *every* action — search or buy — is denied,
+bounds 0–3600) during which _every_ action — search or buy — is denied,
 not just the one that tripped it, and a `risk_budget_events` row with
 `kind: 'hard_stop'` is produced alongside the specific threshold's own kind.
 `buyToSearchRatio` and `maxCoinFlowPerHour` are **soft denies**: only the one
@@ -271,7 +271,7 @@ This is the same list the options page's "What it sends" panel shows,
 word for word (`options/main.ts`'s `WHAT_IT_SENDS`), and the same list
 `docs/01-architecture.md` §3.3b/§5 frame as the telemetry trust boundary:
 
-- **Activity**: login/logout, search *metadata* (a hash of the filter +
+- **Activity**: login/logout, search _metadata_ (a hash of the filter +
   result count — never the listings themselves), filter changes, settings
   changes, errors, heartbeats.
 - **Snipe attempts**: resource/trade id, target and listed price, outcome
@@ -366,7 +366,7 @@ on the service worker itself, so a background crash is reportable too, and
 runs a 5-minute `chrome.alarms` flush independent of the on-demand
 `errors.report` message the options page's other flows can trigger.
 
-The options page's "Export logs" button downloads the *background* service
+The options page's "Export logs" button downloads the _background_ service
 worker's ring buffer as JSON (`logs.export` message) — a documented,
 current limitation is that `content/index.ts`'s own `logger` calls (e.g. the
 watchdog's warning above) are not yet forwarded to background, so they are
@@ -410,7 +410,7 @@ control.
   not sent" — never read.
 - **No CAPTCHA bypass, no client impersonation.** Not present anywhere in
   this codebase, not planned. The act surface only ever drives the app's
-  *own* service-layer functions — the same ones its own UI calls — never a
+  _own_ service-layer functions — the same ones its own UI calls — never a
   hand-built request, never a spoofed header, never the session token used
   outside a call the app's own code would have made.
 

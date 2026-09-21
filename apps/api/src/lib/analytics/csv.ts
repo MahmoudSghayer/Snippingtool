@@ -33,7 +33,10 @@ export interface CsvColumn<T> {
  * interface (e.g. `ProfitSeriesPoint`) can be passed directly without a
  * structural-index-signature mismatch.
  */
-export function csvStream<T extends object>(columns: Array<CsvColumn<T>>, rows: Iterable<T> | AsyncIterable<T>): Readable {
+export function csvStream<T extends object>(
+  columns: Array<CsvColumn<T>>,
+  rows: Iterable<T> | AsyncIterable<T>,
+): Readable {
   async function* generate(): AsyncGenerator<string> {
     yield toCsvRow(columns.map((c) => c.header));
     for await (const row of rows) {

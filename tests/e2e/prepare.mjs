@@ -40,8 +40,14 @@ async function main() {
   const env = { ...process.env, DATABASE_URL, SEED_ADMIN_EMAIL, SEED_ADMIN_PASSWORD };
 
   if (!SKIP_RESET) {
-    console.warn(`[tests/e2e prepare] db:reset + seed against ${DATABASE_URL.replace(/:[^:@]*@/, ':***@')} ...`);
-    execFileSync('pnpm', ['--filter', '@sl/db', 'db:reset'], { cwd: repoRoot, stdio: 'inherit', env });
+    console.warn(
+      `[tests/e2e prepare] db:reset + seed against ${DATABASE_URL.replace(/:[^:@]*@/, ':***@')} ...`,
+    );
+    execFileSync('pnpm', ['--filter', '@sl/db', 'db:reset'], {
+      cwd: repoRoot,
+      stdio: 'inherit',
+      env,
+    });
     execFileSync('pnpm', ['--filter', '@sl/db', 'seed'], { cwd: repoRoot, stdio: 'inherit', env });
   } else {
     console.warn('[tests/e2e prepare] E2E_SKIP_DB_RESET=1 — reusing the database as-is.');

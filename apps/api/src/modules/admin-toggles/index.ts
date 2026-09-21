@@ -4,7 +4,6 @@
 // AND `user:{id}` for every currently-online user (best-effort: online set
 // only, not every user — offline clients pick it up on next heartbeat).
 
-
 import { featureToggles } from '@sl/db';
 import { featureToggleDtoSchema, updateFeatureToggleRequestSchema } from '@sl/shared';
 import { eq } from 'drizzle-orm';
@@ -35,7 +34,10 @@ export default fp(
 
     app.get(
       '/api/v1/admin/toggles',
-      { onRequest: [fastify.requirePermission('system.read')], schema: { tags: ['admin'], response: { 200: z.array(featureToggleDtoSchema) } } },
+      {
+        onRequest: [fastify.requirePermission('system.read')],
+        schema: { tags: ['admin'], response: { 200: z.array(featureToggleDtoSchema) } },
+      },
       async () => {
         const rows = await fastify.db.query.featureToggles.findMany();
         return rows.map(toDto);
@@ -47,10 +49,17 @@ export default fp(
       {
         onRequest: [fastify.requirePermission('feature_toggles.write')],
         preHandler: [fastify.verifyCsrf],
-        schema: { tags: ['admin'], params: z.object({ key: z.string().min(1) }), body: updateFeatureToggleRequestSchema, response: { 200: featureToggleDtoSchema } },
+        schema: {
+          tags: ['admin'],
+          params: z.object({ key: z.string().min(1) }),
+          body: updateFeatureToggleRequestSchema,
+          response: { 200: featureToggleDtoSchema },
+        },
       },
       async (request) => {
-        const before = await fastify.db.query.featureToggles.findFirst({ where: eq(featureToggles.key, request.params.key) });
+        const before = await fastify.db.query.featureToggles.findFirst({
+          where: eq(featureToggles.key, request.params.key),
+        });
         if (!before) throw AppErrors.notFound('feature toggle');
 
         const [after] = await fastify.db
@@ -58,7 +67,12 @@ export default fp(
           .set({
             enabled: request.body.enabled ?? before.enabled,
             rolloutPercent: request.body.rolloutPercent ?? before.rolloutPercent,
-            planGate: request.body.planGate !== undefined ? (request.body.planGate ? [request.body.planGate] : []) : before.planGate,
+            planGate:
+              request.body.planGate !== undefined
+                ? request.body.planGate
+                  ? [request.body.planGate]
+                  : []
+                : before.planGate,
             updatedBy: request.authUser!.id,
           })
           .where(eq(featureToggles.id, before.id))

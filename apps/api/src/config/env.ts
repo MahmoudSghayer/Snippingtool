@@ -30,14 +30,16 @@ function refineForProduction(env: z.infer<typeof envSchema>, ctx: z.RefinementCt
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['COOKIE_SECRET'],
-      message: 'refusing to start in production with the default dev COOKIE_SECRET — set a real 32+ byte secret.',
+      message:
+        'refusing to start in production with the default dev COOKIE_SECRET — set a real 32+ byte secret.',
     });
   }
   if (!env.JWT_PRIVATE_KEY || !env.JWT_PUBLIC_KEY) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['JWT_PRIVATE_KEY'],
-      message: 'JWT_PRIVATE_KEY/JWT_PUBLIC_KEY are required in production (generate with `pnpm --filter @sl/api keys:generate`).',
+      message:
+        'JWT_PRIVATE_KEY/JWT_PUBLIC_KEY are required in production (generate with `pnpm --filter @sl/api keys:generate`).',
     });
   }
   if (!env.ENTITLEMENT_SIGNING_KEY || !env.ENTITLEMENT_PUBLIC_KEY) {
@@ -80,13 +82,17 @@ function refineForProduction(env: z.infer<typeof envSchema>, ctx: z.RefinementCt
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['COOKIE_SAME_SITE'],
-      message: 'COOKIE_SAME_SITE=none requires COOKIE_SECURE=true (browsers reject SameSite=None cookies without Secure).',
+      message:
+        'COOKIE_SAME_SITE=none requires COOKIE_SECURE=true (browsers reject SameSite=None cookies without Secure).',
     });
   }
   // A cross-site (SameSite=None) cookie is useless if the two origins that
   // need to see it aren't even served over HTTPS — the browser would have
   // rejected the cookie before either side mattered.
-  if (env.COOKIE_SAME_SITE === 'none' && (!env.APP_ORIGIN.startsWith('https://') || !env.DASHBOARD_ORIGIN.startsWith('https://'))) {
+  if (
+    env.COOKIE_SAME_SITE === 'none' &&
+    (!env.APP_ORIGIN.startsWith('https://') || !env.DASHBOARD_ORIGIN.startsWith('https://'))
+  ) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['DASHBOARD_ORIGIN'],
@@ -220,7 +226,9 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
   if (cached) return cached;
   const parsed = validatedEnvSchema.safeParse(source);
   if (!parsed.success) {
-    const message = parsed.error.issues.map((i) => `  - ${i.path.join('.')}: ${i.message}`).join('\n');
+    const message = parsed.error.issues
+      .map((i) => `  - ${i.path.join('.')}: ${i.message}`)
+      .join('\n');
     throw new Error(`Invalid environment configuration:\n${message}`);
   }
   const env = parsed.data;

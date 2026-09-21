@@ -18,7 +18,10 @@ function extensionOrigins(extensionIds: string): string[] {
 
 export default fp(
   async function corsPlugin(fastify: FastifyInstance) {
-    const allowlist = new Set([fastify.config.DASHBOARD_ORIGIN, ...extensionOrigins(fastify.config.EXTENSION_IDS)]);
+    const allowlist = new Set([
+      fastify.config.DASHBOARD_ORIGIN,
+      ...extensionOrigins(fastify.config.EXTENSION_IDS),
+    ]);
 
     await fastify.register(cors, {
       origin(origin, callback) {

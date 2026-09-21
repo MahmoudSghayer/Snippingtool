@@ -5,7 +5,6 @@ import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 
-
 import { api } from '@/api/client.js';
 
 type FormValues = { email: string };
@@ -13,7 +12,10 @@ type FormValues = { email: string };
 export function ForgotPasswordPage() {
   const [sent, setSent] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const form = useForm<FormValues>({ resolver: zodResolver(passwordResetRequestSchema), defaultValues: { email: '' } });
+  const form = useForm<FormValues>({
+    resolver: zodResolver(passwordResetRequestSchema),
+    defaultValues: { email: '' },
+  });
 
   async function onSubmit(values: FormValues) {
     setSubmitting(true);
@@ -33,7 +35,8 @@ export function ForgotPasswordPage() {
         </CardHeader>
         <CardContent>
           <p className="text-sm text-ink-2">
-            If that email has an account, a password reset link is on its way. The link expires in 1 hour.
+            If that email has an account, a password reset link is on its way. The link expires in 1
+            hour.
           </p>
         </CardContent>
       </Card>
@@ -49,7 +52,13 @@ export function ForgotPasswordPage() {
       <CardContent>
         <form className="flex flex-col gap-4" onSubmit={form.handleSubmit(onSubmit)}>
           <FormField label="Email" htmlFor="email" error={form.formState.errors.email?.message}>
-            <Input id="email" type="email" autoComplete="email" autoFocus {...form.register('email')} />
+            <Input
+              id="email"
+              type="email"
+              autoComplete="email"
+              autoFocus
+              {...form.register('email')}
+            />
           </FormField>
           <Button type="submit" loading={submitting} className="w-full">
             Send reset link

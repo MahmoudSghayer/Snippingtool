@@ -1,7 +1,6 @@
 // /api/v1/notifications — list (cursor), mark read, and (via
 // user_settings.notifications) preferences.
 
-
 import { notifications } from '@sl/db';
 import { paginationQuerySchema, paginatedResponseSchema } from '@sl/shared';
 import { and, desc, eq, isNull, lt } from 'drizzle-orm';
@@ -32,7 +31,11 @@ export default fp(
       '/api/v1/notifications',
       {
         onRequest: [fastify.authenticate],
-        schema: { tags: ['notifications'], querystring: paginationQuerySchema, response: { 200: paginatedResponseSchema(notificationDtoSchema) } },
+        schema: {
+          tags: ['notifications'],
+          querystring: paginationQuerySchema,
+          response: { 200: paginatedResponseSchema(notificationDtoSchema) },
+        },
       },
       async (request) => {
         const cursor = decodeCursor(request.query.cursor);
@@ -40,7 +43,10 @@ export default fp(
 
         const rows = await fastify.db.query.notifications.findMany({
           where: cursor
-            ? and(eq(notifications.userId, request.authUser!.id), lt(notifications.createdAt, new Date(cursor.v)))
+            ? and(
+                eq(notifications.userId, request.authUser!.id),
+                lt(notifications.createdAt, new Date(cursor.v)),
+              )
             : eq(notifications.userId, request.authUser!.id),
           orderBy: [desc(notifications.createdAt)],
           limit: limit + 1,
@@ -60,7 +66,8 @@ export default fp(
             readAt: n.readAt ? n.readAt.toISOString() : null,
             createdAt: n.createdAt.toISOString(),
           })),
-          nextCursor: hasMore && last ? encodeCursor({ v: last.createdAt.toISOString(), id: last.id }) : null,
+          nextCursor:
+            hasMore && last ? encodeCursor({ v: last.createdAt.toISOString(), id: last.id }) : null,
         };
       },
     );
@@ -70,14 +77,24 @@ export default fp(
       {
         onRequest: [fastify.authenticate],
         preHandler: [fastify.verifyCsrf],
-        schema: { tags: ['notifications'], params: z.object({ id: z.string().uuid() }), response: { 200: z.object({ ok: z.literal(true) }) } },
+        schema: {
+          tags: ['notifications'],
+          params: z.object({ id: z.string().uuid() }),
+          response: { 200: z.object({ ok: z.literal(true) }) },
+        },
       },
       async (request) => {
         const notification = await fastify.db.query.notifications.findFirst({
-          where: and(eq(notifications.id, request.params.id), eq(notifications.userId, request.authUser!.id)),
+          where: and(
+            eq(notifications.id, request.params.id),
+            eq(notifications.userId, request.authUser!.id),
+          ),
         });
         if (!notification) throw AppErrors.notFound('notification');
-        await fastify.db.update(notifications).set({ readAt: new Date() }).where(eq(notifications.id, notification.id));
+        await fastify.db
+          .update(notifications)
+          .set({ readAt: new Date() })
+          .where(eq(notifications.id, notification.id));
         return { ok: true as const };
       },
     );

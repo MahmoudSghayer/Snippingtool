@@ -11,10 +11,18 @@ import { buildApp } from '../../../app.js';
 
 import type { FastifyInstance } from 'fastify';
 
-const device = { fingerprint: 'test-fingerprint-binding-000001', name: 'Test Device', browser: 'chrome', os: 'linux', extensionVersion: '1.0.0' };
+const device = {
+  fingerprint: 'test-fingerprint-binding-000001',
+  name: 'Test Device',
+  browser: 'chrome',
+  os: 'linux',
+  extensionVersion: '1.0.0',
+};
 
-const CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-const FIREFOX_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0';
+const CHROME_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+const FIREFOX_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0';
 
 let ipCounter = 1;
 function nextIp(): string {
@@ -57,7 +65,12 @@ describe('auth module — refresh-token binding', () => {
     expect(registerRes.statusCode).toBe(201);
 
     const token = extractToken(app.mailer.sentEmails.at(-1)!.html);
-    await app.inject({ method: 'POST', url: '/api/v1/auth/verify-email', remoteAddress: ip, payload: { token } });
+    await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/verify-email',
+      remoteAddress: ip,
+      payload: { token },
+    });
 
     const loginRes = await app.inject({
       method: 'POST',
@@ -114,7 +127,12 @@ describe('auth module — refresh-token binding', () => {
     const ip = nextIp();
     const rt = await registerVerifyAndLogin('ua-absent@example.com', ip, '');
 
-    const res = await app.inject({ method: 'POST', url: '/api/v1/auth/refresh', remoteAddress: ip, payload: { refreshToken: rt } });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/refresh',
+      remoteAddress: ip,
+      payload: { refreshToken: rt },
+    });
     expect(res.statusCode).toBe(200);
   });
 

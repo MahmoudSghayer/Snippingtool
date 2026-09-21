@@ -9,9 +9,20 @@ import { type ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 
 import { recordAudit } from '../../lib/audit.js';
-import { recordAdminAction, requireAdminUsersRowId, toAuditSnapshot } from '../admin-subscriptions/admin-action-log.js';
+import {
+  recordAdminAction,
+  requireAdminUsersRowId,
+  toAuditSnapshot,
+} from '../admin-subscriptions/admin-action-log.js';
 
-import { archivePlan, createPlan, featuresJsonbToArray, listAllPlans, updatePlan, type PlanRow } from './service.js';
+import {
+  archivePlan,
+  createPlan,
+  featuresJsonbToArray,
+  listAllPlans,
+  updatePlan,
+  type PlanRow,
+} from './service.js';
 
 import type { FastifyInstance } from 'fastify';
 
@@ -135,7 +146,12 @@ export default fp(
       },
       async (request) => {
         const adminUserRowId = await requireAdminUsersRowId(fastify.db, request.authUser!.id);
-        const { before, after } = await updatePlan(fastify.db, request.params.id, request.body, request.authUser!.id);
+        const { before, after } = await updatePlan(
+          fastify.db,
+          request.params.id,
+          request.body,
+          request.authUser!.id,
+        );
 
         await recordAdminAction({
           db: fastify.db,
@@ -177,7 +193,11 @@ export default fp(
       },
       async (request) => {
         const adminUserRowId = await requireAdminUsersRowId(fastify.db, request.authUser!.id);
-        const { before, after } = await archivePlan(fastify.db, request.params.id, request.authUser!.id);
+        const { before, after } = await archivePlan(
+          fastify.db,
+          request.params.id,
+          request.authUser!.id,
+        );
 
         await recordAdminAction({
           db: fastify.db,

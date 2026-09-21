@@ -11,7 +11,10 @@ import { BASE_URL, jsonHeaders, scenarioOptions, thresholds } from '../lib/confi
 
 const users = new SharedArray('users', () => JSON.parse(open('../.artifacts/fixtures.json')).users);
 
-export const options = { ...scenarioOptions(), thresholds: thresholds({ http_req_duration: ['p(95)<600'] }) };
+export const options = {
+  ...scenarioOptions(),
+  thresholds: thresholds({ http_req_duration: ['p(95)<600'] }),
+};
 
 export default function () {
   const user = users[__VU % users.length];
@@ -29,7 +32,7 @@ export default function () {
     { headers: { ...jsonHeaders(), authorization: `Bearer ${user.accessToken}` } },
   );
   check(res, {
-    '200': (r) => r.status === 200,
+    200: (r) => r.status === 200,
     'has killSwitchActive': (r) => {
       try {
         return typeof JSON.parse(r.body).killSwitchActive === 'boolean';

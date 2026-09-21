@@ -5,7 +5,6 @@ import userEvent from '@testing-library/user-event';
 import { useForm } from 'react-hook-form';
 import { describe, expect, it, vi } from 'vitest';
 
-
 import { registerFormSchema } from '@/pages/auth/RegisterPage.js';
 
 /** Exercises the real `registerFormSchema` (the same schema RegisterPage
@@ -23,10 +22,18 @@ function TestForm({ onValid }: { onValid: (values: unknown) => void }) {
       <FormField label="Email" htmlFor="email" error={form.formState.errors.email?.message}>
         <Input id="email" {...form.register('email')} />
       </FormField>
-      <FormField label="Password" htmlFor="password" error={form.formState.errors.password?.message}>
+      <FormField
+        label="Password"
+        htmlFor="password"
+        error={form.formState.errors.password?.message}
+      >
         <PasswordInput id="password" {...form.register('password')} />
       </FormField>
-      <FormField label="Confirm" htmlFor="confirmPassword" error={form.formState.errors.confirmPassword?.message}>
+      <FormField
+        label="Confirm"
+        htmlFor="confirmPassword"
+        error={form.formState.errors.confirmPassword?.message}
+      >
         <PasswordInput id="confirmPassword" {...form.register('confirmPassword')} />
       </FormField>
       <Button type="submit">Submit</Button>

@@ -2,9 +2,12 @@
 // (the canonical get/put surface) and modules/extension (bootstrap/heartbeat
 // need the same settings document without a second round trip).
 
-
 import { userSettings, type Database } from '@sl/db';
-import { DEFAULT_GOVERNOR_SETTINGS, DEFAULT_NOTIFICATION_PREFS, type UserSettings } from '@sl/shared';
+import {
+  DEFAULT_GOVERNOR_SETTINGS,
+  DEFAULT_NOTIFICATION_PREFS,
+  type UserSettings,
+} from '@sl/shared';
 import { eq } from 'drizzle-orm';
 
 import { newId } from './ids.js';
@@ -18,10 +21,19 @@ export const DEFAULT_SETTINGS: UserSettings = {
   notifications: DEFAULT_NOTIFICATION_PREFS,
 };
 
-export async function getOrCreateUserSettings(db: Database, userId: string): Promise<{ id: string; settings: UserSettings; version: number }> {
-  const existing = await db.query.userSettings.findFirst({ where: eq(userSettings.userId, userId) });
+export async function getOrCreateUserSettings(
+  db: Database,
+  userId: string,
+): Promise<{ id: string; settings: UserSettings; version: number }> {
+  const existing = await db.query.userSettings.findFirst({
+    where: eq(userSettings.userId, userId),
+  });
   if (existing) {
-    return { id: existing.id, settings: existing.settings as UserSettings, version: existing.version };
+    return {
+      id: existing.id,
+      settings: existing.settings as UserSettings,
+      version: existing.version,
+    };
   }
   // `userSettings.userId` is unique (packages/db/src/schema/settings.ts) —
   // two concurrent first-ever calls for the same user (e.g. the extension's
@@ -38,9 +50,22 @@ export async function getOrCreateUserSettings(db: Database, userId: string): Pro
     .onConflictDoNothing({ target: userSettings.userId })
     .returning();
   if (inserted) {
-    return { id: inserted.id, settings: inserted.settings as UserSettings, version: inserted.version };
+    return {
+      id: inserted.id,
+      settings: inserted.settings as UserSettings,
+      version: inserted.version,
+    };
   }
-  const raceWinner = await db.query.userSettings.findFirst({ where: eq(userSettings.userId, userId) });
-  if (!raceWinner) throw new Error(`user_settings row for ${userId} missing after onConflictDoNothing insert lost the race`);
-  return { id: raceWinner.id, settings: raceWinner.settings as UserSettings, version: raceWinner.version };
+  const raceWinner = await db.query.userSettings.findFirst({
+    where: eq(userSettings.userId, userId),
+  });
+  if (!raceWinner)
+    throw new Error(
+      `user_settings row for ${userId} missing after onConflictDoNothing insert lost the race`,
+    );
+  return {
+    id: raceWinner.id,
+    settings: raceWinner.settings as UserSettings,
+    version: raceWinner.version,
+  };
 }

@@ -1,6 +1,5 @@
 // /api/v1/users/me — profile get/patch, soft-delete account.
 
-
 import { users } from '@sl/db';
 import { updateProfileRequestSchema, userDtoSchema, type UserDto } from '@sl/shared';
 import { and, eq, isNull } from 'drizzle-orm';
@@ -38,9 +37,14 @@ export default fp(
 
     app.get(
       '/api/v1/users/me',
-      { onRequest: [fastify.authenticate], schema: { tags: ['users'], response: { 200: userDtoSchema } } },
+      {
+        onRequest: [fastify.authenticate],
+        schema: { tags: ['users'], response: { 200: userDtoSchema } },
+      },
       async (request) => {
-        const user = await fastify.db.query.users.findFirst({ where: and(eq(users.id, request.authUser!.id), isNull(users.deletedAt)) });
+        const user = await fastify.db.query.users.findFirst({
+          where: and(eq(users.id, request.authUser!.id), isNull(users.deletedAt)),
+        });
         if (!user) throw AppErrors.notFound('user');
         const admin = await resolveAdminSession(fastify.db, user.id, user.role);
         return toDto(user, admin);
@@ -52,10 +56,16 @@ export default fp(
       {
         onRequest: [fastify.authenticate],
         preHandler: [fastify.verifyCsrf],
-        schema: { tags: ['users'], body: updateProfileRequestSchema, response: { 200: userDtoSchema } },
+        schema: {
+          tags: ['users'],
+          body: updateProfileRequestSchema,
+          response: { 200: userDtoSchema },
+        },
       },
       async (request) => {
-        const before = await fastify.db.query.users.findFirst({ where: eq(users.id, request.authUser!.id) });
+        const before = await fastify.db.query.users.findFirst({
+          where: eq(users.id, request.authUser!.id),
+        });
         if (!before) throw AppErrors.notFound('user');
 
         const [after] = await fastify.db
@@ -87,16 +97,26 @@ export default fp(
       {
         onRequest: [fastify.authenticate],
         preHandler: [fastify.verifyCsrf],
-        schema: { tags: ['users'], body: z.object({ password: z.string().min(1) }), response: { 200: z.object({ deleted: z.literal(true) }) } },
+        schema: {
+          tags: ['users'],
+          body: z.object({ password: z.string().min(1) }),
+          response: { 200: z.object({ deleted: z.literal(true) }) },
+        },
       },
       async (request) => {
-        const user = await fastify.db.query.users.findFirst({ where: eq(users.id, request.authUser!.id) });
+        const user = await fastify.db.query.users.findFirst({
+          where: eq(users.id, request.authUser!.id),
+        });
         if (!user) throw AppErrors.notFound('user');
 
         const { verifySecret } = await import('../../lib/crypto.js');
-        if (!(await verifySecret(user.passwordHash, request.body.password))) throw AppErrors.invalidCredentials();
+        if (!(await verifySecret(user.passwordHash, request.body.password)))
+          throw AppErrors.invalidCredentials();
 
-        await fastify.db.update(users).set({ status: 'deleted', deletedAt: new Date() }).where(eq(users.id, user.id));
+        await fastify.db
+          .update(users)
+          .set({ status: 'deleted', deletedAt: new Date() })
+          .where(eq(users.id, user.id));
 
         const { revokeAllUserSessions, bumpUserVersion } = await import('../auth/repo.js');
         await revokeAllUserSessions(fastify.db, user.id, 'account_deleted');

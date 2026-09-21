@@ -41,7 +41,9 @@ export function SubscriptionActions({ userId }: { userId: string }) {
   const subQuery = useQuery({
     queryKey: ['admin', 'subscriptions', 'by-user', userId],
     queryFn: async () => {
-      const { data, error } = await api.GET('/api/v1/admin/subscriptions/by-user/{userId}', { params: { path: { userId } } });
+      const { data, error } = await api.GET('/api/v1/admin/subscriptions/by-user/{userId}', {
+        params: { path: { userId } },
+      });
       if (error) throw error;
       return data;
     },
@@ -58,7 +60,10 @@ export function SubscriptionActions({ userId }: { userId: string }) {
   const extendMutation = useMutation({
     mutationFn: async (reason: string) => {
       if (!current) return;
-      const { error } = await api.POST('/api/v1/admin/subscriptions/{id}/extend', { params: { path: { id: current.id } }, body: { periodDays, reason } });
+      const { error } = await api.POST('/api/v1/admin/subscriptions/{id}/extend', {
+        params: { path: { id: current.id } },
+        body: { periodDays, reason },
+      });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -66,18 +71,27 @@ export function SubscriptionActions({ userId }: { userId: string }) {
       setExtendOpen(false);
       invalidate();
     },
-    onError: (error) => toast.error("Couldn't extend subscription", { description: apiErrorMessage(error) }),
+    onError: (error) =>
+      toast.error("Couldn't extend subscription", { description: apiErrorMessage(error) }),
   });
 
   const suspendMutation = useMutation({
     mutationFn: async (reason: string) => {
       if (!current) return;
-      const path = current.status === 'suspended' ? '/api/v1/admin/subscriptions/{id}/unsuspend' : '/api/v1/admin/subscriptions/{id}/suspend';
-      const { error } = await api.POST(path, { params: { path: { id: current.id } }, body: { reason } });
+      const path =
+        current.status === 'suspended'
+          ? '/api/v1/admin/subscriptions/{id}/unsuspend'
+          : '/api/v1/admin/subscriptions/{id}/suspend';
+      const { error } = await api.POST(path, {
+        params: { path: { id: current.id } },
+        body: { reason },
+      });
       if (error) throw error;
     },
     onSuccess: () => {
-      toast.success(current?.status === 'suspended' ? 'Subscription unsuspended' : 'Subscription suspended');
+      toast.success(
+        current?.status === 'suspended' ? 'Subscription unsuspended' : 'Subscription suspended',
+      );
       setSuspendOpen(false);
       invalidate();
     },
@@ -87,7 +101,10 @@ export function SubscriptionActions({ userId }: { userId: string }) {
   const cancelMutation = useMutation({
     mutationFn: async (reason: string) => {
       if (!current) return;
-      const { error } = await api.POST('/api/v1/admin/subscriptions/{id}/cancel', { params: { path: { id: current.id } }, body: { reason, immediate } });
+      const { error } = await api.POST('/api/v1/admin/subscriptions/{id}/cancel', {
+        params: { path: { id: current.id } },
+        body: { reason, immediate },
+      });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -95,13 +112,17 @@ export function SubscriptionActions({ userId }: { userId: string }) {
       setCancelOpen(false);
       invalidate();
     },
-    onError: (error) => toast.error("Couldn't cancel subscription", { description: apiErrorMessage(error) }),
+    onError: (error) =>
+      toast.error("Couldn't cancel subscription", { description: apiErrorMessage(error) }),
   });
 
   const deviceLimitMutation = useMutation({
     mutationFn: async (reason: string) => {
       if (!licenseId) return;
-      const { error } = await api.POST('/api/v1/admin/licenses/{id}/device-limit', { params: { path: { id: licenseId } }, body: { maxDevices, reason } });
+      const { error } = await api.POST('/api/v1/admin/licenses/{id}/device-limit', {
+        params: { path: { id: licenseId } },
+        body: { maxDevices, reason },
+      });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -109,12 +130,16 @@ export function SubscriptionActions({ userId }: { userId: string }) {
       setDeviceLimitOpen(false);
       invalidate();
     },
-    onError: (error) => toast.error("Couldn't update device limit", { description: apiErrorMessage(error) }),
+    onError: (error) =>
+      toast.error("Couldn't update device limit", { description: apiErrorMessage(error) }),
   });
 
   const activateMutation = useMutation({
     mutationFn: async (reason: string) => {
-      const { error } = await api.POST('/api/v1/admin/subscriptions/{userId}/activate', { params: { path: { userId } }, body: { planCode, periodDays, reason } });
+      const { error } = await api.POST('/api/v1/admin/subscriptions/{userId}/activate', {
+        params: { path: { userId } },
+        body: { planCode, periodDays, reason },
+      });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -122,12 +147,16 @@ export function SubscriptionActions({ userId }: { userId: string }) {
       setActivateOpen(false);
       invalidate();
     },
-    onError: (error) => toast.error("Couldn't activate subscription", { description: apiErrorMessage(error) }),
+    onError: (error) =>
+      toast.error("Couldn't activate subscription", { description: apiErrorMessage(error) }),
   });
 
   const grantLifetimeMutation = useMutation({
     mutationFn: async (reason: string) => {
-      const { error } = await api.POST('/api/v1/admin/subscriptions/{userId}/grant-lifetime', { params: { path: { userId } }, body: { planCode, reason } });
+      const { error } = await api.POST('/api/v1/admin/subscriptions/{userId}/grant-lifetime', {
+        params: { path: { userId } },
+        body: { planCode, reason },
+      });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -135,11 +164,13 @@ export function SubscriptionActions({ userId }: { userId: string }) {
       setLifetimeOpen(false);
       invalidate();
     },
-    onError: (error) => toast.error("Couldn't grant lifetime", { description: apiErrorMessage(error) }),
+    onError: (error) =>
+      toast.error("Couldn't grant lifetime", { description: apiErrorMessage(error) }),
   });
 
   if (subQuery.isLoading) return <p className="text-sm text-ink-2">Loading…</p>;
-  if (subQuery.isError) return <p className="text-sm text-risk">Couldn't load this user's subscription.</p>;
+  if (subQuery.isError)
+    return <p className="text-sm text-risk">Couldn't load this user's subscription.</p>;
 
   return (
     <div className="flex flex-col gap-4">
@@ -151,8 +182,16 @@ export function SubscriptionActions({ userId }: { userId: string }) {
             <span className="text-xs text-ink-2">({current.plan.code})</span>
           </div>
           <div className="grid grid-cols-2 gap-2 text-xs text-ink-2">
-            <div>Period ends: {current.currentPeriodEnd ? new Date(current.currentPeriodEnd).toLocaleDateString() : '—'}</div>
-            <div>Trial ends: {current.trialEndsAt ? new Date(current.trialEndsAt).toLocaleDateString() : '—'}</div>
+            <div>
+              Period ends:{' '}
+              {current.currentPeriodEnd
+                ? new Date(current.currentPeriodEnd).toLocaleDateString()
+                : '—'}
+            </div>
+            <div>
+              Trial ends:{' '}
+              {current.trialEndsAt ? new Date(current.trialEndsAt).toLocaleDateString() : '—'}
+            </div>
             <div>Auto-renew: {current.autoRenew ? 'Yes' : 'No'}</div>
             <div>License device limit: {licenseId ? 'Managed' : 'No active license'}</div>
           </div>
@@ -167,7 +206,12 @@ export function SubscriptionActions({ userId }: { userId: string }) {
               <Button size="sm" variant="destructive" onClick={() => setCancelOpen(true)}>
                 Cancel
               </Button>
-              <Button size="sm" variant="outline" disabled={!licenseId} onClick={() => setDeviceLimitOpen(true)}>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!licenseId}
+                onClick={() => setDeviceLimitOpen(true)}
+              >
                 Device limit
               </Button>
             </div>
@@ -181,10 +225,19 @@ export function SubscriptionActions({ userId }: { userId: string }) {
         <div className="flex flex-col gap-3">
           <div className="grid grid-cols-2 gap-3">
             <FormField label="Plan code" htmlFor="sa-planCode">
-              <Input id="sa-planCode" value={planCode} onChange={(e) => setPlanCode(e.target.value)} />
+              <Input
+                id="sa-planCode"
+                value={planCode}
+                onChange={(e) => setPlanCode(e.target.value)}
+              />
             </FormField>
             <FormField label="Period (days)" htmlFor="sa-periodDays">
-              <Input id="sa-periodDays" type="number" value={periodDays} onChange={(e) => setPeriodDays(Number(e.target.value))} />
+              <Input
+                id="sa-periodDays"
+                type="number"
+                value={periodDays}
+                onChange={(e) => setPeriodDays(Number(e.target.value))}
+              />
             </FormField>
           </div>
           <div className="flex gap-2">
@@ -207,7 +260,12 @@ export function SubscriptionActions({ userId }: { userId: string }) {
         onConfirm={(reason) => extendMutation.mutate(reason)}
         extraFields={
           <FormField label="Period (days)" htmlFor="extend-days">
-            <Input id="extend-days" type="number" value={periodDays} onChange={(e) => setPeriodDays(Number(e.target.value))} />
+            <Input
+              id="extend-days"
+              type="number"
+              value={periodDays}
+              onChange={(e) => setPeriodDays(Number(e.target.value))}
+            />
           </FormField>
         }
       />
@@ -249,12 +307,33 @@ export function SubscriptionActions({ userId }: { userId: string }) {
         onConfirm={(reason) => deviceLimitMutation.mutate(reason)}
         extraFields={
           <FormField label="Max devices" htmlFor="device-limit">
-            <Input id="device-limit" type="number" min={1} max={10} value={maxDevices} onChange={(e) => setMaxDevices(Number(e.target.value))} />
+            <Input
+              id="device-limit"
+              type="number"
+              min={1}
+              max={10}
+              value={maxDevices}
+              onChange={(e) => setMaxDevices(Number(e.target.value))}
+            />
           </FormField>
         }
       />
-      <ReasonDialog open={activateOpen} onOpenChange={setActivateOpen} title={`Activate ${planCode} for ${periodDays}d`} confirmLabel="Activate" loading={activateMutation.isPending} onConfirm={(reason) => activateMutation.mutate(reason)} />
-      <ReasonDialog open={lifetimeOpen} onOpenChange={setLifetimeOpen} title={`Grant lifetime (${planCode})`} confirmLabel="Grant lifetime" loading={grantLifetimeMutation.isPending} onConfirm={(reason) => grantLifetimeMutation.mutate(reason)} />
+      <ReasonDialog
+        open={activateOpen}
+        onOpenChange={setActivateOpen}
+        title={`Activate ${planCode} for ${periodDays}d`}
+        confirmLabel="Activate"
+        loading={activateMutation.isPending}
+        onConfirm={(reason) => activateMutation.mutate(reason)}
+      />
+      <ReasonDialog
+        open={lifetimeOpen}
+        onOpenChange={setLifetimeOpen}
+        title={`Grant lifetime (${planCode})`}
+        confirmLabel="Grant lifetime"
+        loading={grantLifetimeMutation.isPending}
+        onConfirm={(reason) => grantLifetimeMutation.mutate(reason)}
+      />
     </div>
   );
 }

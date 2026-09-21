@@ -1,11 +1,7 @@
 {
   "uid": "sl-db-redis",
   "title": "DB / Redis",
-  "tags": [
-    "sniper-ledger",
-    "database",
-    "redis"
-  ],
+  "tags": ["sniper-ledger", "database", "redis"],
   "timezone": "utc",
   "schemaVersion": 39,
   "version": 1,

@@ -9,8 +9,18 @@ import { type ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 
 import { recordAudit } from '../../lib/audit.js';
-import { recordAdminAction, requireAdminUsersRowId, toAuditSnapshot } from '../admin-subscriptions/admin-action-log.js';
-import { createCoupon, listAllCoupons, resolvePlanCodes, updateCoupon, type CouponRow } from '../coupons/service.js';
+import {
+  recordAdminAction,
+  requireAdminUsersRowId,
+  toAuditSnapshot,
+} from '../admin-subscriptions/admin-action-log.js';
+import {
+  createCoupon,
+  listAllCoupons,
+  resolvePlanCodes,
+  updateCoupon,
+  type CouponRow,
+} from '../coupons/service.js';
 
 import type { Database } from '@sl/db';
 import type { FastifyInstance } from 'fastify';

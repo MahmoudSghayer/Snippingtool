@@ -5,7 +5,6 @@ import { reportSnipingAttemptsRequestSchema } from '@sl/shared';
 import fp from 'fastify-plugin';
 import { z } from 'zod';
 
-
 import { newId } from '../../lib/ids.js';
 import { INGEST_RATE_LIMIT } from '../../lib/rate-limit-tiers.js';
 
@@ -22,7 +21,11 @@ export default fp(
         onRequest: [fastify.authenticate],
         preHandler: [fastify.verifyCsrf],
         config: { rateLimit: INGEST_RATE_LIMIT },
-        schema: { tags: ['sniping'], body: reportSnipingAttemptsRequestSchema, response: { 200: z.object({ accepted: z.number() }) } },
+        schema: {
+          tags: ['sniping'],
+          body: reportSnipingAttemptsRequestSchema,
+          response: { 200: z.object({ accepted: z.number() }) },
+        },
       },
       async (request) => {
         const userId = request.authUser!.id;

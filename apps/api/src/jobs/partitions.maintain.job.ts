@@ -10,7 +10,12 @@ import { sql } from 'drizzle-orm';
 
 import { defineJob } from './types.js';
 
-const PARTITIONED_TABLES = ['audit_logs', 'user_activity', 'search_activity', 'sniping_activity'] as const;
+const PARTITIONED_TABLES = [
+  'audit_logs',
+  'user_activity',
+  'search_activity',
+  'sniping_activity',
+] as const;
 const MONTHS_AHEAD = 3;
 
 export default defineJob({
@@ -18,7 +23,9 @@ export default defineJob({
   schedule: '0 4 * * *', // nightly at 04:00 UTC
   async processor(_job, { db, log }) {
     const now = new Date();
-    const fromMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString().slice(0, 10);
+    const fromMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
+      .toISOString()
+      .slice(0, 10);
 
     // Defense-in-depth even though both values are internally computed
     // (never request input): assert their shape before they're ever allowed
@@ -35,9 +42,16 @@ export default defineJob({
       // `fromMonth` is validated immediately above, neither is
       // request-controlled. See docs/09-security.md "No string-interpolated
       // SQL".
-      await db.execute(sql.raw(`SELECT create_month_partitions('${table}', '${fromMonth}'::date, ${MONTHS_AHEAD})`)); // nosemgrep: no-raw-sql-string-interpolation
+      await db.execute(
+        sql.raw(
+          `SELECT create_month_partitions('${table}', '${fromMonth}'::date, ${MONTHS_AHEAD})`,
+        ),
+      ); // nosemgrep: no-raw-sql-string-interpolation
     }
 
-    log.info({ tables: PARTITIONED_TABLES, fromMonth, monthsAhead: MONTHS_AHEAD }, 'partitions.maintain complete');
+    log.info(
+      { tables: PARTITIONED_TABLES, fromMonth, monthsAhead: MONTHS_AHEAD },
+      'partitions.maintain complete',
+    );
   },
 });

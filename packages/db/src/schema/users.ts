@@ -6,7 +6,17 @@ import { customType, index, inet, pgTable, smallint, text, uniqueIndex } from 'd
 
 import { adminUsers } from './admin.js';
 import { devices } from './auth.js';
-import { citext, createdAt, deletedAt, idPk, rowVersion, timestamptz, updatedAt, userRoleEnum, userStatusEnum } from './common.js';
+import {
+  citext,
+  createdAt,
+  deletedAt,
+  idPk,
+  rowVersion,
+  timestamptz,
+  updatedAt,
+  userRoleEnum,
+  userStatusEnum,
+} from './common.js';
 import { subscriptions } from './subscriptions.js';
 
 // bytea passthrough for the encrypted TOTP secret; Buffer in/out.
@@ -59,14 +69,14 @@ export const users = pgTable(
   },
   (t) => [
     uniqueIndex('users_email_unique_live').on(t.email).where(isNull(t.deletedAt)),
-    uniqueIndex('users_referral_code_unique_live')
-      .on(t.referralCode)
-      .where(isNull(t.deletedAt)),
+    uniqueIndex('users_referral_code_unique_live').on(t.referralCode).where(isNull(t.deletedAt)),
     index('users_status_idx').on(t.status).where(isNull(t.deletedAt)),
     index('users_role_idx').on(t.role).where(isNull(t.deletedAt)),
     index('users_created_at_idx').on(t.createdAt),
     index('users_last_login_at_idx').on(t.lastLoginAt).where(isNull(t.deletedAt)),
-    uniqueIndex('users_stripe_customer_id_unique').on(t.stripeCustomerId).where(isNotNull(t.stripeCustomerId)),
+    uniqueIndex('users_stripe_customer_id_unique')
+      .on(t.stripeCustomerId)
+      .where(isNotNull(t.stripeCustomerId)),
     index('users_email_normalised_idx').on(t.emailNormalised).where(isNull(t.deletedAt)),
   ],
 );

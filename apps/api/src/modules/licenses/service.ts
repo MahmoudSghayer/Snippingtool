@@ -36,14 +36,17 @@ export async function issueForSubscription(
   for (let attempt = 0; attempt < 5; attempt++) {
     const candidate = generateLicenseKey(randomBytes(LICENSE_KEY_RANDOM_BYTES));
     const candidateHash = fastHash(candidate);
-    const existing = await db.query.licenses.findFirst({ where: eq(licenses.keyHash, candidateHash) });
+    const existing = await db.query.licenses.findFirst({
+      where: eq(licenses.keyHash, candidateHash),
+    });
     if (!existing) {
       fullKey = candidate;
       keyHash = candidateHash;
       break;
     }
   }
-  if (!fullKey) throw AppErrors.internal('Could not generate a unique license key after 5 attempts.');
+  if (!fullKey)
+    throw AppErrors.internal('Could not generate a unique license key after 5 attempts.');
 
   const [row] = await db
     .insert(licenses)
@@ -72,9 +75,16 @@ export async function revoke(db: Database, licenseId: string, reason: string): P
   return row;
 }
 
-export async function findActiveForSubscription(db: Database, subscriptionId: string): Promise<LicenseRow | null> {
+export async function findActiveForSubscription(
+  db: Database,
+  subscriptionId: string,
+): Promise<LicenseRow | null> {
   const row = await db.query.licenses.findFirst({
-    where: and(eq(licenses.subscriptionId, subscriptionId), eq(licenses.status, 'active'), isNull(licenses.deletedAt)),
+    where: and(
+      eq(licenses.subscriptionId, subscriptionId),
+      eq(licenses.status, 'active'),
+      isNull(licenses.deletedAt),
+    ),
     orderBy: [desc(licenses.createdAt)],
   });
   return row ?? null;
@@ -119,7 +129,11 @@ export async function regenerateForUser(
 
 async function countActiveDevicesForLicense(db: Database, licenseId: string): Promise<number> {
   const rows = await db.query.devices.findMany({
-    where: and(eq(devices.licenseId, licenseId), eq(devices.status, 'active'), isNull(devices.deletedAt)),
+    where: and(
+      eq(devices.licenseId, licenseId),
+      eq(devices.status, 'active'),
+      isNull(devices.deletedAt),
+    ),
   });
   return rows.length;
 }
@@ -181,7 +195,11 @@ export async function validateLicense(
 
   const fingerprintHash = fastHash(input.device.fingerprint);
   const existingDevice = await db.query.devices.findFirst({
-    where: and(eq(devices.userId, license.userId), eq(devices.fingerprintHash, fingerprintHash), isNull(devices.deletedAt)),
+    where: and(
+      eq(devices.userId, license.userId),
+      eq(devices.fingerprintHash, fingerprintHash),
+      isNull(devices.deletedAt),
+    ),
   });
 
   let deviceId: string;
@@ -228,7 +246,11 @@ export async function validateLicense(
   await db.update(licenses).set({ lastValidatedAt: new Date() }).where(eq(licenses.id, license.id));
 
   const snapshot = await entitlementProvider.getEntitlements(license.userId);
-  const entitlementJws = await entitlementProvider.signEntitlementBlob(snapshot, license.userId, deviceId);
+  const entitlementJws = await entitlementProvider.signEntitlementBlob(
+    snapshot,
+    license.userId,
+    deviceId,
+  );
 
   return { status: license.status, entitlements: snapshot, entitlementJws };
 }
@@ -242,11 +264,18 @@ const NON_LIVE_SUBSCRIPTION_STATUSES = new Set(['canceled', 'expired', 'suspende
  * (`subscriptions.expire`, admin suspend/cancel, the Stripe webhook) should
  * already have handled each of these — this is the backstop for anything
  * that slipped through. */
-export async function revalidateLicenses(db: Database): Promise<{ expiredCount: number; revokedCount: number }> {
+export async function revalidateLicenses(
+  db: Database,
+): Promise<{ expiredCount: number; revokedCount: number }> {
   const now = new Date();
 
   const expiredCandidates = await db.query.licenses.findMany({
-    where: and(eq(licenses.status, 'active'), isNotNull(licenses.expiresAt), lt(licenses.expiresAt, now), isNull(licenses.deletedAt)),
+    where: and(
+      eq(licenses.status, 'active'),
+      isNotNull(licenses.expiresAt),
+      lt(licenses.expiresAt, now),
+      isNull(licenses.deletedAt),
+    ),
   });
   for (const license of expiredCandidates) {
     await db.update(licenses).set({ status: 'expired' }).where(eq(licenses.id, license.id));
@@ -257,7 +286,9 @@ export async function revalidateLicenses(db: Database): Promise<{ expiredCount: 
   });
   let revokedCount = 0;
   for (const license of stillActive) {
-    const sub = await db.query.subscriptions.findFirst({ where: eq(subscriptions.id, license.subscriptionId) });
+    const sub = await db.query.subscriptions.findFirst({
+      where: eq(subscriptions.id, license.subscriptionId),
+    });
     if (sub && NON_LIVE_SUBSCRIPTION_STATUSES.has(sub.status)) {
       await revoke(db, license.id, `revalidate_sweep: subscription is ${sub.status}`);
       revokedCount += 1;

@@ -7,7 +7,6 @@
 import { profits, snipingActivity, trades } from '@sl/db';
 import { and, eq, gte, isNull, lt } from 'drizzle-orm';
 
-
 import { newId } from '../lib/ids.js';
 
 import { defineJob } from './types.js';
@@ -29,7 +28,11 @@ export default defineJob({
       where: and(isNull(trades.deletedAt), gte(trades.soldAt, dayStart), lt(trades.soldAt, dayEnd)),
     });
     const boughtToday = await db.query.trades.findMany({
-      where: and(isNull(trades.deletedAt), gte(trades.boughtAt, dayStart), lt(trades.boughtAt, dayEnd)),
+      where: and(
+        isNull(trades.deletedAt),
+        gte(trades.boughtAt, dayStart),
+        lt(trades.boughtAt, dayEnd),
+      ),
     });
     const snipesToday = await db.query.snipingActivity.findMany({
       where: and(gte(snipingActivity.occurredAt, dayStart), lt(snipingActivity.occurredAt, dayEnd)),
@@ -53,8 +56,17 @@ export default defineJob({
       const snipeCount = snipes.length;
       const successes = snipes.filter((s) => s.outcome === 'success').length;
 
-      const existing = await db.query.profits.findFirst({ where: and(eq(profits.userId, userId), eq(profits.day, day)) });
-      const values = { coinsSpent, coinsEarned, netProfit, snipes: snipeCount, successes, tradesClosed };
+      const existing = await db.query.profits.findFirst({
+        where: and(eq(profits.userId, userId), eq(profits.day, day)),
+      });
+      const values = {
+        coinsSpent,
+        coinsEarned,
+        netProfit,
+        snipes: snipeCount,
+        successes,
+        tradesClosed,
+      };
 
       if (existing) {
         await db.update(profits).set(values).where(eq(profits.id, existing.id));

@@ -18,7 +18,9 @@ function wsUpgradeUrl(ticket: string): string {
   // API_BASE_URL is the bare origin (or '' for the dev proxy / same-origin
   // case) — the WS upgrade itself is unprefixed (docs/03-api.md §ws), so no
   // `/api/v1` stripping is needed here, just the http(s) -> ws(s) swap.
-  const absoluteBase = API_BASE_URL.startsWith('http') ? API_BASE_URL : `${window.location.origin}${API_BASE_URL}`;
+  const absoluteBase = API_BASE_URL.startsWith('http')
+    ? API_BASE_URL
+    : `${window.location.origin}${API_BASE_URL}`;
   const wsBase = absoluteBase.replace(/^http/, 'ws');
   return `${wsBase}/ws?ticket=${encodeURIComponent(ticket)}`;
 }

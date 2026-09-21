@@ -82,7 +82,9 @@ function main() {
     // but worth flagging since a missing pair silently skips seeding the
     // super admin rather than failing loudly.
     if (!parsed.SEED_ADMIN_EMAIL || !parsed.SEED_ADMIN_PASSWORD) {
-      console.log('    note: SEED_ADMIN_EMAIL/SEED_ADMIN_PASSWORD not both set — `pnpm --filter @sl/db seed` will skip the super admin.');
+      console.log(
+        '    note: SEED_ADMIN_EMAIL/SEED_ADMIN_PASSWORD not both set — `pnpm --filter @sl/db seed` will skip the super admin.',
+      );
     }
     process.exit(0);
   } catch (err) {

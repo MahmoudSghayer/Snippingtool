@@ -40,7 +40,10 @@ function parseArgs(argv: string[]): { from: string; to: string } {
   return { from, to };
 }
 
-export async function runBackfill(from: string, to: string): Promise<{ days: number; rows: number }> {
+export async function runBackfill(
+  from: string,
+  to: string,
+): Promise<{ days: number; rows: number }> {
   const env = loadEnv();
   const { db, sql } = createDb(env.DATABASE_URL, { max: 5 });
   try {
@@ -53,7 +56,9 @@ export async function runBackfill(from: string, to: string): Promise<{ days: num
       console.log(`analytics:backfill ${day}: ${rowCount} rows`);
     }
     await refreshMvKpiDaily(db);
-    console.log(`analytics:backfill complete: ${days} day(s), ${totalRows} row(s) upserted, mv_kpi_daily refreshed.`);
+    console.log(
+      `analytics:backfill complete: ${days} day(s), ${totalRows} row(s) upserted, mv_kpi_daily refreshed.`,
+    );
     return { days, rows: totalRows };
   } finally {
     await sql.end({ timeout: 5 });

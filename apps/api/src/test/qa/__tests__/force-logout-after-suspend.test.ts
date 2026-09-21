@@ -25,17 +25,41 @@ import { buildApp } from '../../../app.js';
 
 import type { FastifyInstance } from 'fastify';
 
-const device = { fingerprint: 'force-logout-ws-fp-0000000001', name: 'Force Logout Test', browser: 'chrome', os: 'linux', extensionVersion: '0.1.0' };
+const device = {
+  fingerprint: 'force-logout-ws-fp-0000000001',
+  name: 'Force Logout Test',
+  browser: 'chrome',
+  os: 'linux',
+  extensionVersion: '0.1.0',
+};
 
 function extractToken(html: string): string {
   return decodeURIComponent(html.match(/token=([A-Za-z0-9_-]+)/)![1]!);
 }
 
-async function registerVerifiedUser(app: FastifyInstance, email: string): Promise<{ accessToken: string }> {
-  await app.inject({ method: 'POST', url: '/api/v1/auth/register', remoteAddress: '203.0.113.9', payload: { email, password: 'correcthorsebattery12', device } });
+async function registerVerifiedUser(
+  app: FastifyInstance,
+  email: string,
+): Promise<{ accessToken: string }> {
+  await app.inject({
+    method: 'POST',
+    url: '/api/v1/auth/register',
+    remoteAddress: '203.0.113.9',
+    payload: { email, password: 'correcthorsebattery12', device },
+  });
   const token = extractToken(app.mailer.sentEmails.at(-1)!.html);
-  await app.inject({ method: 'POST', url: '/api/v1/auth/verify-email', remoteAddress: '203.0.113.9', payload: { token } });
-  const login = await app.inject({ method: 'POST', url: '/api/v1/auth/login', remoteAddress: '203.0.113.9', payload: { email, password: 'correcthorsebattery12', device } });
+  await app.inject({
+    method: 'POST',
+    url: '/api/v1/auth/verify-email',
+    remoteAddress: '203.0.113.9',
+    payload: { token },
+  });
+  const login = await app.inject({
+    method: 'POST',
+    url: '/api/v1/auth/login',
+    remoteAddress: '203.0.113.9',
+    payload: { email, password: 'correcthorsebattery12', device },
+  });
   return login.json() as { accessToken: string };
 }
 
@@ -54,8 +78,13 @@ async function createAdmin(app: FastifyInstance, email: string): Promise<{ token
     emailVerifiedAt: new Date(),
     totpEnabledAt: new Date(),
   });
-  await app.db.insert(adminUsers).values({ id: newId(), userId, adminRole: 'super_admin', permissions: {} });
-  const token = await signAccessToken({ sub: userId, sid: newId(), did: null, role: 'admin', plan: null, ver: 0 }, app.config.JWT_PRIVATE_KEY!);
+  await app.db
+    .insert(adminUsers)
+    .values({ id: newId(), userId, adminRole: 'super_admin', permissions: {} });
+  const token = await signAccessToken(
+    { sub: userId, sid: newId(), did: null, role: 'admin', plan: null, ver: 0 },
+    app.config.JWT_PRIVATE_KEY!,
+  );
   return { token };
 }
 
@@ -94,7 +123,11 @@ describe('force-logout after suspend still notifies the user (defect #7)', () =>
 
     // Open a real, live WS connection for the target user *before* either
     // admin action, so it's still open when force-logout runs.
-    const ticketRes = await app.inject({ method: 'POST', url: '/api/v1/ws/ticket', headers: { authorization: `Bearer ${user.accessToken}` } });
+    const ticketRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/ws/ticket',
+      headers: { authorization: `Bearer ${user.accessToken}` },
+    });
     expect(ticketRes.statusCode).toBe(200);
     const { ticket } = ticketRes.json() as { ticket: string };
 
@@ -125,7 +158,11 @@ describe('force-logout after suspend still notifies the user (defect #7)', () =>
       payload: { reason: 'defect-8 regression: force-logout after suspend' },
     });
     expect(forceLogoutRes.statusCode).toBe(200);
-    const body = forceLogoutRes.json() as { ok: true; sessionsRevoked: number; sessionsNotified: number };
+    const body = forceLogoutRes.json() as {
+      ok: true;
+      sessionsRevoked: number;
+      sessionsNotified: number;
+    };
     expect(body.ok).toBe(true);
     // suspend already revoked the only session -> force-logout's own DB-level revoke count is 0 ...
     expect(body.sessionsRevoked).toBe(0);
@@ -137,7 +174,10 @@ describe('force-logout after suspend still notifies the user (defect #7)', () =>
     await new Promise((resolve) => setTimeout(resolve, 300)); // pub/sub delivery is async
     const revokedMessages = messages.filter((m) => m.type === 'session.revoked');
     expect(revokedMessages.length).toBeGreaterThanOrEqual(1);
-    expect(revokedMessages[0]).toMatchObject({ type: 'session.revoked', reason: 'admin_force_logout' });
+    expect(revokedMessages[0]).toMatchObject({
+      type: 'session.revoked',
+      reason: 'admin_force_logout',
+    });
 
     socket.close();
   });

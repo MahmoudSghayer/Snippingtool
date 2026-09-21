@@ -10,8 +10,8 @@ groups:
         for: 1m
         labels: { severity: critical }
         annotations:
-          summary: "sniper-ledger API target is down"
-          description: "Prometheus has failed to scrape {{ $labels.instance }} (job sniper-ledger-api) for 1m. The process may have crashed or be unresponsive. Runbook: docs/11-devops.md#api-down."
+          summary: 'sniper-ledger API target is down'
+          description: 'Prometheus has failed to scrape {{ $labels.instance }} (job sniper-ledger-api) for 1m. The process may have crashed or be unresponsive. Runbook: docs/11-devops.md#api-down.'
 
       - alert: HighServerErrorRate
         expr: |
@@ -23,8 +23,8 @@ groups:
         for: 5m
         labels: { severity: critical }
         annotations:
-          summary: "5xx rate above 5% for 5 minutes"
-          description: "{{ $value | humanizePercentage }} of requests are failing with a 5xx status. Runbook: docs/11-devops.md#high-5xx-rate."
+          summary: '5xx rate above 5% for 5 minutes'
+          description: '{{ $value | humanizePercentage }} of requests are failing with a 5xx status. Runbook: docs/11-devops.md#high-5xx-rate.'
 
       - alert: HighP95Latency
         expr: |
@@ -32,8 +32,8 @@ groups:
         for: 10m
         labels: { severity: warning }
         annotations:
-          summary: "p95 request latency above 1s on {{ $labels.route }}"
-          description: "p95 latency has been over 1s for 10m on route {{ $labels.route }}. Runbook: docs/11-devops.md#high-p95-latency."
+          summary: 'p95 request latency above 1s on {{ $labels.route }}'
+          description: 'p95 latency has been over 1s for 10m on route {{ $labels.route }}. Runbook: docs/11-devops.md#high-p95-latency.'
 
   - name: sniper-ledger.queues
     rules:
@@ -45,7 +45,7 @@ groups:
         for: 15m
         labels: { severity: warning }
         annotations:
-          summary: "BullMQ queue {{ $labels.key }} has >500 waiting jobs"
+          summary: 'BullMQ queue {{ $labels.key }} has >500 waiting jobs'
           description: "A queue's waiting list has stayed above 500 for 15m — the worker may be stalled, crashed, or under-provisioned for the current job rate. Runbook: docs/11-devops.md#queue-backlog-growing."
 
   - name: sniper-ledger.database
@@ -55,16 +55,16 @@ groups:
         for: 5m
         labels: { severity: warning }
         annotations:
-          summary: "Postgres connections above 80% of max_connections"
-          description: "{{ $value | humanizePercentage }} of max_connections in use. Check for a connection leak (a pool not releasing clients) or scale the pool size down / max_connections up. Runbook: docs/11-devops.md#db-connections-near-limit."
+          summary: 'Postgres connections above 80% of max_connections'
+          description: '{{ $value | humanizePercentage }} of max_connections in use. Check for a connection leak (a pool not releasing clients) or scale the pool size down / max_connections up. Runbook: docs/11-devops.md#db-connections-near-limit.'
 
       - alert: DBDown
         expr: pg_up == 0
         for: 1m
         labels: { severity: critical }
         annotations:
-          summary: "postgres_exporter cannot reach Postgres"
-          description: "Runbook: docs/11-devops.md#db-down."
+          summary: 'postgres_exporter cannot reach Postgres'
+          description: 'Runbook: docs/11-devops.md#db-down.'
 
   - name: sniper-ledger.host
     rules:
@@ -74,7 +74,7 @@ groups:
         for: 10m
         labels: { severity: warning }
         annotations:
-          summary: "Less than 15% disk free on {{ $labels.mountpoint }}"
+          summary: 'Less than 15% disk free on {{ $labels.mountpoint }}'
           description: "Free space on {{ $labels.instance }}:{{ $labels.mountpoint }} is below 15%. Postgres, backups and container logs all live on this VM's disk in the single-VM deployment. Runbook: docs/11-devops.md#disk-space-low."
 
       - alert: DiskSpaceCritical
@@ -83,8 +83,8 @@ groups:
         for: 5m
         labels: { severity: critical }
         annotations:
-          summary: "Less than 5% disk free on {{ $labels.mountpoint }}"
-          description: "Runbook: docs/11-devops.md#disk-space-low."
+          summary: 'Less than 5% disk free on {{ $labels.mountpoint }}'
+          description: 'Runbook: docs/11-devops.md#disk-space-low.'
 
   - name: sniper-ledger.backups
     rules:
@@ -97,13 +97,13 @@ groups:
         for: 5m
         labels: { severity: critical }
         annotations:
-          summary: "Last successful Postgres backup is over 26 hours old"
-          description: "The daily backup (infra/backups/pg-backup.sh, scheduled 02:00 UTC) has not succeeded in the last 26 hours. Runbook: docs/11-devops.md#backup-too-old."
+          summary: 'Last successful Postgres backup is over 26 hours old'
+          description: 'The daily backup (infra/backups/pg-backup.sh, scheduled 02:00 UTC) has not succeeded in the last 26 hours. Runbook: docs/11-devops.md#backup-too-old.'
 
       - alert: BackupVerifyFailed
         expr: sl_backup_last_verify_status{type="postgres"} == 0
         for: 5m
         labels: { severity: critical }
         annotations:
-          summary: "Latest backup failed its restore verification"
-          description: "infra/backups/verify-backup.sh restored the latest dump into a scratch database and its sanity checks failed (or the restore itself failed) — the backup exists but may not be usable. Runbook: docs/11-devops.md#backup-verify-failed."
+          summary: 'Latest backup failed its restore verification'
+          description: 'infra/backups/verify-backup.sh restored the latest dump into a scratch database and its sanity checks failed (or the restore itself failed) — the backup exists but may not be usable. Runbook: docs/11-devops.md#backup-verify-failed.'

@@ -26,10 +26,16 @@ async function getConfigNumber(db: Database, key: string, fallback: number): Pro
   return typeof row?.value === 'number' ? row.value : fallback;
 }
 
-async function getConfigSeverity(db: Database, key: string, fallback: FlagRow['severity']): Promise<FlagRow['severity']> {
+async function getConfigSeverity(
+  db: Database,
+  key: string,
+  fallback: FlagRow['severity'],
+): Promise<FlagRow['severity']> {
   const row = await db.query.systemConfig.findFirst({ where: eq(systemConfig.key, key) });
   const severities: readonly FlagRow['severity'][] = ['low', 'medium', 'high', 'critical'];
-  return typeof row?.value === 'string' && (severities as readonly string[]).includes(row.value) ? (row.value as FlagRow['severity']) : fallback;
+  return typeof row?.value === 'string' && (severities as readonly string[]).includes(row.value)
+    ? (row.value as FlagRow['severity'])
+    : fallback;
 }
 
 const SEVERITY_ORDER: readonly FlagRow['severity'][] = ['low', 'medium', 'high', 'critical'];
@@ -68,7 +74,12 @@ async function maybeAutoSuspend(
 
 /** Detector 1: more than N distinct devices first-seen from the same IP in
  * a rolling 24h window — flags every account involved. */
-async function scanDeviceVelocity(db: Database, redis: Redis, threshold: number, autoSuspendSeverity: FlagRow['severity']): Promise<number> {
+async function scanDeviceVelocity(
+  db: Database,
+  redis: Redis,
+  threshold: number,
+  autoSuspendSeverity: FlagRow['severity'],
+): Promise<number> {
   const since = new Date(Date.now() - DAY_MS);
   const recent = await db.query.devices.findMany({ where: gte(devices.firstSeenAt, since) });
 
@@ -110,7 +121,12 @@ async function scanDeviceVelocity(db: Database, redis: Redis, threshold: number,
 /** Detector 2: more than N distinct user accounts have ever registered a
  * device with the same fingerprint hash — unbounded lookback (a shared
  * fingerprint is evidence regardless of when each account first used it). */
-async function scanMultiAccountByFingerprint(db: Database, redis: Redis, threshold: number, autoSuspendSeverity: FlagRow['severity']): Promise<number> {
+async function scanMultiAccountByFingerprint(
+  db: Database,
+  redis: Redis,
+  threshold: number,
+  autoSuspendSeverity: FlagRow['severity'],
+): Promise<number> {
   const allDevices = await db.query.devices.findMany({ where: isNull(devices.deletedAt) });
 
   const byFingerprint = new Map<string, Set<string>>();
@@ -149,16 +165,25 @@ async function scanMultiAccountByFingerprint(db: Database, redis: Redis, thresho
  * component in this system currently enriches that column with a real ASN
  * lookup (out of this agent's scope — see docs/05-subscriptions.md §6),
  * so distinct IP addresses are used as the nearest available proxy. */
-async function scanLicenseNetworkSpread(db: Database, redis: Redis, threshold: number, autoSuspendSeverity: FlagRow['severity']): Promise<number> {
+async function scanLicenseNetworkSpread(
+  db: Database,
+  redis: Redis,
+  threshold: number,
+  autoSuspendSeverity: FlagRow['severity'],
+): Promise<number> {
   const since = new Date(Date.now() - DAY_MS);
-  const activeLicenses = await db.query.licenses.findMany({ where: and(eq(licenses.status, 'active'), isNull(licenses.deletedAt)) });
+  const activeLicenses = await db.query.licenses.findMany({
+    where: and(eq(licenses.status, 'active'), isNull(licenses.deletedAt)),
+  });
 
   let flagged = 0;
   for (const license of activeLicenses) {
     const recentDevices = await db.query.devices.findMany({
       where: and(eq(devices.licenseId, license.id), gte(devices.lastSeenAt, since)),
     });
-    const ips = new Set(recentDevices.map((d) => d.lastIp).filter((ip): ip is string => Boolean(ip)));
+    const ips = new Set(
+      recentDevices.map((d) => d.lastIp).filter((ip): ip is string => Boolean(ip)),
+    );
     if (ips.size <= threshold) continue;
 
     const severity = severityFromRatio(ips.size, threshold);
@@ -185,19 +210,44 @@ export default defineJob({
   name: 'abuse.scan',
   schedule: '0 * * * *', // hourly
   async processor(_job, { db, redis, log }) {
-    const [maxDevicesPerIpPerDay, maxAccountsPerFingerprint, maxIpsPerLicense, autoSuspendSeverity] = await Promise.all([
+    const [
+      maxDevicesPerIpPerDay,
+      maxAccountsPerFingerprint,
+      maxIpsPerLicense,
+      autoSuspendSeverity,
+    ] = await Promise.all([
       getConfigNumber(db, 'abuse.max_devices_per_ip_per_day', 5),
       getConfigNumber(db, 'abuse.max_accounts_per_fingerprint', 3),
       getConfigNumber(db, 'abuse.max_ips_per_license_24h', 3),
       getConfigSeverity(db, 'abuse.auto_suspend_severity_threshold', 'high'),
     ]);
 
-    const velocityFlags = await scanDeviceVelocity(db, redis, maxDevicesPerIpPerDay, autoSuspendSeverity);
-    const fingerprintFlags = await scanMultiAccountByFingerprint(db, redis, maxAccountsPerFingerprint, autoSuspendSeverity);
-    const networkSpreadFlags = await scanLicenseNetworkSpread(db, redis, maxIpsPerLicense, autoSuspendSeverity);
+    const velocityFlags = await scanDeviceVelocity(
+      db,
+      redis,
+      maxDevicesPerIpPerDay,
+      autoSuspendSeverity,
+    );
+    const fingerprintFlags = await scanMultiAccountByFingerprint(
+      db,
+      redis,
+      maxAccountsPerFingerprint,
+      autoSuspendSeverity,
+    );
+    const networkSpreadFlags = await scanLicenseNetworkSpread(
+      db,
+      redis,
+      maxIpsPerLicense,
+      autoSuspendSeverity,
+    );
 
     log.info(
-      { velocityFlags, fingerprintFlags, networkSpreadFlags, totalFlags: velocityFlags + fingerprintFlags + networkSpreadFlags },
+      {
+        velocityFlags,
+        fingerprintFlags,
+        networkSpreadFlags,
+        totalFlags: velocityFlags + fingerprintFlags + networkSpreadFlags,
+      },
       'abuse.scan completed',
     );
   },

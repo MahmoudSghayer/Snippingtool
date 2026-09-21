@@ -23,7 +23,18 @@ export interface ChartCardProps {
  * range/granularity controls in `actions`, an optional series `legend`, and
  * consistent loading/empty states so no chart-owning page has to hand-roll
  * them. */
-export function ChartCard({ title, description, actions, legend, isLoading, isEmpty, emptyMessage = 'No data for this range.', height = 280, className, children }: ChartCardProps) {
+export function ChartCard({
+  title,
+  description,
+  actions,
+  legend,
+  isLoading,
+  isEmpty,
+  emptyMessage = 'No data for this range.',
+  height = 280,
+  className,
+  children,
+}: ChartCardProps) {
   return (
     <Card className={className}>
       <CardHeader>

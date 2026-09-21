@@ -15,7 +15,13 @@ const IP_US = '203.0.113.10';
 const IP_DE = '198.51.100.20';
 
 function device(fingerprint: string) {
-  return { fingerprint, name: 'Test Device', browser: 'chrome', os: 'linux', extensionVersion: '1.0.0' };
+  return {
+    fingerprint,
+    name: 'Test Device',
+    browser: 'chrome',
+    os: 'linux',
+    extensionVersion: '1.0.0',
+  };
 }
 
 function extractToken(html: string): string {
@@ -62,7 +68,12 @@ describe('auth module — IP monitoring', () => {
     const { userId } = registerRes.json();
 
     const token = extractToken(app.mailer.sentEmails.at(-1)!.html);
-    await app.inject({ method: 'POST', url: '/api/v1/auth/verify-email', remoteAddress: ip, payload: { token } });
+    await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/verify-email',
+      remoteAddress: ip,
+      payload: { token },
+    });
 
     const loginRes = await app.inject({
       method: 'POST',
@@ -75,13 +86,19 @@ describe('auth module — IP monitoring', () => {
   }
 
   it('upserts ip_activity with geo enrichment on login', async () => {
-    const userId = await registerVerifyAndLogin('geo1@example.com', IP_US, 'fp-geo-1-0000000000000000');
+    const userId = await registerVerifyAndLogin(
+      'geo1@example.com',
+      IP_US,
+      'fp-geo-1-0000000000000000',
+    );
 
     // Best-effort background write (service.ts fires it without awaiting) —
     // give the event loop a tick to let it land before asserting.
     await new Promise((r) => setTimeout(r, 50));
 
-    const rows = await app.db.query.ipActivity.findMany({ where: (t, { eq }) => eq(t.userId, userId) });
+    const rows = await app.db.query.ipActivity.findMany({
+      where: (t, { eq }) => eq(t.userId, userId),
+    });
     expect(rows).toHaveLength(1);
     expect(rows[0]?.ip).toBe(IP_US);
     expect(rows[0]?.country).toBe('US');
@@ -97,12 +114,18 @@ describe('auth module — IP monitoring', () => {
       method: 'POST',
       url: '/api/v1/auth/login',
       remoteAddress: IP_US,
-      payload: { email, password: 'correcthorsebattery12', device: device('fp-geo-2-0000000000000000') },
+      payload: {
+        email,
+        password: 'correcthorsebattery12',
+        device: device('fp-geo-2-0000000000000000'),
+      },
     });
     expect(secondLogin.statusCode).toBe(200);
     await new Promise((r) => setTimeout(r, 50));
 
-    const rows = await app.db.query.ipActivity.findMany({ where: (t, { eq }) => eq(t.userId, userId) });
+    const rows = await app.db.query.ipActivity.findMany({
+      where: (t, { eq }) => eq(t.userId, userId),
+    });
     expect(rows).toHaveLength(1);
     expect(rows[0]?.requestCount).toBe(2);
 
@@ -132,7 +155,11 @@ describe('auth module — IP monitoring', () => {
     expect(flags).toHaveLength(1);
     expect(flags[0]?.kind).toBe('suspicious_ip');
     expect(flags[0]?.severity).toBe('high');
-    expect(flags[0]?.evidence).toMatchObject({ reason: 'impossible_travel', newCountry: 'DE', previousCountry: 'US' });
+    expect(flags[0]?.evidence).toMatchObject({
+      reason: 'impossible_travel',
+      newCountry: 'DE',
+      previousCountry: 'US',
+    });
 
     const flaggedRow = await app.db.query.ipActivity.findFirst({
       where: (t, { and: andOp, eq }) => andOp(eq(t.userId, userId), eq(t.ip, IP_DE)),
@@ -141,7 +168,11 @@ describe('auth module — IP monitoring', () => {
   });
 
   it('does not flag a brand-new user with no prior IP history', async () => {
-    const userId = await registerVerifyAndLogin('geo4@example.com', IP_DE, 'fp-geo-4-0000000000000000');
+    const userId = await registerVerifyAndLogin(
+      'geo4@example.com',
+      IP_DE,
+      'fp-geo-4-0000000000000000',
+    );
     await new Promise((r) => setTimeout(r, 50));
 
     const flags = await app.db.query.flags.findMany({ where: (t, { eq }) => eq(t.userId, userId) });

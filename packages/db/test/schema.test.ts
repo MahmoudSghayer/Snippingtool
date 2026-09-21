@@ -41,7 +41,13 @@ const EXPECTED_TABLES = [
   'analytics_daily',
 ];
 
-const EXPECTED_VIEWS = ['v_active_subscriptions', 'v_mrr', 'v_arr', 'v_user_lifetime_profit', 'v_daily_profit'];
+const EXPECTED_VIEWS = [
+  'v_active_subscriptions',
+  'v_mrr',
+  'v_arr',
+  'v_user_lifetime_profit',
+  'v_daily_profit',
+];
 const EXPECTED_MATVIEWS = ['mv_kpi_daily'];
 
 const PARTITIONED_TABLES = ['user_activity', 'search_activity', 'sniping_activity', 'audit_logs'];
@@ -94,9 +100,15 @@ describe('schema: every expected table/view/partition exists', () => {
         [table],
       );
       const names = rows.map((r) => r.inhrelid);
-      expect(names.some((n) => n === `${table}_default`), `${table} missing default partition`).toBe(true);
+      expect(
+        names.some((n) => n === `${table}_default`),
+        `${table} missing default partition`,
+      ).toBe(true);
       const monthly = names.filter((n) => new RegExp(`^${table}_y\\d{4}m\\d{2}$`).test(n));
-      expect(monthly.length, `${table} should have >= 13 monthly partitions`).toBeGreaterThanOrEqual(13);
+      expect(
+        monthly.length,
+        `${table} should have >= 13 monthly partitions`,
+      ).toBeGreaterThanOrEqual(13);
     }
   });
 

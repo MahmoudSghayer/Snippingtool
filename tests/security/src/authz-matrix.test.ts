@@ -10,10 +10,22 @@
 // same as a real one would.
 
 import { resetDatabase } from '@sl/db/test-utils';
-import { ADMIN_ROLES, PERMISSION_MATRIX, hasPermission, type AdminRole, type Permission } from '@sl/shared';
+import {
+  ADMIN_ROLES,
+  PERMISSION_MATRIX,
+  hasPermission,
+  type AdminRole,
+  type Permission,
+} from '@sl/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { NIL_LIKE_UUID, bearer, createAdminSession, buildTestApp, type TestApp } from './helpers.js';
+import {
+  NIL_LIKE_UUID,
+  bearer,
+  createAdminSession,
+  buildTestApp,
+  type TestApp,
+} from './helpers.js';
 
 interface AdminRoute {
   method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
@@ -31,28 +43,101 @@ const ADMIN_ROUTES: AdminRoute[] = [
   { method: 'GET', path: '/api/v1/admin/analytics/overview', permission: 'analytics.read' },
   { method: 'GET', path: '/api/v1/admin/audit', permission: 'audit.read' },
   { method: 'GET', path: '/api/v1/admin/audit/export.csv', permission: 'audit.read' },
-  { method: 'POST', path: `/api/v1/admin/bans`, permission: 'users.ban', body: { type: 'account', userId: NIL_LIKE_UUID, reason: 'x' } },
+  {
+    method: 'POST',
+    path: `/api/v1/admin/bans`,
+    permission: 'users.ban',
+    body: { type: 'account', userId: NIL_LIKE_UUID, reason: 'x' },
+  },
   { method: 'GET', path: '/api/v1/admin/bans', permission: 'users.ban' },
-  { method: 'POST', path: `/api/v1/admin/bans/${NIL_LIKE_UUID}/lift`, permission: 'users.ban', body: { reason: 'x' } },
+  {
+    method: 'POST',
+    path: `/api/v1/admin/bans/${NIL_LIKE_UUID}/lift`,
+    permission: 'users.ban',
+    body: { reason: 'x' },
+  },
   { method: 'GET', path: '/api/v1/admin/config', permission: 'system.read' },
-  { method: 'PUT', path: '/api/v1/admin/config/some-key', permission: 'config.write', body: { value: 'x' } },
-  { method: 'POST', path: '/api/v1/admin/coupons', permission: 'coupons.write', body: { code: 'X', type: 'percent', value: 10, planCodes: ['trial'], maxRedemptions: null, expiresAt: null, reason: 'x' } },
+  {
+    method: 'PUT',
+    path: '/api/v1/admin/config/some-key',
+    permission: 'config.write',
+    body: { value: 'x' },
+  },
+  {
+    method: 'POST',
+    path: '/api/v1/admin/coupons',
+    permission: 'coupons.write',
+    body: {
+      code: 'X',
+      type: 'percent',
+      value: 10,
+      planCodes: ['trial'],
+      maxRedemptions: null,
+      expiresAt: null,
+      reason: 'x',
+    },
+  },
   { method: 'GET', path: '/api/v1/admin/coupons', permission: 'coupons.write' },
-  { method: 'PATCH', path: `/api/v1/admin/coupons/${NIL_LIKE_UUID}`, permission: 'coupons.write', body: { reason: 'x' } },
+  {
+    method: 'PATCH',
+    path: `/api/v1/admin/coupons/${NIL_LIKE_UUID}`,
+    permission: 'coupons.write',
+    body: { reason: 'x' },
+  },
   { method: 'GET', path: '/api/v1/admin/flags', permission: 'users.read' },
-  { method: 'POST', path: `/api/v1/admin/flags/${NIL_LIKE_UUID}/review`, permission: 'users.suspend', body: { status: 'dismissed', reason: 'x' } },
+  {
+    method: 'POST',
+    path: `/api/v1/admin/flags/${NIL_LIKE_UUID}/review`,
+    permission: 'users.suspend',
+    body: { status: 'dismissed', reason: 'x' },
+  },
   { method: 'POST', path: '/api/v1/admin/plans', permission: 'plans.write', body: {} },
-  { method: 'PATCH', path: `/api/v1/admin/plans/${NIL_LIKE_UUID}`, permission: 'plans.write', body: { reason: 'x' } },
+  {
+    method: 'PATCH',
+    path: `/api/v1/admin/plans/${NIL_LIKE_UUID}`,
+    permission: 'plans.write',
+    body: { reason: 'x' },
+  },
   { method: 'GET', path: '/api/v1/admin/system/health', permission: 'system.read' },
   { method: 'GET', path: '/api/v1/admin/toggles', permission: 'system.read' },
-  { method: 'PATCH', path: '/api/v1/admin/toggles/some-key', permission: 'feature_toggles.write', body: {} },
+  {
+    method: 'PATCH',
+    path: '/api/v1/admin/toggles/some-key',
+    permission: 'feature_toggles.write',
+    body: {},
+  },
   { method: 'GET', path: '/api/v1/admin/users', permission: 'users.read' },
   { method: 'GET', path: `/api/v1/admin/users/${NIL_LIKE_UUID}`, permission: 'users.read' },
-  { method: 'PATCH', path: `/api/v1/admin/users/${NIL_LIKE_UUID}`, permission: 'users.write', body: {} },
-  { method: 'POST', path: `/api/v1/admin/users/${NIL_LIKE_UUID}/suspend`, permission: 'users.suspend', body: { reason: 'x' } },
-  { method: 'POST', path: `/api/v1/admin/users/${NIL_LIKE_UUID}/unsuspend`, permission: 'users.suspend', body: { reason: 'x' } },
-  { method: 'POST', path: `/api/v1/admin/users/${NIL_LIKE_UUID}/reset-password`, permission: 'users.reset_password', body: { reason: 'x' } },
-  { method: 'POST', path: `/api/v1/admin/users/${NIL_LIKE_UUID}/force-logout`, permission: 'users.force_logout', body: { reason: 'x' } },
+  {
+    method: 'PATCH',
+    path: `/api/v1/admin/users/${NIL_LIKE_UUID}`,
+    permission: 'users.write',
+    body: {},
+  },
+  {
+    method: 'POST',
+    path: `/api/v1/admin/users/${NIL_LIKE_UUID}/suspend`,
+    permission: 'users.suspend',
+    body: { reason: 'x' },
+  },
+  {
+    method: 'POST',
+    path: `/api/v1/admin/users/${NIL_LIKE_UUID}/unsuspend`,
+    permission: 'users.suspend',
+    body: { reason: 'x' },
+  },
+  {
+    method: 'POST',
+    path: `/api/v1/admin/users/${NIL_LIKE_UUID}/reset-password`,
+    permission: 'users.reset_password',
+    body: { reason: 'x' },
+  },
+  {
+    method: 'POST',
+    path: `/api/v1/admin/users/${NIL_LIKE_UUID}/force-logout`,
+    permission: 'users.force_logout',
+    body: { reason: 'x' },
+  },
   {
     method: 'POST',
     path: `/api/v1/admin/subscriptions/${NIL_LIKE_UUID}/activate`,
@@ -63,8 +148,16 @@ const ADMIN_ROUTES: AdminRoute[] = [
   // lookup endpoints that previously left `subscriptions.read` unenforced
   // (see the old `KNOWN_UNENFORCED_PERMISSIONS` comment, now removed below).
   { method: 'GET', path: '/api/v1/admin/subscriptions', permission: 'subscriptions.read' },
-  { method: 'GET', path: `/api/v1/admin/subscriptions/by-user/${NIL_LIKE_UUID}`, permission: 'subscriptions.read' },
-  { method: 'GET', path: `/api/v1/admin/users/${NIL_LIKE_UUID}/risk-events`, permission: 'users.read' },
+  {
+    method: 'GET',
+    path: `/api/v1/admin/subscriptions/by-user/${NIL_LIKE_UUID}`,
+    permission: 'subscriptions.read',
+  },
+  {
+    method: 'GET',
+    path: `/api/v1/admin/users/${NIL_LIKE_UUID}/risk-events`,
+    permission: 'users.read',
+  },
 ];
 
 /** Permissions that exist in `@sl/shared`'s `PERMISSION_MATRIX` but have no
@@ -94,7 +187,12 @@ describe('authz matrix: admin routes × admin roles', () => {
     // sharing them across every assertion in this file is safe and much
     // faster than re-enrolling 2FA (a real, non-trivial flow) per case.
     for (const role of ADMIN_ROLES) {
-      const session = await createAdminSession(app, role, `matrix-${role}@example.com`, `matrix-fp-${role}-00000000000`);
+      const session = await createAdminSession(
+        app,
+        role,
+        `matrix-${role}@example.com`,
+        `matrix-fp-${role}-00000000000`,
+      );
       sessions.set(role, session.accessToken);
     }
   });
@@ -108,7 +206,10 @@ describe('authz matrix: admin routes × admin roles', () => {
     const allPermissions = new Set(Object.values(PERMISSION_MATRIX).flat());
     for (const permission of allPermissions) {
       if (KNOWN_UNENFORCED_PERMISSIONS.includes(permission)) continue;
-      expect(covered.has(permission), `no ADMIN_ROUTES entry exercises permission "${permission}"`).toBe(true);
+      expect(
+        covered.has(permission),
+        `no ADMIN_ROUTES entry exercises permission "${permission}"`,
+      ).toBe(true);
     }
   });
 
@@ -127,7 +228,10 @@ describe('authz matrix: admin routes × admin roles', () => {
           headers: bearer(token),
           payload: route.body,
         });
-        expect(res.statusCode, `expected 403 for ${label}, got ${res.statusCode}: ${res.body}`).toBe(403);
+        expect(
+          res.statusCode,
+          `expected 403 for ${label}, got ${res.statusCode}: ${res.body}`,
+        ).toBe(403);
         expect(res.json().code).toBe('FORBIDDEN');
       });
     }
@@ -135,8 +239,16 @@ describe('authz matrix: admin routes × admin roles', () => {
 
   it('a non-admin user session 403s on an admin route regardless of permission', async () => {
     const { createUserSession } = await import('./helpers.js');
-    const session = await createUserSession(app, 'matrix-plain-user@example.com', 'matrix-fp-plain-000000000000');
-    const res = await app.inject({ method: 'GET', url: '/api/v1/admin/users', headers: bearer(session.accessToken) });
+    const session = await createUserSession(
+      app,
+      'matrix-plain-user@example.com',
+      'matrix-fp-plain-000000000000',
+    );
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/v1/admin/users',
+      headers: bearer(session.accessToken),
+    });
     expect(res.statusCode).toBe(403);
   });
 });

@@ -12,7 +12,6 @@ import { resetDatabase } from '@sl/db/test-utils';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-
 import { buildApp } from '../../../app.js';
 import { hashSecret } from '../../../lib/crypto.js';
 import { newId } from '../../../lib/ids.js';
@@ -20,7 +19,11 @@ import { signAccessToken } from '../../../lib/tokens.js';
 
 import type { FastifyInstance } from 'fastify';
 
-async function createAdmin(app: FastifyInstance, adminRole: 'super_admin' | 'support' | 'analyst' | 'billing', email: string) {
+async function createAdmin(
+  app: FastifyInstance,
+  adminRole: 'super_admin' | 'support' | 'analyst' | 'billing',
+  email: string,
+) {
   const userId = newId();
   await app.db.insert(users).values({
     id: userId,
@@ -41,7 +44,12 @@ async function createAdmin(app: FastifyInstance, adminRole: 'super_admin' | 'sup
 
 async function createTargetUser(app: FastifyInstance, email: string) {
   const id = newId();
-  await app.db.insert(users).values({ id, email, passwordHash: await hashSecret('irrelevant-password-123'), emailVerifiedAt: new Date() });
+  await app.db.insert(users).values({
+    id,
+    email,
+    passwordHash: await hashSecret('irrelevant-password-123'),
+    emailVerifiedAt: new Date(),
+  });
   return id;
 }
 
@@ -62,7 +70,7 @@ describe('admin-users module: permission matrix + audit trail', () => {
     await resetDatabase(app.db);
   });
 
-  it('403s a support-role admin on a permission it lacks (users.ban is not in its grant; analytics.read isn\'t either) but allows users.suspend', async () => {
+  it("403s a support-role admin on a permission it lacks (users.ban is not in its grant; analytics.read isn't either) but allows users.suspend", async () => {
     const { token } = await createAdmin(app, 'support', 'support-admin@example.com');
 
     // `support` does not have `users.ban` in @sl/shared's PERMISSION_MATRIX
@@ -73,7 +81,11 @@ describe('admin-users module: permission matrix + audit trail', () => {
     // agent's own admin-activity module is gated on `analytics.read`, which
     // `support` also lacks, so it stands in for the same assertion without
     // depending on the other agent's route existing.
-    const analyticsGated = await app.inject({ method: 'GET', url: '/api/v1/admin/activity/logins', headers: { authorization: `Bearer ${token}` } });
+    const analyticsGated = await app.inject({
+      method: 'GET',
+      url: '/api/v1/admin/activity/logins',
+      headers: { authorization: `Bearer ${token}` },
+    });
     expect(analyticsGated.statusCode).toBe(403);
     expect(analyticsGated.json().code).toBe('FORBIDDEN');
 
@@ -102,7 +114,11 @@ describe('admin-users module: permission matrix + audit trail', () => {
   });
 
   it('writes an audit_logs row with before/after on an admin patch', async () => {
-    const { token, userId: adminUserId } = await createAdmin(app, 'super_admin', 'super-admin@example.com');
+    const { token, userId: adminUserId } = await createAdmin(
+      app,
+      'super_admin',
+      'super-admin@example.com',
+    );
     const targetId = await createTargetUser(app, 'target3@example.com');
 
     const res = await app.inject({

@@ -17,9 +17,17 @@ import {
   text,
   uniqueIndex,
   uuid,
- date } from 'drizzle-orm/pg-core';
+  date,
+} from 'drizzle-orm/pg-core';
 
-import { auditActorTypeEnum, createdAt, idPk, rowVersion, timestamptz, updatedAt } from './common.js';
+import {
+  auditActorTypeEnum,
+  createdAt,
+  idPk,
+  rowVersion,
+  timestamptz,
+  updatedAt,
+} from './common.js';
 
 // ---------------------------------------------------------------------------
 // audit_logs: append-only, partitioned by month on occurred_at (see 0020).
@@ -79,7 +87,10 @@ export const featureToggles = pgTable(
     updatedAt: updatedAt(),
     rowVersion: rowVersion(),
   },
-  (t) => [uniqueIndex('feature_toggles_key_unique').on(t.key), index('feature_toggles_enabled_idx').on(t.enabled)],
+  (t) => [
+    uniqueIndex('feature_toggles_key_unique').on(t.key),
+    index('feature_toggles_enabled_idx').on(t.enabled),
+  ],
 );
 
 // ---------------------------------------------------------------------------

@@ -65,12 +65,14 @@ export const licenseDtoSchema = z.object({
 });
 export type LicenseDto = z.infer<typeof licenseDtoSchema>;
 
-export const checkoutRequestSchema = z.object({
-  planCode: z.enum(PLAN_CODES),
-  successUrl: z.string().url(),
-  cancelUrl: z.string().url(),
-  couponCode: z.string().min(1).max(40).optional(),
-}).strict();
+export const checkoutRequestSchema = z
+  .object({
+    planCode: z.enum(PLAN_CODES),
+    successUrl: z.string().url(),
+    cancelUrl: z.string().url(),
+    couponCode: z.string().min(1).max(40).optional(),
+  })
+  .strict();
 export type CheckoutRequest = z.infer<typeof checkoutRequestSchema>;
 
 export const checkoutResponseSchema = z.object({
@@ -97,38 +99,44 @@ export const paymentDtoSchema = z.object({
 });
 export type PaymentDto = z.infer<typeof paymentDtoSchema>;
 
-export const adminGrantSubscriptionRequestSchema = z.object({
-  userId: z.string().uuid(),
-  planCode: z.enum(PLAN_CODES),
-  periodDays: z.number().int().positive().nullable(), // null for lifetime plans
-  reason: z.string().min(1).max(1000),
-}).strict();
+export const adminGrantSubscriptionRequestSchema = z
+  .object({
+    userId: z.string().uuid(),
+    planCode: z.enum(PLAN_CODES),
+    periodDays: z.number().int().positive().nullable(), // null for lifetime plans
+    reason: z.string().min(1).max(1000),
+  })
+  .strict();
 export type AdminGrantSubscriptionRequest = z.infer<typeof adminGrantSubscriptionRequestSchema>;
 
 export const COUPON_TYPES = ['percent', 'fixed', 'free_days', 'lifetime'] as const;
 export type CouponType = (typeof COUPON_TYPES)[number];
 
-export const createCouponRequestSchema = z.object({
-  code: z
-    .string()
-    .min(3)
-    .max(40)
-    .regex(/^[A-Z0-9_-]+$/, 'Uppercase letters, digits, - and _ only'),
-  type: z.enum(COUPON_TYPES),
-  value: z.number().min(0),
-  planCodes: z.array(z.enum(PLAN_CODES)).min(1),
-  maxRedemptions: z.number().int().positive().nullable(),
-  expiresAt: z.string().datetime().nullable(),
-  reason: z.string().min(1).max(1000),
-}).strict();
+export const createCouponRequestSchema = z
+  .object({
+    code: z
+      .string()
+      .min(3)
+      .max(40)
+      .regex(/^[A-Z0-9_-]+$/, 'Uppercase letters, digits, - and _ only'),
+    type: z.enum(COUPON_TYPES),
+    value: z.number().min(0),
+    planCodes: z.array(z.enum(PLAN_CODES)).min(1),
+    maxRedemptions: z.number().int().positive().nullable(),
+    expiresAt: z.string().datetime().nullable(),
+    reason: z.string().min(1).max(1000),
+  })
+  .strict();
 export type CreateCouponRequest = z.infer<typeof createCouponRequestSchema>;
 
-export const updateCouponRequestSchema = z.object({
-  isActive: z.boolean().optional(),
-  maxRedemptions: z.number().int().positive().nullable().optional(),
-  expiresAt: z.string().datetime().nullable().optional(),
-  reason: z.string().min(1).max(1000),
-}).strict();
+export const updateCouponRequestSchema = z
+  .object({
+    isActive: z.boolean().optional(),
+    maxRedemptions: z.number().int().positive().nullable().optional(),
+    expiresAt: z.string().datetime().nullable().optional(),
+    reason: z.string().min(1).max(1000),
+  })
+  .strict();
 export type UpdateCouponRequest = z.infer<typeof updateCouponRequestSchema>;
 
 export const couponDtoSchema = z.object({
@@ -147,10 +155,12 @@ export const couponDtoSchema = z.object({
 });
 export type CouponDto = z.infer<typeof couponDtoSchema>;
 
-export const couponValidateRequestSchema = z.object({
-  code: z.string().min(1).max(40),
-  planCode: z.enum(PLAN_CODES),
-}).strict();
+export const couponValidateRequestSchema = z
+  .object({
+    code: z.string().min(1).max(40),
+    planCode: z.enum(PLAN_CODES),
+  })
+  .strict();
 export type CouponValidateRequest = z.infer<typeof couponValidateRequestSchema>;
 
 /** `POST /coupons/validate` response. `discountPreview` is a human-readable
@@ -161,7 +171,9 @@ export const couponValidateResponseSchema = z.object({
   valid: z.boolean(),
   coupon: couponDtoSchema.nullable(),
   discountPreview: z.string().max(80).nullable(),
-  reason: z.enum(['NOT_FOUND', 'EXPIRED', 'MAX_REDEMPTIONS', 'ALREADY_REDEEMED', 'PLAN_NOT_ELIGIBLE']).nullable(),
+  reason: z
+    .enum(['NOT_FOUND', 'EXPIRED', 'MAX_REDEMPTIONS', 'ALREADY_REDEEMED', 'PLAN_NOT_ELIGIBLE'])
+    .nullable(),
 });
 export type CouponValidateResponse = z.infer<typeof couponValidateResponseSchema>;
 
@@ -169,37 +181,41 @@ export type CouponValidateResponse = z.infer<typeof couponValidateResponseSchema
 // Admin plans CRUD
 // ---------------------------------------------------------------------------
 
-export const planCreateRequestSchema = z.object({
-  code: z
-    .string()
-    .min(1)
-    .max(40)
-    .regex(/^[a-z0-9_-]+$/, 'Lowercase letters, digits, - and _ only'),
-  name: z.string().min(1).max(80),
-  description: z.string().max(2000).nullable().optional(),
-  priceCents: z.number().int().min(0),
-  currency: z.string().length(3).default('usd'),
-  interval: z.enum(['day', 'week', 'month', 'year', 'one_time']),
-  isLifetime: z.boolean().default(false),
-  deviceLimit: z.number().int().min(1).max(10),
-  features: z.array(z.string().min(1).max(80)),
-  stripePriceId: z.string().min(1).max(200).nullable().optional(),
-  sortOrder: z.number().int().default(0),
-  reason: z.string().min(1).max(1000),
-}).strict();
+export const planCreateRequestSchema = z
+  .object({
+    code: z
+      .string()
+      .min(1)
+      .max(40)
+      .regex(/^[a-z0-9_-]+$/, 'Lowercase letters, digits, - and _ only'),
+    name: z.string().min(1).max(80),
+    description: z.string().max(2000).nullable().optional(),
+    priceCents: z.number().int().min(0),
+    currency: z.string().length(3).default('usd'),
+    interval: z.enum(['day', 'week', 'month', 'year', 'one_time']),
+    isLifetime: z.boolean().default(false),
+    deviceLimit: z.number().int().min(1).max(10),
+    features: z.array(z.string().min(1).max(80)),
+    stripePriceId: z.string().min(1).max(200).nullable().optional(),
+    sortOrder: z.number().int().default(0),
+    reason: z.string().min(1).max(1000),
+  })
+  .strict();
 export type PlanCreateRequest = z.infer<typeof planCreateRequestSchema>;
 
-export const planUpdateRequestSchema = z.object({
-  name: z.string().min(1).max(80).optional(),
-  description: z.string().max(2000).nullable().optional(),
-  priceCents: z.number().int().min(0).optional(),
-  deviceLimit: z.number().int().min(1).max(10).optional(),
-  features: z.array(z.string().min(1).max(80)).optional(),
-  stripePriceId: z.string().min(1).max(200).nullable().optional(),
-  isActive: z.boolean().optional(),
-  sortOrder: z.number().int().optional(),
-  reason: z.string().min(1).max(1000),
-}).strict();
+export const planUpdateRequestSchema = z
+  .object({
+    name: z.string().min(1).max(80).optional(),
+    description: z.string().max(2000).nullable().optional(),
+    priceCents: z.number().int().min(0).optional(),
+    deviceLimit: z.number().int().min(1).max(10).optional(),
+    features: z.array(z.string().min(1).max(80)).optional(),
+    stripePriceId: z.string().min(1).max(200).nullable().optional(),
+    isActive: z.boolean().optional(),
+    sortOrder: z.number().int().optional(),
+    reason: z.string().min(1).max(1000),
+  })
+  .strict();
 export type PlanUpdateRequest = z.infer<typeof planUpdateRequestSchema>;
 
 // ---------------------------------------------------------------------------
@@ -264,27 +280,35 @@ export type RegenerateLicenseResponse = z.infer<typeof regenerateLicenseResponse
 // Admin subscriptions
 // ---------------------------------------------------------------------------
 
-export const adminExtendSubscriptionRequestSchema = z.object({
-  periodDays: z.number().int().positive(),
-  reason: z.string().min(1).max(1000),
-}).strict();
+export const adminExtendSubscriptionRequestSchema = z
+  .object({
+    periodDays: z.number().int().positive(),
+    reason: z.string().min(1).max(1000),
+  })
+  .strict();
 export type AdminExtendSubscriptionRequest = z.infer<typeof adminExtendSubscriptionRequestSchema>;
 
-export const adminSuspendSubscriptionRequestSchema = z.object({
-  reason: z.string().min(1).max(1000),
-}).strict();
+export const adminSuspendSubscriptionRequestSchema = z
+  .object({
+    reason: z.string().min(1).max(1000),
+  })
+  .strict();
 export type AdminSuspendSubscriptionRequest = z.infer<typeof adminSuspendSubscriptionRequestSchema>;
 
-export const adminCancelSubscriptionRequestSchema = z.object({
-  reason: z.string().min(1).max(1000),
-  immediate: z.boolean().default(false),
-}).strict();
+export const adminCancelSubscriptionRequestSchema = z
+  .object({
+    reason: z.string().min(1).max(1000),
+    immediate: z.boolean().default(false),
+  })
+  .strict();
 export type AdminCancelSubscriptionRequest = z.infer<typeof adminCancelSubscriptionRequestSchema>;
 
-export const adminDeviceLimitOverrideRequestSchema = z.object({
-  maxDevices: z.number().int().min(1).max(10),
-  reason: z.string().min(1).max(1000),
-}).strict();
+export const adminDeviceLimitOverrideRequestSchema = z
+  .object({
+    maxDevices: z.number().int().min(1).max(10),
+    reason: z.string().min(1).max(1000),
+  })
+  .strict();
 export type AdminDeviceLimitOverrideRequest = z.infer<typeof adminDeviceLimitOverrideRequestSchema>;
 
 // ---------------------------------------------------------------------------

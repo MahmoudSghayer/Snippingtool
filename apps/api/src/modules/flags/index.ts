@@ -7,4 +7,6 @@ import fp from 'fastify-plugin';
 
 import type { FastifyInstance } from 'fastify';
 
-export default fp(async function flagsModule(_fastify: FastifyInstance) {}, { name: 'module:flags' });
+export default fp(async function flagsModule(_fastify: FastifyInstance) {}, {
+  name: 'module:flags',
+});

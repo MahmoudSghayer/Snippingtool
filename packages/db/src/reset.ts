@@ -21,7 +21,9 @@ async function main() {
 
   const sql = postgres(url, { max: 1 });
   try {
-    console.log(`Dropping and recreating schema "public" on ${url.replace(/:[^:@]*@/, ':***@')} ...`);
+    console.log(
+      `Dropping and recreating schema "public" on ${url.replace(/:[^:@]*@/, ':***@')} ...`,
+    );
     await sql`DROP SCHEMA IF EXISTS public CASCADE`;
     await sql`CREATE SCHEMA public`;
     console.log('Schema reset.');

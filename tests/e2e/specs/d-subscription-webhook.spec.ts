@@ -21,11 +21,18 @@ test.afterAll(async () => {
   }
 });
 
-test('checkout.session.completed webhook activates a plan -> dashboard shows it', async ({ page, request }) => {
-  const user = await test.step('user registers, verifies, logs in (API) — starts with no subscription', () => registerAndLogin(API_ORIGIN, EMAIL, 'journey-d'));
+test('checkout.session.completed webhook activates a plan -> dashboard shows it', async ({
+  page,
+  request,
+}) => {
+  const user =
+    await test.step('user registers, verifies, logs in (API) — starts with no subscription', () =>
+      registerAndLogin(API_ORIGIN, EMAIL, 'journey-d'));
 
   await test.step('GET /subscriptions/me shows no live subscription yet', async () => {
-    const res = await request.get(`${API_ORIGIN}/api/v1/subscriptions/me`, { headers: { authorization: `Bearer ${user.accessToken}` } });
+    const res = await request.get(`${API_ORIGIN}/api/v1/subscriptions/me`, {
+      headers: { authorization: `Bearer ${user.accessToken}` },
+    });
     expect(res.status()).toBe(200);
     const body = (await res.json()) as { subscription: unknown };
     expect(body.subscription).toBeNull();
@@ -57,7 +64,9 @@ test('checkout.session.completed webhook activates a plan -> dashboard shows it'
   // that changed is `stripe_customer_id` — this is the regression test for
   // that fix, over real HTTP against the real trigger.
   await test.step("the buyer's own pre-checkout access token still works after the webhook's stripe_customer_id backfill", async () => {
-    const res = await request.get(`${API_ORIGIN}/api/v1/subscriptions/me`, { headers: { authorization: `Bearer ${user.accessToken}` } });
+    const res = await request.get(`${API_ORIGIN}/api/v1/subscriptions/me`, {
+      headers: { authorization: `Bearer ${user.accessToken}` },
+    });
     expect(res.status(), await res.text()).toBe(200);
     const body = (await res.json()) as { subscription: { status: string } };
     expect(body.subscription.status).toBe('active');
@@ -78,8 +87,12 @@ test('checkout.session.completed webhook activates a plan -> dashboard shows it'
   });
 
   await test.step('the API now shows the pro plan active', async () => {
-    const res = await request.get(`${API_ORIGIN}/api/v1/subscriptions/me`, { headers: { authorization: `Bearer ${user.accessToken}` } });
-    const body = (await res.json()) as { subscription: { status: string; plan: { code: string; name: string } } };
+    const res = await request.get(`${API_ORIGIN}/api/v1/subscriptions/me`, {
+      headers: { authorization: `Bearer ${user.accessToken}` },
+    });
+    const body = (await res.json()) as {
+      subscription: { status: string; plan: { code: string; name: string } };
+    };
     expect(body.subscription.status).toBe('active');
     expect(body.subscription.plan.code).toBe('pro');
   });
@@ -87,13 +100,18 @@ test('checkout.session.completed webhook activates a plan -> dashboard shows it'
   await test.step('an invalid signature is rejected (400), never processed', async () => {
     const { body } = signCheckoutCompleted(user.userId, 'ultimate');
     const res = await request.post(`${API_ORIGIN}/api/v1/webhooks/stripe`, {
-      headers: { 'content-type': 'application/json', 'stripe-signature': 't=1,v1=not_a_real_signature' },
+      headers: {
+        'content-type': 'application/json',
+        'stripe-signature': 't=1,v1=not_a_real_signature',
+      },
       data: body,
     });
     expect(res.status()).toBe(400);
     // Confirms the bad-signature attempt above did not sneak the user onto
     // 'ultimate' — still 'pro' from the legitimately-signed event.
-    const check = await request.get(`${API_ORIGIN}/api/v1/subscriptions/me`, { headers: { authorization: `Bearer ${user.accessToken}` } });
+    const check = await request.get(`${API_ORIGIN}/api/v1/subscriptions/me`, {
+      headers: { authorization: `Bearer ${user.accessToken}` },
+    });
     const checkBody = (await check.json()) as { subscription: { plan: { code: string } } };
     expect(checkBody.subscription.plan.code).toBe('pro');
   });

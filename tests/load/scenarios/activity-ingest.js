@@ -11,17 +11,28 @@ import { BASE_URL, jsonHeaders, scenarioOptions, thresholds } from '../lib/confi
 
 const users = new SharedArray('users', () => JSON.parse(open('../.artifacts/fixtures.json')).users);
 
-export const options = { ...scenarioOptions(), thresholds: thresholds({ http_req_duration: ['p(95)<1000'] }) };
+export const options = {
+  ...scenarioOptions(),
+  thresholds: thresholds({ http_req_duration: ['p(95)<1000'] }),
+};
 
 function batch() {
   const now = () => new Date().toISOString();
   return {
     events: [
-      { type: 'heartbeat', occurredAt: now(), metadata: { extensionVersion: '0.1.0', engineState: 'running' } },
+      {
+        type: 'heartbeat',
+        occurredAt: now(),
+        metadata: { extensionVersion: '0.1.0', engineState: 'running' },
+      },
       {
         type: 'search',
         occurredAt: now(),
-        metadata: { filterHash: `k6-${Math.floor(Math.random() * 1e9)}`, resultsCount: Math.floor(Math.random() * 40), floorPrice: 1000 + Math.floor(Math.random() * 50000) },
+        metadata: {
+          filterHash: `k6-${Math.floor(Math.random() * 1e9)}`,
+          resultsCount: Math.floor(Math.random() * 40),
+          floorPrice: 1000 + Math.floor(Math.random() * 50000),
+        },
       },
     ],
   };
@@ -33,7 +44,7 @@ export default function () {
     headers: { ...jsonHeaders(), authorization: `Bearer ${user.accessToken}` },
   });
   check(res, {
-    '200': (r) => r.status === 200,
+    200: (r) => r.status === 200,
     'accepted >= 1': (r) => {
       try {
         return JSON.parse(r.body).accepted >= 1;

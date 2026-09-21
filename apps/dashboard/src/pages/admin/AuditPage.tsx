@@ -16,7 +16,6 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { toast } from 'sonner';
 
-
 import { api, apiErrorMessage } from '@/api/client.js';
 import { downloadServerCsv } from '@/lib/csv.js';
 
@@ -53,17 +52,31 @@ export function AuditPage() {
   const exportMutation = useMutation({
     mutationFn: async () => {
       const qs = new URLSearchParams(filterQuery as Record<string, string>).toString();
-      await downloadServerCsv(`audit-${range.from}-${range.to}.csv`, `/api/v1/admin/audit/export.csv?${qs}`);
+      await downloadServerCsv(
+        `audit-${range.from}-${range.to}.csv`,
+        `/api/v1/admin/audit/export.csv?${qs}`,
+      );
     },
-    onError: (error) => toast.error("Couldn't export audit log", { description: apiErrorMessage(error) }),
+    onError: (error) =>
+      toast.error("Couldn't export audit log", { description: apiErrorMessage(error) }),
   });
 
   const columns: ColumnDef<AuditLogEntry, unknown>[] = [
-    { accessorKey: 'occurredAt', header: 'When', cell: (c) => formatDateTime(c.getValue() as string) },
+    {
+      accessorKey: 'occurredAt',
+      header: 'When',
+      cell: (c) => formatDateTime(c.getValue() as string),
+    },
     { accessorKey: 'actorType', header: 'Actor' },
     { accessorKey: 'action', header: 'Action' },
     { accessorKey: 'entityType', header: 'Entity' },
-    { accessorKey: 'entityId', header: 'Entity ID', cell: (c) => <span className="font-mono text-xs">{(c.getValue() as string | null) ?? '—'}</span> },
+    {
+      accessorKey: 'entityId',
+      header: 'Entity ID',
+      cell: (c) => (
+        <span className="font-mono text-xs">{(c.getValue() as string | null) ?? '—'}</span>
+      ),
+    },
   ];
 
   const rows = auditQuery.data ?? [];
@@ -76,7 +89,12 @@ export function AuditPage() {
         actions={
           <div className="flex items-center gap-2">
             <DateRangePicker value={range} onChange={setRange} />
-            <Button variant="outline" size="sm" loading={exportMutation.isPending} onClick={() => exportMutation.mutate()}>
+            <Button
+              variant="outline"
+              size="sm"
+              loading={exportMutation.isPending}
+              onClick={() => exportMutation.mutate()}
+            >
               Export CSV
             </Button>
           </div>
@@ -85,7 +103,12 @@ export function AuditPage() {
 
       <div className="flex flex-wrap items-end gap-3">
         <FormField label="Entity type" htmlFor="entityType" className="w-48">
-          <Input id="entityType" placeholder="user, subscription…" value={entityType} onChange={(e) => setEntityType(e.target.value)} />
+          <Input
+            id="entityType"
+            placeholder="user, subscription…"
+            value={entityType}
+            onChange={(e) => setEntityType(e.target.value)}
+          />
         </FormField>
         <FormField label="Entity ID" htmlFor="entityId" className="w-64">
           <Input id="entityId" value={entityId} onChange={(e) => setEntityId(e.target.value)} />
@@ -103,20 +126,29 @@ export function AuditPage() {
         onRowClick={setSelected}
       />
 
-      <Drawer open={!!selected} onOpenChange={(open) => !open && setSelected(null)} title={selected?.action ?? ''} description={selected ? formatDateTime(selected.occurredAt) : ''}>
+      <Drawer
+        open={!!selected}
+        onOpenChange={(open) => !open && setSelected(null)}
+        title={selected?.action ?? ''}
+        description={selected ? formatDateTime(selected.occurredAt) : ''}
+      >
         {selected && (
           <div className="flex flex-col gap-4">
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div>
                 <p className="text-xs text-ink-2">Actor</p>
                 <p>
-                  {selected.actorType} {selected.actorId && <span className="font-mono text-xs">{selected.actorId}</span>}
+                  {selected.actorType}{' '}
+                  {selected.actorId && (
+                    <span className="font-mono text-xs">{selected.actorId}</span>
+                  )}
                 </p>
               </div>
               <div>
                 <p className="text-xs text-ink-2">Entity</p>
                 <p>
-                  {selected.entityType} <span className="font-mono text-xs">{selected.entityId}</span>
+                  {selected.entityType}{' '}
+                  <span className="font-mono text-xs">{selected.entityId}</span>
                 </p>
               </div>
               <div>

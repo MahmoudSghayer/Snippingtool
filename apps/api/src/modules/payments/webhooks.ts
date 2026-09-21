@@ -3,7 +3,16 @@
 // after signature verification — see docs/05-subscriptions.md §7 for the
 // full per-event-type table this file implements.
 
-import { coupons, notifications, payments, paymentHistory, stripeWebhookEvents, subscriptions, users, type Database } from '@sl/db';
+import {
+  coupons,
+  notifications,
+  payments,
+  paymentHistory,
+  stripeWebhookEvents,
+  subscriptions,
+  users,
+  type Database,
+} from '@sl/db';
 import { and, eq } from 'drizzle-orm';
 
 import { recordAudit } from '../../lib/audit.js';
@@ -12,7 +21,11 @@ import { publishToUser } from '../../ws/publish.js';
 import { toAuditSnapshot } from '../admin-subscriptions/admin-action-log.js';
 import { redeemCoupon } from '../coupons/service.js';
 import { createFlag } from '../flags/service.js';
-import { findActiveForSubscription, issueForSubscription, revoke as revokeLicense } from '../licenses/service.js';
+import {
+  findActiveForSubscription,
+  issueForSubscription,
+  revoke as revokeLicense,
+} from '../licenses/service.js';
 import {
   findSubscriptionById,
   getLiveSubscriptionForUser,
@@ -75,22 +88,34 @@ async function recordPayment(
     .returning();
 
   if (inserted) {
-    await db.insert(paymentHistory).values({ id: newId(), paymentId: inserted.id, event: input.eventName, rawEvent });
+    await db
+      .insert(paymentHistory)
+      .values({ id: newId(), paymentId: inserted.id, event: input.eventName, rawEvent });
     return;
   }
 
   // Row already existed (a status transition on the same provider payment
   // id, e.g. a later invoice event for the same invoice) — update + append.
   const existing = await db.query.payments.findFirst({
-    where: and(eq(payments.provider, 'stripe'), eq(payments.providerPaymentId, input.providerPaymentId)),
+    where: and(
+      eq(payments.provider, 'stripe'),
+      eq(payments.providerPaymentId, input.providerPaymentId),
+    ),
   });
   if (existing) {
     await db.update(payments).set({ status: input.status }).where(eq(payments.id, existing.id));
-    await db.insert(paymentHistory).values({ id: newId(), paymentId: existing.id, event: input.eventName, rawEvent });
+    await db
+      .insert(paymentHistory)
+      .values({ id: newId(), paymentId: existing.id, event: input.eventName, rawEvent });
   }
 }
 
-async function handleCheckoutCompleted(db: Database, redis: Redis, stripe: Stripe, event: Stripe.Event): Promise<void> {
+async function handleCheckoutCompleted(
+  db: Database,
+  redis: Redis,
+  stripe: Stripe,
+  event: Stripe.Event,
+): Promise<void> {
   const session = event.data.object as Stripe.Checkout.Session;
   const userId = session.metadata?.userId;
   const planCode = session.metadata?.planCode;
@@ -127,7 +152,8 @@ async function handleCheckoutCompleted(db: Database, redis: Redis, stripe: Strip
   // for this checkout — persist it (migrations/0025) so later portal
   // sessions and the trial-abuse "shared Stripe customer" check
   // (docs/05-subscriptions.md §5, check 4) can use it.
-  const stripeCustomerId = typeof session.customer === 'string' ? session.customer : (session.customer?.id ?? null);
+  const stripeCustomerId =
+    typeof session.customer === 'string' ? session.customer : (session.customer?.id ?? null);
   const couponId = session.metadata?.couponId;
 
   // Everything that must be consistent together — ending the trial row (if
@@ -198,7 +224,10 @@ async function handleCheckoutCompleted(db: Database, redis: Redis, stripe: Strip
     return insertedRow!;
   });
 
-  await publishToUser(redis, userId, { type: 'subscription.changed', subscription: toSubscriptionDto(row, plan) });
+  await publishToUser(redis, userId, {
+    type: 'subscription.changed',
+    subscription: toSubscriptionDto(row, plan),
+  });
   await db.insert(notifications).values({
     id: newId(),
     userId,
@@ -210,12 +239,19 @@ async function handleCheckoutCompleted(db: Database, redis: Redis, stripe: Strip
   });
 }
 
-async function handleInvoicePaid(db: Database, redis: Redis, stripe: Stripe, event: Stripe.Event): Promise<void> {
+async function handleInvoicePaid(
+  db: Database,
+  redis: Redis,
+  stripe: Stripe,
+  event: Stripe.Event,
+): Promise<void> {
   const invoice = event.data.object as Stripe.Invoice;
   const stripeSubId = getInvoiceSubscriptionId(invoice);
   if (!stripeSubId) return;
 
-  const sub = await db.query.subscriptions.findFirst({ where: eq(subscriptions.stripeSubscriptionId, stripeSubId) });
+  const sub = await db.query.subscriptions.findFirst({
+    where: eq(subscriptions.stripeSubscriptionId, stripeSubId),
+  });
   if (!sub) return;
 
   const stripeSub = await stripe.subscriptions.retrieve(stripeSubId);
@@ -235,7 +271,12 @@ async function handleInvoicePaid(db: Database, redis: Redis, stripe: Stripe, eve
 
   const activeLicense = await findActiveForSubscription(db, sub.id);
   if (!activeLicense && plan) {
-    await issueForSubscription(db, { subscriptionId: sub.id, userId: sub.userId, maxDevices: plan.deviceLimit, expiresAt: period.end });
+    await issueForSubscription(db, {
+      subscriptionId: sub.id,
+      userId: sub.userId,
+      maxDevices: plan.deviceLimit,
+      expiresAt: period.end,
+    });
   }
 
   await recordPayment(db, {
@@ -251,15 +292,25 @@ async function handleInvoicePaid(db: Database, redis: Redis, stripe: Stripe, eve
     rawEvent: event,
   });
 
-  if (plan) await publishToUser(redis, sub.userId, { type: 'subscription.changed', subscription: toSubscriptionDto(after!, plan) });
+  if (plan)
+    await publishToUser(redis, sub.userId, {
+      type: 'subscription.changed',
+      subscription: toSubscriptionDto(after!, plan),
+    });
 }
 
-async function handleInvoicePaymentFailed(db: Database, redis: Redis, event: Stripe.Event): Promise<void> {
+async function handleInvoicePaymentFailed(
+  db: Database,
+  redis: Redis,
+  event: Stripe.Event,
+): Promise<void> {
   const invoice = event.data.object as Stripe.Invoice;
   const stripeSubId = getInvoiceSubscriptionId(invoice);
   if (!stripeSubId) return;
 
-  const sub = await db.query.subscriptions.findFirst({ where: eq(subscriptions.stripeSubscriptionId, stripeSubId) });
+  const sub = await db.query.subscriptions.findFirst({
+    where: eq(subscriptions.stripeSubscriptionId, stripeSubId),
+  });
   if (!sub) return;
 
   const [after] = await db
@@ -282,7 +333,11 @@ async function handleInvoicePaymentFailed(db: Database, redis: Redis, event: Str
     rawEvent: event,
   });
 
-  if (plan) await publishToUser(redis, sub.userId, { type: 'subscription.changed', subscription: toSubscriptionDto(after!, plan) });
+  if (plan)
+    await publishToUser(redis, sub.userId, {
+      type: 'subscription.changed',
+      subscription: toSubscriptionDto(after!, plan),
+    });
   await db.insert(notifications).values({
     id: newId(),
     userId: sub.userId,
@@ -294,9 +349,15 @@ async function handleInvoicePaymentFailed(db: Database, redis: Redis, event: Str
   });
 }
 
-async function handleSubscriptionUpdated(db: Database, redis: Redis, event: Stripe.Event): Promise<void> {
+async function handleSubscriptionUpdated(
+  db: Database,
+  redis: Redis,
+  event: Stripe.Event,
+): Promise<void> {
   const stripeSub = event.data.object as Stripe.Subscription;
-  const sub = await db.query.subscriptions.findFirst({ where: eq(subscriptions.stripeSubscriptionId, stripeSub.id) });
+  const sub = await db.query.subscriptions.findFirst({
+    where: eq(subscriptions.stripeSubscriptionId, stripeSub.id),
+  });
   if (!sub) return;
 
   const period = getSubscriptionPeriod(stripeSub);
@@ -316,12 +377,22 @@ async function handleSubscriptionUpdated(db: Database, redis: Redis, event: Stri
     .returning();
 
   const plan = await getPlanById(db, after!.planId);
-  if (plan) await publishToUser(redis, sub.userId, { type: 'subscription.changed', subscription: toSubscriptionDto(after!, plan) });
+  if (plan)
+    await publishToUser(redis, sub.userId, {
+      type: 'subscription.changed',
+      subscription: toSubscriptionDto(after!, plan),
+    });
 }
 
-async function handleSubscriptionDeleted(db: Database, redis: Redis, event: Stripe.Event): Promise<void> {
+async function handleSubscriptionDeleted(
+  db: Database,
+  redis: Redis,
+  event: Stripe.Event,
+): Promise<void> {
   const stripeSub = event.data.object as Stripe.Subscription;
-  const sub = await db.query.subscriptions.findFirst({ where: eq(subscriptions.stripeSubscriptionId, stripeSub.id) });
+  const sub = await db.query.subscriptions.findFirst({
+    where: eq(subscriptions.stripeSubscriptionId, stripeSub.id),
+  });
   if (!sub) return;
 
   const [after] = await db
@@ -334,18 +405,29 @@ async function handleSubscriptionDeleted(db: Database, redis: Redis, event: Stri
   if (license) await revokeLicense(db, license.id, 'subscription_ended');
 
   const plan = await getPlanById(db, after!.planId);
-  if (plan) await publishToUser(redis, sub.userId, { type: 'subscription.changed', subscription: toSubscriptionDto(after!, plan) });
+  if (plan)
+    await publishToUser(redis, sub.userId, {
+      type: 'subscription.changed',
+      subscription: toSubscriptionDto(after!, plan),
+    });
 }
 
-async function findPaymentByStripeCharge(db: Database, charge: Stripe.Charge): Promise<PaymentRow | undefined> {
+async function findPaymentByStripeCharge(
+  db: Database,
+  charge: Stripe.Charge,
+): Promise<PaymentRow | undefined> {
   // `charge.invoice` was removed in this Stripe API version — only
   // `payment_intent` and the charge's own id remain as candidates for
   // matching back to the `payments` row we recorded (which stored either a
   // Checkout Session id or an Invoice id as `provider_payment_id`, so this
   // is necessarily best-effort; documented in docs/05-subscriptions.md).
-  const candidateIds = [charge.payment_intent, charge.id].filter((v): v is string => typeof v === 'string');
+  const candidateIds = [charge.payment_intent, charge.id].filter(
+    (v): v is string => typeof v === 'string',
+  );
   for (const id of candidateIds) {
-    const found = await db.query.payments.findFirst({ where: and(eq(payments.provider, 'stripe'), eq(payments.providerPaymentId, id)) });
+    const found = await db.query.payments.findFirst({
+      where: and(eq(payments.provider, 'stripe'), eq(payments.providerPaymentId, id)),
+    });
     if (found) return found;
   }
   return undefined;
@@ -365,17 +447,28 @@ async function handleChargeRefunded(db: Database, event: Stripe.Event): Promise<
   });
 }
 
-async function handleDisputeCreated(db: Database, redis: Redis, event: Stripe.Event): Promise<void> {
+async function handleDisputeCreated(
+  db: Database,
+  redis: Redis,
+  event: Stripe.Event,
+): Promise<void> {
   const dispute = event.data.object as Stripe.Dispute;
   const chargeId = typeof dispute.charge === 'string' ? dispute.charge : dispute.charge.id;
 
   const payment =
-    (await db.query.payments.findFirst({ where: and(eq(payments.provider, 'stripe'), eq(payments.providerPaymentId, chargeId)) })) ??
+    (await db.query.payments.findFirst({
+      where: and(eq(payments.provider, 'stripe'), eq(payments.providerPaymentId, chargeId)),
+    })) ??
     (dispute.payment_intent
       ? await db.query.payments.findFirst({
           where: and(
             eq(payments.provider, 'stripe'),
-            eq(payments.providerPaymentId, typeof dispute.payment_intent === 'string' ? dispute.payment_intent : dispute.payment_intent.id),
+            eq(
+              payments.providerPaymentId,
+              typeof dispute.payment_intent === 'string'
+                ? dispute.payment_intent
+                : dispute.payment_intent.id,
+            ),
           ),
         })
       : undefined);
@@ -420,7 +513,12 @@ async function handleDisputeCreated(db: Database, redis: Redis, event: Stripe.Ev
   }
 }
 
-export async function processWebhookEvent(db: Database, redis: Redis, stripe: Stripe, event: Stripe.Event): Promise<void> {
+export async function processWebhookEvent(
+  db: Database,
+  redis: Redis,
+  stripe: Stripe,
+  event: Stripe.Event,
+): Promise<void> {
   switch (event.type) {
     case 'checkout.session.completed':
       return handleCheckoutCompleted(db, redis, stripe, event);
@@ -452,7 +550,12 @@ export interface ReceiveWebhookResult {
  * event as a failure). `processedAt`/`error` are stamped after the actual
  * handler runs (or throws), so `stripe.reconcile` can find and retry any
  * event that was received but never finished processing. */
-export async function receiveWebhookEvent(db: Database, redis: Redis, stripe: Stripe, event: Stripe.Event): Promise<ReceiveWebhookResult> {
+export async function receiveWebhookEvent(
+  db: Database,
+  redis: Redis,
+  stripe: Stripe,
+  event: Stripe.Event,
+): Promise<ReceiveWebhookResult> {
   try {
     await db.insert(stripeWebhookEvents).values({
       id: newId(),
@@ -466,14 +569,19 @@ export async function receiveWebhookEvent(db: Database, redis: Redis, stripe: St
     // (bumped for docs/09-security.md's drizzle-orm advisory) — its own
     // `.code` is undefined; the Postgres error code this check needs is on
     // `.cause` instead. Checking both keeps this resilient to either shape.
-    const code = (err as { code?: string; cause?: { code?: string } } | null)?.code ?? (err as { cause?: { code?: string } } | null)?.cause?.code;
+    const code =
+      (err as { code?: string; cause?: { code?: string } } | null)?.code ??
+      (err as { cause?: { code?: string } } | null)?.cause?.code;
     if (code === '23505') return { alreadyProcessed: true }; // unique_violation on event_id
     throw err;
   }
 
   try {
     await processWebhookEvent(db, redis, stripe, event);
-    await db.update(stripeWebhookEvents).set({ processedAt: new Date() }).where(eq(stripeWebhookEvents.eventId, event.id));
+    await db
+      .update(stripeWebhookEvents)
+      .set({ processedAt: new Date() })
+      .where(eq(stripeWebhookEvents.eventId, event.id));
   } catch (err) {
     await db
       .update(stripeWebhookEvents)

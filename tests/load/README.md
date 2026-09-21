@@ -8,13 +8,13 @@ fits the overall test strategy, coverage targets and release gate.
 
 ## Scenarios
 
-| Script | Exercises | Notes |
-|---|---|---|
-| `auth-login-refresh.js` | `POST /auth/login` -> `POST /auth/refresh` | One fixed device fingerprint per pooled user (see the script's own comment — trial device limit is 1). |
-| `activity-ingest.js` | `POST /activity/batch` | A 2-event batch (heartbeat + search) per iteration. |
-| `extension-heartbeat.js` | `POST /extension/heartbeat` | Needs each user's `deviceId` (captured by `setup/provision.mjs`). |
-| `admin-analytics-overview.js` | `GET /admin/analytics/overview` | One shared, really-TOTP-enrolled admin session. |
-| `profits-queries.js` | `GET /profits` | Rotates `daily`/`weekly`/`monthly`/`lifetime` across iterations. |
+| Script                        | Exercises                                  | Notes                                                                                                  |
+| ----------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| `auth-login-refresh.js`       | `POST /auth/login` -> `POST /auth/refresh` | One fixed device fingerprint per pooled user (see the script's own comment — trial device limit is 1). |
+| `activity-ingest.js`          | `POST /activity/batch`                     | A 2-event batch (heartbeat + search) per iteration.                                                    |
+| `extension-heartbeat.js`      | `POST /extension/heartbeat`                | Needs each user's `deviceId` (captured by `setup/provision.mjs`).                                      |
+| `admin-analytics-overview.js` | `GET /admin/analytics/overview`            | One shared, really-TOTP-enrolled admin session.                                                        |
+| `profits-queries.js`          | `GET /profits`                             | Rotates `daily`/`weekly`/`monthly`/`lifetime` across iterations.                                       |
 
 ## Installing k6
 
@@ -86,10 +86,10 @@ Defined in `lib/config.js`'s `thresholds()`, overridable per scenario. As
 shipped:
 
 | Profile | p95 `http_req_duration` | error rate |
-|---|---|---|
-| smoke | < 800ms | < 1% |
-| soak | < 1200ms | < 2% |
-| stress | < 2500ms | < 10% |
+| ------- | ----------------------- | ---------- |
+| smoke   | < 800ms                 | < 1%       |
+| soak    | < 1200ms                | < 2%       |
+| stress  | < 2500ms                | < 10%      |
 
 A scenario tightens or loosens these for its own endpoint (see each
 script's `thresholds({...})` call) — `extension-heartbeat.js` and
@@ -110,7 +110,7 @@ aggregates across the whole platform.
   `http_req_duration{p(95)}`/`http_req_failed{rate}` per scenario, plus the
   named `check()`s (e.g. `activity-ingest.js`'s `"accepted >= 1"`) — a check
   failing while the request itself still returns 200 usually means the
-  response *shape* changed, worth investigating even if it didn't trip a
+  response _shape_ changed, worth investigating even if it didn't trip a
   threshold.
 
 ## Local smoke run — recorded numbers

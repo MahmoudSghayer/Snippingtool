@@ -12,7 +12,9 @@ import { materializeDay } from '../lib/analytics/materialize.js';
 import { defineJob } from './types.js';
 
 function todayUtc(now: Date): string {
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).toISOString().slice(0, 10);
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+    .toISOString()
+    .slice(0, 10);
 }
 
 export default defineJob({

@@ -55,7 +55,8 @@ export function diffObjects(
  * callers must never pass password hashes / token hashes / totp secrets).
  */
 export async function recordAudit(options: RecordAuditOptions): Promise<void> {
-  const { db, actor, action, entityType, entityId, before, after, ip, userAgent, requestId } = options;
+  const { db, actor, action, entityType, entityId, before, after, ip, userAgent, requestId } =
+    options;
   const diff = diffObjects(before ?? null, after ?? null);
   await db.insert(auditLogs).values({
     id: newId(),

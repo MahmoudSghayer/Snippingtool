@@ -18,7 +18,11 @@ import type { JobContext } from '../types.js';
 import type { Job } from 'bullmq';
 import type { FastifyInstance } from 'fastify';
 
-const noopLog: JobContext['log'] = { info: () => undefined, warn: () => undefined, error: () => undefined };
+const noopLog: JobContext['log'] = {
+  info: () => undefined,
+  warn: () => undefined,
+  error: () => undefined,
+};
 
 function jobContext(app: FastifyInstance): JobContext {
   return { db: app.db, redis: app.redis, env: app.config, mailer: app.mailer, log: noopLog };
@@ -26,7 +30,12 @@ function jobContext(app: FastifyInstance): JobContext {
 
 async function createVerifiedUser(app: FastifyInstance, email: string): Promise<string> {
   const id = newId();
-  await app.db.insert(users).values({ id, email, passwordHash: await hashSecret('irrelevant-password-123'), emailVerifiedAt: new Date() });
+  await app.db.insert(users).values({
+    id,
+    email,
+    passwordHash: await hashSecret('irrelevant-password-123'),
+    emailVerifiedAt: new Date(),
+  });
   return id;
 }
 
@@ -83,11 +92,15 @@ describe('subscriptions.expire job', () => {
 
     await subscriptionsExpireJob.processor({} as Job, jobContext(app));
 
-    const after = await app.db.query.subscriptions.findFirst({ where: eq(subscriptions.id, sub!.id) });
+    const after = await app.db.query.subscriptions.findFirst({
+      where: eq(subscriptions.id, sub!.id),
+    });
     expect(after!.status).toBe('expired');
     expect(after!.endedAt).toBeTruthy();
 
-    const licenseAfter = await app.db.query.licenses.findFirst({ where: eq(licenses.id, license!.id) });
+    const licenseAfter = await app.db.query.licenses.findFirst({
+      where: eq(licenses.id, license!.id),
+    });
     expect(licenseAfter!.status).toBe('revoked');
     expect(licenseAfter!.revokedReason).toBe('subscription_expired');
   });
@@ -114,7 +127,9 @@ describe('subscriptions.expire job', () => {
 
     await subscriptionsExpireJob.processor({} as Job, jobContext(app));
 
-    const after = await app.db.query.subscriptions.findFirst({ where: eq(subscriptions.id, sub!.id) });
+    const after = await app.db.query.subscriptions.findFirst({
+      where: eq(subscriptions.id, sub!.id),
+    });
     expect(after!.status).toBe('trialing');
   });
 });
@@ -166,7 +181,9 @@ describe('abuse.scan job', () => {
 
     // Every involved user got their own flag row.
     for (const userId of userIds) {
-      const userFlags = await app.db.query.flags.findMany({ where: and(eq(flags.userId, userId), eq(flags.kind, 'velocity')) });
+      const userFlags = await app.db.query.flags.findMany({
+        where: and(eq(flags.userId, userId), eq(flags.kind, 'velocity')),
+      });
       expect(userFlags).toHaveLength(1);
     }
   });

@@ -29,20 +29,20 @@ test`: 683 tests across seven packages). Remaining work is the go-live
 checklist in `docs/13-roadmap.md`, which needs the live market, real Stripe
 keys and infrastructure.
 
-| Phase | Scope | Status | Where |
-| --- | --- | --- | --- |
-| 1 Architecture | Monorepo, shared contracts, diagrams, roadmap | Done | `packages/shared`, `docs/01-architecture.md`, `docs/13-roadmap.md` |
-| 2 Database | 35 tables, partitioning, audit, views, seed, tests | Done | `packages/db`, `docs/02-database.md` |
-| 3 Backend API | Fastify, 110+ routes, WS gateway, jobs, OpenAPI | Done | `apps/api`, `docs/03-api.md` |
-| 4 Authentication | JWT + rotating refresh, sessions, devices, 2FA, lockout, admin roles | Done | `apps/api/src/modules/auth`, `docs/04-auth.md` |
-| 5 Subscriptions | Plans, trials with abuse protection, licenses, Stripe, coupons, bans, flags | Done | `apps/api/src/modules/{subscriptions,licenses,payments,coupons,plans,bans,flags}`, `docs/05-subscriptions.md` |
-| 6 Extension | TypeScript port, ranker, governor, assist, gated autobuyer, popup, options | Done | `apps/extension`, `docs/06-extension.md` |
-| 7 Dashboard | React user + admin dashboard, design system, e2e against the real API | Done | `apps/dashboard`, `packages/ui`, `docs/07-dashboard.md` |
-| 8 Analytics | KPI engine, profit analytics, reports, CSV exports, materialisation jobs | Done | `apps/api/src/modules/{analytics,admin-analytics}`, `docs/08-analytics.md` |
-| 9 Security | Hardening pass, 167 security tests, threat model, controls inventory | Done | `docs/09-security.md`, `docs/threat-model.md` |
-| 10 UI/UX | Design system, dashboard and extension surfaces, axe-checked | Done | `packages/ui`, `docs/10-design-system.md` |
-| 11 Testing | Unit, integration, cross-app e2e, k6 load, security suites, coverage | Done | `tests/`, `docs/12-testing.md` |
-| DevOps | Docker, Compose, Caddy, CI/CD, monitoring, backups, deploy guides | Done | `infra/`, `.github/`, `docs/11-devops.md` |
+| Phase            | Scope                                                                       | Status | Where                                                                                                         |
+| ---------------- | --------------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------- |
+| 1 Architecture   | Monorepo, shared contracts, diagrams, roadmap                               | Done   | `packages/shared`, `docs/01-architecture.md`, `docs/13-roadmap.md`                                            |
+| 2 Database       | 35 tables, partitioning, audit, views, seed, tests                          | Done   | `packages/db`, `docs/02-database.md`                                                                          |
+| 3 Backend API    | Fastify, 110+ routes, WS gateway, jobs, OpenAPI                             | Done   | `apps/api`, `docs/03-api.md`                                                                                  |
+| 4 Authentication | JWT + rotating refresh, sessions, devices, 2FA, lockout, admin roles        | Done   | `apps/api/src/modules/auth`, `docs/04-auth.md`                                                                |
+| 5 Subscriptions  | Plans, trials with abuse protection, licenses, Stripe, coupons, bans, flags | Done   | `apps/api/src/modules/{subscriptions,licenses,payments,coupons,plans,bans,flags}`, `docs/05-subscriptions.md` |
+| 6 Extension      | TypeScript port, ranker, governor, assist, gated autobuyer, popup, options  | Done   | `apps/extension`, `docs/06-extension.md`                                                                      |
+| 7 Dashboard      | React user + admin dashboard, design system, e2e against the real API       | Done   | `apps/dashboard`, `packages/ui`, `docs/07-dashboard.md`                                                       |
+| 8 Analytics      | KPI engine, profit analytics, reports, CSV exports, materialisation jobs    | Done   | `apps/api/src/modules/{analytics,admin-analytics}`, `docs/08-analytics.md`                                    |
+| 9 Security       | Hardening pass, 167 security tests, threat model, controls inventory        | Done   | `docs/09-security.md`, `docs/threat-model.md`                                                                 |
+| 10 UI/UX         | Design system, dashboard and extension surfaces, axe-checked                | Done   | `packages/ui`, `docs/10-design-system.md`                                                                     |
+| 11 Testing       | Unit, integration, cross-app e2e, k6 load, security suites, coverage        | Done   | `tests/`, `docs/12-testing.md`                                                                                |
+| DevOps           | Docker, Compose, Caddy, CI/CD, monitoring, backups, deploy guides           | Done   | `infra/`, `.github/`, `docs/11-devops.md`                                                                     |
 
 Follow-ups from every phase report and all nine QA defects have been closed
 (see `docs/12-testing.md` §12 for the defect table with statuses). One open
@@ -138,22 +138,22 @@ the step-by-step deployment guide live under `infra/`, `.github/` and
 
 ## Documentation
 
-| Document | Contents |
-| --- | --- |
-| `docs/01-architecture.md` | Components, deployment, sequence diagrams, trust boundaries, build targets |
-| `docs/02-database.md` | ERD, every table, indexes, partitioning and retention runbooks |
-| `docs/03-api.md` | Every route with auth, permission, rate limit and schema |
-| `docs/04-auth.md` | Token lifetimes, refresh rotation, devices, 2FA, CSRF, admin roles |
-| `docs/05-subscriptions.md` | Plan matrix, state machine, license keys, trial protection, Stripe webhooks |
-| `docs/06-extension.md` | Worlds, message flows, governor math, telemetry itemisation, day-one checklist |
-| `docs/07-dashboard.md` | Routes and permissions, auth/CSRF/WS handling, tokens, components, Vercel deployment |
-| `docs/08-analytics.md` | Every metric formula, source tables, materialisation schedule, export formats |
-| `docs/09-security.md` | Controls inventory with file and test references, key rotation, open findings |
-| `docs/threat-model.md` | STRIDE per component, attack vectors with mitigations, residual risks, non-goals |
-| `docs/10-design-system.md` | Tokens, typography, components, chart rules, page specs, accessibility |
-| `docs/11-devops.md` | Local dev, environments, deployment guide, monitoring runbook, backups, readiness checklist |
-| `docs/12-testing.md` | Test strategy, commands, isolation rules, coverage, load thresholds, defects found |
-| `docs/13-roadmap.md` | Remaining phases, exit criteria, go-live checklist |
+| Document                   | Contents                                                                                    |
+| -------------------------- | ------------------------------------------------------------------------------------------- |
+| `docs/01-architecture.md`  | Components, deployment, sequence diagrams, trust boundaries, build targets                  |
+| `docs/02-database.md`      | ERD, every table, indexes, partitioning and retention runbooks                              |
+| `docs/03-api.md`           | Every route with auth, permission, rate limit and schema                                    |
+| `docs/04-auth.md`          | Token lifetimes, refresh rotation, devices, 2FA, CSRF, admin roles                          |
+| `docs/05-subscriptions.md` | Plan matrix, state machine, license keys, trial protection, Stripe webhooks                 |
+| `docs/06-extension.md`     | Worlds, message flows, governor math, telemetry itemisation, day-one checklist              |
+| `docs/07-dashboard.md`     | Routes and permissions, auth/CSRF/WS handling, tokens, components, Vercel deployment        |
+| `docs/08-analytics.md`     | Every metric formula, source tables, materialisation schedule, export formats               |
+| `docs/09-security.md`      | Controls inventory with file and test references, key rotation, open findings               |
+| `docs/threat-model.md`     | STRIDE per component, attack vectors with mitigations, residual risks, non-goals            |
+| `docs/10-design-system.md` | Tokens, typography, components, chart rules, page specs, accessibility                      |
+| `docs/11-devops.md`        | Local dev, environments, deployment guide, monitoring runbook, backups, readiness checklist |
+| `docs/12-testing.md`       | Test strategy, commands, isolation rules, coverage, load thresholds, defects found          |
+| `docs/13-roadmap.md`       | Remaining phases, exit criteria, go-live checklist                                          |
 
 ## What this product will and will not do
 

@@ -26,26 +26,38 @@ export const AppErrors = {
   validation: (message: string, details?: Record<string, unknown>) =>
     new AppError('VALIDATION_FAILED', message, details),
   notFound: (entity: string) => new AppError('NOT_FOUND', `${entity} not found`),
-  forbidden: (message = 'You do not have permission to do that.') => new AppError('FORBIDDEN', message),
-  conflict: (message: string, details?: Record<string, unknown>) => new AppError('CONFLICT', message, details),
+  forbidden: (message = 'You do not have permission to do that.') =>
+    new AppError('FORBIDDEN', message),
+  conflict: (message: string, details?: Record<string, unknown>) =>
+    new AppError('CONFLICT', message, details),
   internal: (message = 'Internal server error') => new AppError('INTERNAL', message),
   invalidCredentials: () => new AppError('AUTH_INVALID_CREDENTIALS', 'Invalid email or password.'),
-  emailNotVerified: () => new AppError('AUTH_EMAIL_NOT_VERIFIED', 'Please verify your email before logging in.'),
+  emailNotVerified: () =>
+    new AppError('AUTH_EMAIL_NOT_VERIFIED', 'Please verify your email before logging in.'),
   mfaRequired: () => new AppError('AUTH_MFA_REQUIRED', 'Two-factor authentication is required.'),
   mfaInvalid: () => new AppError('AUTH_MFA_INVALID', 'Invalid two-factor code.'),
   accountLocked: (retryAfterSeconds: number) =>
-    new AppError('AUTH_ACCOUNT_LOCKED', 'Account temporarily locked due to failed login attempts.', {
-      retryAfterSeconds,
-    }),
+    new AppError(
+      'AUTH_ACCOUNT_LOCKED',
+      'Account temporarily locked due to failed login attempts.',
+      {
+        retryAfterSeconds,
+      },
+    ),
   tokenExpired: () => new AppError('AUTH_TOKEN_EXPIRED', 'Token has expired.'),
   tokenInvalid: (message = 'Invalid token.') => new AppError('AUTH_TOKEN_INVALID', message),
-  tokenReused: () => new AppError('AUTH_TOKEN_REUSED', 'Refresh token reuse detected; session family revoked.'),
+  tokenReused: () =>
+    new AppError('AUTH_TOKEN_REUSED', 'Refresh token reuse detected; session family revoked.'),
   sessionRevoked: () => new AppError('AUTH_SESSION_REVOKED', 'Session has been revoked.'),
   deviceLimitReached: (devices: unknown) =>
     new AppError('DEVICE_LIMIT_REACHED', 'Device limit reached for your plan.', { devices }),
   deviceNotFound: () => new AppError('DEVICE_NOT_FOUND', 'Device not found.'),
   rateLimited: (retryAfterSeconds?: number) =>
-    new AppError('RATE_LIMITED', 'Too many requests.', retryAfterSeconds ? { retryAfterSeconds } : undefined),
+    new AppError(
+      'RATE_LIMITED',
+      'Too many requests.',
+      retryAfterSeconds ? { retryAfterSeconds } : undefined,
+    ),
   killSwitchActive: () => new AppError('KILL_SWITCH_ACTIVE', 'The kill switch is active.'),
 };
 

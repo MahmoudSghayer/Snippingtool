@@ -1,7 +1,6 @@
 // Device registration + plan device-limit enforcement, shared by
 // modules/auth (login/mfa-verify) and modules/devices (list/rename/revoke).
 
-
 import { devices, type Database } from '@sl/db';
 import { deviceFingerprintSchema, type DeviceFingerprint } from '@sl/shared';
 import { and, eq, isNull } from 'drizzle-orm';
@@ -34,7 +33,11 @@ export async function findOrRegisterDevice(
   const parsed = deviceFingerprintSchema.parse(device);
 
   const existing = await db.query.devices.findFirst({
-    where: and(eq(devices.userId, userId), eq(devices.fingerprintHash, parsed.fingerprint), isNull(devices.deletedAt)),
+    where: and(
+      eq(devices.userId, userId),
+      eq(devices.fingerprintHash, parsed.fingerprint),
+      isNull(devices.deletedAt),
+    ),
   });
 
   if (existing && existing.status === 'active') {

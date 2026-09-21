@@ -8,7 +8,6 @@
 import { users, type Database } from '@sl/db';
 import { eq } from 'drizzle-orm';
 
-
 import { AppErrors } from './errors.js';
 
 import type { Redis } from 'ioredis';
@@ -54,7 +53,11 @@ export function assertNotLocked(lockedUntil: Date | null): void {
 /** Records a failed login attempt: increments `failed_login_count`, and once
  * the threshold is crossed, sets `locked_until` with exponential backoff
  * (15m, 30m, 60m, ... capped at 24h). */
-export async function recordFailedLogin(db: Database, userId: string, currentFailedCount: number): Promise<void> {
+export async function recordFailedLogin(
+  db: Database,
+  userId: string,
+  currentFailedCount: number,
+): Promise<void> {
   const failedCount = currentFailedCount + 1;
   let lockedUntil: Date | null = null;
   if (failedCount >= LOCKOUT_THRESHOLD) {
@@ -62,9 +65,15 @@ export async function recordFailedLogin(db: Database, userId: string, currentFai
     const lockoutMs = Math.min(BASE_LOCKOUT_MS * backoffMultiplier, MAX_LOCKOUT_MS);
     lockedUntil = new Date(Date.now() + lockoutMs);
   }
-  await db.update(users).set({ failedLoginCount: failedCount, lockedUntil }).where(eq(users.id, userId));
+  await db
+    .update(users)
+    .set({ failedLoginCount: failedCount, lockedUntil })
+    .where(eq(users.id, userId));
 }
 
 export async function resetLoginFailures(db: Database, userId: string): Promise<void> {
-  await db.update(users).set({ failedLoginCount: 0, lockedUntil: null }).where(eq(users.id, userId));
+  await db
+    .update(users)
+    .set({ failedLoginCount: 0, lockedUntil: null })
+    .where(eq(users.id, userId));
 }

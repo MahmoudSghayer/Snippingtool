@@ -38,7 +38,9 @@ export default fp(
         onRequest: [fastify.requirePermission('audit.read')],
         schema: {
           tags: ['admin'],
-          querystring: auditLogQuerySchema.extend({ limit: z.coerce.number().int().min(1).max(500).default(100) }),
+          querystring: auditLogQuerySchema.extend({
+            limit: z.coerce.number().int().min(1).max(500).default(100),
+          }),
           response: { 200: z.array(auditLogEntrySchema) },
         },
       },
@@ -70,7 +72,11 @@ export default fp(
       '/api/v1/admin/audit/export.csv',
       {
         onRequest: [fastify.requirePermission('audit.read')],
-        schema: { tags: ['admin'], summary: 'Stream every audit_logs row matching the given filters as CSV.', querystring: auditLogQuerySchema },
+        schema: {
+          tags: ['admin'],
+          summary: 'Stream every audit_logs row matching the given filters as CSV.',
+          querystring: auditLogQuerySchema,
+        },
       },
       async (request, reply) => {
         const { actorId, entityType, entityId, from, to } = request.query;
@@ -88,7 +94,13 @@ export default fp(
           entityType: 'audit_log',
           entityId: null,
           before: null,
-          after: { actorId: actorId ?? null, entityType: entityType ?? null, entityId: entityId ?? null, from: from ?? null, to: to ?? null },
+          after: {
+            actorId: actorId ?? null,
+            entityType: entityType ?? null,
+            entityId: entityId ?? null,
+            from: from ?? null,
+            to: to ?? null,
+          },
           ip: request.ip,
           userAgent: request.headers['user-agent'] ?? null,
           requestId: request.id,
@@ -102,7 +114,9 @@ export default fp(
         async function* pages() {
           let cursor: { occurredAt: Date; id: string } | null = null;
           for (;;) {
-            const pageConditions: SQL[] = cursor ? [...conditions, lt(auditLogs.occurredAt, cursor.occurredAt)] : conditions;
+            const pageConditions: SQL[] = cursor
+              ? [...conditions, lt(auditLogs.occurredAt, cursor.occurredAt)]
+              : conditions;
             const rows = await fastify.db.query.auditLogs.findMany({
               where: pageConditions.length > 0 ? and(...pageConditions) : undefined,
               orderBy: [desc(auditLogs.occurredAt)],

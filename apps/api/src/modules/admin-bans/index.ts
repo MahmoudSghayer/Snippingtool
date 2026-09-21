@@ -8,7 +8,11 @@ import { type ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 
 import { recordAudit } from '../../lib/audit.js';
-import { recordAdminAction, requireAdminUsersRowId, toAuditSnapshot } from '../admin-subscriptions/admin-action-log.js';
+import {
+  recordAdminAction,
+  requireAdminUsersRowId,
+  toAuditSnapshot,
+} from '../admin-subscriptions/admin-action-log.js';
 import { createBan, liftBan, listBans, type BanRow } from '../bans/service.js';
 
 import type { FastifyInstance } from 'fastify';
@@ -114,7 +118,9 @@ export default fp(
       },
       async (request) => {
         const adminUserRowId = await requireAdminUsersRowId(fastify.db, request.authUser!.id);
-        const before = await fastify.db.query.bans.findFirst({ where: (t, { eq: eqOp }) => eqOp(t.id, request.params.id) });
+        const before = await fastify.db.query.bans.findFirst({
+          where: (t, { eq: eqOp }) => eqOp(t.id, request.params.id),
+        });
         const after = await liftBan(fastify.db, request.params.id);
 
         await recordAdminAction({

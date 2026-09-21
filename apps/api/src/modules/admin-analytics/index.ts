@@ -27,8 +27,16 @@ import { getExtensionUsage } from '../../lib/analytics/extension.js';
 import { getFeatureUsage } from '../../lib/analytics/features.js';
 import { getKpiOverview } from '../../lib/analytics/kpi.js';
 import { getPerformance } from '../../lib/analytics/performance.js';
-import { getPlatformLifetimeSummary, getPlatformProfitSeries, getProfitLeaderboard } from '../../lib/analytics/profits.js';
-import { getPastDueCount, getPlanMix, getSubscriptionSeries } from '../../lib/analytics/subscriptions.js';
+import {
+  getPlatformLifetimeSummary,
+  getPlatformProfitSeries,
+  getProfitLeaderboard,
+} from '../../lib/analytics/profits.js';
+import {
+  getPastDueCount,
+  getPlanMix,
+  getSubscriptionSeries,
+} from '../../lib/analytics/subscriptions.js';
 import { recordAudit } from '../../lib/audit.js';
 
 import type { FastifyInstance } from 'fastify';
@@ -41,7 +49,14 @@ export default fp(
 
     app.get(
       '/api/v1/admin/analytics/overview',
-      { onRequest: [gate], schema: { tags: ['admin-analytics'], querystring: analyticsRangeQuerySchema, response: { 200: kpiOverviewSchema } } },
+      {
+        onRequest: [gate],
+        schema: {
+          tags: ['admin-analytics'],
+          querystring: analyticsRangeQuerySchema,
+          response: { 200: kpiOverviewSchema },
+        },
+      },
       async (request) => {
         const { from, to } = request.query;
         return getKpiOverview(fastify.db, fastify.redis, { from, to });
@@ -50,7 +65,14 @@ export default fp(
 
     app.get(
       '/api/v1/admin/analytics/profits',
-      { onRequest: [gate], schema: { tags: ['admin-analytics'], querystring: analyticsRangeQuerySchema, response: { 200: profitAnalyticsResponseSchema } } },
+      {
+        onRequest: [gate],
+        schema: {
+          tags: ['admin-analytics'],
+          querystring: analyticsRangeQuerySchema,
+          response: { 200: profitAnalyticsResponseSchema },
+        },
+      },
       async (request) => {
         const { from, to, granularity } = request.query;
         const [items, lifetime] = await Promise.all([
@@ -65,7 +87,11 @@ export default fp(
       '/api/v1/admin/analytics/profits/leaderboard',
       {
         onRequest: [gate],
-        schema: { tags: ['admin-analytics'], querystring: profitLeaderboardQuerySchema, response: { 200: profitLeaderboardResponseSchema } },
+        schema: {
+          tags: ['admin-analytics'],
+          querystring: profitLeaderboardQuerySchema,
+          response: { 200: profitLeaderboardResponseSchema },
+        },
       },
       async (request) => {
         const { from, to, limit, order } = request.query;
@@ -76,7 +102,14 @@ export default fp(
 
     app.get(
       '/api/v1/admin/analytics/activity',
-      { onRequest: [gate], schema: { tags: ['admin-analytics'], querystring: analyticsRangeQuerySchema, response: { 200: activityAnalyticsResponseSchema } } },
+      {
+        onRequest: [gate],
+        schema: {
+          tags: ['admin-analytics'],
+          querystring: analyticsRangeQuerySchema,
+          response: { 200: activityAnalyticsResponseSchema },
+        },
+      },
       async (request) => {
         const { from, to, granularity } = request.query;
         const items = await getActivitySeries(fastify.db, { from, to, granularity });
@@ -88,7 +121,11 @@ export default fp(
       '/api/v1/admin/analytics/subscriptions',
       {
         onRequest: [gate],
-        schema: { tags: ['admin-analytics'], querystring: analyticsRangeQuerySchema, response: { 200: subscriptionMetricsResponseSchema } },
+        schema: {
+          tags: ['admin-analytics'],
+          querystring: analyticsRangeQuerySchema,
+          response: { 200: subscriptionMetricsResponseSchema },
+        },
       },
       async (request) => {
         const { from, to, granularity } = request.query;
@@ -103,7 +140,14 @@ export default fp(
 
     app.get(
       '/api/v1/admin/analytics/feature-usage',
-      { onRequest: [gate], schema: { tags: ['admin-analytics'], querystring: analyticsRangeQuerySchema, response: { 200: featureUsageResponseSchema } } },
+      {
+        onRequest: [gate],
+        schema: {
+          tags: ['admin-analytics'],
+          querystring: analyticsRangeQuerySchema,
+          response: { 200: featureUsageResponseSchema },
+        },
+      },
       async (request) => {
         const { from, to } = request.query;
         const byFeature = await getFeatureUsage(fastify.db, { from, to });
@@ -113,7 +157,14 @@ export default fp(
 
     app.get(
       '/api/v1/admin/analytics/extension',
-      { onRequest: [gate], schema: { tags: ['admin-analytics'], querystring: analyticsRangeQuerySchema, response: { 200: extensionUsageResponseSchema } } },
+      {
+        onRequest: [gate],
+        schema: {
+          tags: ['admin-analytics'],
+          querystring: analyticsRangeQuerySchema,
+          response: { 200: extensionUsageResponseSchema },
+        },
+      },
       async (request) => {
         const { from, to } = request.query;
         const usage = await getExtensionUsage(fastify.db, { from, to });
@@ -123,7 +174,14 @@ export default fp(
 
     app.get(
       '/api/v1/admin/analytics/errors',
-      { onRequest: [gate], schema: { tags: ['admin-analytics'], querystring: analyticsRangeQuerySchema, response: { 200: errorRatesResponseSchema } } },
+      {
+        onRequest: [gate],
+        schema: {
+          tags: ['admin-analytics'],
+          querystring: analyticsRangeQuerySchema,
+          response: { 200: errorRatesResponseSchema },
+        },
+      },
       async (request) => {
         const { from, to } = request.query;
         const rates = await getErrorRates(fastify.db, fastify.redis, { from, to });
@@ -133,7 +191,10 @@ export default fp(
 
     app.get(
       '/api/v1/admin/analytics/performance',
-      { onRequest: [gate], schema: { tags: ['admin-analytics'], response: { 200: performanceResponseSchema } } },
+      {
+        onRequest: [gate],
+        schema: { tags: ['admin-analytics'], response: { 200: performanceResponseSchema } },
+      },
       async () => getPerformance(fastify.metrics.registry),
     );
 
@@ -144,7 +205,10 @@ export default fp(
 
     app.get(
       '/api/v1/admin/analytics/reports/kpi',
-      { onRequest: [gate], schema: { tags: ['admin-analytics'], querystring: analyticsReportQuerySchema } },
+      {
+        onRequest: [gate],
+        schema: { tags: ['admin-analytics'], querystring: analyticsReportQuerySchema },
+      },
       async (request, reply) => {
         const { from, to, format } = request.query;
         const overview = await getKpiOverview(fastify.db, fastify.redis, { from, to });
@@ -167,7 +231,10 @@ export default fp(
         if (format === 'json') return { items: [row] };
 
         reply.header('content-type', 'text/csv; charset=utf-8');
-        reply.header('content-disposition', `attachment; filename="kpi-report-${from}-to-${to}.csv"`);
+        reply.header(
+          'content-disposition',
+          `attachment; filename="kpi-report-${from}-to-${to}.csv"`,
+        );
         return reply.send(
           csvStream(
             [
@@ -191,7 +258,10 @@ export default fp(
 
     app.get(
       '/api/v1/admin/analytics/reports/profits',
-      { onRequest: [gate], schema: { tags: ['admin-analytics'], querystring: analyticsReportQuerySchema } },
+      {
+        onRequest: [gate],
+        schema: { tags: ['admin-analytics'], querystring: analyticsReportQuerySchema },
+      },
       async (request, reply) => {
         const { from, to, format } = request.query;
         const items = await getPlatformProfitSeries(fastify.db, { from, to, granularity: 'day' });
@@ -200,7 +270,10 @@ export default fp(
         if (format === 'json') return { items };
 
         reply.header('content-type', 'text/csv; charset=utf-8');
-        reply.header('content-disposition', `attachment; filename="profits-report-${from}-to-${to}.csv"`);
+        reply.header(
+          'content-disposition',
+          `attachment; filename="profits-report-${from}-to-${to}.csv"`,
+        );
         return reply.send(
           csvStream(
             [
@@ -223,7 +296,10 @@ export default fp(
 
     app.get(
       '/api/v1/admin/analytics/reports/activity',
-      { onRequest: [gate], schema: { tags: ['admin-analytics'], querystring: analyticsReportQuerySchema } },
+      {
+        onRequest: [gate],
+        schema: { tags: ['admin-analytics'], querystring: analyticsReportQuerySchema },
+      },
       async (request, reply) => {
         const { from, to, format } = request.query;
         const items = await getActivitySeries(fastify.db, { from, to, granularity: 'day' });
@@ -232,7 +308,10 @@ export default fp(
         if (format === 'json') return { items };
 
         reply.header('content-type', 'text/csv; charset=utf-8');
-        reply.header('content-disposition', `attachment; filename="activity-report-${from}-to-${to}.csv"`);
+        reply.header(
+          'content-disposition',
+          `attachment; filename="activity-report-${from}-to-${to}.csv"`,
+        );
         return reply.send(
           csvStream(
             [
@@ -272,7 +351,8 @@ async function auditExport(
     before: null,
     after: { report, from, to, format },
     ip: request.ip,
-    userAgent: typeof request.headers['user-agent'] === 'string' ? request.headers['user-agent'] : null,
+    userAgent:
+      typeof request.headers['user-agent'] === 'string' ? request.headers['user-agent'] : null,
     requestId: request.id,
   });
 }

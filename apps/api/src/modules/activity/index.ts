@@ -15,7 +15,6 @@ import { activityIngestBatchSchema } from '@sl/shared';
 import fp from 'fastify-plugin';
 import { z } from 'zod';
 
-
 import { newId } from '../../lib/ids.js';
 import { INGEST_RATE_LIMIT } from '../../lib/rate-limit-tiers.js';
 
@@ -39,7 +38,11 @@ export default fp(
         onRequest: [fastify.authenticate],
         preHandler: [fastify.verifyCsrf],
         config: { rateLimit: INGEST_RATE_LIMIT },
-        schema: { tags: ['activity'], body: activityIngestBatchSchema, response: { 200: z.object({ accepted: z.number(), deduped: z.number() }) } },
+        schema: {
+          tags: ['activity'],
+          body: activityIngestBatchSchema,
+          response: { 200: z.object({ accepted: z.number(), deduped: z.number() }) },
+        },
       },
       async (request) => {
         const userId = request.authUser!.id;

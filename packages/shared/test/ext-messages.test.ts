@@ -36,7 +36,10 @@ describe('backgroundMessageEnvelopeSchema', () => {
       cooldownRemainingMs: 0,
       killSwitchActive: false,
     });
-    const result = backgroundMessageEnvelopeSchema.safeParse({ type: 'governor.snapshotPush', payload });
+    const result = backgroundMessageEnvelopeSchema.safeParse({
+      type: 'governor.snapshotPush',
+      payload,
+    });
     expect(result.success).toBe(true);
   });
 

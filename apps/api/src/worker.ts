@@ -34,12 +34,21 @@ async function main() {
   for (const job of jobs) {
     const queue = new Queue(job.name, {
       connection,
-      defaultJobOptions: { attempts: 3, backoff: { type: 'exponential', delay: 5_000 }, removeOnComplete: 50, removeOnFail: 100 },
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 5_000 },
+        removeOnComplete: 50,
+        removeOnFail: 100,
+      },
     });
     queues.push(queue);
 
     if (job.schedule) {
-      await queue.add(job.name, {}, { repeat: { pattern: job.schedule }, jobId: `${job.name}:scheduled` });
+      await queue.add(
+        job.name,
+        {},
+        { repeat: { pattern: job.schedule }, jobId: `${job.name}:scheduled` },
+      );
       log.info({ job: job.name, schedule: job.schedule }, 'scheduled repeatable job');
     }
 

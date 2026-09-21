@@ -1,7 +1,6 @@
 import { Button, EmptyState } from '@sl/ui';
 import { AlertOctagon } from 'lucide-react';
 
-
 export function ErrorPage({ error }: { error: unknown }) {
   const message = error instanceof Error ? error.message : undefined;
   return (

@@ -1,6 +1,16 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { emailSchema } from '@sl/shared';
-import { Button, Card, CardContent, CardHeader, CardTitle, CopyField, FormField, Input, PasswordInput } from '@sl/ui';
+import {
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CopyField,
+  FormField,
+  Input,
+  PasswordInput,
+} from '@sl/ui';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import QRCode from 'qrcode';
 import { useState } from 'react';
@@ -54,13 +64,20 @@ export function LoginPage() {
     defaultValues: { email: '', password: '', deviceName: defaultDeviceName() },
   });
 
-  const mfaForm = useForm<MfaForm>({ resolver: zodResolver(mfaSchema), defaultValues: { code: '' } });
-  const enrollConfirmForm = useForm<MfaForm>({ resolver: zodResolver(mfaSchema), defaultValues: { code: '' } });
+  const mfaForm = useForm<MfaForm>({
+    resolver: zodResolver(mfaSchema),
+    defaultValues: { code: '' },
+  });
+  const enrollConfirmForm = useForm<MfaForm>({
+    resolver: zodResolver(mfaSchema),
+    defaultValues: { code: '' },
+  });
 
   async function completeSession() {
     resetBootstrap();
     await ensureBootstrapped();
-    const dest = search.returnTo && search.returnTo.startsWith('/') ? search.returnTo : '/dashboard';
+    const dest =
+      search.returnTo && search.returnTo.startsWith('/') ? search.returnTo : '/dashboard';
     await navigate({ to: dest });
   }
 
@@ -73,7 +90,11 @@ export function LoginPage() {
     setSubmitting(true);
     try {
       const { data, error } = await api.POST('/api/v1/auth/login', {
-        body: { email: values.email, password: values.password, device: buildDevicePayload(values.deviceName) },
+        body: {
+          email: values.email,
+          password: values.password,
+          device: buildDevicePayload(values.deviceName),
+        },
       });
       if (error) {
         toast.error('Couldn’t sign in', { description: apiErrorMessage(error) });
@@ -89,7 +110,9 @@ export function LoginPage() {
       // comment above).
       setMfaTicket(data.mfaTicket);
       setDetectingMode(true);
-      const enrollAttempt = await api.POST('/api/v1/auth/totp/enroll', { body: { mfaTicket: data.mfaTicket } });
+      const enrollAttempt = await api.POST('/api/v1/auth/totp/enroll', {
+        body: { mfaTicket: data.mfaTicket },
+      });
       setDetectingMode(false);
       if (!enrollAttempt.error) {
         const qrDataUrl = await QRCode.toDataURL(enrollAttempt.data.otpauthUrl).catch(() => null);
@@ -107,7 +130,9 @@ export function LoginPage() {
     if (!mfaTicket) return;
     setSubmitting(true);
     try {
-      const { error } = await api.POST('/api/v1/auth/mfa/verify', { body: { mfaTicket, code: values.code } });
+      const { error } = await api.POST('/api/v1/auth/mfa/verify', {
+        body: { mfaTicket, code: values.code },
+      });
       if (error) {
         toast.error('Verification failed', { description: apiErrorMessage(error) });
         return;
@@ -123,7 +148,9 @@ export function LoginPage() {
     if (!mfaTicket) return;
     setSubmitting(true);
     try {
-      const { error } = await api.POST('/api/v1/auth/totp/enroll/confirm', { body: { mfaTicket, code: values.code } });
+      const { error } = await api.POST('/api/v1/auth/totp/enroll/confirm', {
+        body: { mfaTicket, code: values.code },
+      });
       if (error) {
         toast.error('Invalid code', { description: apiErrorMessage(error) });
         return;
@@ -140,32 +167,58 @@ export function LoginPage() {
       <Card>
         <CardHeader className="flex-col items-start gap-1">
           <CardTitle>Set up two-factor authentication</CardTitle>
-          <p className="text-xs text-ink-2">Admin accounts require 2FA. This is a one-time setup for your first login.</p>
+          <p className="text-xs text-ink-2">
+            Admin accounts require 2FA. This is a one-time setup for your first login.
+          </p>
         </CardHeader>
         <CardContent>
           {detectingMode || !enrollment ? (
             <p className="text-sm text-ink-2">Loading…</p>
           ) : (
-            <form className="flex flex-col gap-4" onSubmit={enrollConfirmForm.handleSubmit(onSubmitEnrollConfirm)}>
+            <form
+              className="flex flex-col gap-4"
+              onSubmit={enrollConfirmForm.handleSubmit(onSubmitEnrollConfirm)}
+            >
               {enrollment.qrDataUrl && (
-                <img src={enrollment.qrDataUrl} alt="Authenticator QR code" width={180} height={180} className="self-center rounded-md border border-line" />
+                <img
+                  src={enrollment.qrDataUrl}
+                  alt="Authenticator QR code"
+                  width={180}
+                  height={180}
+                  className="self-center rounded-md border border-line"
+                />
               )}
               <CopyField label="Manual entry secret" value={enrollment.secret} />
               <div>
-                <p className="mb-1 text-xs font-medium text-ink-2">Recovery codes (save these somewhere safe)</p>
+                <p className="mb-1 text-xs font-medium text-ink-2">
+                  Recovery codes (save these somewhere safe)
+                </p>
                 <div className="grid grid-cols-2 gap-1 rounded-md border border-line bg-ground p-3 font-mono text-xs">
                   {enrollment.recoveryCodes.map((code) => (
                     <span key={code}>{code}</span>
                   ))}
                 </div>
               </div>
-              <FormField label="Enter the 6-digit code to confirm" htmlFor="enroll-code" error={enrollConfirmForm.formState.errors.code?.message}>
-                <Input id="enroll-code" autoFocus inputMode="numeric" {...enrollConfirmForm.register('code')} />
+              <FormField
+                label="Enter the 6-digit code to confirm"
+                htmlFor="enroll-code"
+                error={enrollConfirmForm.formState.errors.code?.message}
+              >
+                <Input
+                  id="enroll-code"
+                  autoFocus
+                  inputMode="numeric"
+                  {...enrollConfirmForm.register('code')}
+                />
               </FormField>
               <Button type="submit" loading={submitting} className="w-full">
                 Confirm and sign in
               </Button>
-              <button type="button" className="text-xs text-ink-2 underline hover:text-ink" onClick={resetMfaState}>
+              <button
+                type="button"
+                className="text-xs text-ink-2 underline hover:text-ink"
+                onClick={resetMfaState}
+              >
                 Use a different account
               </button>
             </form>
@@ -180,17 +233,33 @@ export function LoginPage() {
       <Card>
         <CardHeader className="flex-col items-start gap-1">
           <CardTitle>Two-factor verification</CardTitle>
-          <p className="text-xs text-ink-2">Enter the 6-digit code from your authenticator app, or a recovery code.</p>
+          <p className="text-xs text-ink-2">
+            Enter the 6-digit code from your authenticator app, or a recovery code.
+          </p>
         </CardHeader>
         <CardContent>
           <form className="flex flex-col gap-4" onSubmit={mfaForm.handleSubmit(onSubmitMfaVerify)}>
-            <FormField label="Verification code" htmlFor="code" error={mfaForm.formState.errors.code?.message}>
-              <Input id="code" autoFocus inputMode="numeric" autoComplete="one-time-code" {...mfaForm.register('code')} />
+            <FormField
+              label="Verification code"
+              htmlFor="code"
+              error={mfaForm.formState.errors.code?.message}
+            >
+              <Input
+                id="code"
+                autoFocus
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                {...mfaForm.register('code')}
+              />
             </FormField>
             <Button type="submit" loading={submitting} className="w-full">
               Verify
             </Button>
-            <button type="button" className="text-xs text-ink-2 underline hover:text-ink" onClick={resetMfaState}>
+            <button
+              type="button"
+              className="text-xs text-ink-2 underline hover:text-ink"
+              onClick={resetMfaState}
+            >
               Use a different account
             </button>
           </form>
@@ -206,12 +275,33 @@ export function LoginPage() {
         <p className="text-xs text-ink-2">Track your snipes, profit and subscription.</p>
       </CardHeader>
       <CardContent>
-        <form className="flex flex-col gap-4" onSubmit={credentialsForm.handleSubmit(onSubmitCredentials)}>
-          <FormField label="Email" htmlFor="email" error={credentialsForm.formState.errors.email?.message}>
-            <Input id="email" type="email" autoComplete="email" autoFocus {...credentialsForm.register('email')} />
+        <form
+          className="flex flex-col gap-4"
+          onSubmit={credentialsForm.handleSubmit(onSubmitCredentials)}
+        >
+          <FormField
+            label="Email"
+            htmlFor="email"
+            error={credentialsForm.formState.errors.email?.message}
+          >
+            <Input
+              id="email"
+              type="email"
+              autoComplete="email"
+              autoFocus
+              {...credentialsForm.register('email')}
+            />
           </FormField>
-          <FormField label="Password" htmlFor="password" error={credentialsForm.formState.errors.password?.message}>
-            <PasswordInput id="password" autoComplete="current-password" {...credentialsForm.register('password')} />
+          <FormField
+            label="Password"
+            htmlFor="password"
+            error={credentialsForm.formState.errors.password?.message}
+          >
+            <PasswordInput
+              id="password"
+              autoComplete="current-password"
+              {...credentialsForm.register('password')}
+            />
           </FormField>
           <FormField
             label="This device"
@@ -232,7 +322,10 @@ export function LoginPage() {
         </form>
         <p className="mt-5 text-center text-sm text-ink-2">
           Don&apos;t have an account?{' '}
-          <Link to="/register" className="text-gold underline underline-offset-2 hover:text-gold/80">
+          <Link
+            to="/register"
+            className="text-gold underline underline-offset-2 hover:text-gold/80"
+          >
             Create one
           </Link>
         </p>

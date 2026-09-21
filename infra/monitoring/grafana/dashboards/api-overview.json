@@ -1,10 +1,7 @@
 {
   "uid": "sl-api-overview",
   "title": "API Overview",
-  "tags": [
-    "sniper-ledger",
-    "api"
-  ],
+  "tags": ["sniper-ledger", "api"],
   "timezone": "utc",
   "schemaVersion": 39,
   "version": 1,

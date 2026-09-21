@@ -23,8 +23,11 @@ export default defineJob({
   name: 'audit.retention',
   schedule: '30 3 * * *', // nightly at 03:30 UTC
   async processor(_job, { db, log }) {
-    const configRow = await db.query.systemConfig.findFirst({ where: (c, { eq }) => eq(c.key, 'audit.retention_months') });
-    const retentionMonths = typeof configRow?.value === 'number' ? configRow.value : DEFAULT_RETENTION_MONTHS;
+    const configRow = await db.query.systemConfig.findFirst({
+      where: (c, { eq }) => eq(c.key, 'audit.retention_months'),
+    });
+    const retentionMonths =
+      typeof configRow?.value === 'number' ? configRow.value : DEFAULT_RETENTION_MONTHS;
 
     const now = new Date();
     const cutoff = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - retentionMonths, 1));
@@ -38,7 +41,9 @@ export default defineJob({
       // allowed near sql.raw(), so a future change to that function (or to
       // this loop) can't silently start interpolating something else.
       if (!/^audit_logs_y\d{4}m\d{2}$/.test(name)) {
-        throw new Error(`audit.retention: refusing to DROP an unexpected partition identifier: ${name}`);
+        throw new Error(
+          `audit.retention: refusing to DROP an unexpected partition identifier: ${name}`,
+        );
       }
       // DDL identifier (DROP TABLE target) can't be a bound parameter in
       // Postgres; `name` is validated immediately above against a fixed
@@ -47,6 +52,9 @@ export default defineJob({
       await db.execute(sql.raw(`DROP TABLE IF EXISTS "${name}"`)); // nosemgrep: no-raw-sql-string-interpolation
     }
 
-    log.info({ retentionMonths, cutoff: cutoff.toISOString() }, `audit.retention checked ${LOOKBACK_MONTHS_TO_CHECK} candidate partitions`);
+    log.info(
+      { retentionMonths, cutoff: cutoff.toISOString() },
+      `audit.retention checked ${LOOKBACK_MONTHS_TO_CHECK} candidate partitions`,
+    );
   },
 });

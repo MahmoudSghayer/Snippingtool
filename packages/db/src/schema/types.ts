@@ -3,13 +3,37 @@
 // stay in sync automatically. Naming: `<Table>` = select shape (row as read
 // back), `New<Table>` = insert shape (defaults/generated columns optional).
 
-import { type userActivity, type searchActivity, type snipingActivity, type riskBudgetEvents } from './activity.js';
+import {
+  type userActivity,
+  type searchActivity,
+  type snipingActivity,
+  type riskBudgetEvents,
+} from './activity.js';
 import { type adminUsers, type adminActions, type bans, type flags } from './admin.js';
-import { type devices, type sessions, type emailVerifications, type passwordResets, type totpRecoveryCodes } from './auth.js';
-import { type coupons, type couponRedemptions, type payments, type paymentHistory, type stripeWebhookEvents } from './billing.js';
+import {
+  type devices,
+  type sessions,
+  type emailVerifications,
+  type passwordResets,
+  type totpRecoveryCodes,
+} from './auth.js';
+import {
+  type coupons,
+  type couponRedemptions,
+  type payments,
+  type paymentHistory,
+  type stripeWebhookEvents,
+} from './billing.js';
 import { type userSettings, type settingsHistory, type notifications } from './settings.js';
 import { type plans, type subscriptions, type licenses } from './subscriptions.js';
-import { type auditLogs, type featureToggles, type systemConfig, type ipActivity, type extensionInstalls, type analyticsDaily } from './system.js';
+import {
+  type auditLogs,
+  type featureToggles,
+  type systemConfig,
+  type ipActivity,
+  type extensionInstalls,
+  type analyticsDaily,
+} from './system.js';
 import { type trades, type profits, type savedFilters, type filterStats } from './trading.js';
 import { type users } from './users.js';
 

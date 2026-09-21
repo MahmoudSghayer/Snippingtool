@@ -1,4 +1,14 @@
-import { Badge, Button, DataTable, FormField, Input, Modal, PageHeader, Textarea, type ColumnDef } from '@sl/ui';
+import {
+  Badge,
+  Button,
+  DataTable,
+  FormField,
+  Input,
+  Modal,
+  PageHeader,
+  Textarea,
+  type ColumnDef,
+} from '@sl/ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { toast } from 'sonner';
@@ -6,7 +16,6 @@ import { toast } from 'sonner';
 import { api, apiErrorMessage } from '@/api/client.js';
 
 import type { SystemConfigDto } from '@sl/shared';
-
 
 /** `/admin/config` — system config key/value pairs, masked secrets. `GET
  * /admin/config` already masks `isSecret` values server-side
@@ -29,8 +38,19 @@ export function ConfigPage() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: async ({ key, value, isSecret }: { key: string; value: unknown; isSecret: boolean }) => {
-      const { error } = await api.PUT('/api/v1/admin/config/{key}', { params: { path: { key } }, body: { value, isSecret } });
+    mutationFn: async ({
+      key,
+      value,
+      isSecret,
+    }: {
+      key: string;
+      value: unknown;
+      isSecret: boolean;
+    }) => {
+      const { error } = await api.PUT('/api/v1/admin/config/{key}', {
+        params: { path: { key } },
+        body: { value, isSecret },
+      });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -38,7 +58,8 @@ export function ConfigPage() {
       setEditTarget(null);
       void queryClient.invalidateQueries({ queryKey: ['admin', 'config'] });
     },
-    onError: (error) => toast.error("Couldn't update config", { description: apiErrorMessage(error) }),
+    onError: (error) =>
+      toast.error("Couldn't update config", { description: apiErrorMessage(error) }),
   });
 
   function openEdit(row: SystemConfigDto) {
@@ -59,13 +80,21 @@ export function ConfigPage() {
   }
 
   const columns: ColumnDef<SystemConfigDto, unknown>[] = [
-    { accessorKey: 'key', header: 'Key', cell: (c) => <span className="font-mono">{c.getValue() as string}</span> },
+    {
+      accessorKey: 'key',
+      header: 'Key',
+      cell: (c) => <span className="font-mono">{c.getValue() as string}</span>,
+    },
     {
       accessorKey: 'value',
       header: 'Value',
       cell: (c) => (
         <span className="font-mono text-xs text-ink-2">
-          {c.row.original.isSecret ? <Badge tone="warning">Secret</Badge> : JSON.stringify(c.getValue())}
+          {c.row.original.isSecret ? (
+            <Badge tone="warning">Secret</Badge>
+          ) : (
+            JSON.stringify(c.getValue())
+          )}
         </span>
       ),
     },
@@ -73,7 +102,10 @@ export function ConfigPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title="System config" description="Runtime configuration keys, with secrets masked unless you hold config.write." />
+      <PageHeader
+        title="System config"
+        description="Runtime configuration keys, with secrets masked unless you hold config.write."
+      />
 
       <DataTable
         columns={columns}
@@ -107,10 +139,21 @@ export function ConfigPage() {
       >
         <div className="flex flex-col gap-4">
           <FormField label="Value (JSON or plain text)" htmlFor="config-value">
-            <Textarea id="config-value" rows={6} value={valueDraft} onChange={(e) => setValueDraft(e.target.value)} className="font-mono text-xs" />
+            <Textarea
+              id="config-value"
+              rows={6}
+              value={valueDraft}
+              onChange={(e) => setValueDraft(e.target.value)}
+              className="font-mono text-xs"
+            />
           </FormField>
           <label className="flex items-center gap-2 text-sm text-ink">
-            <Input type="checkbox" checked={isSecretDraft} onChange={(e) => setIsSecretDraft(e.target.checked)} className="h-4 w-4" />
+            <Input
+              type="checkbox"
+              checked={isSecretDraft}
+              onChange={(e) => setIsSecretDraft(e.target.checked)}
+              className="h-4 w-4"
+            />
             Mark as secret
           </label>
         </div>

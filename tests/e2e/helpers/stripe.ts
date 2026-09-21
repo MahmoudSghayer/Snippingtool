@@ -20,7 +20,10 @@ const stripe = new Stripe('sk_test_e2e_unused_no_network_calls');
  * apps/api/src/modules/payments/webhooks.ts's handleCheckoutCompleted()
  * skips its `stripe.subscriptions.retrieve()` branch entirely — no real
  * Stripe API call happens anywhere in this journey. */
-export function signCheckoutCompleted(userId: string, planCode: string): { body: string; signatureHeader: string } {
+export function signCheckoutCompleted(
+  userId: string,
+  planCode: string,
+): { body: string; signatureHeader: string } {
   const event = {
     id: `evt_e2e_${Date.now()}_${Math.random().toString(36).slice(2)}`,
     object: 'event',
@@ -38,6 +41,9 @@ export function signCheckoutCompleted(userId: string, planCode: string): { body:
     },
   };
   const body = JSON.stringify(event);
-  const signatureHeader = stripe.webhooks.generateTestHeaderString({ payload: body, secret: E2E_STRIPE_WEBHOOK_SECRET });
+  const signatureHeader = stripe.webhooks.generateTestHeaderString({
+    payload: body,
+    secret: E2E_STRIPE_WEBHOOK_SECRET,
+  });
   return { body, signatureHeader };
 }

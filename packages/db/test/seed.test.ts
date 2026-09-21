@@ -26,14 +26,22 @@ describe('seed is idempotent', () => {
     const planRows = await db.select().from(plans);
     const planCodes = planRows.map((p) => p.code);
     expect(new Set(planCodes).size).toBe(planCodes.length); // no duplicate codes
-    expect(planCodes).toEqual(expect.arrayContaining(['trial', 'basic', 'pro', 'ultimate', 'lifetime']));
+    expect(planCodes).toEqual(
+      expect.arrayContaining(['trial', 'basic', 'pro', 'ultimate', 'lifetime']),
+    );
     expect(planRows.length).toBe(5);
 
     const toggleRows = await db.select().from(featureToggles);
     const toggleKeys = toggleRows.map((t) => t.key);
     expect(new Set(toggleKeys).size).toBe(toggleKeys.length);
     expect(toggleKeys).toEqual(
-      expect.arrayContaining(['automation.enabled', 'kill_switch', 'telemetry.enabled', 'trial.enabled', 'hibp_check']),
+      expect.arrayContaining([
+        'automation.enabled',
+        'kill_switch',
+        'telemetry.enabled',
+        'trial.enabled',
+        'hibp_check',
+      ]),
     );
 
     const configRows = await db.select().from(systemConfig);

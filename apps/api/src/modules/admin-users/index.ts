@@ -3,7 +3,6 @@
 // PERMISSION_MATRIX and writes an audit_logs row (before/after) via
 // recordAudit, plus an admin_actions row for the admin-specific action log.
 
-
 import { adminActions, users, type User } from '@sl/db';
 import {
   adminSuspendUserRequestSchema,
@@ -135,16 +134,26 @@ export default fp(
 
         return {
           items: items.map(toDto),
-          nextCursor: hasMore && last ? encodeCursor({ v: last.createdAt.toISOString(), id: last.id }) : null,
+          nextCursor:
+            hasMore && last ? encodeCursor({ v: last.createdAt.toISOString(), id: last.id }) : null,
         };
       },
     );
 
     app.get(
       '/api/v1/admin/users/:id',
-      { onRequest: [fastify.requirePermission('users.read')], schema: { tags: ['admin'], params: z.object({ id: z.string().uuid() }), response: { 200: userDtoSchema } } },
+      {
+        onRequest: [fastify.requirePermission('users.read')],
+        schema: {
+          tags: ['admin'],
+          params: z.object({ id: z.string().uuid() }),
+          response: { 200: userDtoSchema },
+        },
+      },
       async (request) => {
-        const user = await fastify.db.query.users.findFirst({ where: eq(users.id, request.params.id) });
+        const user = await fastify.db.query.users.findFirst({
+          where: eq(users.id, request.params.id),
+        });
         if (!user) throw AppErrors.notFound('user');
         return toDto(user);
       },
@@ -156,10 +165,17 @@ export default fp(
         onRequest: [fastify.requirePermission('users.write')],
         preHandler: [fastify.verifyCsrf],
         config: { rateLimit: ADMIN_RATE_LIMIT },
-        schema: { tags: ['admin'], params: z.object({ id: z.string().uuid() }), body: updateProfileRequestSchema, response: { 200: userDtoSchema } },
+        schema: {
+          tags: ['admin'],
+          params: z.object({ id: z.string().uuid() }),
+          body: updateProfileRequestSchema,
+          response: { 200: userDtoSchema },
+        },
       },
       async (request) => {
-        const before = await fastify.db.query.users.findFirst({ where: eq(users.id, request.params.id) });
+        const before = await fastify.db.query.users.findFirst({
+          where: eq(users.id, request.params.id),
+        });
         if (!before) throw AppErrors.notFound('user');
 
         const [after] = await fastify.db
@@ -169,7 +185,17 @@ export default fp(
           .returning();
 
         const adminRowId = await getAdminUserRowId(fastify, request.authUser!.id);
-        await logAdminAction(fastify, adminRowId, request.authUser!.id, 'user.updated', before.id, 'admin profile edit', { timezone: before.timezone }, { timezone: after!.timezone }, request);
+        await logAdminAction(
+          fastify,
+          adminRowId,
+          request.authUser!.id,
+          'user.updated',
+          before.id,
+          'admin profile edit',
+          { timezone: before.timezone },
+          { timezone: after!.timezone },
+          request,
+        );
 
         return toDto(after!);
       },
@@ -181,18 +207,39 @@ export default fp(
         onRequest: [fastify.requirePermission('users.suspend')],
         preHandler: [fastify.verifyCsrf],
         config: { rateLimit: ADMIN_RATE_LIMIT },
-        schema: { tags: ['admin'], params: z.object({ id: z.string().uuid() }), body: adminSuspendUserRequestSchema, response: { 200: userDtoSchema } },
+        schema: {
+          tags: ['admin'],
+          params: z.object({ id: z.string().uuid() }),
+          body: adminSuspendUserRequestSchema,
+          response: { 200: userDtoSchema },
+        },
       },
       async (request) => {
-        const before = await fastify.db.query.users.findFirst({ where: eq(users.id, request.params.id) });
+        const before = await fastify.db.query.users.findFirst({
+          where: eq(users.id, request.params.id),
+        });
         if (!before) throw AppErrors.notFound('user');
 
-        const [after] = await fastify.db.update(users).set({ status: 'suspended' }).where(eq(users.id, before.id)).returning();
+        const [after] = await fastify.db
+          .update(users)
+          .set({ status: 'suspended' })
+          .where(eq(users.id, before.id))
+          .returning();
         await revokeAllUserSessions(fastify.db, before.id, 'admin_suspend');
         await bumpUserVersion(fastify.db, before.id);
 
         const adminRowId = await getAdminUserRowId(fastify, request.authUser!.id);
-        await logAdminAction(fastify, adminRowId, request.authUser!.id, 'user.suspended', before.id, request.body.reason, { status: before.status }, { status: 'suspended' }, request);
+        await logAdminAction(
+          fastify,
+          adminRowId,
+          request.authUser!.id,
+          'user.suspended',
+          before.id,
+          request.body.reason,
+          { status: before.status },
+          { status: 'suspended' },
+          request,
+        );
 
         return toDto(after!);
       },
@@ -204,16 +251,37 @@ export default fp(
         onRequest: [fastify.requirePermission('users.suspend')],
         preHandler: [fastify.verifyCsrf],
         config: { rateLimit: ADMIN_RATE_LIMIT },
-        schema: { tags: ['admin'], params: z.object({ id: z.string().uuid() }), body: z.object({ reason: z.string().min(1).max(1000) }), response: { 200: userDtoSchema } },
+        schema: {
+          tags: ['admin'],
+          params: z.object({ id: z.string().uuid() }),
+          body: z.object({ reason: z.string().min(1).max(1000) }),
+          response: { 200: userDtoSchema },
+        },
       },
       async (request) => {
-        const before = await fastify.db.query.users.findFirst({ where: eq(users.id, request.params.id) });
+        const before = await fastify.db.query.users.findFirst({
+          where: eq(users.id, request.params.id),
+        });
         if (!before) throw AppErrors.notFound('user');
 
-        const [after] = await fastify.db.update(users).set({ status: 'active' }).where(eq(users.id, before.id)).returning();
+        const [after] = await fastify.db
+          .update(users)
+          .set({ status: 'active' })
+          .where(eq(users.id, before.id))
+          .returning();
 
         const adminRowId = await getAdminUserRowId(fastify, request.authUser!.id);
-        await logAdminAction(fastify, adminRowId, request.authUser!.id, 'user.unsuspended', before.id, request.body.reason, { status: before.status }, { status: 'active' }, request);
+        await logAdminAction(
+          fastify,
+          adminRowId,
+          request.authUser!.id,
+          'user.unsuspended',
+          before.id,
+          request.body.reason,
+          { status: before.status },
+          { status: 'active' },
+          request,
+        );
 
         return toDto(after!);
       },
@@ -225,10 +293,17 @@ export default fp(
         onRequest: [fastify.requirePermission('users.reset_password')],
         preHandler: [fastify.verifyCsrf],
         config: { rateLimit: ADMIN_RATE_LIMIT },
-        schema: { tags: ['admin'], params: z.object({ id: z.string().uuid() }), body: z.object({ reason: z.string().min(1).max(1000) }), response: { 200: z.object({ sent: z.literal(true) }) } },
+        schema: {
+          tags: ['admin'],
+          params: z.object({ id: z.string().uuid() }),
+          body: z.object({ reason: z.string().min(1).max(1000) }),
+          response: { 200: z.object({ sent: z.literal(true) }) },
+        },
       },
       async (request) => {
-        const user = await fastify.db.query.users.findFirst({ where: eq(users.id, request.params.id) });
+        const user = await fastify.db.query.users.findFirst({
+          where: eq(users.id, request.params.id),
+        });
         if (!user) throw AppErrors.notFound('user');
 
         const { requestPasswordReset } = await import('../auth/service.js');
@@ -246,7 +321,17 @@ export default fp(
         );
 
         const adminRowId = await getAdminUserRowId(fastify, request.authUser!.id);
-        await logAdminAction(fastify, adminRowId, request.authUser!.id, 'user.reset_password_sent', user.id, request.body.reason, null, null, request);
+        await logAdminAction(
+          fastify,
+          adminRowId,
+          request.authUser!.id,
+          'user.reset_password_sent',
+          user.id,
+          request.body.reason,
+          null,
+          null,
+          request,
+        );
 
         return { sent: true as const };
       },
@@ -262,14 +347,26 @@ export default fp(
           tags: ['admin'],
           params: z.object({ id: z.string().uuid() }),
           body: z.object({ reason: z.string().min(1).max(1000) }),
-          response: { 200: z.object({ ok: z.literal(true), sessionsRevoked: z.number().int().min(0), sessionsNotified: z.number().int().min(0) }) },
+          response: {
+            200: z.object({
+              ok: z.literal(true),
+              sessionsRevoked: z.number().int().min(0),
+              sessionsNotified: z.number().int().min(0),
+            }),
+          },
         },
       },
       async (request) => {
-        const user = await fastify.db.query.users.findFirst({ where: eq(users.id, request.params.id) });
+        const user = await fastify.db.query.users.findFirst({
+          where: eq(users.id, request.params.id),
+        });
         if (!user) throw AppErrors.notFound('user');
 
-        const revokedSessionIds = await revokeAllUserSessions(fastify.db, user.id, 'admin_force_logout');
+        const revokedSessionIds = await revokeAllUserSessions(
+          fastify.db,
+          user.id,
+          'admin_force_logout',
+        );
         await bumpUserVersion(fastify.db, user.id);
 
         // Defect #7 fix (docs/12-testing.md "Defects found"): an admin who
@@ -287,7 +384,11 @@ export default fp(
         // its own current session id).
         const notifyTargets = await listAllUserSessionIds(fastify.db, user.id);
         for (const sessionId of notifyTargets) {
-          await publishToUser(fastify.redis, user.id, { type: 'session.revoked', sessionId, reason: 'admin_force_logout' });
+          await publishToUser(fastify.redis, user.id, {
+            type: 'session.revoked',
+            sessionId,
+            reason: 'admin_force_logout',
+          });
         }
 
         await fastify.mailer
@@ -312,7 +413,11 @@ export default fp(
           request,
         );
 
-        return { ok: true as const, sessionsRevoked: revokedSessionIds.length, sessionsNotified: notifyTargets.length };
+        return {
+          ok: true as const,
+          sessionsRevoked: revokedSessionIds.length,
+          sessionsNotified: notifyTargets.length,
+        };
       },
     );
   },

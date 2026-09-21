@@ -20,8 +20,8 @@ x-app-env: &app-env
   logging:
     driver: json-file
     options:
-      max-size: "20m"
-      max-file: "5"
+      max-size: '20m'
+      max-file: '5'
 
 x-restart-always: &restart-always
   restart: unless-stopped
@@ -36,22 +36,22 @@ services:
       DOMAIN: ${DOMAIN:?set DOMAIN in .env.production, e.g. sniperledger.com}
       ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env.production}
     ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp" # HTTP/3
+      - '80:80'
+      - '443:443'
+      - '443:443/udp' # HTTP/3
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
     logging:
       driver: json-file
-      options: { max-size: "20m", max-file: "5" }
+      options: { max-size: '20m', max-file: '5' }
     depends_on:
       - api
       - dashboard
     deploy:
       resources:
-        limits: { cpus: "1.0", memory: 256M }
+        limits: { cpus: '1.0', memory: 256M }
 
   api:
     image: ${REGISTRY:-ghcr.io/sniper-ledger}/api:${IMAGE_TAG:?set IMAGE_TAG, e.g. v1.2.3}
@@ -66,8 +66,8 @@ services:
     deploy:
       replicas: ${API_REPLICAS:-2}
       resources:
-        limits: { cpus: "1.0", memory: 512M }
-        reservations: { cpus: "0.25", memory: 256M }
+        limits: { cpus: '1.0', memory: 512M }
+        reservations: { cpus: '0.25', memory: 256M }
       restart_policy:
         condition: any
         delay: 5s
@@ -92,7 +92,7 @@ services:
     deploy:
       replicas: ${WORKER_REPLICAS:-1}
       resources:
-        limits: { cpus: "1.0", memory: 512M }
+        limits: { cpus: '1.0', memory: 512M }
       restart_policy:
         condition: any
         delay: 5s
@@ -109,21 +109,21 @@ services:
     <<: *restart-always
     logging:
       driver: json-file
-      options: { max-size: "20m", max-file: "5" }
+      options: { max-size: '20m', max-file: '5' }
     deploy:
       replicas: ${DASHBOARD_REPLICAS:-1}
       resources:
-        limits: { cpus: "0.5", memory: 128M }
+        limits: { cpus: '0.5', memory: 128M }
 
   migrator:
     image: ${REGISTRY:-ghcr.io/sniper-ledger}/db-migrator:${IMAGE_TAG:?set IMAGE_TAG}
     <<: *app-env
     environment:
-      RUN_SEED: "false" # prod never auto-seeds; grant lifetime/admin via the seeded-once bootstrap documented in docs/11-devops.md instead
+      RUN_SEED: 'false' # prod never auto-seeds; grant lifetime/admin via the seeded-once bootstrap documented in docs/11-devops.md instead
     depends_on:
       postgres:
         condition: service_healthy
-    profiles: ["migrate"] # `docker compose run --rm migrator`, never part of `up -d`
+    profiles: ['migrate'] # `docker compose run --rm migrator`, never part of `up -d`
 
   postgres:
     image: postgres:16-alpine
@@ -137,35 +137,41 @@ services:
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
     logging:
       driver: json-file
-      options: { max-size: "50m", max-file: "10" }
+      options: { max-size: '50m', max-file: '10' }
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sl} -d ${POSTGRES_DB:-sniper_ledger}"]
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-sl} -d ${POSTGRES_DB:-sniper_ledger}']
       interval: 10s
       timeout: 5s
       retries: 10
     deploy:
       resources:
-        limits: { cpus: "2.0", memory: 2G }
+        limits: { cpus: '2.0', memory: 2G }
         reservations: { memory: 1G }
 
   redis:
     image: redis:7-alpine
     <<: *restart-always
-    command: ["redis-server", "/usr/local/etc/redis/redis.conf", "--requirepass", "${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.production}"]
+    command:
+      [
+        'redis-server',
+        '/usr/local/etc/redis/redis.conf',
+        '--requirepass',
+        '${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.production}',
+      ]
     volumes:
       - redisdata:/data
       - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
     logging:
       driver: json-file
-      options: { max-size: "20m", max-file: "5" }
+      options: { max-size: '20m', max-file: '5' }
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "--no-auth-warning", "ping"]
+      test: ['CMD', 'redis-cli', '-a', '${REDIS_PASSWORD}', '--no-auth-warning', 'ping']
       interval: 10s
       timeout: 5s
       retries: 10
     deploy:
       resources:
-        limits: { cpus: "1.0", memory: 512M }
+        limits: { cpus: '1.0', memory: 512M }
 
   backup:
     build:
@@ -175,7 +181,7 @@ services:
     env_file: [.env.production]
     environment:
       PGHOST: postgres
-      PGPORT: "5432"
+      PGPORT: '5432'
       PGUSER: ${POSTGRES_USER:-sl}
       PGDATABASE: ${POSTGRES_DB:-sniper_ledger}
       PGPASSWORD: ${POSTGRES_PASSWORD}
@@ -190,14 +196,14 @@ services:
         condition: service_healthy
     deploy:
       resources:
-        limits: { cpus: "0.5", memory: 256M }
+        limits: { cpus: '0.5', memory: 256M }
 
   # --- monitoring stack (always-on in prod; dev gates this behind a
   # `monitoring` profile, staging mirrors prod) ---
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.116.1
     <<: *restart-always
-    command: ["--config=/etc/otel-collector-config.yaml"]
+    command: ['--config=/etc/otel-collector-config.yaml']
     volumes:
       - ./monitoring/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
 
@@ -209,9 +215,9 @@ services:
       - ./monitoring/prometheus/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
       - promdata:/prometheus
     command:
-      - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.path=/prometheus"
-      - "--storage.tsdb.retention.time=30d"
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
     deploy:
       resources:
         limits: { memory: 1G }
@@ -231,7 +237,7 @@ services:
     environment:
       REDIS_ADDR: redis://redis:6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
-      REDIS_EXPORTER_CHECK_KEYS: "bull:*:wait,bull:*:active,bull:*:delayed"
+      REDIS_EXPORTER_CHECK_KEYS: 'bull:*:wait,bull:*:active,bull:*:delayed'
     depends_on:
       redis:
         condition: service_healthy
@@ -251,11 +257,11 @@ services:
       # BackupVerifyFailed).
       - backupdata:/textfile:ro
     command:
-      - "--path.procfs=/host/proc"
-      - "--path.sysfs=/host/sys"
-      - "--path.rootfs=/rootfs"
-      - "--collector.textfile.directory=/textfile"
-      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.textfile.directory=/textfile'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
 
   grafana:
     image: grafana/grafana:11.4.0
@@ -263,10 +269,10 @@ services:
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env.production}
-      GF_USERS_ALLOW_SIGN_UP: "false"
-      GF_SERVER_ROOT_URL: "https://grafana.${DOMAIN}"
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_SERVER_ROOT_URL: 'https://grafana.${DOMAIN}'
       GRAFANA_PG_HOST: postgres
-      GRAFANA_PG_PORT: "5432"
+      GRAFANA_PG_PORT: '5432'
       GRAFANA_PG_DATABASE: ${POSTGRES_DB:-sniper_ledger}
       GRAFANA_PG_USER: ${GRAFANA_PG_USER:-sl}
       GRAFANA_PG_PASSWORD: ${GRAFANA_PG_PASSWORD:?set a read-only reporting user in .env.production, see docs/11-devops.md}
@@ -282,7 +288,7 @@ services:
   loki:
     image: grafana/loki:3.3.2
     <<: *restart-always
-    command: ["-config.file=/etc/loki/loki-config.yaml"]
+    command: ['-config.file=/etc/loki/loki-config.yaml']
     volumes:
       - ./monitoring/loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
       - lokidata:/loki
@@ -290,7 +296,7 @@ services:
   promtail:
     image: grafana/promtail:3.3.2
     <<: *restart-always
-    command: ["-config.file=/etc/promtail/promtail-config.yaml"]
+    command: ['-config.file=/etc/promtail/promtail-config.yaml']
     volumes:
       - ./monitoring/promtail/promtail-config.yaml:/etc/promtail/promtail-config.yaml:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro

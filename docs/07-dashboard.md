@@ -47,31 +47,31 @@ whichever page is active (see the `vite build` chunk list — each page under
 
 ## 2. Routes and permissions matrix
 
-| Route | Guard | Notes |
-|---|---|---|
-| `/login`, `/register`, `/verify-email`, `/forgot-password`, `/reset-password` | none | Redirect target for a 401 anywhere (`?returnTo=`). |
-| `/dashboard`, `/analytics`, `/subscriptions`, `/settings` | `appLayoutRoute.beforeLoad`: session bootstrapped and `status === 'authenticated'`, else redirect to `/login?returnTo=` | |
-| `/admin/*` | `adminLayoutRoute.beforeLoad`: additionally `admin !== null` (i.e. `role === 'admin'`), else `notFound()` | Nav items under "Admin" are also only rendered when `admin !== null` — a non-admin never sees the links, and the route itself 404s if reached directly. **Fine-grained gating** by the four `AdminRole`s (`super_admin`/`support`/`analyst`/`billing`, `@sl/shared`'s `PERMISSION_MATRIX`) is not implemented client-side — see [§11](#11-known-api-gaps): the API doesn't expose the caller's own `adminRole` anywhere yet, so every admin currently sees every admin nav item and page; the server remains the real enforcement point (`fastify.requirePermission`) and a call a role doesn't grant surfaces as an inline 403 (toast/error state), never a silent failure. |
-| `/dev/components` | `import.meta.env.DEV` only | Not reachable in a production build (`router.tsx` swaps its component for `NotFoundPage` when `DEV` is false). |
+| Route                                                                         | Guard                                                                                                                   | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/login`, `/register`, `/verify-email`, `/forgot-password`, `/reset-password` | none                                                                                                                    | Redirect target for a 401 anywhere (`?returnTo=`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `/dashboard`, `/analytics`, `/subscriptions`, `/settings`                     | `appLayoutRoute.beforeLoad`: session bootstrapped and `status === 'authenticated'`, else redirect to `/login?returnTo=` |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `/admin/*`                                                                    | `adminLayoutRoute.beforeLoad`: additionally `admin !== null` (i.e. `role === 'admin'`), else `notFound()`               | Nav items under "Admin" are also only rendered when `admin !== null` — a non-admin never sees the links, and the route itself 404s if reached directly. **Fine-grained gating** by the four `AdminRole`s (`super_admin`/`support`/`analyst`/`billing`, `@sl/shared`'s `PERMISSION_MATRIX`) is not implemented client-side — see [§11](#11-known-api-gaps): the API doesn't expose the caller's own `adminRole` anywhere yet, so every admin currently sees every admin nav item and page; the server remains the real enforcement point (`fastify.requirePermission`) and a call a role doesn't grant surfaces as an inline 403 (toast/error state), never a silent failure. |
+| `/dev/components`                                                             | `import.meta.env.DEV` only                                                                                              | Not reachable in a production build (`router.tsx` swaps its component for `NotFoundPage` when `DEV` is false).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
 Admin pages and the endpoints/permissions they exercise (full detail in
 `docs/03-api.md`/`docs/05-subscriptions.md`):
 
-| Page | Endpoints | Permission(s) |
-|---|---|---|
-| `/admin` Overview | `GET /admin/analytics/overview`, WS `admin.overview.tick` | `analytics.read` |
-| `/admin/users` | `GET/PATCH /admin/users`, `.../suspend`, `.../unsuspend`, `.../reset-password`, `.../force-logout`, `GET/POST /admin/bans`, `.../lift`, `GET /admin/flags`, `POST /admin/subscriptions/{userId}/activate`, `.../grant-lifetime` | `users.read`/`.write`/`.suspend`/`.reset_password`/`.force_logout` |
-| `/admin/profits` | `GET /admin/analytics/profits`, `.../profits/leaderboard` | `analytics.read` |
-| `/admin/activity` | `GET /admin/activity/{logins,searches,snipes,errors,devices,ips}` | `analytics.read` |
-| `/admin/system` | `GET /admin/system/health` | `system.read` |
-| `/admin/audit` | `GET /admin/audit` | `audit.read` |
-| `/admin/subscriptions` | `GET /admin/analytics/subscriptions` | `analytics.read` |
-| `/admin/coupons` | `GET/POST /admin/coupons`, `PATCH .../{id}` | `coupons.write` |
-| `/admin/plans` | `GET/POST /admin/plans`, `PATCH/POST .../{id}(/archive)` | `plans.write` |
-| `/admin/flags` | `GET /admin/flags`, `POST .../{id}/review` | `users.suspend`/`.ban` (flags share the moderation permission, `05-subscriptions.md` §8) |
-| `/admin/bans` | `GET/POST /admin/bans`, `POST .../{id}/lift` | `users.suspend`/`.ban` |
-| `/admin/feature-toggles` | `GET /admin/toggles`, `PATCH .../{key}` | `feature_toggles.write` |
-| `/admin/config` | `GET /admin/config`, `PUT .../{key}` | `system.read` / `config.write` |
+| Page                     | Endpoints                                                                                                                                                                                                                       | Permission(s)                                                                            |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `/admin` Overview        | `GET /admin/analytics/overview`, WS `admin.overview.tick`                                                                                                                                                                       | `analytics.read`                                                                         |
+| `/admin/users`           | `GET/PATCH /admin/users`, `.../suspend`, `.../unsuspend`, `.../reset-password`, `.../force-logout`, `GET/POST /admin/bans`, `.../lift`, `GET /admin/flags`, `POST /admin/subscriptions/{userId}/activate`, `.../grant-lifetime` | `users.read`/`.write`/`.suspend`/`.reset_password`/`.force_logout`                       |
+| `/admin/profits`         | `GET /admin/analytics/profits`, `.../profits/leaderboard`                                                                                                                                                                       | `analytics.read`                                                                         |
+| `/admin/activity`        | `GET /admin/activity/{logins,searches,snipes,errors,devices,ips}`                                                                                                                                                               | `analytics.read`                                                                         |
+| `/admin/system`          | `GET /admin/system/health`                                                                                                                                                                                                      | `system.read`                                                                            |
+| `/admin/audit`           | `GET /admin/audit`                                                                                                                                                                                                              | `audit.read`                                                                             |
+| `/admin/subscriptions`   | `GET /admin/analytics/subscriptions`                                                                                                                                                                                            | `analytics.read`                                                                         |
+| `/admin/coupons`         | `GET/POST /admin/coupons`, `PATCH .../{id}`                                                                                                                                                                                     | `coupons.write`                                                                          |
+| `/admin/plans`           | `GET/POST /admin/plans`, `PATCH/POST .../{id}(/archive)`                                                                                                                                                                        | `plans.write`                                                                            |
+| `/admin/flags`           | `GET /admin/flags`, `POST .../{id}/review`                                                                                                                                                                                      | `users.suspend`/`.ban` (flags share the moderation permission, `05-subscriptions.md` §8) |
+| `/admin/bans`            | `GET/POST /admin/bans`, `POST .../{id}/lift`                                                                                                                                                                                    | `users.suspend`/`.ban`                                                                   |
+| `/admin/feature-toggles` | `GET /admin/toggles`, `PATCH .../{key}`                                                                                                                                                                                         | `feature_toggles.write`                                                                  |
+| `/admin/config`          | `GET /admin/config`, `PUT .../{key}`                                                                                                                                                                                            | `system.read` / `config.write`                                                           |
 
 ## 3. Data flow
 
@@ -161,7 +161,7 @@ Two supported shapes, both documented in `apps/dashboard/.env.example`:
 2. **Cross-site (Vercel production/preview)**: `VITE_API_ORIGIN` set to the
    deployed API's origin. The browser now talks to two origins, so the API
    must set its `sl_at`/`sl_rt`/`sl_csrf` cookies with `SameSite=None;
-   Secure` and `DASHBOARD_ORIGIN` must equal the exact Vercel URL. **Resolved**
+Secure` and `DASHBOARD_ORIGIN` must equal the exact Vercel URL. **Resolved**
    (API follow-ups pass, docs/09-security.md's former open finding #1): the
    API's `COOKIE_SAME_SITE` env var (`lax` default \| `strict` \| `none`) makes
    this a config change, not a code change — set `COOKIE_SAME_SITE=none` and
@@ -174,25 +174,25 @@ Two supported shapes, both documented in `apps/dashboard/.env.example`:
    rewrite or a shared apex domain with the API on a subdomain fronted by
    the same edge) still avoids the `SameSite=None` requirement entirely and
    remains the preferred production shape if available — `COOKIE_SAME_SITE`
-   just means it's no longer the *only* option.
+   just means it's no longer the _only_ option.
 
 ## 6. Design tokens reference
 
 `packages/ui/src/tokens.css` is the single source; `apps/dashboard/src/styles/global.css`
 maps it into Tailwind v4's `@theme`. Dark gaming theme, the only theme:
 
-| Token | Value | Tailwind utility | Use |
-|---|---|---|---|
-| `--sl-ground` | `#0D1311` | `bg-ground` | Page background |
-| `--sl-surface` | `#151D1A` | `bg-surface` | Card/sidebar background |
-| `--sl-surface-2` | `#1B2522` | `bg-surface-2` | Raised surface (dropdown, input) |
-| `--sl-line` | `#242F2B` | `border-line` | Borders/dividers |
-| `--sl-ink` | `#E7EDEA` | `text-ink` | Primary text |
-| `--sl-ink-2` | `#94A49E` | `text-ink-2` | Secondary/muted text |
-| `--sl-gold` | `#DDB35C` | `bg-gold`/`text-gold` | Accent, primary buttons |
-| `--sl-green` | `#6FBF9B` | `bg-live`/`text-live` | Positive/live status, chart series 1 |
-| `--sl-red` | `#E08678` | `bg-risk`/`text-risk` | Negative/risk status, chart series 5 |
-| `--sl-mid` | `#D6A94E` | `text-risk-mid` | Warning midpoint |
+| Token               | Value          | Tailwind utility                    | Use                                                               |
+| ------------------- | -------------- | ----------------------------------- | ----------------------------------------------------------------- |
+| `--sl-ground`       | `#0D1311`      | `bg-ground`                         | Page background                                                   |
+| `--sl-surface`      | `#151D1A`      | `bg-surface`                        | Card/sidebar background                                           |
+| `--sl-surface-2`    | `#1B2522`      | `bg-surface-2`                      | Raised surface (dropdown, input)                                  |
+| `--sl-line`         | `#242F2B`      | `border-line`                       | Borders/dividers                                                  |
+| `--sl-ink`          | `#E7EDEA`      | `text-ink`                          | Primary text                                                      |
+| `--sl-ink-2`        | `#94A49E`      | `text-ink-2`                        | Secondary/muted text                                              |
+| `--sl-gold`         | `#DDB35C`      | `bg-gold`/`text-gold`               | Accent, primary buttons                                           |
+| `--sl-green`        | `#6FBF9B`      | `bg-live`/`text-live`               | Positive/live status, chart series 1                              |
+| `--sl-red`          | `#E08678`      | `bg-risk`/`text-risk`               | Negative/risk status, chart series 5                              |
+| `--sl-mid`          | `#D6A94E`      | `text-risk-mid`                     | Warning midpoint                                                  |
 | `--sl-chart-{1..6}` | see tokens.css | `packages/ui/src/charts/palette.ts` | One categorical series palette across every chart (dataviz skill) |
 
 Fonts: **Inter** (UI text) and **JetBrains Mono** (numbers, `tabular-nums`
@@ -265,6 +265,7 @@ visual QA — the substitute for a full Storybook instance.
   `pnpm exec playwright install`.
 
   **Running it**:
+
   ```bash
   # Postgres + Redis reachable at the URLs below, migrated + seeded with an
   # admin (packages/db/src/seed.ts, SEED_ADMIN_EMAIL=admin@sniperledger.local
@@ -274,6 +275,7 @@ visual QA — the substitute for a full Storybook instance.
   REDIS_URL=redis://127.0.0.1:6379 \
   xvfb-run -a pnpm exec playwright test
   ```
+
   This passed repeatably (three consecutive runs, including a rerun after a
   full process restart) during this pass. If the `webServer`-managed
   processes prove unreliable in a different environment, the two-terminal
@@ -338,15 +340,15 @@ section by number in their own comments.
 2. **Resolved.** `GET /admin/subscriptions` (cursor list, filters
    `status`/`plan`/`userId`/`search`) and
    `GET /admin/subscriptions/by-user/:userId` (current + `currentLicenseId`
-   + history) now exist — see the pointer in
-   [`03-api.md`](./03-api.md#admin-users--admin-audit--admin-toggles--admin-config--admin-system--admin-activity).
-   `/admin/subscriptions` now renders a real, filterable subscriptions
-   table below the existing plan-mix analytics, with a row drawer; the
-   `/admin/users` detail drawer's Subscription tab and the new page's row
-   drawer both share `src/components/SubscriptionActions.tsx`, which
-   resolves the live subscription id and offers extend/suspend/unsuspend/
-   cancel/device-limit alongside activate/grant-lifetime. The "not
-   reachable" note is gone.
+   - history) now exist — see the pointer in
+     [`03-api.md`](./03-api.md#admin-users--admin-audit--admin-toggles--admin-config--admin-system--admin-activity).
+     `/admin/subscriptions` now renders a real, filterable subscriptions
+     table below the existing plan-mix analytics, with a row drawer; the
+     `/admin/users` detail drawer's Subscription tab and the new page's row
+     drawer both share `src/components/SubscriptionActions.tsx`, which
+     resolves the live subscription id and offers extend/suspend/unsuspend/
+     cancel/device-limit alongside activate/grant-lifetime. The "not
+     reachable" note is gone.
 3. **Resolved.** `GET /admin/audit/export.csv` streams the full filtered
    range server-side (keyset-paginated internally, no row cap) and writes
    an `audit.export` audit row. `/admin/audit`'s "Export CSV" button now

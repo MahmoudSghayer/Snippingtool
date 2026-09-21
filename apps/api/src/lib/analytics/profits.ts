@@ -28,7 +28,15 @@ interface ProfitAcc {
 }
 
 function zeroAcc(): ProfitAcc {
-  return { netProfit: 0, coinsSpent: 0, coinsEarned: 0, snipes: 0, successes: 0, tradesClosed: 0, traders: new Set() };
+  return {
+    netProfit: 0,
+    coinsSpent: 0,
+    coinsEarned: 0,
+    snipes: 0,
+    successes: 0,
+    tradesClosed: 0,
+    traders: new Set(),
+  };
 }
 
 export interface ProfitSeriesPoint {
@@ -82,7 +90,10 @@ function addRow(acc: ProfitAcc, row: ProfitDayRow): ProfitAcc {
 }
 
 /** Platform-wide profit series across every user, bucketed and zero-filled. */
-export async function getPlatformProfitSeries(db: Database, params: ProfitRangeParams): Promise<ProfitSeriesPoint[]> {
+export async function getPlatformProfitSeries(
+  db: Database,
+  params: ProfitRangeParams,
+): Promise<ProfitSeriesPoint[]> {
   const rows = await db.query.profits.findMany({
     where: and(gte(profits.day, params.from), lte(profits.day, params.to)),
   });
@@ -96,16 +107,30 @@ export async function getPlatformProfitSeries(db: Database, params: ProfitRangeP
     successes: r.successes,
     tradesClosed: r.tradesClosed,
   }));
-  return aggregateIntoBuckets(dayRows, (r) => r.day, params.from, params.to, params.granularity, zeroAcc, addRow).map((b) =>
-    toPoint(b.bucket, b.value),
-  );
+  return aggregateIntoBuckets(
+    dayRows,
+    (r) => r.day,
+    params.from,
+    params.to,
+    params.granularity,
+    zeroAcc,
+    addRow,
+  ).map((b) => toPoint(b.bucket, b.value));
 }
 
 /** Per-user profit series (used by the user-facing /analytics/me/profits
  * route, and by admin single-user drilldowns). */
-export async function getUserProfitSeries(db: Database, userId: string, params: ProfitRangeParams): Promise<ProfitSeriesPoint[]> {
+export async function getUserProfitSeries(
+  db: Database,
+  userId: string,
+  params: ProfitRangeParams,
+): Promise<ProfitSeriesPoint[]> {
   const rows = await db.query.profits.findMany({
-    where: and(eq(profits.userId, userId), gte(profits.day, params.from), lte(profits.day, params.to)),
+    where: and(
+      eq(profits.userId, userId),
+      gte(profits.day, params.from),
+      lte(profits.day, params.to),
+    ),
   });
   const dayRows: ProfitDayRow[] = rows.map((r) => ({
     userId: r.userId,
@@ -117,9 +142,15 @@ export async function getUserProfitSeries(db: Database, userId: string, params: 
     successes: r.successes,
     tradesClosed: r.tradesClosed,
   }));
-  return aggregateIntoBuckets(dayRows, (r) => r.day, params.from, params.to, params.granularity, zeroAcc, addRow).map((b) =>
-    toPoint(b.bucket, b.value),
-  );
+  return aggregateIntoBuckets(
+    dayRows,
+    (r) => r.day,
+    params.from,
+    params.to,
+    params.granularity,
+    zeroAcc,
+    addRow,
+  ).map((b) => toPoint(b.bucket, b.value));
 }
 
 export interface LifetimeProfit {
@@ -146,7 +177,10 @@ const EMPTY_LIFETIME: LifetimeProfit = {
 
 /** All-time per-user totals, from `v_user_lifetime_profit`. */
 export async function getUserLifetimeProfit(db: Database, userId: string): Promise<LifetimeProfit> {
-  const [row] = await db.select().from(vUserLifetimeProfit).where(eq(vUserLifetimeProfit.userId, userId));
+  const [row] = await db
+    .select()
+    .from(vUserLifetimeProfit)
+    .where(eq(vUserLifetimeProfit.userId, userId));
   if (!row) return EMPTY_LIFETIME;
   return {
     netProfit: row.lifetimeNetProfit ?? 0,
@@ -178,7 +212,11 @@ export async function getPlatformLifetimeSummary(
     coinsTraded += r.coinsSpent + r.coinsEarned;
     traders.add(r.userId);
   }
-  return { netProfit, coinsTraded, avgProfitPerActiveTrader: traders.size > 0 ? netProfit / traders.size : 0 };
+  return {
+    netProfit,
+    coinsTraded,
+    avgProfitPerActiveTrader: traders.size > 0 ? netProfit / traders.size : 0,
+  };
 }
 
 export interface LeaderboardEntry {
@@ -204,7 +242,10 @@ export interface LeaderboardParams {
  * Drizzle's `sum()` aggregate helper (never a raw interpolated `sql`
  * template — see the repo eslint preset's `no-sql-template-interpolation`
  * rule) so ordering happens in Postgres, not by loading every row. */
-export async function getProfitLeaderboard(db: Database, params: LeaderboardParams): Promise<LeaderboardEntry[]> {
+export async function getProfitLeaderboard(
+  db: Database,
+  params: LeaderboardParams,
+): Promise<LeaderboardEntry[]> {
   const netProfitSum = sum(profits.netProfit);
 
   const rows = await db

@@ -85,7 +85,12 @@ export async function createCheckoutSession(
   if (coupon && (coupon.type === 'free_days' || coupon.type === 'lifetime')) {
     const granted =
       coupon.type === 'lifetime'
-        ? await grantLifetime(db, redis, { userId: input.userId, planCode: input.planCode, grantedByAdminId: null, source: 'coupon' })
+        ? await grantLifetime(db, redis, {
+            userId: input.userId,
+            planCode: input.planCode,
+            grantedByAdminId: null,
+            source: 'coupon',
+          })
         : await activateManual(db, redis, {
             userId: input.userId,
             planCode: input.planCode,
@@ -98,7 +103,9 @@ export async function createCheckoutSession(
   }
 
   if (!plan.stripePriceId) {
-    throw AppErrors.conflict('This plan is not available for Stripe checkout (no stripe_price_id configured).');
+    throw AppErrors.conflict(
+      'This plan is not available for Stripe checkout (no stripe_price_id configured).',
+    );
   }
 
   let discounts: Stripe.Checkout.SessionCreateParams.Discount[] | undefined;
@@ -111,7 +118,12 @@ export async function createCheckoutSession(
     const stripeCoupon = await stripe.coupons.create(
       coupon.type === 'percent'
         ? { percent_off: coupon.value, duration: 'once', name: coupon.code }
-        : { amount_off: coupon.value, currency: plan.currency, duration: 'once', name: coupon.code },
+        : {
+            amount_off: coupon.value,
+            currency: plan.currency,
+            duration: 'once',
+            name: coupon.code,
+          },
     );
     discounts = [{ coupon: stripeCoupon.id }];
   }
@@ -162,7 +174,10 @@ export async function createPortalSession(
     await db.update(users).set({ stripeCustomerId: customerId }).where(eq(users.id, input.userId));
   }
 
-  const session = await stripe.billingPortal.sessions.create({ customer: customerId, return_url: input.returnUrl });
+  const session = await stripe.billingPortal.sessions.create({
+    customer: customerId,
+    return_url: input.returnUrl,
+  });
   return { portalUrl: session.url };
 }
 
@@ -171,7 +186,12 @@ export interface PaymentHistoryPage {
   nextCursor: string | null;
 }
 
-export async function listPaymentHistory(db: Database, userId: string, limit: number, cursor?: string): Promise<PaymentHistoryPage> {
+export async function listPaymentHistory(
+  db: Database,
+  userId: string,
+  limit: number,
+  cursor?: string,
+): Promise<PaymentHistoryPage> {
   const decoded = decodeCursor(cursor);
   const rows = await db.query.payments.findMany({
     where: decoded
@@ -189,7 +209,9 @@ export async function listPaymentHistory(db: Database, userId: string, limit: nu
 // below, so the two never drift into two different mappings.
 // ---------------------------------------------------------------------------
 
-export const STRIPE_STATUS_MAP: Partial<Record<Stripe.Subscription.Status, SubscriptionRow['status']>> = {
+export const STRIPE_STATUS_MAP: Partial<
+  Record<Stripe.Subscription.Status, SubscriptionRow['status']>
+> = {
   active: 'active',
   trialing: 'trialing',
   past_due: 'past_due',
@@ -212,7 +234,11 @@ const RECONCILABLE_STATUSES = ['trialing', 'active', 'past_due', 'suspended'] as
  * up in the identical state a correctly-delivered webhook would have left
  * it in.
  */
-export async function reconcileStripeSubscriptions(db: Database, redis: Redis, stripe: Stripe): Promise<{ reconciledCount: number; errorCount: number }> {
+export async function reconcileStripeSubscriptions(
+  db: Database,
+  redis: Redis,
+  stripe: Stripe,
+): Promise<{ reconciledCount: number; errorCount: number }> {
   const rows = await db.query.subscriptions.findMany({
     where: and(
       eq(subscriptions.source, 'stripe'),
@@ -260,7 +286,10 @@ export async function reconcileStripeSubscriptions(db: Database, redis: Redis, s
 
     const plan = await getPlanById(db, sub.planId);
     if (plan && after) {
-      await publishToUser(redis, sub.userId, { type: 'subscription.changed', subscription: toSubscriptionDto(after, plan) });
+      await publishToUser(redis, sub.userId, {
+        type: 'subscription.changed',
+        subscription: toSubscriptionDto(after, plan),
+      });
     }
     reconciledCount += 1;
   }

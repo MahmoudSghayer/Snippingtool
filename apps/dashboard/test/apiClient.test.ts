@@ -12,7 +12,13 @@ describe('api client CSRF + 401 handling', () => {
 
   beforeEach(() => {
     document.cookie = 'sl_csrf=test-csrf-token; path=/';
-    fetchMock = vi.fn(async () => new Response(JSON.stringify({}), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    );
   });
 
   afterEach(() => {
@@ -41,7 +47,11 @@ describe('api client CSRF + 401 handling', () => {
   });
 
   it('calls the unauthorized handler on a 401 for a non-exempt path', async () => {
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ code: 'AUTH_TOKEN_EXPIRED', message: 'expired' }), { status: 401 }));
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ code: 'AUTH_TOKEN_EXPIRED', message: 'expired' }), {
+        status: 401,
+      }),
+    );
     const handler = vi.fn();
     setUnauthorizedHandler(handler);
     await api.GET('/api/v1/users/me', { fetch: fetchMock });
@@ -49,7 +59,11 @@ describe('api client CSRF + 401 handling', () => {
   });
 
   it('does not call the unauthorized handler for a 401 on the login route itself', async () => {
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ code: 'AUTH_INVALID_CREDENTIALS', message: 'bad' }), { status: 401 }));
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ code: 'AUTH_INVALID_CREDENTIALS', message: 'bad' }), {
+        status: 401,
+      }),
+    );
     const handler = vi.fn();
     setUnauthorizedHandler(handler);
     await api.POST('/api/v1/auth/login', {

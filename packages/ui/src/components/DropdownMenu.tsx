@@ -9,7 +9,11 @@ export const DropdownMenu = DropdownPrimitive.Root;
 export const DropdownMenuTrigger = DropdownPrimitive.Trigger;
 export const DropdownMenuGroup = DropdownPrimitive.Group;
 
-export function DropdownMenuContent({ className, sideOffset = 6, ...props }: ComponentProps<typeof DropdownPrimitive.Content>) {
+export function DropdownMenuContent({
+  className,
+  sideOffset = 6,
+  ...props
+}: ComponentProps<typeof DropdownPrimitive.Content>) {
   return (
     <DropdownPrimitive.Portal>
       <DropdownPrimitive.Content
@@ -43,7 +47,11 @@ export function DropdownMenuItem({
   );
 }
 
-export function DropdownMenuCheckboxItem({ className, children, ...props }: ComponentProps<typeof DropdownPrimitive.CheckboxItem>) {
+export function DropdownMenuCheckboxItem({
+  className,
+  children,
+  ...props
+}: ComponentProps<typeof DropdownPrimitive.CheckboxItem>) {
   return (
     <DropdownPrimitive.CheckboxItem
       className={cn(
@@ -61,10 +69,26 @@ export function DropdownMenuCheckboxItem({ className, children, ...props }: Comp
   );
 }
 
-export function DropdownMenuLabel({ className, ...props }: ComponentProps<typeof DropdownPrimitive.Label>) {
-  return <DropdownPrimitive.Label className={cn('px-2.5 py-1.5 text-xs font-medium text-[--sl-fg-muted]', className)} {...props} />;
+export function DropdownMenuLabel({
+  className,
+  ...props
+}: ComponentProps<typeof DropdownPrimitive.Label>) {
+  return (
+    <DropdownPrimitive.Label
+      className={cn('px-2.5 py-1.5 text-xs font-medium text-[--sl-fg-muted]', className)}
+      {...props}
+    />
+  );
 }
 
-export function DropdownMenuSeparator({ className, ...props }: ComponentProps<typeof DropdownPrimitive.Separator>) {
-  return <DropdownPrimitive.Separator className={cn('my-1 h-px bg-[--sl-border]', className)} {...props} />;
+export function DropdownMenuSeparator({
+  className,
+  ...props
+}: ComponentProps<typeof DropdownPrimitive.Separator>) {
+  return (
+    <DropdownPrimitive.Separator
+      className={cn('my-1 h-px bg-[--sl-border]', className)}
+      {...props}
+    />
+  );
 }

@@ -8,7 +8,10 @@
 import { generateKeyPair, exportPKCS8, exportSPKI } from 'jose';
 
 async function printKeypair(label: string, privateVar: string, publicVar: string) {
-  const { privateKey, publicKey } = await generateKeyPair('EdDSA', { crv: 'Ed25519', extractable: true });
+  const { privateKey, publicKey } = await generateKeyPair('EdDSA', {
+    crv: 'Ed25519',
+    extractable: true,
+  });
   const pkcs8 = await exportPKCS8(privateKey);
   const spki = await exportSPKI(publicKey);
   console.log(`\n# ${label}`);
@@ -17,9 +20,15 @@ async function printKeypair(label: string, privateVar: string, publicVar: string
 }
 
 async function main() {
-  console.log('Generated Ed25519 keypairs — paste into apps/api/.env (values are PEM with \\n escapes).');
+  console.log(
+    'Generated Ed25519 keypairs — paste into apps/api/.env (values are PEM with \\n escapes).',
+  );
   await printKeypair('JWT signing (access tokens, EdDSA)', 'JWT_PRIVATE_KEY', 'JWT_PUBLIC_KEY');
-  await printKeypair('Entitlement blob signing', 'ENTITLEMENT_SIGNING_KEY', 'ENTITLEMENT_PUBLIC_KEY');
+  await printKeypair(
+    'Entitlement blob signing',
+    'ENTITLEMENT_SIGNING_KEY',
+    'ENTITLEMENT_PUBLIC_KEY',
+  );
 }
 
 main();

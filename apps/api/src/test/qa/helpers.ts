@@ -25,7 +25,13 @@ export type TestApp = FastifyInstance & {
 export const TEST_PASSWORD = 'correcthorsebattery12';
 
 export function device(fingerprint: string) {
-  return { fingerprint, name: 'QA Test Device', browser: 'chrome', os: 'linux', extensionVersion: '1.0.0' };
+  return {
+    fingerprint,
+    name: 'QA Test Device',
+    browser: 'chrome',
+    os: 'linux',
+    extensionVersion: '1.0.0',
+  };
 }
 
 let ipCounter = 20;
@@ -58,7 +64,11 @@ export interface UserSession {
   refreshToken: string;
 }
 
-export async function createUserSession(app: TestApp, email: string, fp: string): Promise<UserSession> {
+export async function createUserSession(
+  app: TestApp,
+  email: string,
+  fp: string,
+): Promise<UserSession> {
   const ip = nextIp();
   const registerRes = await app.inject({
     method: 'POST',
@@ -67,13 +77,20 @@ export async function createUserSession(app: TestApp, email: string, fp: string)
     payload: { email, password: TEST_PASSWORD, device: device(fp) },
   });
   if (registerRes.statusCode !== 201) {
-    throw new Error(`createUserSession: register failed (${registerRes.statusCode}): ${registerRes.body}`);
+    throw new Error(
+      `createUserSession: register failed (${registerRes.statusCode}): ${registerRes.body}`,
+    );
   }
   const { userId } = registerRes.json() as { userId: string };
 
   const mail = app.mailer.sentEmails.at(-1);
   const token = extractToken(mail!.html);
-  await app.inject({ method: 'POST', url: '/api/v1/auth/verify-email', remoteAddress: ip, payload: { token } });
+  await app.inject({
+    method: 'POST',
+    url: '/api/v1/auth/verify-email',
+    remoteAddress: ip,
+    payload: { token },
+  });
 
   const loginRes = await app.inject({
     method: 'POST',
@@ -94,7 +111,12 @@ export async function createUserSession(app: TestApp, email: string, fp: string)
 /** Registers + verifies + promotes to admin (DB, no self-service route) +
  * drives the real mandatory admin-2FA-enrollment flow through its actual
  * routes — never a hand-minted JWT. */
-export async function createAdminSession(app: TestApp, role: AdminRole, email: string, fp: string): Promise<UserSession> {
+export async function createAdminSession(
+  app: TestApp,
+  role: AdminRole,
+  email: string,
+  fp: string,
+): Promise<UserSession> {
   const ip = nextIp();
   const registerRes = await app.inject({
     method: 'POST',
@@ -103,16 +125,25 @@ export async function createAdminSession(app: TestApp, role: AdminRole, email: s
     payload: { email, password: TEST_PASSWORD, device: device(fp) },
   });
   if (registerRes.statusCode !== 201) {
-    throw new Error(`createAdminSession: register failed (${registerRes.statusCode}): ${registerRes.body}`);
+    throw new Error(
+      `createAdminSession: register failed (${registerRes.statusCode}): ${registerRes.body}`,
+    );
   }
   const { userId } = registerRes.json() as { userId: string };
 
   const mail = app.mailer.sentEmails.at(-1);
   const token = extractToken(mail!.html);
-  await app.inject({ method: 'POST', url: '/api/v1/auth/verify-email', remoteAddress: ip, payload: { token } });
+  await app.inject({
+    method: 'POST',
+    url: '/api/v1/auth/verify-email',
+    remoteAddress: ip,
+    payload: { token },
+  });
 
   await app.db.update(users).set({ role: 'admin' }).where(eq(users.id, userId));
-  await app.db.insert(adminUsers).values({ id: crypto.randomUUID(), userId, adminRole: role, permissions: {} });
+  await app.db
+    .insert(adminUsers)
+    .values({ id: crypto.randomUUID(), userId, adminRole: role, permissions: {} });
 
   const loginRes = await app.inject({
     method: 'POST',
@@ -125,12 +156,21 @@ export async function createAdminSession(app: TestApp, role: AdminRole, email: s
   }
   const loginBody = loginRes.json() as { status: string; mfaTicket?: string };
   if (loginBody.status !== 'mfa_required' || !loginBody.mfaTicket) {
-    throw new Error(`createAdminSession: expected an admin-enrollment mfaTicket, got: ${JSON.stringify(loginBody)}`);
+    throw new Error(
+      `createAdminSession: expected an admin-enrollment mfaTicket, got: ${JSON.stringify(loginBody)}`,
+    );
   }
 
-  const enrollRes = await app.inject({ method: 'POST', url: '/api/v1/auth/totp/enroll', remoteAddress: ip, payload: { mfaTicket: loginBody.mfaTicket } });
+  const enrollRes = await app.inject({
+    method: 'POST',
+    url: '/api/v1/auth/totp/enroll',
+    remoteAddress: ip,
+    payload: { mfaTicket: loginBody.mfaTicket },
+  });
   if (enrollRes.statusCode !== 200) {
-    throw new Error(`createAdminSession: enroll failed (${enrollRes.statusCode}): ${enrollRes.body}`);
+    throw new Error(
+      `createAdminSession: enroll failed (${enrollRes.statusCode}): ${enrollRes.body}`,
+    );
   }
   const { secret } = enrollRes.json() as { secret: string };
 
@@ -141,11 +181,22 @@ export async function createAdminSession(app: TestApp, role: AdminRole, email: s
     payload: { mfaTicket: loginBody.mfaTicket, code: authenticator.generate(secret) },
   });
   if (confirmRes.statusCode !== 200) {
-    throw new Error(`createAdminSession: enroll/confirm failed (${confirmRes.statusCode}): ${confirmRes.body}`);
+    throw new Error(
+      `createAdminSession: enroll/confirm failed (${confirmRes.statusCode}): ${confirmRes.body}`,
+    );
   }
-  const confirmBody = confirmRes.json() as { enabled: boolean; tokens?: { accessToken: string; refreshToken: string } };
+  const confirmBody = confirmRes.json() as {
+    enabled: boolean;
+    tokens?: { accessToken: string; refreshToken: string };
+  };
   if (!confirmBody.tokens) {
-    throw new Error(`createAdminSession: enroll/confirm did not complete the pending login: ${JSON.stringify(confirmBody)}`);
+    throw new Error(
+      `createAdminSession: enroll/confirm did not complete the pending login: ${JSON.stringify(confirmBody)}`,
+    );
   }
-  return { userId, accessToken: confirmBody.tokens.accessToken, refreshToken: confirmBody.tokens.refreshToken };
+  return {
+    userId,
+    accessToken: confirmBody.tokens.accessToken,
+    refreshToken: confirmBody.tokens.refreshToken,
+  };
 }

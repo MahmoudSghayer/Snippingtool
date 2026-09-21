@@ -81,7 +81,10 @@ function getPublicKey(pem: string) {
   return cached;
 }
 
-export async function signAccessToken(claims: AccessTokenClaims, privateKeyPem: string): Promise<string> {
+export async function signAccessToken(
+  claims: AccessTokenClaims,
+  privateKeyPem: string,
+): Promise<string> {
   const key = await getPrivateKey(privateKeyPem);
   return new SignJWT({ ...claims })
     .setProtectedHeader({ alg: 'EdDSA' })
@@ -91,7 +94,10 @@ export async function signAccessToken(claims: AccessTokenClaims, privateKeyPem: 
     .sign(key);
 }
 
-export async function verifyAccessToken(token: string, publicKeyPem: string): Promise<AccessTokenClaims> {
+export async function verifyAccessToken(
+  token: string,
+  publicKeyPem: string,
+): Promise<AccessTokenClaims> {
   const key = await getPublicKey(publicKeyPem);
   const { payload } = await jwtVerify(token, key);
   return payload as unknown as AccessTokenClaims;

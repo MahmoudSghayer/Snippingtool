@@ -19,7 +19,9 @@ export interface ResolvedCookieAttrs {
   secure: boolean;
 }
 
-export function resolveCookieAttrs(config: Pick<Env, 'NODE_ENV' | 'COOKIE_SAME_SITE' | 'COOKIE_SECURE'>): ResolvedCookieAttrs {
+export function resolveCookieAttrs(
+  config: Pick<Env, 'NODE_ENV' | 'COOKIE_SAME_SITE' | 'COOKIE_SECURE'>,
+): ResolvedCookieAttrs {
   const isProd = config.NODE_ENV === 'production';
   const sameSite = config.COOKIE_SAME_SITE;
   const secure = sameSite === 'none' ? true : isProd || config.COOKIE_SECURE;

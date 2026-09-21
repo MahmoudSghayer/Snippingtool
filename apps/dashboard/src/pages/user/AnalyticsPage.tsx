@@ -28,7 +28,6 @@ import { api } from '@/api/client.js';
 
 import type { ActivityAnalyticsPoint, FilterStats } from '@sl/shared';
 
-
 const snipeOutcomeSeries = [
   { key: 'snipeAttempts', label: 'Attempts', colorIndex: 1 },
   { key: 'snipeSuccesses', label: 'Successes', colorIndex: 0 },
@@ -45,13 +44,29 @@ const activityColumns: ColumnDef<ActivityAnalyticsPoint, unknown>[] = [
 ];
 
 const filterStatsColumns: ColumnDef<FilterStats, unknown>[] = [
-  { accessorKey: 'windowStart', header: 'Window', cell: (c) => new Date(c.getValue() as string).toLocaleDateString() },
+  {
+    accessorKey: 'windowStart',
+    header: 'Window',
+    cell: (c) => new Date(c.getValue() as string).toLocaleDateString(),
+  },
   { accessorKey: 'searches', header: 'Searches' },
   { accessorKey: 'attempts', header: 'Attempts' },
   { accessorKey: 'successes', header: 'Successes' },
-  { accessorKey: 'coinsSpent', header: 'Coins spent', cell: (c) => formatCoins(c.getValue() as number) },
-  { accessorKey: 'coinsEarned', header: 'Coins earned', cell: (c) => formatCoins(c.getValue() as number) },
-  { accessorKey: 'coinsPerHour', header: 'Coins/hour', cell: (c) => formatCoins(c.getValue() as number) },
+  {
+    accessorKey: 'coinsSpent',
+    header: 'Coins spent',
+    cell: (c) => formatCoins(c.getValue() as number),
+  },
+  {
+    accessorKey: 'coinsEarned',
+    header: 'Coins earned',
+    cell: (c) => formatCoins(c.getValue() as number),
+  },
+  {
+    accessorKey: 'coinsPerHour',
+    header: 'Coins/hour',
+    cell: (c) => formatCoins(c.getValue() as number),
+  },
 ];
 
 /** `/analytics/me/{profits,activity}` — profit series, snipe outcomes and
@@ -75,7 +90,9 @@ export function AnalyticsPage() {
     queryKey: ['filters', 'stats', filterId, range],
     queryFn: async () => {
       const { data, error } = await api.GET('/api/v1/filters/stats', {
-        params: { query: { filterId, from: `${range.from}T00:00:00.000Z`, to: `${range.to}T23:59:59.999Z` } },
+        params: {
+          query: { filterId, from: `${range.from}T00:00:00.000Z`, to: `${range.to}T23:59:59.999Z` },
+        },
       });
       if (error) throw error;
       return data;
@@ -85,7 +102,9 @@ export function AnalyticsPage() {
   const profitsQuery = useQuery({
     queryKey: ['analytics', 'me', 'profits', range],
     queryFn: async () => {
-      const { data, error } = await api.GET('/api/v1/analytics/me/profits', { params: { query: { ...range, granularity: 'day' } } });
+      const { data, error } = await api.GET('/api/v1/analytics/me/profits', {
+        params: { query: { ...range, granularity: 'day' } },
+      });
       if (error) throw error;
       return data;
     },
@@ -94,7 +113,9 @@ export function AnalyticsPage() {
   const activityQuery = useQuery({
     queryKey: ['analytics', 'me', 'activity', range],
     queryFn: async () => {
-      const { data, error } = await api.GET('/api/v1/analytics/me/activity', { params: { query: { ...range, granularity: 'day', tz: 'UTC' } } });
+      const { data, error } = await api.GET('/api/v1/analytics/me/activity', {
+        params: { query: { ...range, granularity: 'day', tz: 'UTC' } },
+      });
       if (error) throw error;
       return data;
     },
@@ -116,9 +137,18 @@ export function AnalyticsPage() {
         description="Daily net coin profit for the selected range."
         isLoading={profitsQuery.isLoading}
         isEmpty={!profitsQuery.isLoading && !profitsQuery.isError && profitItems.length === 0}
-        emptyMessage={profitsQuery.isError ? "Couldn't load profit analytics." : 'No profit recorded for this range.'}
+        emptyMessage={
+          profitsQuery.isError
+            ? "Couldn't load profit analytics."
+            : 'No profit recorded for this range.'
+        }
       >
-        <AreaChart data={profitItems} xKey="bucket" series={[{ key: 'netProfit', label: 'Net profit', colorIndex: 0 }]} valueFormatter={formatCoins} />
+        <AreaChart
+          data={profitItems}
+          xKey="bucket"
+          series={[{ key: 'netProfit', label: 'Net profit', colorIndex: 0 }]}
+          valueFormatter={formatCoins}
+        />
       </ChartCard>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -128,7 +158,11 @@ export function AnalyticsPage() {
           legend={<ChartLegend items={seriesLegendItems(snipeOutcomeSeries)} />}
           isLoading={activityQuery.isLoading}
           isEmpty={!activityQuery.isLoading && !activityQuery.isError && activityItems.length === 0}
-          emptyMessage={activityQuery.isError ? "Couldn't load activity analytics." : 'No snipe activity for this range.'}
+          emptyMessage={
+            activityQuery.isError
+              ? "Couldn't load activity analytics."
+              : 'No snipe activity for this range.'
+          }
         >
           <BarChart data={activityItems} xKey="bucket" series={snipeOutcomeSeries} />
         </ChartCard>
@@ -139,7 +173,12 @@ export function AnalyticsPage() {
           isLoading={profitsQuery.isLoading}
           isEmpty={!profitsQuery.isLoading && !profitsQuery.isError && profitItems.length === 0}
         >
-          <BarChart data={profitItems} xKey="bucket" series={[{ key: 'coinsTraded', label: 'Coins traded', colorIndex: 2 }]} valueFormatter={formatCoins} />
+          <BarChart
+            data={profitItems}
+            xKey="bucket"
+            series={[{ key: 'coinsTraded', label: 'Coins traded', colorIndex: 2 }]}
+            valueFormatter={formatCoins}
+          />
         </ChartCard>
       </div>
 
@@ -168,7 +207,10 @@ export function AnalyticsPage() {
           {(filtersQuery.data ?? []).length === 0 && !filtersQuery.isLoading ? (
             <Card>
               <CardContent className="pt-5">
-                <EmptyState title="No saved filters yet" description="Save a filter in the extension to start tracking its realised coins/hour here." />
+                <EmptyState
+                  title="No saved filters yet"
+                  description="Save a filter in the extension to start tracking its realised coins/hour here."
+                />
               </CardContent>
             </Card>
           ) : (
@@ -177,7 +219,10 @@ export function AnalyticsPage() {
                 <Select
                   value={filterId ?? ''}
                   onValueChange={(v) => setFilterId(v || undefined)}
-                  options={[{ value: '', label: 'All filters' }, ...(filtersQuery.data ?? []).map((f) => ({ value: f.id, label: f.name }))]}
+                  options={[
+                    { value: '', label: 'All filters' },
+                    ...(filtersQuery.data ?? []).map((f) => ({ value: f.id, label: f.name })),
+                  ]}
                 />
               </FormField>
 
@@ -185,8 +230,16 @@ export function AnalyticsPage() {
                 title="Coins per hour"
                 description="Realised return per window for the selected filter."
                 isLoading={filterStatsQuery.isLoading}
-                isEmpty={!filterStatsQuery.isLoading && !filterStatsQuery.isError && (filterStatsQuery.data ?? []).length === 0}
-                emptyMessage={filterStatsQuery.isError ? "Couldn't load filter performance." : 'No stats reported for this range yet.'}
+                isEmpty={
+                  !filterStatsQuery.isLoading &&
+                  !filterStatsQuery.isError &&
+                  (filterStatsQuery.data ?? []).length === 0
+                }
+                emptyMessage={
+                  filterStatsQuery.isError
+                    ? "Couldn't load filter performance."
+                    : 'No stats reported for this range yet.'
+                }
               >
                 <AreaChart
                   data={[...(filterStatsQuery.data ?? [])].reverse()}

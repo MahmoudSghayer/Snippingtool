@@ -20,7 +20,6 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 
-
 import { api } from '@/api/client.js';
 
 import type {
@@ -43,32 +42,63 @@ function toRangeQuery(range: DateRange): { from: string; to: string } {
   return { from: `${range.from}T00:00:00.000Z`, to: `${range.to}T23:59:59.999Z` };
 }
 
-const deviceCell = (c: { getValue: () => unknown }) => <span className="font-mono text-xs">{(c.getValue() as string | null) ?? '—'}</span>;
-const timeCell = (c: { getValue: () => unknown }) => (c.getValue() ? new Date(c.getValue() as string).toLocaleString() : '—');
+const deviceCell = (c: { getValue: () => unknown }) => (
+  <span className="font-mono text-xs">{(c.getValue() as string | null) ?? '—'}</span>
+);
+const timeCell = (c: { getValue: () => unknown }) =>
+  c.getValue() ? new Date(c.getValue() as string).toLocaleString() : '—';
 
 const loginColumns: ColumnDef<AdminLoginActivityRow, unknown>[] = [
   { accessorKey: 'occurredAt', header: 'Time', cell: timeCell },
   { accessorKey: 'userId', header: 'User', cell: deviceCell },
   { accessorKey: 'deviceId', header: 'Device', cell: deviceCell },
   { accessorKey: 'ip', header: 'IP', cell: (c) => (c.getValue() as string | null) ?? '—' },
-  { id: 'mfa', header: 'MFA', cell: ({ row }) => (row.original.metadata.mfaUsed ? <Badge tone="positive">Used</Badge> : '—') },
+  {
+    id: 'mfa',
+    header: 'MFA',
+    cell: ({ row }) => (row.original.metadata.mfaUsed ? <Badge tone="positive">Used</Badge> : '—'),
+  },
 ];
 
 const errorColumns: ColumnDef<AdminErrorActivityRow, unknown>[] = [
   { accessorKey: 'occurredAt', header: 'Time', cell: timeCell },
   { accessorKey: 'userId', header: 'User', cell: deviceCell },
   { accessorKey: 'deviceId', header: 'Device', cell: deviceCell },
-  { id: 'code', header: 'Code', cell: ({ row }) => <span className="font-mono text-xs">{String(row.original.metadata.code ?? '—')}</span> },
-  { id: 'context', header: 'Context', cell: ({ row }) => String(row.original.metadata.context ?? '—') },
-  { id: 'message', header: 'Message', cell: ({ row }) => <span className="text-xs text-ink-2">{String(row.original.metadata.message ?? '—')}</span> },
+  {
+    id: 'code',
+    header: 'Code',
+    cell: ({ row }) => (
+      <span className="font-mono text-xs">{String(row.original.metadata.code ?? '—')}</span>
+    ),
+  },
+  {
+    id: 'context',
+    header: 'Context',
+    cell: ({ row }) => String(row.original.metadata.context ?? '—'),
+  },
+  {
+    id: 'message',
+    header: 'Message',
+    cell: ({ row }) => (
+      <span className="text-xs text-ink-2">{String(row.original.metadata.message ?? '—')}</span>
+    ),
+  },
 ];
 
 const searchColumns: ColumnDef<AdminSearchActivityRow, unknown>[] = [
   { accessorKey: 'occurredAt', header: 'Time', cell: timeCell },
   { accessorKey: 'userId', header: 'User', cell: deviceCell },
-  { accessorKey: 'resourceId', header: 'Resource', cell: (c) => (c.getValue() as string | null) ?? '—' },
+  {
+    accessorKey: 'resourceId',
+    header: 'Resource',
+    cell: (c) => (c.getValue() as string | null) ?? '—',
+  },
   { accessorKey: 'resultsCount', header: 'Results' },
-  { accessorKey: 'floorPrice', header: 'Floor price', cell: (c) => (c.getValue() != null ? (c.getValue() as number).toLocaleString() : '—') },
+  {
+    accessorKey: 'floorPrice',
+    header: 'Floor price',
+    cell: (c) => (c.getValue() != null ? (c.getValue() as number).toLocaleString() : '—'),
+  },
 ];
 
 const snipeOutcomeTone: Record<string, 'positive' | 'negative' | 'warning' | 'neutral'> = {
@@ -84,25 +114,59 @@ const snipeColumns: ColumnDef<AdminSnipeActivityRow, unknown>[] = [
   { accessorKey: 'occurredAt', header: 'Time', cell: timeCell },
   { accessorKey: 'userId', header: 'User', cell: deviceCell },
   { accessorKey: 'resourceId', header: 'Resource' },
-  { accessorKey: 'targetPrice', header: 'Target price', cell: (c) => (c.getValue() as number).toLocaleString() },
-  { accessorKey: 'outcome', header: 'Outcome', cell: (c) => <Badge tone={snipeOutcomeTone[c.getValue() as string] ?? 'neutral'}>{c.getValue() as string}</Badge> },
-  { accessorKey: 'latencyMs', header: 'Latency (ms)', cell: (c) => (c.getValue() != null ? c.getValue() : '—') },
+  {
+    accessorKey: 'targetPrice',
+    header: 'Target price',
+    cell: (c) => (c.getValue() as number).toLocaleString(),
+  },
+  {
+    accessorKey: 'outcome',
+    header: 'Outcome',
+    cell: (c) => (
+      <Badge tone={snipeOutcomeTone[c.getValue() as string] ?? 'neutral'}>
+        {c.getValue() as string}
+      </Badge>
+    ),
+  },
+  {
+    accessorKey: 'latencyMs',
+    header: 'Latency (ms)',
+    cell: (c) => (c.getValue() != null ? c.getValue() : '—'),
+  },
 ];
 
 const filterChangeColumns: ColumnDef<AdminFilterChangeActivityRow, unknown>[] = [
   { accessorKey: 'occurredAt', header: 'Time', cell: timeCell },
   { accessorKey: 'userId', header: 'User', cell: deviceCell },
-  { id: 'action', header: 'Action', cell: ({ row }) => <Badge tone="neutral">{row.original.metadata.action}</Badge> },
-  { id: 'filterId', header: 'Filter', cell: ({ row }) => <span className="font-mono text-xs">{row.original.metadata.filterId ?? '—'}</span> },
+  {
+    id: 'action',
+    header: 'Action',
+    cell: ({ row }) => <Badge tone="neutral">{row.original.metadata.action}</Badge>,
+  },
+  {
+    id: 'filterId',
+    header: 'Filter',
+    cell: ({ row }) => (
+      <span className="font-mono text-xs">{row.original.metadata.filterId ?? '—'}</span>
+    ),
+  },
 ];
 
 const ipColumns: ColumnDef<AdminIpActivityRow, unknown>[] = [
   { accessorKey: 'ip', header: 'IP' },
   { accessorKey: 'userId', header: 'User', cell: deviceCell },
-  { accessorKey: 'country', header: 'Country', cell: (c) => (c.getValue() as string | null) ?? '—' },
+  {
+    accessorKey: 'country',
+    header: 'Country',
+    cell: (c) => (c.getValue() as string | null) ?? '—',
+  },
   { accessorKey: 'requestCount', header: 'Requests' },
   { accessorKey: 'lastSeen', header: 'Last seen', cell: timeCell },
-  { accessorKey: 'flagged', header: 'Flagged', cell: (c) => (c.getValue() ? <Badge tone="negative">Flagged</Badge> : '—') },
+  {
+    accessorKey: 'flagged',
+    header: 'Flagged',
+    cell: (c) => (c.getValue() ? <Badge tone="negative">Flagged</Badge> : '—'),
+  },
 ];
 
 function useActivity<
@@ -123,7 +187,9 @@ function useActivity<
       // can't see that through the union) — narrowed back with an explicit
       // cast rather than losing the shared-hook structure across five
       // otherwise-identical tabs.
-      const { data, error } = await (api.GET as (p: string, init: unknown) => ReturnType<typeof api.GET>)(path, {
+      const { data, error } = await (
+        api.GET as (p: string, init: unknown) => ReturnType<typeof api.GET>
+      )(path, {
         params: { query: { ...toRangeQuery(range), limit: 100 } },
       });
       if (error) throw error;
@@ -185,18 +251,32 @@ export function ActivityPage() {
   const ipsQuery = useQuery({
     queryKey: ['admin', 'activity', 'ips'],
     queryFn: async () => {
-      const { data, error } = await api.GET('/api/v1/admin/activity/ips', { params: { query: { limit: 100 } } });
+      const { data, error } = await api.GET('/api/v1/admin/activity/ips', {
+        params: { query: { limit: 100 } },
+      });
       if (error) throw error;
       return data;
     },
   });
 
-  const osData = Object.entries(devicesQuery.data?.byOs ?? {}).map(([key, value], i) => ({ bucket: key, count: value, colorIndex: i }));
-  const versionData = Object.entries(devicesQuery.data?.byVersion ?? {}).map(([key, value], i) => ({ bucket: key, count: value, colorIndex: i }));
+  const osData = Object.entries(devicesQuery.data?.byOs ?? {}).map(([key, value], i) => ({
+    bucket: key,
+    count: value,
+    colorIndex: i,
+  }));
+  const versionData = Object.entries(devicesQuery.data?.byVersion ?? {}).map(([key, value], i) => ({
+    bucket: key,
+    count: value,
+    colorIndex: i,
+  }));
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title="Activity" description="Logins, searches, filter changes, snipes, errors and network activity." actions={<DateRangePicker value={range} onChange={setRange} />} />
+      <PageHeader
+        title="Activity"
+        description="Logins, searches, filter changes, snipes, errors and network activity."
+        actions={<DateRangePicker value={range} onChange={setRange} />}
+      />
 
       <Tabs defaultValue="logins">
         <TabsList>
@@ -210,19 +290,44 @@ export function ActivityPage() {
         </TabsList>
 
         <TabsContent value="logins">
-          <ActivityTab path="/api/v1/admin/activity/logins" range={range} columns={loginColumns} emptyTitle="No logins in this range" />
+          <ActivityTab
+            path="/api/v1/admin/activity/logins"
+            range={range}
+            columns={loginColumns}
+            emptyTitle="No logins in this range"
+          />
         </TabsContent>
         <TabsContent value="searches">
-          <ActivityTab path="/api/v1/admin/activity/searches" range={range} columns={searchColumns} emptyTitle="No searches in this range" />
+          <ActivityTab
+            path="/api/v1/admin/activity/searches"
+            range={range}
+            columns={searchColumns}
+            emptyTitle="No searches in this range"
+          />
         </TabsContent>
         <TabsContent value="filters">
-          <ActivityTab path="/api/v1/admin/activity/filter-changes" range={range} columns={filterChangeColumns} emptyTitle="No filter changes in this range" />
+          <ActivityTab
+            path="/api/v1/admin/activity/filter-changes"
+            range={range}
+            columns={filterChangeColumns}
+            emptyTitle="No filter changes in this range"
+          />
         </TabsContent>
         <TabsContent value="snipes">
-          <ActivityTab path="/api/v1/admin/activity/snipes" range={range} columns={snipeColumns} emptyTitle="No snipe attempts in this range" />
+          <ActivityTab
+            path="/api/v1/admin/activity/snipes"
+            range={range}
+            columns={snipeColumns}
+            emptyTitle="No snipe attempts in this range"
+          />
         </TabsContent>
         <TabsContent value="errors">
-          <ActivityTab path="/api/v1/admin/activity/errors" range={range} columns={errorColumns} emptyTitle="No errors in this range" />
+          <ActivityTab
+            path="/api/v1/admin/activity/errors"
+            range={range}
+            columns={errorColumns}
+            emptyTitle="No errors in this range"
+          />
         </TabsContent>
         <TabsContent value="devices">
           <div className="flex flex-col gap-4">
@@ -230,11 +335,27 @@ export function ActivityPage() {
               <StatTile label="Active devices" value={devicesQuery.data?.total ?? '—'} />
             </KpiGrid>
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <ChartCard title="By OS" isLoading={devicesQuery.isLoading} isEmpty={!devicesQuery.isLoading && osData.length === 0}>
-                <BarChart data={osData} xKey="bucket" series={[{ key: 'count', label: 'Devices', colorIndex: 0 }]} />
+              <ChartCard
+                title="By OS"
+                isLoading={devicesQuery.isLoading}
+                isEmpty={!devicesQuery.isLoading && osData.length === 0}
+              >
+                <BarChart
+                  data={osData}
+                  xKey="bucket"
+                  series={[{ key: 'count', label: 'Devices', colorIndex: 0 }]}
+                />
               </ChartCard>
-              <ChartCard title="By extension version" isLoading={devicesQuery.isLoading} isEmpty={!devicesQuery.isLoading && versionData.length === 0}>
-                <BarChart data={versionData} xKey="bucket" series={[{ key: 'count', label: 'Devices', colorIndex: 1 }]} />
+              <ChartCard
+                title="By extension version"
+                isLoading={devicesQuery.isLoading}
+                isEmpty={!devicesQuery.isLoading && versionData.length === 0}
+              >
+                <BarChart
+                  data={versionData}
+                  xKey="bucket"
+                  series={[{ key: 'count', label: 'Devices', colorIndex: 1 }]}
+                />
               </ChartCard>
             </div>
           </div>

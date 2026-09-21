@@ -18,7 +18,9 @@ export function ChartTooltip({ active, label, payload, valueFormatter }: ChartTo
             <span className="size-2 rounded-full" style={{ backgroundColor: entry.color }} />
             <span className="text-[--sl-fg-muted]">{entry.name}</span>
             <span className="ml-auto font-mono tabular-nums text-[--sl-fg]">
-              {typeof entry.value === 'number' && valueFormatter ? valueFormatter(entry.value) : entry.value}
+              {typeof entry.value === 'number' && valueFormatter
+                ? valueFormatter(entry.value)
+                : entry.value}
             </span>
           </div>
         ))}

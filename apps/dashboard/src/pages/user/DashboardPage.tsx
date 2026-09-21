@@ -23,15 +23,36 @@ import { api } from '@/api/client.js';
 
 import type { Trade } from '@sl/shared';
 
-
 const tradeColumns: ColumnDef<Trade, unknown>[] = [
-  { accessorKey: 'resourceId', header: 'Player', cell: (c) => <span className="font-mono">{c.getValue() as number}</span> },
-  { accessorKey: 'status', header: 'Status', cell: (c) => <Badge tone={c.getValue() === 'sold' ? 'positive' : 'neutral'}>{c.getValue() as string}</Badge> },
-  { accessorKey: 'buyPrice', header: 'Buy', cell: (c) => <span className="font-mono tabular-nums">{formatCoins(c.getValue() as number)}</span> },
+  {
+    accessorKey: 'resourceId',
+    header: 'Player',
+    cell: (c) => <span className="font-mono">{c.getValue() as number}</span>,
+  },
+  {
+    accessorKey: 'status',
+    header: 'Status',
+    cell: (c) => (
+      <Badge tone={c.getValue() === 'sold' ? 'positive' : 'neutral'}>
+        {c.getValue() as string}
+      </Badge>
+    ),
+  },
+  {
+    accessorKey: 'buyPrice',
+    header: 'Buy',
+    cell: (c) => (
+      <span className="font-mono tabular-nums">{formatCoins(c.getValue() as number)}</span>
+    ),
+  },
   {
     accessorKey: 'sellPrice',
     header: 'Sell',
-    cell: (c) => <span className="font-mono tabular-nums">{c.getValue() ? formatCoins(c.getValue() as number) : '—'}</span>,
+    cell: (c) => (
+      <span className="font-mono tabular-nums">
+        {c.getValue() ? formatCoins(c.getValue() as number) : '—'}
+      </span>
+    ),
   },
   {
     accessorKey: 'netProfit',
@@ -39,10 +60,18 @@ const tradeColumns: ColumnDef<Trade, unknown>[] = [
     cell: (c) => {
       const value = c.getValue() as number | null;
       if (value === null) return <span className="text-ink-2">—</span>;
-      return <span className={`font-mono tabular-nums ${value >= 0 ? 'text-live' : 'text-risk'}`}>{formatCoins(value)}</span>;
+      return (
+        <span className={`font-mono tabular-nums ${value >= 0 ? 'text-live' : 'text-risk'}`}>
+          {formatCoins(value)}
+        </span>
+      );
     },
   },
-  { accessorKey: 'boughtAt', header: 'Bought', cell: (c) => formatDateTime(c.getValue() as string) },
+  {
+    accessorKey: 'boughtAt',
+    header: 'Bought',
+    cell: (c) => formatDateTime(c.getValue() as string),
+  },
 ];
 
 export function DashboardPage() {
@@ -97,7 +126,9 @@ export function DashboardPage() {
     queryKey: ['risk-events', 'last24h'],
     queryFn: async () => {
       const { data, error } = await api.GET('/api/v1/risk-events', {
-        params: { query: { from: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(), limit: 200 } },
+        params: {
+          query: { from: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(), limit: 200 },
+        },
       });
       if (error) throw error;
       return data.items;
@@ -111,7 +142,9 @@ export function DashboardPage() {
     acc[e.kind] = (acc[e.kind] ?? 0) + 1;
     return acc;
   }, {});
-  const recentHardStops = riskEvents.filter((e) => e.kind === 'hard_stop' || e.kind === 'kill_switch').slice(0, 5);
+  const recentHardStops = riskEvents
+    .filter((e) => e.kind === 'hard_stop' || e.kind === 'kill_switch')
+    .slice(0, 5);
 
   return (
     <div className="flex flex-col gap-6">
@@ -120,19 +153,33 @@ export function DashboardPage() {
       <KpiGrid>
         <StatTile
           label="Net profit (7d)"
-          value={overview ? formatCoins(overview.last7d.netProfit) : overviewQuery.isLoading ? '…' : '—'}
+          value={
+            overview ? formatCoins(overview.last7d.netProfit) : overviewQuery.isLoading ? '…' : '—'
+          }
           icon={<TrendingUp className="size-4" />}
         />
         <StatTile
           label="Net profit (30d)"
-          value={overview ? formatCoins(overview.last30d.netProfit) : overviewQuery.isLoading ? '…' : '—'}
+          value={
+            overview ? formatCoins(overview.last30d.netProfit) : overviewQuery.isLoading ? '…' : '—'
+          }
         />
         <StatTile
           label="Snipe success rate"
-          value={overview ? formatPercent(overview.snipeSuccessRateLifetime) : overviewQuery.isLoading ? '…' : '—'}
+          value={
+            overview
+              ? formatPercent(overview.snipeSuccessRateLifetime)
+              : overviewQuery.isLoading
+                ? '…'
+                : '—'
+          }
           icon={<Gauge className="size-4" />}
         />
-        <StatTile label="Active devices" value={activeDevices} icon={<Laptop className="size-4" />} />
+        <StatTile
+          label="Active devices"
+          value={activeDevices}
+          icon={<Laptop className="size-4" />}
+        />
       </KpiGrid>
 
       {overviewQuery.isError && (
@@ -156,7 +203,10 @@ export function DashboardPage() {
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle>Recent trades</CardTitle>
-            <Link to="/analytics" className="text-xs text-gold underline underline-offset-2 hover:text-gold/80">
+            <Link
+              to="/analytics"
+              className="text-xs text-gold underline underline-offset-2 hover:text-gold/80"
+            >
               View analytics
             </Link>
           </CardHeader>
@@ -189,7 +239,9 @@ export function DashboardPage() {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-ink-2">Status</span>
-                    <Badge tone={licenseQuery.data.status === 'active' ? 'positive' : 'negative'}>{licenseQuery.data.status}</Badge>
+                    <Badge tone={licenseQuery.data.status === 'active' ? 'positive' : 'negative'}>
+                      {licenseQuery.data.status}
+                    </Badge>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-ink-2">Devices</span>
@@ -204,7 +256,10 @@ export function DashboardPage() {
                   </Link>
                 </div>
               ) : (
-                <EmptyState title="No license yet" description="Start a subscription to get a license key." />
+                <EmptyState
+                  title="No license yet"
+                  description="Start a subscription to get a license key."
+                />
               )}
             </CardContent>
           </Card>
@@ -218,19 +273,27 @@ export function DashboardPage() {
                 <div className="flex flex-col gap-2 text-sm">
                   <div className="flex justify-between">
                     <span className="text-ink-2">Actions / hour</span>
-                    <span className="font-mono tabular-nums">{settingsQuery.data.governor.actionsPerHour}</span>
+                    <span className="font-mono tabular-nums">
+                      {settingsQuery.data.governor.actionsPerHour}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-ink-2">Session length</span>
-                    <span className="font-mono tabular-nums">{settingsQuery.data.governor.sessionLengthMinutes}m</span>
+                    <span className="font-mono tabular-nums">
+                      {settingsQuery.data.governor.sessionLengthMinutes}m
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-ink-2">Buy:search ratio</span>
-                    <span className="font-mono tabular-nums">{settingsQuery.data.governor.buyToSearchRatio.toFixed(2)}</span>
+                    <span className="font-mono tabular-nums">
+                      {settingsQuery.data.governor.buyToSearchRatio.toFixed(2)}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-ink-2">Coin flow / hour</span>
-                    <span className="font-mono tabular-nums">{formatCoins(settingsQuery.data.governor.maxCoinFlowPerHour)}</span>
+                    <span className="font-mono tabular-nums">
+                      {formatCoins(settingsQuery.data.governor.maxCoinFlowPerHour)}
+                    </span>
                   </div>
 
                   <div className="mt-2 border-t border-line pt-2">
@@ -242,7 +305,14 @@ export function DashboardPage() {
                     ) : (
                       <div className="flex flex-wrap gap-1.5">
                         {Object.entries(riskCountsByKind).map(([kind, count]) => (
-                          <Badge key={kind} tone={kind === 'hard_stop' || kind === 'kill_switch' ? 'negative' : 'neutral'}>
+                          <Badge
+                            key={kind}
+                            tone={
+                              kind === 'hard_stop' || kind === 'kill_switch'
+                                ? 'negative'
+                                : 'neutral'
+                            }
+                          >
                             {kind.replace(/_/g, ' ')}: {count}
                           </Badge>
                         ))}

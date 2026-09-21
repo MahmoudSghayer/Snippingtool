@@ -34,8 +34,12 @@ const repoRoot = path.resolve(dirname, '..', '..');
 const extensionRoot = path.join(repoRoot, 'apps', 'extension');
 const outDir = path.join(dirname, '.artifacts', 'extension-dist', 'ledger');
 
-export async function buildExtension(apiOrigin = process.env.E2E_API_ORIGIN ?? 'http://127.0.0.1:3100') {
-  const { buildManifest } = await import(path.join(extensionRoot, 'scripts', 'generate-manifest.mjs'));
+export async function buildExtension(
+  apiOrigin = process.env.E2E_API_ORIGIN ?? 'http://127.0.0.1:3100',
+) {
+  const { buildManifest } = await import(
+    path.join(extensionRoot, 'scripts', 'generate-manifest.mjs')
+  );
   const pkg = JSON.parse(readFileSync(path.join(extensionRoot, 'package.json'), 'utf8'));
 
   const defineEnv = {
@@ -46,12 +50,20 @@ export async function buildExtension(apiOrigin = process.env.E2E_API_ORIGIN ?? '
     VITE_EXTENSION_VERSION: pkg.version,
     VITE_LICENSE_PUBLIC_KEY: process.env.VITE_LICENSE_PUBLIC_KEY || '',
   };
-  const define = Object.fromEntries(Object.entries(defineEnv).map(([k, v]) => [`import.meta.env.${k}`, JSON.stringify(v)]));
+  const define = Object.fromEntries(
+    Object.entries(defineEnv).map(([k, v]) => [`import.meta.env.${k}`, JSON.stringify(v)]),
+  );
 
   const alias = {
-    '@sl/shared/adapter-channel.js': path.resolve(repoRoot, 'packages/shared/src/adapter-channel.ts'),
+    '@sl/shared/adapter-channel.js': path.resolve(
+      repoRoot,
+      'packages/shared/src/adapter-channel.ts',
+    ),
     '@sl/shared': path.resolve(repoRoot, 'packages/shared/src/index.ts'),
-    'virtual:autobuyer-loader': path.resolve(extensionRoot, 'src/engine/autobuyer-loader.ledger.ts'),
+    'virtual:autobuyer-loader': path.resolve(
+      extensionRoot,
+      'src/engine/autobuyer-loader.ledger.ts',
+    ),
   };
 
   function baseConfig(emptyOutDirFirst) {
@@ -78,7 +90,12 @@ export async function buildExtension(apiOrigin = process.env.E2E_API_ORIGIN ?? '
     ...baseConfig(true),
     build: {
       ...baseConfig(true).build,
-      lib: { entry: path.join(extensionRoot, 'src/main/adapter.ts'), formats: ['iife'], name: 'SLAdapter', fileName: () => 'adapter.js' },
+      lib: {
+        entry: path.join(extensionRoot, 'src/main/adapter.ts'),
+        formats: ['iife'],
+        name: 'SLAdapter',
+        fileName: () => 'adapter.js',
+      },
       rollupOptions: { treeshake: { moduleSideEffects: false }, output: { extend: true } },
     },
   });
@@ -87,7 +104,12 @@ export async function buildExtension(apiOrigin = process.env.E2E_API_ORIGIN ?? '
     ...baseConfig(false),
     build: {
       ...baseConfig(false).build,
-      lib: { entry: path.join(extensionRoot, 'src/content/index.ts'), formats: ['iife'], name: 'SLContent', fileName: () => 'content.js' },
+      lib: {
+        entry: path.join(extensionRoot, 'src/content/index.ts'),
+        formats: ['iife'],
+        name: 'SLContent',
+        fileName: () => 'content.js',
+      },
       rollupOptions: { treeshake: { moduleSideEffects: false }, output: { extend: true } },
     },
   });
@@ -116,7 +138,9 @@ export async function buildExtension(apiOrigin = process.env.E2E_API_ORIGIN ?? '
   mkdirSync(outDir, { recursive: true });
   writeFileSync(path.join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
 
-  console.warn(`[tests/e2e] built extension (ledger, apiOrigin=${apiOrigin}) -> ${path.relative(repoRoot, outDir)}`);
+  console.warn(
+    `[tests/e2e] built extension (ledger, apiOrigin=${apiOrigin}) -> ${path.relative(repoRoot, outDir)}`,
+  );
   return outDir;
 }
 

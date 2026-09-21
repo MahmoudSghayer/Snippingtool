@@ -53,7 +53,13 @@ describe('subscriptions module', () => {
   });
 
   async function registerVerifyLogin(email: string, ip: string, fingerprint: string) {
-    const device = { fingerprint, name: 'Test Device', browser: 'chrome', os: 'linux', extensionVersion: '1.0.0' };
+    const device = {
+      fingerprint,
+      name: 'Test Device',
+      browser: 'chrome',
+      os: 'linux',
+      extensionVersion: '1.0.0',
+    };
     const registerRes = await app.inject({
       method: 'POST',
       url: '/api/v1/auth/register',
@@ -63,7 +69,12 @@ describe('subscriptions module', () => {
     expect(registerRes.statusCode).toBe(201);
     const mail = app.mailer.sentEmails.at(-1);
     const token = extractToken(mail!.html);
-    const verifyRes = await app.inject({ method: 'POST', url: '/api/v1/auth/verify-email', remoteAddress: ip, payload: { token } });
+    const verifyRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/verify-email',
+      remoteAddress: ip,
+      payload: { token },
+    });
     expect(verifyRes.statusCode).toBe(200);
 
     const loginRes = await app.inject({
@@ -78,7 +89,11 @@ describe('subscriptions module', () => {
 
   it('GET /subscriptions/me returns null subscription/license before any trial', async () => {
     const ip = nextIp();
-    const accessToken = await registerVerifyLogin('nosub@example.com', ip, 'fp-nosub-0000000000000001');
+    const accessToken = await registerVerifyLogin(
+      'nosub@example.com',
+      ip,
+      'fp-nosub-0000000000000001',
+    );
 
     const res = await app.inject({
       method: 'GET',
@@ -96,7 +111,11 @@ describe('subscriptions module', () => {
 
   it('starts a trial, issues a license once, and GET /me reflects it', async () => {
     const ip = nextIp();
-    const accessToken = await registerVerifyLogin('trial-happy@example.com', ip, 'fp-happy-0000000000000001');
+    const accessToken = await registerVerifyLogin(
+      'trial-happy@example.com',
+      ip,
+      'fp-happy-0000000000000001',
+    );
 
     const trialRes = await app.inject({
       method: 'POST',
@@ -136,7 +155,11 @@ describe('subscriptions module', () => {
 
   it('trial abuse: denies a second trial from the same normalised (gmail dotted/plus) email and flags it', async () => {
     const ipA = nextIp();
-    const tokenA = await registerVerifyLogin('sniper.pro@gmail.com', ipA, 'fp-emailabuse-a-000000001');
+    const tokenA = await registerVerifyLogin(
+      'sniper.pro@gmail.com',
+      ipA,
+      'fp-emailabuse-a-000000001',
+    );
     const startA = await app.inject({
       method: 'POST',
       url: '/api/v1/subscriptions/trial',
@@ -147,7 +170,11 @@ describe('subscriptions module', () => {
 
     // Same inbox, dotted + plus-tagged, different account/device/IP.
     const ipB = nextIp();
-    const tokenB = await registerVerifyLogin('sniper.pro+altaccount@gmail.com', ipB, 'fp-emailabuse-b-000000002');
+    const tokenB = await registerVerifyLogin(
+      'sniper.pro+altaccount@gmail.com',
+      ipB,
+      'fp-emailabuse-b-000000002',
+    );
     const startB = await app.inject({
       method: 'POST',
       url: '/api/v1/subscriptions/trial',
@@ -157,9 +184,9 @@ describe('subscriptions module', () => {
     expect(startB.statusCode).toBe(403);
     expect(startB.json().code).toBe('TRIAL_ABUSE_DETECTED');
 
-    const secondUserId = (
-      await app.db.query.users.findFirst({ where: (t, { eq: eqOp }) => eqOp(t.email, 'sniper.pro+altaccount@gmail.com') })
-    )!.id;
+    const secondUserId = (await app.db.query.users.findFirst({
+      where: (t, { eq: eqOp }) => eqOp(t.email, 'sniper.pro+altaccount@gmail.com'),
+    }))!.id;
     const flagRows = await app.db.query.flags.findMany({ where: eq(flags.userId, secondUserId) });
     expect(flagRows).toHaveLength(1);
     expect(flagRows[0]!.kind).toBe('trial_abuse');
@@ -199,7 +226,9 @@ describe('subscriptions module', () => {
     expect(startB.statusCode).toBe(403);
     expect(startB.json().code).toBe('TRIAL_ABUSE_DETECTED');
 
-    const secondUserId = (await app.db.query.users.findFirst({ where: (t, { eq: eqOp }) => eqOp(t.email, 'device-b@example.com') }))!.id;
+    const secondUserId = (await app.db.query.users.findFirst({
+      where: (t, { eq: eqOp }) => eqOp(t.email, 'device-b@example.com'),
+    }))!.id;
     const flagRows = await app.db.query.flags.findMany({ where: eq(flags.userId, secondUserId) });
     expect(flagRows).toHaveLength(1);
     expect((flagRows[0]!.evidence as Record<string, unknown>).detectors).toContain('device');
@@ -211,8 +240,14 @@ describe('subscriptions module', () => {
     // never reused afterwards, so bumping row_version via the UPDATE below
     // has no effect on this test).
     const ipA = nextIp();
-    const tokenA = await registerVerifyLogin('stripe-customer-a@example.com', ipA, 'fp-stripecust-a-00000001');
-    const userAId = (await app.db.query.users.findFirst({ where: eq(users.email, 'stripe-customer-a@example.com') }))!.id;
+    const tokenA = await registerVerifyLogin(
+      'stripe-customer-a@example.com',
+      ipA,
+      'fp-stripecust-a-00000001',
+    );
+    const userAId = (await app.db.query.users.findFirst({
+      where: eq(users.email, 'stripe-customer-a@example.com'),
+    }))!.id;
     const startA = await app.inject({
       method: 'POST',
       url: '/api/v1/subscriptions/trial',
@@ -220,7 +255,10 @@ describe('subscriptions module', () => {
       headers: { authorization: `Bearer ${tokenA}` },
     });
     expect(startA.statusCode).toBe(201);
-    await app.db.update(users).set({ stripeCustomerId: 'cus_shared_between_accounts' }).where(eq(users.id, userAId));
+    await app.db
+      .update(users)
+      .set({ stripeCustomerId: 'cus_shared_between_accounts' })
+      .where(eq(users.id, userAId));
 
     // userB: a second, otherwise-unrelated account (different email/device/
     // IP — nothing else overlaps). Its own users.stripe_customer_id can
@@ -257,7 +295,9 @@ describe('subscriptions module', () => {
 
     const flagRows = await app.db.query.flags.findMany({ where: eq(flags.userId, userBId) });
     expect(flagRows).toHaveLength(1);
-    expect((flagRows[0]!.evidence as Record<string, unknown>).detectors).toContain('stripe_customer');
+    expect((flagRows[0]!.evidence as Record<string, unknown>).detectors).toContain(
+      'stripe_customer',
+    );
   });
 
   it('does NOT flag two different accounts sharing an IP/device when only one ever had a trial (false-positive avoidance)', async () => {
@@ -267,7 +307,11 @@ describe('subscriptions module', () => {
     // with via checks 2/3 (which only count *prior trials*).
     const sharedFingerprint = 'fp-shared-paid-0000000000001';
     const ip = nextIp();
-    const tokenSecond = await registerVerifyLogin('paid-office-mate@example.com', ip, sharedFingerprint);
+    const tokenSecond = await registerVerifyLogin(
+      'paid-office-mate@example.com',
+      ip,
+      sharedFingerprint,
+    );
 
     const startSecond = await app.inject({
       method: 'POST',
@@ -280,8 +324,17 @@ describe('subscriptions module', () => {
 
   it('cancel sets cancelAtPeriodEnd, resume clears it', async () => {
     const ip = nextIp();
-    const accessToken = await registerVerifyLogin('cancel-resume@example.com', ip, 'fp-cancelresume-00000001');
-    await app.inject({ method: 'POST', url: '/api/v1/subscriptions/trial', remoteAddress: ip, headers: { authorization: `Bearer ${accessToken}` } });
+    const accessToken = await registerVerifyLogin(
+      'cancel-resume@example.com',
+      ip,
+      'fp-cancelresume-00000001',
+    );
+    await app.inject({
+      method: 'POST',
+      url: '/api/v1/subscriptions/trial',
+      remoteAddress: ip,
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
 
     const cancelRes = await app.inject({
       method: 'POST',

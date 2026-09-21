@@ -22,7 +22,15 @@ export function DonutChart({ data, valueFormatter, centerLabel, centerValue }: D
     <div className="relative h-full w-full">
       <ResponsiveContainer width="100%" height="100%">
         <PieChart>
-          <Pie data={data} dataKey="value" nameKey="label" innerRadius="62%" outerRadius="92%" paddingAngle={2} strokeWidth={0}>
+          <Pie
+            data={data}
+            dataKey="value"
+            nameKey="label"
+            innerRadius="62%"
+            outerRadius="92%"
+            paddingAngle={2}
+            strokeWidth={0}
+          >
             {data.map((d, i) => (
               <Cell key={d.key} fill={seriesColor(d.colorIndex ?? i)} />
             ))}
@@ -32,7 +40,11 @@ export function DonutChart({ data, valueFormatter, centerLabel, centerValue }: D
       </ResponsiveContainer>
       {(centerLabel || centerValue) && (
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-          {centerValue && <div className="font-mono text-lg font-semibold tabular-nums text-[--sl-fg]">{centerValue}</div>}
+          {centerValue && (
+            <div className="font-mono text-lg font-semibold tabular-nums text-[--sl-fg]">
+              {centerValue}
+            </div>
+          )}
           {centerLabel && <div className="text-xs text-[--sl-fg-muted]">{centerLabel}</div>}
         </div>
       )}

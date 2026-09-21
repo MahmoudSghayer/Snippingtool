@@ -44,8 +44,16 @@ describe('security headers (helmet + Permissions-Policy)', () => {
   });
 
   it('an authenticated JSON route carries the same header set', async () => {
-    const user = await createUserSession(app, 'headers-user@example.com', 'headers-fp-000000000000001');
-    const res = await app.inject({ method: 'GET', url: '/api/v1/users/me', headers: bearer(user.accessToken) });
+    const user = await createUserSession(
+      app,
+      'headers-user@example.com',
+      'headers-fp-000000000000001',
+    );
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/v1/users/me',
+      headers: bearer(user.accessToken),
+    });
     expect(res.statusCode).toBe(200);
     expect(res.headers['x-content-type-options']).toBe('nosniff');
     expect(res.headers['x-frame-options']).toBe('DENY');
@@ -59,7 +67,7 @@ describe('security headers (helmet + Permissions-Policy)', () => {
     expect(res.headers['x-frame-options']).toBe('DENY');
   });
 
-  it('HSTS is absent under NODE_ENV=test/development (no local TLS to promise) — dev must never poison a browser\'s HSTS cache for localhost', async () => {
+  it("HSTS is absent under NODE_ENV=test/development (no local TLS to promise) — dev must never poison a browser's HSTS cache for localhost", async () => {
     const res = await app.inject({ method: 'GET', url: '/health/live' });
     expect(res.headers['strict-transport-security']).toBeUndefined();
   });

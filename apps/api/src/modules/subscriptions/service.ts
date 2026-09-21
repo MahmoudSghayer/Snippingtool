@@ -4,15 +4,31 @@
 // See docs/05-subscriptions.md §2 (state machine) and §5 (trial protection)
 // for the full design this file implements.
 
-import { devices, ipActivity, notifications, plans, subscriptions, users, type Database } from '@sl/db';
-import { normaliseEmailForAbuseCheck, TRIAL_LENGTH_DAYS, type SubscriptionStatus } from '@sl/shared';
+import {
+  devices,
+  ipActivity,
+  notifications,
+  plans,
+  subscriptions,
+  users,
+  type Database,
+} from '@sl/db';
+import {
+  normaliseEmailForAbuseCheck,
+  TRIAL_LENGTH_DAYS,
+  type SubscriptionStatus,
+} from '@sl/shared';
 import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, ne } from 'drizzle-orm';
 
 import { AppErrors } from '../../lib/errors.js';
 import { newId } from '../../lib/ids.js';
 import { publishToUser } from '../../ws/publish.js';
 import { createFlag } from '../flags/service.js';
-import { findActiveForSubscription, issueForSubscription, revoke as revokeLicense } from '../licenses/service.js';
+import {
+  findActiveForSubscription,
+  issueForSubscription,
+  revoke as revokeLicense,
+} from '../licenses/service.js';
 import { toPlanDto } from '../plans/index.js';
 
 import type { Redis } from 'ioredis';
@@ -24,7 +40,13 @@ export type PlanRow = typeof plans.$inferSelect;
  * unique index (`02-database.md` §6.3) and is what `/subscriptions/me`,
  * trial/checkout/admin-activate all treat as "this user already has a
  * subscription". */
-export const LIVE_SUBSCRIPTION_STATUSES = ['trialing', 'active', 'past_due', 'suspended', 'lifetime'] as const;
+export const LIVE_SUBSCRIPTION_STATUSES = [
+  'trialing',
+  'active',
+  'past_due',
+  'suspended',
+  'lifetime',
+] as const;
 
 export function isLiveStatus(status: string): boolean {
   return (LIVE_SUBSCRIPTION_STATUSES as readonly string[]).includes(status);
@@ -37,7 +59,9 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // ---------------------------------------------------------------------------
 
 export async function getPlanByCode(db: Database, code: string): Promise<PlanRow | null> {
-  const row = await db.query.plans.findFirst({ where: and(eq(plans.code, code), isNull(plans.deletedAt)) });
+  const row = await db.query.plans.findFirst({
+    where: and(eq(plans.code, code), isNull(plans.deletedAt)),
+  });
   return row ?? null;
 }
 
@@ -46,14 +70,22 @@ export async function getPlanById(db: Database, planId: string): Promise<PlanRow
   return row ?? null;
 }
 
-export async function findSubscriptionById(db: Database, subscriptionId: string): Promise<SubscriptionRow | null> {
-  const row = await db.query.subscriptions.findFirst({ where: eq(subscriptions.id, subscriptionId) });
+export async function findSubscriptionById(
+  db: Database,
+  subscriptionId: string,
+): Promise<SubscriptionRow | null> {
+  const row = await db.query.subscriptions.findFirst({
+    where: eq(subscriptions.id, subscriptionId),
+  });
   return row && !row.deletedAt ? row : null;
 }
 
 /** The user's current *live* subscription, or null. A user may have many
  * historical (canceled/expired) rows — this only ever returns a live one. */
-export async function getLiveSubscriptionForUser(db: Database, userId: string): Promise<SubscriptionRow | null> {
+export async function getLiveSubscriptionForUser(
+  db: Database,
+  userId: string,
+): Promise<SubscriptionRow | null> {
   const row = await db.query.subscriptions.findFirst({
     where: and(eq(subscriptions.userId, userId), isNull(subscriptions.deletedAt)),
     orderBy: [desc(subscriptions.createdAt)],
@@ -63,7 +95,10 @@ export async function getLiveSubscriptionForUser(db: Database, userId: string): 
 
 /** Most recent subscription row regardless of status — used by `resume`,
  * which specifically operates on a `canceled` (non-live) row. */
-export async function getLatestSubscriptionForUser(db: Database, userId: string): Promise<SubscriptionRow | null> {
+export async function getLatestSubscriptionForUser(
+  db: Database,
+  userId: string,
+): Promise<SubscriptionRow | null> {
   const row = await db.query.subscriptions.findFirst({
     where: and(eq(subscriptions.userId, userId), isNull(subscriptions.deletedAt)),
     orderBy: [desc(subscriptions.createdAt)],
@@ -84,8 +119,15 @@ export function toSubscriptionDto(row: SubscriptionRow, plan: PlanRow) {
   };
 }
 
-async function publishSubscriptionChanged(redis: Redis, row: SubscriptionRow, plan: PlanRow): Promise<void> {
-  await publishToUser(redis, row.userId, { type: 'subscription.changed', subscription: toSubscriptionDto(row, plan) });
+async function publishSubscriptionChanged(
+  redis: Redis,
+  row: SubscriptionRow,
+  plan: PlanRow,
+): Promise<void> {
+  await publishToUser(redis, row.userId, {
+    type: 'subscription.changed',
+    subscription: toSubscriptionDto(row, plan),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -167,7 +209,8 @@ export async function checkTrialAbuse(
         ),
       );
     const stripeCustomerMatches = [...new Set(stripeCustomerMatchRows.map((r) => r.userId))];
-    if (stripeCustomerMatches.length > 0) matches.push({ detector: 'stripe_customer', matchedUserIds: stripeCustomerMatches });
+    if (stripeCustomerMatches.length > 0)
+      matches.push({ detector: 'stripe_customer', matchedUserIds: stripeCustomerMatches });
   }
 
   // Every user who has ever had a trial (trial_ends_at set at some point),
@@ -178,7 +221,9 @@ export async function checkTrialAbuse(
   const trialHistory = await db
     .select({ userId: subscriptions.userId })
     .from(subscriptions)
-    .where(and(isNotNull(subscriptions.trialEndsAt), ne(subscriptions.userId, input.excludeUserId)));
+    .where(
+      and(isNotNull(subscriptions.trialEndsAt), ne(subscriptions.userId, input.excludeUserId)),
+    );
   const trialUserIds = new Set(trialHistory.map((r) => r.userId));
 
   const windowStart = new Date(Date.now() - TRIAL_ABUSE_WINDOW_MS);
@@ -192,13 +237,20 @@ export async function checkTrialAbuse(
       ),
     });
     const deviceMatches = [
-      ...new Set(deviceRows.map((d) => d.userId).filter((id) => id !== input.excludeUserId && trialUserIds.has(id))),
+      ...new Set(
+        deviceRows
+          .map((d) => d.userId)
+          .filter((id) => id !== input.excludeUserId && trialUserIds.has(id)),
+      ),
     ];
-    if (deviceMatches.length > 0) matches.push({ detector: 'device', matchedUserIds: deviceMatches });
+    if (deviceMatches.length > 0)
+      matches.push({ detector: 'device', matchedUserIds: deviceMatches });
   }
 
   if (input.ipPrefix) {
-    const ipRows = await db.query.ipActivity.findMany({ where: gte(ipActivity.lastSeen, windowStart) });
+    const ipRows = await db.query.ipActivity.findMany({
+      where: gte(ipActivity.lastSeen, windowStart),
+    });
     const ipMatches = [
       ...new Set(
         ipRows
@@ -227,7 +279,11 @@ export function trialAbuseSeverity(matchCount: number): 'low' | 'medium' | 'crit
 /** Upserts the (ip, userId) counter row `checkTrialAbuse`'s IP check reads
  * back later — written on every trial attempt, successful or not
  * (docs §5, check 3's data source). */
-export async function recordTrialIpActivity(db: Database, ip: string, userId: string): Promise<void> {
+export async function recordTrialIpActivity(
+  db: Database,
+  ip: string,
+  userId: string,
+): Promise<void> {
   const existing = await db.query.ipActivity.findFirst({
     where: and(eq(ipActivity.ip, ip), eq(ipActivity.userId, userId)),
   });
@@ -237,7 +293,14 @@ export async function recordTrialIpActivity(db: Database, ip: string, userId: st
       .set({ lastSeen: new Date(), requestCount: existing.requestCount + 1 })
       .where(eq(ipActivity.id, existing.id));
   } else {
-    await db.insert(ipActivity).values({ id: newId(), ip, userId, firstSeen: new Date(), lastSeen: new Date(), requestCount: 1 });
+    await db.insert(ipActivity).values({
+      id: newId(),
+      ip,
+      userId,
+      firstSeen: new Date(),
+      lastSeen: new Date(),
+      requestCount: 1,
+    });
   }
 }
 
@@ -259,7 +322,11 @@ export type StartTrialResult =
       license: { key: string; keyPrefix: string; maxDevices: number; expiresAt: Date | null };
     };
 
-export async function startTrial(db: Database, redis: Redis, input: StartTrialInput): Promise<StartTrialResult> {
+export async function startTrial(
+  db: Database,
+  redis: Redis,
+  input: StartTrialInput,
+): Promise<StartTrialResult> {
   const existingLive = await getLiveSubscriptionForUser(db, input.userId);
   if (existingLive) throw AppErrors.conflict('You already have an active subscription.');
 
@@ -336,7 +403,12 @@ export async function startTrial(db: Database, redis: Redis, input: StartTrialIn
     blocked: false,
     subscription: subRow!,
     plan,
-    license: { key: fullKey, keyPrefix: licenseRow.keyPrefix, maxDevices: licenseRow.maxDevices, expiresAt: licenseRow.expiresAt },
+    license: {
+      key: fullKey,
+      keyPrefix: licenseRow.keyPrefix,
+      maxDevices: licenseRow.maxDevices,
+      expiresAt: licenseRow.expiresAt,
+    },
   };
 }
 
@@ -344,11 +416,17 @@ export async function startTrial(db: Database, redis: Redis, input: StartTrialIn
 // User-facing cancel / resume
 // ---------------------------------------------------------------------------
 
-export async function cancelAtPeriodEnd(db: Database, redis: Redis, userId: string): Promise<SubscriptionRow> {
+export async function cancelAtPeriodEnd(
+  db: Database,
+  redis: Redis,
+  userId: string,
+): Promise<SubscriptionRow> {
   const sub = await getLiveSubscriptionForUser(db, userId);
   if (!sub) throw AppErrors.notFound('subscription');
-  if (sub.status === 'lifetime') throw AppErrors.conflict('A lifetime subscription cannot be canceled.');
-  if (sub.cancelAtPeriodEnd) throw AppErrors.conflict('Subscription is already set to cancel at period end.');
+  if (sub.status === 'lifetime')
+    throw AppErrors.conflict('A lifetime subscription cannot be canceled.');
+  if (sub.cancelAtPeriodEnd)
+    throw AppErrors.conflict('Subscription is already set to cancel at period end.');
 
   const [row] = await db
     .update(subscriptions)
@@ -360,12 +438,18 @@ export async function cancelAtPeriodEnd(db: Database, redis: Redis, userId: stri
   return row!;
 }
 
-export async function resumeCanceled(db: Database, redis: Redis, userId: string): Promise<SubscriptionRow> {
+export async function resumeCanceled(
+  db: Database,
+  redis: Redis,
+  userId: string,
+): Promise<SubscriptionRow> {
   const sub = await getLatestSubscriptionForUser(db, userId);
   const now = Date.now();
   const stillWithinPeriod = Boolean(sub?.currentPeriodEnd && sub.currentPeriodEnd.getTime() > now);
   if (!sub || !sub.cancelAtPeriodEnd || !stillWithinPeriod || !isLiveStatus(sub.status)) {
-    throw AppErrors.conflict('Subscription cannot be resumed (not set to cancel, already ended, or not live).');
+    throw AppErrors.conflict(
+      'Subscription cannot be resumed (not set to cancel, already ended, or not live).',
+    );
   }
 
   const [row] = await db
@@ -385,8 +469,18 @@ export async function resumeCanceled(db: Database, redis: Redis, userId: string)
 export async function activateManual(
   db: Database,
   redis: Redis,
-  input: { userId: string; planCode: string; periodDays: number; grantedByAdminId: string | null; source?: 'manual' | 'coupon' },
-): Promise<{ subscription: SubscriptionRow; plan: PlanRow; license: { row: Awaited<ReturnType<typeof issueForSubscription>>['row']; fullKey: string } }> {
+  input: {
+    userId: string;
+    planCode: string;
+    periodDays: number;
+    grantedByAdminId: string | null;
+    source?: 'manual' | 'coupon';
+  },
+): Promise<{
+  subscription: SubscriptionRow;
+  plan: PlanRow;
+  license: { row: Awaited<ReturnType<typeof issueForSubscription>>['row']; fullKey: string };
+}> {
   const existingLive = await getLiveSubscriptionForUser(db, input.userId);
   if (existingLive) throw AppErrors.conflict('User already has a live subscription.');
   const plan = await getPlanByCode(db, input.planCode);
@@ -426,8 +520,17 @@ export async function activateManual(
 export async function grantLifetime(
   db: Database,
   redis: Redis,
-  input: { userId: string; planCode: string; grantedByAdminId: string | null; source?: 'manual' | 'coupon' },
-): Promise<{ subscription: SubscriptionRow; plan: PlanRow; license: { row: Awaited<ReturnType<typeof issueForSubscription>>['row']; fullKey: string } }> {
+  input: {
+    userId: string;
+    planCode: string;
+    grantedByAdminId: string | null;
+    source?: 'manual' | 'coupon';
+  },
+): Promise<{
+  subscription: SubscriptionRow;
+  plan: PlanRow;
+  license: { row: Awaited<ReturnType<typeof issueForSubscription>>['row']; fullKey: string };
+}> {
   const existingLive = await getLiveSubscriptionForUser(db, input.userId);
   if (existingLive) throw AppErrors.conflict('User already has a live subscription.');
   const plan = await getPlanByCode(db, input.planCode);
@@ -470,11 +573,17 @@ export async function extendSubscription(
   const before = await findSubscriptionById(db, subscriptionId);
   if (!before) throw AppErrors.notFound('subscription');
   if (before.currentPeriodEnd === null) {
-    throw AppErrors.conflict('This subscription has no period end to extend (lifetime, or a trial still in progress).');
+    throw AppErrors.conflict(
+      'This subscription has no period end to extend (lifetime, or a trial still in progress).',
+    );
   }
 
   const newEnd = new Date(before.currentPeriodEnd.getTime() + periodDays * DAY_MS);
-  const [after] = await db.update(subscriptions).set({ currentPeriodEnd: newEnd }).where(eq(subscriptions.id, subscriptionId)).returning();
+  const [after] = await db
+    .update(subscriptions)
+    .set({ currentPeriodEnd: newEnd })
+    .where(eq(subscriptions.id, subscriptionId))
+    .returning();
   const plan = await getPlanById(db, after!.planId);
   if (plan) await publishSubscriptionChanged(redis, after!, plan);
   return { before, after: after! };
@@ -511,7 +620,11 @@ export async function unsuspend(
   if (!before) throw AppErrors.notFound('subscription');
   if (before.status !== 'suspended') throw AppErrors.conflict('Subscription is not suspended.');
 
-  const [after] = await db.update(subscriptions).set({ status: targetStatus }).where(eq(subscriptions.id, subscriptionId)).returning();
+  const [after] = await db
+    .update(subscriptions)
+    .set({ status: targetStatus })
+    .where(eq(subscriptions.id, subscriptionId))
+    .returning();
   const plan = await getPlanById(db, after!.planId);
   if (plan) await publishSubscriptionChanged(redis, after!, plan);
   return { before, after: after! };
@@ -525,14 +638,25 @@ export async function cancelByAdmin(
 ): Promise<{ before: SubscriptionRow; after: SubscriptionRow }> {
   const before = await findSubscriptionById(db, subscriptionId);
   if (!before) throw AppErrors.notFound('subscription');
-  if (before.status === 'lifetime') throw AppErrors.conflict('A lifetime subscription cannot be canceled.');
+  if (before.status === 'lifetime')
+    throw AppErrors.conflict('A lifetime subscription cannot be canceled.');
 
   const now = new Date();
   const patch = immediate
-    ? { status: 'canceled' as const, canceledAt: now, endedAt: now, cancelAtPeriodEnd: true, trialEndsAt: null }
+    ? {
+        status: 'canceled' as const,
+        canceledAt: now,
+        endedAt: now,
+        cancelAtPeriodEnd: true,
+        trialEndsAt: null,
+      }
     : { cancelAtPeriodEnd: true, canceledAt: now };
 
-  const [after] = await db.update(subscriptions).set(patch).where(eq(subscriptions.id, subscriptionId)).returning();
+  const [after] = await db
+    .update(subscriptions)
+    .set(patch)
+    .where(eq(subscriptions.id, subscriptionId))
+    .returning();
   const plan = await getPlanById(db, after!.planId);
   if (plan) await publishSubscriptionChanged(redis, after!, plan);
 
@@ -548,7 +672,10 @@ export async function cancelByAdmin(
 // subscriptions.expire job (also directly unit-testable)
 // ---------------------------------------------------------------------------
 
-export async function expireDueSubscriptions(db: Database, redis: Redis): Promise<{ expiredCount: number }> {
+export async function expireDueSubscriptions(
+  db: Database,
+  redis: Redis,
+): Promise<{ expiredCount: number }> {
   const now = new Date();
 
   const dueTrials = await db.query.subscriptions.findMany({

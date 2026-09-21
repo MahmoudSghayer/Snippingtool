@@ -36,14 +36,19 @@ export default fp(
       keyGenerator: (request) => {
         const auth = request.headers.authorization;
         const bearer = auth?.startsWith('Bearer ') ? auth.slice('Bearer '.length) : undefined;
-        const cookieToken = (request.cookies as Record<string, string | undefined> | undefined)?.sl_at;
+        const cookieToken = (request.cookies as Record<string, string | undefined> | undefined)
+          ?.sl_at;
         const token = bearer ?? cookieToken;
         if (!token) return request.ip;
         try {
           const payload = token.split('.')[1];
           if (!payload) return request.ip;
-          const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { sub?: unknown };
-          return typeof claims.sub === 'string' && claims.sub.length > 0 ? `${request.ip}:${claims.sub}` : request.ip;
+          const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as {
+            sub?: unknown;
+          };
+          return typeof claims.sub === 'string' && claims.sub.length > 0
+            ? `${request.ip}:${claims.sub}`
+            : request.ip;
         } catch {
           return request.ip;
         }
@@ -53,7 +58,8 @@ export default fp(
       // itself means it lands in plugins/error-handler.ts's `isAppError`
       // branch with the correct status/code/message/details, exactly like
       // an AppError thrown from a route handler.
-      errorResponseBuilder: (_request, context) => AppErrors.rateLimited(Math.ceil(context.ttl / 1000)),
+      errorResponseBuilder: (_request, context) =>
+        AppErrors.rateLimited(Math.ceil(context.ttl / 1000)),
     });
   },
   { name: 'rate-limit', dependencies: ['config', 'redis'] },

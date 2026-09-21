@@ -1,7 +1,13 @@
 // Token/password hashing helpers used across auth, devices, and anywhere else
 // a secret needs to be hashed-at-rest and compared safely.
 
-import { randomBytes, createHash, createCipheriv, createDecipheriv, timingSafeEqual } from 'node:crypto';
+import {
+  randomBytes,
+  createHash,
+  createCipheriv,
+  createDecipheriv,
+  timingSafeEqual,
+} from 'node:crypto';
 
 import argon2 from 'argon2';
 
@@ -73,7 +79,9 @@ export function encryptTotpSecret(secret: string, cookieSecret: string): Buffer 
   const keyId = activeTotpKeyId();
   const entry = registry.find((k) => k.id === keyId);
   if (!entry) {
-    throw new Error(`encryptTotpSecret: active key id "${keyId}" is not in the key registry (checked TOTP_ENCRYPTION_KEYS).`);
+    throw new Error(
+      `encryptTotpSecret: active key id "${keyId}" is not in the key registry (checked TOTP_ENCRYPTION_KEYS).`,
+    );
   }
   const iv = randomBytes(12);
   const cipher = createCipheriv('aes-256-gcm', deriveTotpKey(entry.material), iv);
@@ -103,7 +111,10 @@ export function decryptTotpSecret(blob: Buffer, cookieSecret: string): string {
 
   const registry = getTotpKeyRegistry(cookieSecret);
   const entry = registry.find((k) => k.id === keyId);
-  if (!entry) throw new Error(`decryptTotpSecret: unknown key id "${keyId}" — is it still listed in TOTP_ENCRYPTION_KEYS?`);
+  if (!entry)
+    throw new Error(
+      `decryptTotpSecret: unknown key id "${keyId}" — is it still listed in TOTP_ENCRYPTION_KEYS?`,
+    );
 
   const decipher = createDecipheriv('aes-256-gcm', deriveTotpKey(entry.material), iv);
   decipher.setAuthTag(tag);

@@ -39,8 +39,20 @@ export default fp(
             200: z.object({
               uptimeSeconds: z.number(),
               db: z.object({ connected: z.boolean() }),
-              redis: z.object({ connectedClients: z.string().optional(), usedMemory: z.string().optional(), uptimeInSeconds: z.string().optional() }),
-              queues: z.record(z.object({ waiting: z.number(), active: z.number(), completed: z.number(), failed: z.number(), delayed: z.number() })),
+              redis: z.object({
+                connectedClients: z.string().optional(),
+                usedMemory: z.string().optional(),
+                uptimeInSeconds: z.string().optional(),
+              }),
+              queues: z.record(
+                z.object({
+                  waiting: z.number(),
+                  active: z.number(),
+                  completed: z.number(),
+                  failed: z.number(),
+                  delayed: z.number(),
+                }),
+              ),
               wsOnlineUsers: z.number(),
               extensionVersions: z.record(z.number()),
               errorRateLast5Min: z.number(),
@@ -68,13 +80,22 @@ export default fp(
         // worker process sees" regardless of which DB *this* process is on).
         const { loadJobs } = await import('../../jobs/index.js');
         const jobs = await loadJobs().catch(() => []);
-        const queues: Record<string, { waiting: number; active: number; completed: number; failed: number; delayed: number }> = {};
+        const queues: Record<
+          string,
+          { waiting: number; active: number; completed: number; failed: number; delayed: number }
+        > = {};
         const probeConnection = new Redis(fastify.config.REDIS_URL, { maxRetriesPerRequest: null });
         try {
           for (const job of jobs) {
             const queue = new Queue(job.name, { connection: probeConnection });
             try {
-              const counts = await queue.getJobCounts('waiting', 'active', 'completed', 'failed', 'delayed');
+              const counts = await queue.getJobCounts(
+                'waiting',
+                'active',
+                'completed',
+                'failed',
+                'delayed',
+              );
               queues[job.name] = {
                 waiting: counts.waiting ?? 0,
                 active: counts.active ?? 0,
@@ -90,7 +111,9 @@ export default fp(
           probeConnection.disconnect();
         }
 
-        const deviceRows = await fastify.db.query.devices.findMany({ where: (d, { eq }) => eq(d.status, 'active') });
+        const deviceRows = await fastify.db.query.devices.findMany({
+          where: (d, { eq }) => eq(d.status, 'active'),
+        });
         const extensionVersions: Record<string, number> = {};
         for (const d of deviceRows) {
           const v = d.extensionVersion ?? 'unknown';
@@ -100,7 +123,11 @@ export default fp(
         return {
           uptimeSeconds: process.uptime(),
           db: { connected: dbConnected },
-          redis: { connectedClients: info.connected_clients, usedMemory: info.used_memory_human, uptimeInSeconds: info.uptime_in_seconds },
+          redis: {
+            connectedClients: info.connected_clients,
+            usedMemory: info.used_memory_human,
+            uptimeInSeconds: info.uptime_in_seconds,
+          },
           queues,
           wsOnlineUsers: await countOnline(fastify.redis),
           extensionVersions,

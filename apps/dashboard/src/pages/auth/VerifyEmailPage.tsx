@@ -7,7 +7,6 @@ import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 import { z } from 'zod';
 
-
 import { api, apiErrorMessage } from '@/api/client.js';
 
 const resendSchema = z.object({ email: emailSchema });
@@ -20,16 +19,23 @@ type ResendForm = z.infer<typeof resendSchema>;
 export function VerifyEmailPage() {
   const search = useSearch({ strict: false }) as { token?: string };
   const navigate = useNavigate();
-  const [status, setStatus] = useState<'idle' | 'verifying' | 'verified' | 'error'>(search.token ? 'verifying' : 'idle');
+  const [status, setStatus] = useState<'idle' | 'verifying' | 'verified' | 'error'>(
+    search.token ? 'verifying' : 'idle',
+  );
   const [submitting, setSubmitting] = useState(false);
 
-  const form = useForm<ResendForm>({ resolver: zodResolver(resendSchema), defaultValues: { email: '' } });
+  const form = useForm<ResendForm>({
+    resolver: zodResolver(resendSchema),
+    defaultValues: { email: '' },
+  });
 
   useEffect(() => {
     if (!search.token) return;
     let cancelled = false;
     void (async () => {
-      const { error } = await api.POST('/api/v1/auth/verify-email', { body: { token: search.token! } });
+      const { error } = await api.POST('/api/v1/auth/verify-email', {
+        body: { token: search.token! },
+      });
       if (cancelled) return;
       setStatus(error ? 'error' : 'verified');
     })();
@@ -56,7 +62,9 @@ export function VerifyEmailPage() {
   if (status === 'verifying') {
     return (
       <Card>
-        <CardContent className="pt-5 text-center text-sm text-ink-2">Verifying your email…</CardContent>
+        <CardContent className="pt-5 text-center text-sm text-ink-2">
+          Verifying your email…
+        </CardContent>
       </Card>
     );
   }

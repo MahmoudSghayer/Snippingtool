@@ -9,6 +9,7 @@ export default defineConfig({
     environment: 'node',
     include: ['src/**/*.test.ts'],
     setupFiles: ['src/setup.ts'],
+    globalSetup: ['src/global-setup.ts'],
     // Every test file builds its own app instance and truncates/flushes its
     // own state in beforeEach — matching @sl/api's own test convention —
     // but several suites here (rate-limit, lockout) depend on exact

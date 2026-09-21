@@ -5,8 +5,14 @@
  */
 
 const coinsFormatter = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
-const compactFormatter = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 });
-const percentFormatter = new Intl.NumberFormat('en-US', { style: 'percent', maximumFractionDigits: 1 });
+const compactFormatter = new Intl.NumberFormat('en-US', {
+  notation: 'compact',
+  maximumFractionDigits: 1,
+});
+const percentFormatter = new Intl.NumberFormat('en-US', {
+  style: 'percent',
+  maximumFractionDigits: 1,
+});
 
 /** EA FC coins — always a whole number, thousands-separated, no currency
  * symbol. Sign is preserved (net profit can be negative). */

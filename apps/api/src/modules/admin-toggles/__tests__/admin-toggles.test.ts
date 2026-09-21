@@ -18,13 +18,23 @@ import { signAccessToken } from '../../../lib/tokens.js';
 
 import type { FastifyInstance } from 'fastify';
 
-const device = { fingerprint: 'toggles-test-fingerprint-00001', name: 'Toggles Test', browser: 'chrome', os: 'linux', extensionVersion: '0.1.0' };
+const device = {
+  fingerprint: 'toggles-test-fingerprint-00001',
+  name: 'Toggles Test',
+  browser: 'chrome',
+  os: 'linux',
+  extensionVersion: '0.1.0',
+};
 
 function extractToken(html: string): string {
   return decodeURIComponent(html.match(/token=([A-Za-z0-9_-]+)/)![1]!);
 }
 
-async function createAdmin(app: FastifyInstance, adminRole: 'super_admin' | 'support' | 'analyst' | 'billing', email: string) {
+async function createAdmin(
+  app: FastifyInstance,
+  adminRole: 'super_admin' | 'support' | 'analyst' | 'billing',
+  email: string,
+) {
   const userId = newId();
   await app.db.insert(users).values({
     id: userId,
@@ -77,7 +87,10 @@ describe('admin-toggles module: kill-switch fan-out to online users', () => {
     await app.db.insert(featureToggles).values({ id: newId(), key: 'kill_switch', enabled: false });
   });
 
-  async function connectUser(email: string, ip: string): Promise<{ userId: string; socket: WebSocket; messages: unknown[] }> {
+  async function connectUser(
+    email: string,
+    ip: string,
+  ): Promise<{ userId: string; socket: WebSocket; messages: unknown[] }> {
     const registerRes = await app.inject({
       method: 'POST',
       url: '/api/v1/auth/register',
@@ -87,7 +100,12 @@ describe('admin-toggles module: kill-switch fan-out to online users', () => {
     expect(registerRes.statusCode).toBe(201);
     const mail = app.mailer.sentEmails.at(-1);
     const verifyToken = extractToken(mail!.html);
-    await app.inject({ method: 'POST', url: '/api/v1/auth/verify-email', remoteAddress: ip, payload: { token: verifyToken } });
+    await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/verify-email',
+      remoteAddress: ip,
+      payload: { token: verifyToken },
+    });
 
     const loginRes = await app.inject({
       method: 'POST',
@@ -98,7 +116,11 @@ describe('admin-toggles module: kill-switch fan-out to online users', () => {
     expect(loginRes.statusCode).toBe(200);
     const { accessToken } = loginRes.json();
 
-    const ticketRes = await app.inject({ method: 'POST', url: '/api/v1/ws/ticket', headers: { authorization: `Bearer ${accessToken}` } });
+    const ticketRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/ws/ticket',
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
     expect(ticketRes.statusCode).toBe(200);
     const { ticket } = ticketRes.json();
 
@@ -112,14 +134,20 @@ describe('admin-toggles module: kill-switch fan-out to online users', () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(messages[0]).toMatchObject({ type: 'connected' });
 
-    const decoded = JSON.parse(Buffer.from(accessToken.split('.')[1], 'base64url').toString('utf8'));
+    const decoded = JSON.parse(
+      Buffer.from(accessToken.split('.')[1], 'base64url').toString('utf8'),
+    );
     return { userId: decoded.sub as string, socket, messages };
   }
 
   it('delivers kill_switch to two distinct connected user sockets when an admin flips the toggle on', async () => {
     const userA = await connectUser('kill-switch-user-a@example.com', nextIp());
     const userB = await connectUser('kill-switch-user-b@example.com', nextIp());
-    const { token: adminToken } = await createAdmin(app, 'super_admin', 'kill-switch-admin@example.com');
+    const { token: adminToken } = await createAdmin(
+      app,
+      'super_admin',
+      'kill-switch-admin@example.com',
+    );
 
     const patchRes = await app.inject({
       method: 'PATCH',
@@ -137,7 +165,9 @@ describe('admin-toggles module: kill-switch fan-out to online users', () => {
       expect(pushed).toMatchObject({ type: 'kill_switch', active: true });
     }
 
-    const toggleRow = await app.db.query.featureToggles.findFirst({ where: eq(featureToggles.key, 'kill_switch') });
+    const toggleRow = await app.db.query.featureToggles.findFirst({
+      where: eq(featureToggles.key, 'kill_switch'),
+    });
     expect(toggleRow!.enabled).toBe(true);
 
     userA.socket.close();

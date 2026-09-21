@@ -108,8 +108,12 @@ describe('flagDtoSchema', () => {
 
 describe('reviewFlagRequestSchema', () => {
   it('accepts reviewed and dismissed as the only terminal statuses', () => {
-    expect(reviewFlagRequestSchema.safeParse({ status: 'reviewed', reason: 'confirmed' }).success).toBe(true);
-    expect(reviewFlagRequestSchema.safeParse({ status: 'dismissed', reason: 'false positive' }).success).toBe(true);
+    expect(
+      reviewFlagRequestSchema.safeParse({ status: 'reviewed', reason: 'confirmed' }).success,
+    ).toBe(true);
+    expect(
+      reviewFlagRequestSchema.safeParse({ status: 'dismissed', reason: 'false positive' }).success,
+    ).toBe(true);
     expect(reviewFlagRequestSchema.safeParse({ status: 'open', reason: 'x' }).success).toBe(false);
   });
 });

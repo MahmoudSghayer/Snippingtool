@@ -8,8 +8,8 @@ accessibility + page-by-page spec, plus the record of what this pass
 changed and verified. Read [`07-dashboard.md`](./07-dashboard.md) for the
 dashboard's information architecture, routing and data flow, and
 [`06-extension.md`](./06-extension.md) for the extension's, respectively —
-this document is about *how it looks and behaves*, those are about *how
-they're built*.
+this document is about _how it looks and behaves_, those are about _how
+they're built_.
 
 ## Contents
 
@@ -65,24 +65,24 @@ Dark theme only (`color-scheme: dark`); source of truth is
 
 ### Surfaces & ink (text/UI roles — tuned for small-text contrast)
 
-| Token | Hex | Tailwind | Role | Contrast |
-|---|---|---|---|---|
-| `--sl-ground` | `#0d1311` | `bg-ground` | Page background | — |
-| `--sl-surface` | `#151d1a` | `bg-surface` | Card/sidebar background | — |
-| `--sl-surface-2` | `#1b2522` | `bg-surface-2` | Raised surface (dropdown, input, table header) | — |
-| `--sl-line` | `#242f2b` | `border-line` | Borders/dividers | — |
-| `--sl-ink` | `#e7edea` | `text-ink` | Primary text | 15.83:1 vs ground, 14.48:1 vs surface — AAA |
-| `--sl-ink-2` | `#94a49e` | `text-ink-2` | Secondary/muted text | 7.21:1 vs ground, 6.60:1 vs surface — AAA |
-| `--sl-gold` | `#ddb35c` | `bg-gold` / `text-gold` | Accent, money, primary buttons | 9.55:1 vs ground, 8.00:1 vs surface-2 — AAA |
-| `--sl-green` | `#6fbf9b` | `bg-live` / `text-live` | Positive/live/profit status, badges | 8.59:1 vs ground, 7.20:1 vs surface-2 — AAA |
-| `--sl-red` | `#e08678` | `bg-risk` / `text-risk` | Negative/risk status, badges | 7.02:1 vs ground, 5.88:1 vs surface-2 — AA+ |
-| `--sl-mid` | `#d6a94e` | `text-risk-mid` | Warning midpoint | — |
+| Token            | Hex       | Tailwind                | Role                                           | Contrast                                    |
+| ---------------- | --------- | ----------------------- | ---------------------------------------------- | ------------------------------------------- |
+| `--sl-ground`    | `#0d1311` | `bg-ground`             | Page background                                | —                                           |
+| `--sl-surface`   | `#151d1a` | `bg-surface`            | Card/sidebar background                        | —                                           |
+| `--sl-surface-2` | `#1b2522` | `bg-surface-2`          | Raised surface (dropdown, input, table header) | —                                           |
+| `--sl-line`      | `#242f2b` | `border-line`           | Borders/dividers                               | —                                           |
+| `--sl-ink`       | `#e7edea` | `text-ink`              | Primary text                                   | 15.83:1 vs ground, 14.48:1 vs surface — AAA |
+| `--sl-ink-2`     | `#94a49e` | `text-ink-2`            | Secondary/muted text                           | 7.21:1 vs ground, 6.60:1 vs surface — AAA   |
+| `--sl-gold`      | `#ddb35c` | `bg-gold` / `text-gold` | Accent, money, primary buttons                 | 9.55:1 vs ground, 8.00:1 vs surface-2 — AAA |
+| `--sl-green`     | `#6fbf9b` | `bg-live` / `text-live` | Positive/live/profit status, badges            | 8.59:1 vs ground, 7.20:1 vs surface-2 — AAA |
+| `--sl-red`       | `#e08678` | `bg-risk` / `text-risk` | Negative/risk status, badges                   | 7.02:1 vs ground, 5.88:1 vs surface-2 — AA+ |
+| `--sl-mid`       | `#d6a94e` | `text-risk-mid`         | Warning midpoint                               | —                                           |
 
 All body-text and status-badge contrast ratios above were computed against
 every surface they're actually painted on (ground/surface/surface-2) and
 clear **WCAG AA (4.5:1)** for normal text with margin to spare — most clear
-AAA (7:1). `--sl-gold-ink`/`--sl-accent-ink` (`#221a0b`) is the *dark* text
-color used *on top of* a solid gold button/badge fill, not gold text on
+AAA (7:1). `--sl-gold-ink`/`--sl-accent-ink` (`#221a0b`) is the _dark_ text
+color used _on top of_ a solid gold button/badge fill, not gold text on
 dark — that pairing is checked separately per component (Button primary:
 `#221a0b` on `#ddb35c` = 11.7:1).
 
@@ -103,14 +103,14 @@ node scripts/validate_palette.js \
 → ALL CHECKS PASS (lightness band, chroma floor, adjacent CVD ΔE, normal-vision floor, contrast)
 ```
 
-| Slot | Hex | Role |
-|---|---|---|
+| Slot           | Hex       | Role                                              |
+| -------------- | --------- | ------------------------------------------------- |
 | `--sl-chart-1` | `#35a87e` | green — "positive" series (also `POSITIVE_COLOR`) |
-| `--sl-chart-2` | `#b96fd9` | purple |
-| `--sl-chart-3` | `#d9584a` | red — "negative" series (also `NEGATIVE_COLOR`) |
-| `--sl-chart-4` | `#2fa8ad` | teal |
-| `--sl-chart-5` | `#b9822a` | gold |
-| `--sl-chart-6` | `#4f7fd9` | blue |
+| `--sl-chart-2` | `#b96fd9` | purple                                            |
+| `--sl-chart-3` | `#d9584a` | red — "negative" series (also `NEGATIVE_COLOR`)   |
+| `--sl-chart-4` | `#2fa8ad` | teal                                              |
+| `--sl-chart-5` | `#b9822a` | gold                                              |
+| `--sl-chart-6` | `#4f7fd9` | blue                                              |
 
 **Order is the CVD-safety mechanism, not cosmetic** — slots 2/6
 (purple/blue) and 3/5 (red/gold) are deliberately non-adjacent because
@@ -147,16 +147,16 @@ same way.
   `input[type=number]` get `font-variant-numeric: tabular-nums` globally
   (`global.css`) so digit columns never jitter.
 
-| Role | Class | Size / weight |
-|---|---|---|
-| Page title (`PageHeader`) | `text-xl font-semibold` | 20px / 600 |
-| Card title | `text-base font-semibold` | 16px / 600 |
-| Body | `text-sm` | 14px / 400 |
-| Secondary / muted | `text-sm text-ink-2` | 14px / 400, `--sl-ink-2` |
-| Label / eyebrow (StatTile label, table header) | `text-xs font-medium uppercase tracking-wide` | 12px / 500 |
-| KPI value (StatTile) | `font-mono text-2xl font-semibold tabular-nums` | 24px / 600 |
-| Table cell (numeric) | `font-mono tabular-nums` | 14px / 400 |
-| Micro (badges, kbd hints) | `text-xs` | 12px |
+| Role                                           | Class                                           | Size / weight            |
+| ---------------------------------------------- | ----------------------------------------------- | ------------------------ |
+| Page title (`PageHeader`)                      | `text-xl font-semibold`                         | 20px / 600               |
+| Card title                                     | `text-base font-semibold`                       | 16px / 600               |
+| Body                                           | `text-sm`                                       | 14px / 400               |
+| Secondary / muted                              | `text-sm text-ink-2`                            | 14px / 400, `--sl-ink-2` |
+| Label / eyebrow (StatTile label, table header) | `text-xs font-medium uppercase tracking-wide`   | 12px / 500               |
+| KPI value (StatTile)                           | `font-mono text-2xl font-semibold tabular-nums` | 24px / 600               |
+| Table cell (numeric)                           | `font-mono tabular-nums`                        | 14px / 400               |
+| Micro (badges, kbd hints)                      | `text-xs`                                       | 12px                     |
 
 ## 4. Spacing, radius, elevation
 
@@ -169,19 +169,19 @@ same way.
   inputs), `--sl-radius-md` 10px (buttons md/lg, modals), `--sl-radius-lg`
   14px (cards, tables, the command palette).
 - **Elevation** is border + shadow, not a blur/opacity stack: `border
-  border-line` on every raised surface, `shadow-xl`/`shadow-2xl` only on
+border-line` on every raised surface, `shadow-xl`/`shadow-2xl` only on
   floating layers (dropdowns, tooltips, modals, drawers, the command
   palette, toasts) — cards and tables sit flush on the page with a border
   only, keeping the dense layout calm.
 
 ## 5. Motion
 
-| Token | Value | Use |
-|---|---|---|
-| `--sl-motion-fast` | 150ms | Hover/active state changes (button brightness, row hover) |
-| `--sl-motion-base` | 200ms | Default transition duration |
-| `--sl-motion-slow` | 250ms | Modal/drawer/palette open-close, toast enter |
-| `--sl-ease` | `cubic-bezier(0.4, 0, 0.2, 1)` | Standard ease for all of the above |
+| Token              | Value                          | Use                                                       |
+| ------------------ | ------------------------------ | --------------------------------------------------------- |
+| `--sl-motion-fast` | 150ms                          | Hover/active state changes (button brightness, row hover) |
+| `--sl-motion-base` | 200ms                          | Default transition duration                               |
+| `--sl-motion-slow` | 250ms                          | Modal/drawer/palette open-close, toast enter              |
+| `--sl-ease`        | `cubic-bezier(0.4, 0, 0.2, 1)` | Standard ease for all of the above                        |
 
 All zeroed under `@media (prefers-reduced-motion: reduce)`
 (`tokens.css`), which also forces every CSS animation/transition
@@ -254,7 +254,7 @@ surface area — the rest follow the same tokens and are simpler variations.
   click-to-cycle header button with an `ArrowUp`/`ArrowDown`/`ArrowUpDown`
   glyph (never color-only sort indication). **Sticky header** (`thead`
   `sticky top-0 z-10`, `bg-surface-2`) inside a `max-h-[70vh]
-  overflow-auto` scroll region — long tables (users, audit log, activity)
+overflow-auto` scroll region — long tables (users, audit log, activity)
   keep their column headers on screen while the body scrolls, rather than
   scrolling the header off with the page. Built-in states: loading
   (skeleton rows, count via `skeletonRows`), error (`EmptyState` + Retry
@@ -309,7 +309,7 @@ surface area — the rest follow the same tokens and are simpler variations.
 - Now supports `side="left" | "right"` (was right-only) and an optional
   chrome-less mode (`title` omitted — a `sr-only` "Navigation" title is
   substituted so Radix's a11y requirement is still met). `side="left"
-  width="nav"` is exactly the mobile off-canvas sidebar (§9); `side="right"`
+width="nav"` is exactly the mobile off-canvas sidebar (§9); `side="right"`
   (default) is unchanged — user/audit detail panels.
 
 ### Other components (brief)
@@ -372,7 +372,7 @@ accidentally violate them:
   sparse event log where a missing point is itself the signal), so a
   bucket with no data bridges the line instead of breaking it. Pass
   `connectNulls={false}` explicitly for a future chart where a real gap
-  *is* meaningful.
+  _is_ meaningful.
 - **Responsive containers, reserved heights.** Every chart wrapper is
   `<ResponsiveContainer width="100%" height="100%">` inside `ChartCard`'s
   fixed-height (`height`, default 280px) box — the container never
@@ -391,11 +391,11 @@ accidentally violate them:
 Tailwind v4 defaults: `sm` 640px, `md` 768px, `lg` 1024px, `xl` 1280px,
 `2xl` 1536px. The three breakpoints named in the brief map to:
 
-| Viewport | Breakpoint | Shell behavior |
-|---|---|---|
-| 390px (mobile) | `< sm` | Sidebar **hidden**, replaced by a hamburger button (topbar, left) opening a `Drawer side="left" width="nav"` off-canvas nav (same `Sidebar` content, closes on link tap). Topbar collapses: connection dot/label and the "Admin" badge hide (`hidden sm:flex`/`sm:inline-flex`), the "Search ⌘K" button becomes an icon-only button, the user email hides (`hidden md:inline`). KPI grids go to 1 column, chart grids to 1 column, page padding tightens to `px-4`. |
-| 768px (tablet) | `sm`–`lg` | Sidebar still hidden (drawer nav) below `lg` — a docked sidebar at 768px would leave too little width for a data table. KPI grids reach 2 columns (`sm:grid-cols-2`), chart grids stay 1 column until `lg`. Topbar regains the connection indicator and full "Search" button. |
-| 1440px (desktop) | `≥ lg`/`xl` | Docked sidebar (`hidden lg:flex`, 256px). KPI grids reach 4 columns (`lg:grid-cols-4`), chart/analytics grids reach 2–3 columns (`lg:grid-cols-2`/`lg:grid-cols-3`), full topbar. |
+| Viewport         | Breakpoint  | Shell behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ---------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 390px (mobile)   | `< sm`      | Sidebar **hidden**, replaced by a hamburger button (topbar, left) opening a `Drawer side="left" width="nav"` off-canvas nav (same `Sidebar` content, closes on link tap). Topbar collapses: connection dot/label and the "Admin" badge hide (`hidden sm:flex`/`sm:inline-flex`), the "Search ⌘K" button becomes an icon-only button, the user email hides (`hidden md:inline`). KPI grids go to 1 column, chart grids to 1 column, page padding tightens to `px-4`. |
+| 768px (tablet)   | `sm`–`lg`   | Sidebar still hidden (drawer nav) below `lg` — a docked sidebar at 768px would leave too little width for a data table. KPI grids reach 2 columns (`sm:grid-cols-2`), chart grids stay 1 column until `lg`. Topbar regains the connection indicator and full "Search" button.                                                                                                                                                                                       |
+| 1440px (desktop) | `≥ lg`/`xl` | Docked sidebar (`hidden lg:flex`, 256px). KPI grids reach 4 columns (`lg:grid-cols-4`), chart/analytics grids reach 2–3 columns (`lg:grid-cols-2`/`lg:grid-cols-3`), full topbar.                                                                                                                                                                                                                                                                                   |
 
 Tables don't switch to a card-row layout at mobile width — the brand's
 "dense, tabular" principle (§1) and the sniping-companion audience (who
@@ -568,16 +568,17 @@ bespoke layout.
   `playwright.config.ts`; these numbers are directional, not a
   Lighthouse-grade production budget):
 
-  | Page | TTFB | FCP | LCP | CLS |
-  |---|---|---|---|---|
-  | `/dashboard` (1440px, authenticated) | 5ms | 412ms | 544ms | 0.00004 |
-  | `/login` (1440px) | 5ms | 408ms | 460ms | 0 |
+  | Page                                 | TTFB | FCP   | LCP   | CLS     |
+  | ------------------------------------ | ---- | ----- | ----- | ------- |
+  | `/dashboard` (1440px, authenticated) | 5ms  | 412ms | 544ms | 0.00004 |
+  | `/login` (1440px)                    | 5ms  | 408ms | 460ms | 0       |
 
   CLS ≈ 0 on both confirms the "no layout shift" claims above in practice,
   not just by construction. FCP/LCP under 550ms on an unminified dev
   bundle is a reasonable floor; expect both lower still against the
   minified production build (`vite preview`) given the code-splitting in
   §12's chunk listing.
+
 - **Known cost**: the entry chunk (`index-*.js`) is 624KB / 192KB gzip —
   above the 500KB warning threshold `vite build` prints. This is
   React 19 + TanStack Router/Query + Zustand + the design system's Radix
@@ -687,12 +688,12 @@ implementations — this pass is polish, not a rebuild):
   **fixed device fingerprint** via `page.addInitScript` (overriding
   `src/lib/device.ts`'s normal random-per-browser-profile one) — without
   that, three spec files' three separately-isolated Playwright contexts
-  would each register a *different* device, and the seeded admin's
+  would each register a _different_ device, and the seeded admin's
   plan-less device limit is 1.
 - `playwright.config.ts` now sets `workers: 1` — a correctness
   requirement, not a performance choice, once multiple spec files share
   one seeded admin's login state as above; `fullyParallel: false` alone
-  only serialises tests *within* a file, not across files.
+  only serialises tests _within_ a file, not across files.
 
 ### Verification run
 
@@ -758,7 +759,7 @@ disk. This resume:
   stays as documented in §13's original scope decision (the brief's 8 named
   pages). The bug the expansion surfaced (item 13 above) was kept since it's
   real and independently verified; **`/admin/{users,profits,activity,
-  system,subscriptions,coupons,plans,flags,bans,feature-toggles,config}`
+system,subscriptions,coupons,plans,flags,bans,feature-toggles,config}`
   still have no dedicated screenshots** — flagged in §14.
 
   **Update, docs/12-testing.md "Defects found" #10**: closed. The rate
@@ -770,6 +771,7 @@ disk. This resume:
   `apps/api`'s own defaults) let the full ~19-page × 3-breakpoint session
   run without a 429, so the expansion this note describes reverting is now
   back in, in `visual-smoke.spec.ts` — see §14.
+
 - Extension work (`apps/extension/src/{popup,options,ui}`, shared tokens,
   segmented risk gauge, panel sparkline/P&L styling, "What it sends" page,
   `apps/extension/screenshots/`) was gated on `docs/09-security.md`
@@ -806,7 +808,7 @@ disk. This resume:
 - ~~**Screenshots for the 11 admin CRUD sub-pages**~~ — **closed**
   (docs/12-testing.md "Defects found" #10). `visual-smoke.spec.ts` now
   visits and screenshots `/admin/{users,profits,activity,system,
-  subscriptions,coupons,plans,flags,bans,feature-toggles,config}` at all
+subscriptions,coupons,plans,flags,bans,feature-toggles,config}` at all
   three breakpoints, on top of the original 8 named pages. §13a's real
   global-rate-limit trip (`RATE_LIMIT_GLOBAL_MAX=300 req/60s` against one
   continuous ~19-page × 3-breakpoint admin session) is fixed the way that
@@ -822,7 +824,7 @@ disk. This resume:
   spec to find and fix two real bugs (a Google Fonts `<link>` that failed
   outright on a network with no route to `fonts.googleapis.com`, and two
   unlabeled "Add filter" inputs — a critical axe violation). Follow-ups
-  from that work specifically: the popup previously had no *live* risk
+  from that work specifically: the popup previously had no _live_ risk
   gauge (only the in-page panel did) — closed, see §15's "Segmented risk
   gauge"; the panel's font stays system-ui rather than Inter/JetBrains
   Mono (a deliberate CSP/host-page call, also explained in §15);
@@ -854,12 +856,12 @@ contexts:
   run in the extension's own `chrome-extension://` origin, an ordinary
   `<head>`, no different from any other page.
 - `ui/panel.ts` (the in-page, shadow-DOM panel injected into EA's page)
-  imports the file's *text* at build time (Vite's `?raw` import) and swaps
+  imports the file's _text_ at build time (Vite's `?raw` import) and swaps
   `:root` for `:host` before splicing it into the shadow root's `<style>` —
   custom properties are inherited properties, but nothing on EA's own page
   defines `--sl-*`, so the shadow tree needs its own top-level declaration
   rather than relying on inheritance from a `:root` it isn't part of. This
-  is a real build-time copy of the shared file's *values*, not a
+  is a real build-time copy of the shared file's _values_, not a
   hand-retyped approximation — the previous popup/panel palettes were both
   close-but-not-exact hand-typed hex (e.g. panel.ts's old `#55c08e` vs the
   shared token's `#6fbf9b` for "positive") that had drifted from the
@@ -895,7 +897,7 @@ Inter is fine — extensions should not load Google Fonts." **The in-page
 panel already followed this rule** — it renders inside a shadow root
 injected into EA's page via the content script, so a `<style>`-level
 `@import`/external `<link>` there would be a cross-origin stylesheet
-request made *from EA's own page's execution context*, subject to EA's
+request made _from EA's own page's execution context_, subject to EA's
 CSP, not the extension's; `host_permissions` are EA's domains plus the API
 origin only (project instruction 6), so a remote font was already out of
 scope there. The panel keeps its `system-ui` stack.
@@ -921,7 +923,7 @@ to system fonts.
 ("high", amber) and 100% ("over", red) of the governor's live limit — this
 pass adds two permanent tick marks to the track itself (a `::after`
 gradient at exactly those two thresholds, in `--sl-ground` for contrast
-against every fill color), so the *shape* of the gauge shows the safety
+against every fill color), so the _shape_ of the gauge shows the safety
 zones even before the fill's color crosses into one — matching the same
 visual language the dashboard's own meters would use. Popup/style.css
 carries the identical tick-mark treatment on its own `.meter` (for visual
@@ -1053,7 +1055,7 @@ xvfb-run -a pnpm --filter @sl/extension test:e2e   # 7 passed:
 
 ### Bundle size — panel/content, before vs. after
 
-No clean *pre*-design-system build exists to diff against:
+No clean _pre_-design-system build exists to diff against:
 `apps/extension/src/styles/tokens.css` and the popup/options/panel tokens
 work were all introduced together in the same commit
 (`git log --diff-filter=A -- apps/extension/src/styles/tokens.css` →
@@ -1061,7 +1063,7 @@ work were all introduced together in the same commit
 concerns), so there is no earlier commit with a buildable, tokens-free
 extension to compare against. `69360f7` itself doesn't build at all: its
 `ui/panel.ts` has a real syntax bug (a literal backtick inside a `` ` ``-CSS-
-comment *inside* the `css` template literal terminates the string early,
+comment _inside_ the `css` template literal terminates the string early,
 `Expected ";" but found "meterClass"`) — fixed by a later commit in this
 same pass before this document's own §15 was written. Confirmed by actually
 trying: `git worktree add` at `69360f7`, `pnpm install`, then
@@ -1069,21 +1071,21 @@ trying: `git worktree add` at `69360f7`, `pnpm install`, then
 error. Per this pass's own instructions, reporting **current sizes only**
 in that case:
 
-| File | Size | Gzip |
-| --- | --- | --- |
-| `adapter.js` (MAIN world; no panel code) | 5.63 kB | 1.82 kB |
+| File                                                  | Size     | Gzip     |
+| ----------------------------------------------------- | -------- | -------- |
+| `adapter.js` (MAIN world; no panel code)              | 5.63 kB  | 1.82 kB  |
 | `content.js` (ISOLATED world — bundles `ui/panel.ts`) | 36.08 kB | 12.19 kB |
-| `popup.js` | 4.60 kB | 1.61 kB |
-| `assets/popup-*.css` | 2.87 kB | 0.99 kB |
-| `options.js` | 10.84 kB | 3.87 kB |
-| `assets/options-*.css` | 2.89 kB | 0.98 kB |
+| `popup.js`                                            | 4.60 kB  | 1.61 kB  |
+| `assets/popup-*.css`                                  | 2.87 kB  | 0.99 kB  |
+| `options.js`                                          | 10.84 kB | 3.87 kB  |
+| `assets/options-*.css`                                | 2.89 kB  | 0.98 kB  |
 
 (`dist/ledger-auto/content.js` is 38.97 kB / 13.02 kB gzip — larger than
 `dist/ledger`'s by the autobuyer module, expected and unrelated to the
 panel.) The two real fixes this pass made inside `ui/panel.ts`/`style.css`
 (risk-gauge tick marks, tokens migration) predate this document's own
 §15 draft and are already reflected in the numbers above — nothing in
-*this* correction pass touched `ui/panel.ts`'s size at all (the two bugs
+_this_ correction pass touched `ui/panel.ts`'s size at all (the two bugs
 found and fixed were in `options/main.ts` and the two `index.html` files).
 
 ### Screenshot inventory

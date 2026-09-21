@@ -28,20 +28,20 @@ listable build free of automation code). What remains is the go-live work
 that needs the live market, real accounts or infrastructure: see the go-live
 checklist at the end.
 
-| Phase | Status | Evidence |
-| --- | --- | --- |
-| 1 Architecture | Done | `docs/01-architecture.md`, `packages/shared` (142 tests) |
-| 2 Database | Done | 26 migrations, `packages/db` (71 tests), `docs/02-database.md` |
-| 3 Backend API | Done | 110+ OpenAPI routes, `apps/api` (198 tests), `docs/03-api.md` |
-| 4 Authentication | Done | `docs/04-auth.md`, auth + cookie attribute tests |
-| 5 Subscriptions | Done | `docs/05-subscriptions.md`, Stripe webhook + trial-abuse tests |
-| 6 Extension | Done | `apps/extension` (87 unit tests, 7 e2e), `docs/06-extension.md` |
-| 7 Dashboard | Done | `apps/dashboard` + `packages/ui`, e2e with axe, `docs/07-dashboard.md` |
-| 8 Analytics | Done | `docs/08-analytics.md`, materialisation jobs, exports |
-| 9 Security | Done | `tests/security` (167 tests), `docs/09-security.md`, `docs/threat-model.md` |
-| 10 UI/UX | Done | `docs/10-design-system.md`, 60 dashboard + 3 extension screenshots |
-| 11 Testing | Done | `tests/e2e`, `tests/load`, coverage, `docs/12-testing.md` |
-| DevOps | Done | `infra/`, `.github/workflows`, `docs/11-devops.md` |
+| Phase            | Status | Evidence                                                                    |
+| ---------------- | ------ | --------------------------------------------------------------------------- |
+| 1 Architecture   | Done   | `docs/01-architecture.md`, `packages/shared` (142 tests)                    |
+| 2 Database       | Done   | 26 migrations, `packages/db` (71 tests), `docs/02-database.md`              |
+| 3 Backend API    | Done   | 110+ OpenAPI routes, `apps/api` (198 tests), `docs/03-api.md`               |
+| 4 Authentication | Done   | `docs/04-auth.md`, auth + cookie attribute tests                            |
+| 5 Subscriptions  | Done   | `docs/05-subscriptions.md`, Stripe webhook + trial-abuse tests              |
+| 6 Extension      | Done   | `apps/extension` (87 unit tests, 7 e2e), `docs/06-extension.md`             |
+| 7 Dashboard      | Done   | `apps/dashboard` + `packages/ui`, e2e with axe, `docs/07-dashboard.md`      |
+| 8 Analytics      | Done   | `docs/08-analytics.md`, materialisation jobs, exports                       |
+| 9 Security       | Done   | `tests/security` (167 tests), `docs/09-security.md`, `docs/threat-model.md` |
+| 10 UI/UX         | Done   | `docs/10-design-system.md`, 60 dashboard + 3 extension screenshots          |
+| 11 Testing       | Done   | `tests/e2e`, `tests/load`, coverage, `docs/12-testing.md`                   |
+| DevOps           | Done   | `infra/`, `.github/workflows`, `docs/11-devops.md`                          |
 
 Open items carried into go-live (tracked in `docs/12-testing.md` §12 and
 `docs/09-security.md` "Open findings"): the cross-app e2e journey for the

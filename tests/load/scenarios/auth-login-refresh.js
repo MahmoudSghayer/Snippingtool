@@ -21,7 +21,10 @@ import { SharedArray } from 'k6/data';
 
 import { BASE_URL, jsonHeaders, scenarioOptions, thresholds } from '../lib/config.js';
 
-const fixtures = new SharedArray('authUsers', () => JSON.parse(open('../.artifacts/fixtures.json')).authUsers);
+const fixtures = new SharedArray(
+  'authUsers',
+  () => JSON.parse(open('../.artifacts/fixtures.json')).authUsers,
+);
 const PASSWORD = JSON.parse(open('../.artifacts/fixtures.json')).password;
 
 export const options = { ...scenarioOptions(), thresholds: thresholds() };
@@ -35,7 +38,11 @@ export default function () {
   // `device('a' + i)` seed for this exact pool.
   const device = { fingerprint: `load-a${fixtures.indexOf(user)}-${'x'.repeat(24)}`.slice(0, 64) };
 
-  const loginRes = http.post(`${BASE_URL}/api/v1/auth/login`, JSON.stringify({ email: user.email, password: PASSWORD, device }), { headers: jsonHeaders() });
+  const loginRes = http.post(
+    `${BASE_URL}/api/v1/auth/login`,
+    JSON.stringify({ email: user.email, password: PASSWORD, device }),
+    { headers: jsonHeaders() },
+  );
   const loginOk = check(loginRes, {
     'login: 200': (r) => r.status === 200,
     'login: status ok': (r) => {
@@ -49,7 +56,11 @@ export default function () {
 
   if (loginOk) {
     const { refreshToken } = JSON.parse(loginRes.body);
-    const refreshRes = http.post(`${BASE_URL}/api/v1/auth/refresh`, JSON.stringify({ refreshToken }), { headers: jsonHeaders() });
+    const refreshRes = http.post(
+      `${BASE_URL}/api/v1/auth/refresh`,
+      JSON.stringify({ refreshToken }),
+      { headers: jsonHeaders() },
+    );
     check(refreshRes, {
       'refresh: 200': (r) => r.status === 200,
       'refresh: got a new access token': (r) => {

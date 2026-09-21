@@ -21,7 +21,10 @@ export default async function setup() {
   process.env.NODE_ENV ??= 'test';
   await migrateTestDatabase();
 
-  const redis = new Redis(process.env.REDIS_URL ?? 'redis://127.0.0.1:6379', { db: TEST_REDIS_DB, maxRetriesPerRequest: 1 });
+  const redis = new Redis(process.env.REDIS_URL ?? 'redis://127.0.0.1:6379', {
+    db: TEST_REDIS_DB,
+    maxRetriesPerRequest: 1,
+  });
   await redis.flushdb();
   redis.disconnect();
 }

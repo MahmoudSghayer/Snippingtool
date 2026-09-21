@@ -15,12 +15,17 @@ import { decodeJwt } from 'jose';
 import { authenticator } from 'otplib';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-
 import { buildApp } from '../../../app.js';
 
 import type { FastifyInstance } from 'fastify';
 
-const device = { fingerprint: 'test-fingerprint-0000000000000001', name: 'Test Device', browser: 'chrome', os: 'linux', extensionVersion: '1.0.0' };
+const device = {
+  fingerprint: 'test-fingerprint-0000000000000001',
+  name: 'Test Device',
+  browser: 'chrome',
+  os: 'linux',
+  extensionVersion: '1.0.0',
+};
 
 let ipCounter = 1;
 function nextIp(): string {
@@ -66,7 +71,12 @@ describe('auth module', () => {
     expect(mail?.to).toBe(email);
     const token = extractToken(mail!.html);
 
-    const verifyRes = await app.inject({ method: 'POST', url: '/api/v1/auth/verify-email', remoteAddress: ip, payload: { token } });
+    const verifyRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/verify-email',
+      remoteAddress: ip,
+      payload: { token },
+    });
     expect(verifyRes.statusCode).toBe(200);
 
     return userId as string;
@@ -102,9 +112,19 @@ describe('auth module', () => {
   it('rejects login before email verification', async () => {
     const ip = nextIp();
     const email = 'unverified@example.com';
-    await app.inject({ method: 'POST', url: '/api/v1/auth/register', remoteAddress: ip, payload: { email, password: 'correcthorsebattery12', device } });
+    await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      remoteAddress: ip,
+      payload: { email, password: 'correcthorsebattery12', device },
+    });
 
-    const res = await app.inject({ method: 'POST', url: '/api/v1/auth/login', remoteAddress: ip, payload: { email, password: 'correcthorsebattery12', device } });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      remoteAddress: ip,
+      payload: { email, password: 'correcthorsebattery12', device },
+    });
     expect(res.statusCode).toBe(403);
     expect(res.json().code).toBe('AUTH_EMAIL_NOT_VERIFIED');
   });
@@ -113,25 +133,50 @@ describe('auth module', () => {
     const ip = nextIp();
     const email = 'rotation@example.com';
     await registerAndVerify(email, ip);
-    const loginRes = await app.inject({ method: 'POST', url: '/api/v1/auth/login', remoteAddress: ip, payload: { email, password: 'correcthorsebattery12', device } });
+    const loginRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      remoteAddress: ip,
+      payload: { email, password: 'correcthorsebattery12', device },
+    });
     const { refreshToken: rt1 } = loginRes.json();
 
-    const refresh1 = await app.inject({ method: 'POST', url: '/api/v1/auth/refresh', remoteAddress: ip, payload: { refreshToken: rt1 } });
+    const refresh1 = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/refresh',
+      remoteAddress: ip,
+      payload: { refreshToken: rt1 },
+    });
     expect(refresh1.statusCode).toBe(200);
     const { refreshToken: rt2 } = refresh1.json();
     expect(rt2).not.toBe(rt1);
 
     // rt2 (current) still works
-    const refresh2 = await app.inject({ method: 'POST', url: '/api/v1/auth/refresh', remoteAddress: ip, payload: { refreshToken: rt2 } });
+    const refresh2 = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/refresh',
+      remoteAddress: ip,
+      payload: { refreshToken: rt2 },
+    });
     expect(refresh2.statusCode).toBe(200);
 
     // rt1 was already rotated away — reusing it must fail AND revoke the family
-    const reuse = await app.inject({ method: 'POST', url: '/api/v1/auth/refresh', remoteAddress: ip, payload: { refreshToken: rt1 } });
+    const reuse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/refresh',
+      remoteAddress: ip,
+      payload: { refreshToken: rt1 },
+    });
     expect(reuse.statusCode).toBe(401);
     expect(reuse.json().code).toBe('AUTH_TOKEN_REUSED');
 
     const { refreshToken: rt3 } = refresh2.json();
-    const afterRevoke = await app.inject({ method: 'POST', url: '/api/v1/auth/refresh', remoteAddress: ip, payload: { refreshToken: rt3 } });
+    const afterRevoke = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/refresh',
+      remoteAddress: ip,
+      payload: { refreshToken: rt3 },
+    });
     expect(afterRevoke.statusCode).toBe(401);
   });
 
@@ -141,11 +186,21 @@ describe('auth module', () => {
     await registerAndVerify(email, ip);
 
     for (let i = 0; i < 5; i++) {
-      const res = await app.inject({ method: 'POST', url: '/api/v1/auth/login', remoteAddress: ip, payload: { email, password: 'wrong-password-123', device } });
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/login',
+        remoteAddress: ip,
+        payload: { email, password: 'wrong-password-123', device },
+      });
       expect(res.statusCode).toBe(401);
     }
 
-    const res = await app.inject({ method: 'POST', url: '/api/v1/auth/login', remoteAddress: ip, payload: { email, password: 'correcthorsebattery12', device } });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      remoteAddress: ip,
+      payload: { email, password: 'correcthorsebattery12', device },
+    });
     expect(res.statusCode).toBe(423);
     expect(res.json().code).toBe('AUTH_ACCOUNT_LOCKED');
   });
@@ -154,7 +209,12 @@ describe('auth module', () => {
     const ip = nextIp();
     const email = '2fa@example.com';
     await registerAndVerify(email, ip);
-    const loginRes = await app.inject({ method: 'POST', url: '/api/v1/auth/login', remoteAddress: ip, payload: { email, password: 'correcthorsebattery12', device } });
+    const loginRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      remoteAddress: ip,
+      payload: { email, password: 'correcthorsebattery12', device },
+    });
     const { accessToken } = loginRes.json();
 
     const enrollRes = await app.inject({
@@ -180,7 +240,12 @@ describe('auth module', () => {
     expect(confirmRes.json().enabled).toBe(true);
 
     // Next login now requires MFA step-up.
-    const secondLogin = await app.inject({ method: 'POST', url: '/api/v1/auth/login', remoteAddress: ip, payload: { email, password: 'correcthorsebattery12', device } });
+    const secondLogin = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      remoteAddress: ip,
+      payload: { email, password: 'correcthorsebattery12', device },
+    });
     expect(secondLogin.statusCode).toBe(200);
     const pending = secondLogin.json();
     expect(pending.status).toBe('mfa_required');
@@ -201,7 +266,12 @@ describe('auth module', () => {
 
     const userEmail = 'ttl-user@example.com';
     await registerAndVerify(userEmail, ip);
-    const userLogin = await app.inject({ method: 'POST', url: '/api/v1/auth/login', remoteAddress: ip, payload: { email: userEmail, password: 'correcthorsebattery12', device } });
+    const userLogin = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      remoteAddress: ip,
+      payload: { email: userEmail, password: 'correcthorsebattery12', device },
+    });
     expect(userLogin.statusCode).toBe(200);
     const userBody = userLogin.json();
     expect(userBody.expiresIn).toBe(15 * 60);
@@ -214,14 +284,29 @@ describe('auth module', () => {
     const adminEmail = 'ttl-admin@example.com';
     const adminUserId = await registerAndVerify(adminEmail, ip);
     await app.db.update(users).set({ role: 'admin' }).where(eq(users.id, adminUserId));
-    await app.db.insert(adminUsers).values({ id: crypto.randomUUID(), userId: adminUserId, adminRole: 'super_admin', permissions: {} });
+    await app.db.insert(adminUsers).values({
+      id: crypto.randomUUID(),
+      userId: adminUserId,
+      adminRole: 'super_admin',
+      permissions: {},
+    });
 
-    const adminLogin = await app.inject({ method: 'POST', url: '/api/v1/auth/login', remoteAddress: ip, payload: { email: adminEmail, password: 'correcthorsebattery12', device } });
+    const adminLogin = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      remoteAddress: ip,
+      payload: { email: adminEmail, password: 'correcthorsebattery12', device },
+    });
     expect(adminLogin.statusCode).toBe(200);
     const adminPending = adminLogin.json();
     expect(adminPending.status).toBe('mfa_required'); // admin accounts must enrol 2FA (docs/04-auth.md §6)
 
-    const enrollRes = await app.inject({ method: 'POST', url: '/api/v1/auth/totp/enroll', remoteAddress: ip, payload: { mfaTicket: adminPending.mfaTicket } });
+    const enrollRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/totp/enroll',
+      remoteAddress: ip,
+      payload: { mfaTicket: adminPending.mfaTicket },
+    });
     const { secret } = enrollRes.json();
     const confirmRes = await app.inject({
       method: 'POST',
@@ -246,11 +331,21 @@ describe('auth module', () => {
 
     // trial (no subscription) device limit is 1 — a second distinct device
     // should be rejected with DEVICE_LIMIT_REACHED.
-    const first = await app.inject({ method: 'POST', url: '/api/v1/auth/login', remoteAddress: ip, payload: { email, password: 'correcthorsebattery12', device } });
+    const first = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      remoteAddress: ip,
+      payload: { email, password: 'correcthorsebattery12', device },
+    });
     expect(first.statusCode).toBe(200);
 
     const secondDevice = { ...device, fingerprint: 'different-fingerprint-000000002' };
-    const second = await app.inject({ method: 'POST', url: '/api/v1/auth/login', remoteAddress: ip, payload: { email, password: 'correcthorsebattery12', device: secondDevice } });
+    const second = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      remoteAddress: ip,
+      payload: { email, password: 'correcthorsebattery12', device: secondDevice },
+    });
     expect(second.statusCode).toBe(409);
     const body = second.json();
     expect(body.code).toBe('DEVICE_LIMIT_REACHED');
@@ -262,10 +357,20 @@ describe('auth module', () => {
     const ip = nextIp();
     const email = 'reset@example.com';
     await registerAndVerify(email, ip);
-    const loginRes = await app.inject({ method: 'POST', url: '/api/v1/auth/login', remoteAddress: ip, payload: { email, password: 'correcthorsebattery12', device } });
+    const loginRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      remoteAddress: ip,
+      payload: { email, password: 'correcthorsebattery12', device },
+    });
     const { refreshToken } = loginRes.json();
 
-    await app.inject({ method: 'POST', url: '/api/v1/auth/password/reset-request', remoteAddress: ip, payload: { email } });
+    await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/password/reset-request',
+      remoteAddress: ip,
+      payload: { email },
+    });
     const mail = app.mailer.sentEmails.at(-1);
     const token = extractToken(mail!.html);
 
@@ -278,11 +383,21 @@ describe('auth module', () => {
     expect(confirmRes.statusCode).toBe(200);
 
     // old refresh token no longer works
-    const refreshAttempt = await app.inject({ method: 'POST', url: '/api/v1/auth/refresh', remoteAddress: ip, payload: { refreshToken } });
+    const refreshAttempt = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/refresh',
+      remoteAddress: ip,
+      payload: { refreshToken },
+    });
     expect(refreshAttempt.statusCode).toBe(401);
 
     // new password works
-    const newLogin = await app.inject({ method: 'POST', url: '/api/v1/auth/login', remoteAddress: ip, payload: { email, password: 'brandnewpassword12', device } });
+    const newLogin = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      remoteAddress: ip,
+      payload: { email, password: 'brandnewpassword12', device },
+    });
     expect(newLogin.statusCode).toBe(200);
   });
 
@@ -290,7 +405,12 @@ describe('auth module', () => {
     const ip = nextIp();
     const email = 'csrf@example.com';
     await registerAndVerify(email, ip);
-    const loginRes = await app.inject({ method: 'POST', url: '/api/v1/auth/login', remoteAddress: ip, payload: { email, password: 'correcthorsebattery12', device } });
+    const loginRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      remoteAddress: ip,
+      payload: { email, password: 'correcthorsebattery12', device },
+    });
     const setCookies = loginRes.cookies;
     const atCookie = setCookies.find((c) => c.name === 'sl_at')!;
 

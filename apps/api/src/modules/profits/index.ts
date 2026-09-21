@@ -7,7 +7,12 @@
 // compatibility.
 
 import { profits } from '@sl/db';
-import { dailyProfitSchema, granularitySchema, profitQuerySchema, type DailyProfit } from '@sl/shared';
+import {
+  dailyProfitSchema,
+  granularitySchema,
+  profitQuerySchema,
+  type DailyProfit,
+} from '@sl/shared';
 import { and, asc, eq, gte, lte } from 'drizzle-orm';
 import fp from 'fastify-plugin';
 import { z } from 'zod';
@@ -31,7 +36,15 @@ function aggregate(rows: DailyProfit[], key: (row: DailyProfit) => string): Dail
   const buckets = new Map<string, DailyProfit>();
   for (const row of rows) {
     const k = key(row);
-    const bucket = buckets.get(k) ?? { day: k, coinsSpent: 0, coinsEarned: 0, netProfit: 0, snipes: 0, successes: 0, tradesClosed: 0 };
+    const bucket = buckets.get(k) ?? {
+      day: k,
+      coinsSpent: 0,
+      coinsEarned: 0,
+      netProfit: 0,
+      snipes: 0,
+      successes: 0,
+      tradesClosed: 0,
+    };
     bucket.coinsSpent += row.coinsSpent;
     bucket.coinsEarned += row.coinsEarned;
     bucket.netProfit += row.netProfit;
@@ -54,7 +67,9 @@ export default fp(
         schema: {
           tags: ['profits'],
           querystring: profitQuerySchema,
-          response: { 200: z.object({ granularity: granularitySchema, items: z.array(dailyProfitSchema) }) },
+          response: {
+            200: z.object({ granularity: granularitySchema, items: z.array(dailyProfitSchema) }),
+          },
         },
       },
       async (request) => {
@@ -77,8 +92,10 @@ export default fp(
         }));
 
         if (granularity === 'day') return { granularity, items: daily };
-        if (granularity === 'week') return { granularity, items: aggregate(daily, (r) => bucketKey(r.day, 'week')) };
-        if (granularity === 'month') return { granularity, items: aggregate(daily, (r) => bucketKey(r.day, 'month')) };
+        if (granularity === 'week')
+          return { granularity, items: aggregate(daily, (r) => bucketKey(r.day, 'week')) };
+        if (granularity === 'month')
+          return { granularity, items: aggregate(daily, (r) => bucketKey(r.day, 'month')) };
 
         // lifetime: one bucket covering the whole requested range.
         const lifetime = aggregate(daily, () => 'lifetime');

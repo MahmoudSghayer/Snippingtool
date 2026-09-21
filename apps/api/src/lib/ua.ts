@@ -33,7 +33,10 @@ export function uaFamily(userAgent: string | null | undefined): string | null {
  * returns true (nothing to contradict) rather than false (which would lock
  * out every client that legitimately never sends a User-Agent, e.g. some
  * service-worker fetches). */
-export function uaFamiliesCompatible(a: string | null | undefined, b: string | null | undefined): boolean {
+export function uaFamiliesCompatible(
+  a: string | null | undefined,
+  b: string | null | undefined,
+): boolean {
   const famA = uaFamily(a);
   const famB = uaFamily(b);
   if (!famA || !famB) return true;

@@ -59,7 +59,8 @@ export class MaxMindGeoIpProvider implements GeoIpProvider {
         // specifier, so this typechecks whether or not the package is
         // installed) so the rest of the API works unmodified without it.
         const moduleName = 'maxmind';
-        const maxmind = (await import(moduleName).catch(() => undefined)) as { open: (path: string) => Promise<unknown> } | undefined;
+        const maxmind = (await import(moduleName).catch(() => undefined)) as
+          { open: (path: string) => Promise<unknown> } | undefined;
         if (!maxmind) return undefined;
         return maxmind.open(this.dbPath).catch(() => undefined);
       })();
@@ -72,7 +73,11 @@ export class MaxMindGeoIpProvider implements GeoIpProvider {
     if (!reader?.get) return NULL_RESULT;
     try {
       const record = reader.get(ip) as
-        | { country?: { iso_code?: string }; registered_country?: { iso_code?: string }; autonomous_system_number?: number }
+        | {
+            country?: { iso_code?: string };
+            registered_country?: { iso_code?: string };
+            autonomous_system_number?: number;
+          }
         | null
         | undefined;
       const country = record?.country?.iso_code ?? record?.registered_country?.iso_code ?? null;
@@ -94,9 +99,12 @@ export class IpinfoGeoIpProvider implements GeoIpProvider {
 
   async lookup(ip: string): Promise<GeoIpLookupResult> {
     try {
-      const res = await fetch(`https://ipinfo.io/${encodeURIComponent(ip)}/json?token=${encodeURIComponent(this.token)}`, {
-        signal: AbortSignal.timeout(2000),
-      });
+      const res = await fetch(
+        `https://ipinfo.io/${encodeURIComponent(ip)}/json?token=${encodeURIComponent(this.token)}`,
+        {
+          signal: AbortSignal.timeout(2000),
+        },
+      );
       if (!res.ok) return NULL_RESULT;
       const body = (await res.json()) as { country?: string; org?: string };
       const asnMatch = body.org?.match(/^AS(\d+)/);
@@ -118,18 +126,25 @@ export class IpinfoGeoIpProvider implements GeoIpProvider {
  * `modules/auth/__tests__/ip-monitoring.test.ts`. */
 export class StaticGeoIpProvider implements GeoIpProvider {
   readonly name = 'static';
-  constructor(private readonly map: Record<string, { country: string | null; asn: number | null }>) {}
+  constructor(
+    private readonly map: Record<string, { country: string | null; asn: number | null }>,
+  ) {}
 
   async lookup(ip: string): Promise<GeoIpLookupResult> {
     return this.map[ip] ?? NULL_RESULT;
   }
 }
 
-function parseStaticMap(raw: string): Record<string, { country: string | null; asn: number | null }> {
+function parseStaticMap(
+  raw: string,
+): Record<string, { country: string | null; asn: number | null }> {
   const parsed = JSON.parse(raw) as Record<string, string | { country?: string; asn?: number }>;
   const out: Record<string, { country: string | null; asn: number | null }> = {};
   for (const [ip, value] of Object.entries(parsed)) {
-    out[ip] = typeof value === 'string' ? { country: value, asn: null } : { country: value.country ?? null, asn: value.asn ?? null };
+    out[ip] =
+      typeof value === 'string'
+        ? { country: value, asn: null }
+        : { country: value.country ?? null, asn: value.asn ?? null };
   }
   return out;
 }

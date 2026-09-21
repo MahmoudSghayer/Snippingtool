@@ -3,7 +3,6 @@
 
 import { createHash } from 'node:crypto';
 
-
 import { filterStats, savedFilters } from '@sl/db';
 import {
   createSavedFilterRequestSchema,
@@ -47,7 +46,10 @@ export default fp(
 
     app.get(
       '/api/v1/filters',
-      { onRequest: [fastify.authenticate], schema: { tags: ['filters'], response: { 200: z.array(savedFilterSchema) } } },
+      {
+        onRequest: [fastify.authenticate],
+        schema: { tags: ['filters'], response: { 200: z.array(savedFilterSchema) } },
+      },
       async (request) => {
         const rows = await fastify.db.query.savedFilters.findMany({
           where: and(eq(savedFilters.userId, request.authUser!.id), isNull(savedFilters.deletedAt)),
@@ -61,7 +63,11 @@ export default fp(
       {
         onRequest: [fastify.authenticate],
         preHandler: [fastify.verifyCsrf],
-        schema: { tags: ['filters'], body: createSavedFilterRequestSchema, response: { 201: savedFilterSchema } },
+        schema: {
+          tags: ['filters'],
+          body: createSavedFilterRequestSchema,
+          response: { 201: savedFilterSchema },
+        },
       },
       async (request, reply) => {
         const id = newId();
@@ -74,7 +80,9 @@ export default fp(
           filterHash: hash,
         });
         reply.status(201);
-        const row = await fastify.db.query.savedFilters.findFirst({ where: eq(savedFilters.id, id) });
+        const row = await fastify.db.query.savedFilters.findFirst({
+          where: eq(savedFilters.id, id),
+        });
         return toDto(row!);
       },
     );
@@ -84,11 +92,20 @@ export default fp(
       {
         onRequest: [fastify.authenticate],
         preHandler: [fastify.verifyCsrf],
-        schema: { tags: ['filters'], params: z.object({ id: z.string().uuid() }), body: updateSavedFilterRequestSchema, response: { 200: savedFilterSchema } },
+        schema: {
+          tags: ['filters'],
+          params: z.object({ id: z.string().uuid() }),
+          body: updateSavedFilterRequestSchema,
+          response: { 200: savedFilterSchema },
+        },
       },
       async (request) => {
         const existing = await fastify.db.query.savedFilters.findFirst({
-          where: and(eq(savedFilters.id, request.params.id), eq(savedFilters.userId, request.authUser!.id), isNull(savedFilters.deletedAt)),
+          where: and(
+            eq(savedFilters.id, request.params.id),
+            eq(savedFilters.userId, request.authUser!.id),
+            isNull(savedFilters.deletedAt),
+          ),
         });
         if (!existing) throw AppErrors.notFound('filter');
 
@@ -113,14 +130,25 @@ export default fp(
       {
         onRequest: [fastify.authenticate],
         preHandler: [fastify.verifyCsrf],
-        schema: { tags: ['filters'], params: z.object({ id: z.string().uuid() }), response: { 200: z.object({ deleted: z.literal(true) }) } },
+        schema: {
+          tags: ['filters'],
+          params: z.object({ id: z.string().uuid() }),
+          response: { 200: z.object({ deleted: z.literal(true) }) },
+        },
       },
       async (request) => {
         const existing = await fastify.db.query.savedFilters.findFirst({
-          where: and(eq(savedFilters.id, request.params.id), eq(savedFilters.userId, request.authUser!.id), isNull(savedFilters.deletedAt)),
+          where: and(
+            eq(savedFilters.id, request.params.id),
+            eq(savedFilters.userId, request.authUser!.id),
+            isNull(savedFilters.deletedAt),
+          ),
         });
         if (!existing) throw AppErrors.notFound('filter');
-        await fastify.db.update(savedFilters).set({ deletedAt: new Date() }).where(eq(savedFilters.id, existing.id));
+        await fastify.db
+          .update(savedFilters)
+          .set({ deletedAt: new Date() })
+          .where(eq(savedFilters.id, existing.id));
         return { deleted: true as const };
       },
     );
@@ -133,14 +161,21 @@ export default fp(
       '/api/v1/filters/stats',
       {
         onRequest: [fastify.authenticate],
-        schema: { tags: ['filters'], querystring: filterStatsQuerySchema, response: { 200: z.array(filterStatsSchema) } },
+        schema: {
+          tags: ['filters'],
+          querystring: filterStatsQuerySchema,
+          response: { 200: z.array(filterStatsSchema) },
+        },
       },
       async (request) => {
         const { filterId, from, to } = request.query;
 
         if (filterId) {
           const owned = await fastify.db.query.savedFilters.findFirst({
-            where: and(eq(savedFilters.id, filterId), eq(savedFilters.userId, request.authUser!.id)),
+            where: and(
+              eq(savedFilters.id, filterId),
+              eq(savedFilters.userId, request.authUser!.id),
+            ),
           });
           if (!owned) throw AppErrors.notFound('filter');
         }
@@ -159,7 +194,10 @@ export default fp(
         if (from) conditions.push(gte(filterStats.windowStart, new Date(from)));
         if (to) conditions.push(lte(filterStats.windowStart, new Date(to)));
 
-        const rows = await fastify.db.query.filterStats.findMany({ where: and(...conditions), orderBy: [desc(filterStats.windowStart)] });
+        const rows = await fastify.db.query.filterStats.findMany({
+          where: and(...conditions),
+          orderBy: [desc(filterStats.windowStart)],
+        });
         return rows.map((r) => ({
           filterId: r.filterId,
           windowStart: r.windowStart.toISOString(),
@@ -179,19 +217,29 @@ export default fp(
         onRequest: [fastify.authenticate],
         preHandler: [fastify.verifyCsrf],
         config: { rateLimit: INGEST_RATE_LIMIT },
-        schema: { tags: ['filters'], body: reportFilterStatsRequestSchema, response: { 200: z.object({ upserted: z.number() }) } },
+        schema: {
+          tags: ['filters'],
+          body: reportFilterStatsRequestSchema,
+          response: { 200: z.object({ upserted: z.number() }) },
+        },
       },
       async (request) => {
         let upserted = 0;
         for (const stat of request.body.stats) {
           const filter = await fastify.db.query.savedFilters.findFirst({
-            where: and(eq(savedFilters.id, stat.filterId), eq(savedFilters.userId, request.authUser!.id)),
+            where: and(
+              eq(savedFilters.id, stat.filterId),
+              eq(savedFilters.userId, request.authUser!.id),
+            ),
           });
           if (!filter) continue; // silently skip stats for filters that no longer belong to this user
 
           const windowStart = new Date(stat.windowStart);
           const existing = await fastify.db.query.filterStats.findFirst({
-            where: and(eq(filterStats.filterId, filter.id), eq(filterStats.windowStart, windowStart)),
+            where: and(
+              eq(filterStats.filterId, filter.id),
+              eq(filterStats.windowStart, windowStart),
+            ),
           });
 
           const values = {
@@ -206,7 +254,9 @@ export default fp(
           if (existing) {
             await fastify.db.update(filterStats).set(values).where(eq(filterStats.id, existing.id));
           } else {
-            await fastify.db.insert(filterStats).values({ id: newId(), filterId: filter.id, windowStart, ...values });
+            await fastify.db
+              .insert(filterStats)
+              .values({ id: newId(), filterId: filter.id, windowStart, ...values });
           }
           upserted++;
         }

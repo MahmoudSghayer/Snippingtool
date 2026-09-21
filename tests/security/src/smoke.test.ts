@@ -25,15 +25,32 @@ describe('security-tests smoke test', () => {
   });
 
   it('createUserSession produces a working bearer session', async () => {
-    const session = await createUserSession(app, 'smoke-user@example.com', 'smoke-fp-0000000000000001');
-    const res = await app.inject({ method: 'GET', url: '/api/v1/users/me', headers: { authorization: `Bearer ${session.accessToken}` } });
+    const session = await createUserSession(
+      app,
+      'smoke-user@example.com',
+      'smoke-fp-0000000000000001',
+    );
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/v1/users/me',
+      headers: { authorization: `Bearer ${session.accessToken}` },
+    });
     expect(res.statusCode).toBe(200);
     expect(res.json().id).toBe(session.userId);
   });
 
   it('createAdminSession produces a working admin bearer session', async () => {
-    const session = await createAdminSession(app, 'super_admin', 'smoke-admin@example.com', 'smoke-fp-0000000000000002');
-    const res = await app.inject({ method: 'GET', url: '/api/v1/admin/users', headers: { authorization: `Bearer ${session.accessToken}` } });
+    const session = await createAdminSession(
+      app,
+      'super_admin',
+      'smoke-admin@example.com',
+      'smoke-fp-0000000000000002',
+    );
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/v1/admin/users',
+      headers: { authorization: `Bearer ${session.accessToken}` },
+    });
     expect(res.statusCode).toBe(200);
   });
 });

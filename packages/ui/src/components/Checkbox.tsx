@@ -27,7 +27,11 @@ export function Checkbox({ className, ...props }: CheckboxProps) {
       {...props}
     >
       <CheckboxPrimitive.Indicator className="text-[--sl-accent-ink]">
-        {props.checked === 'indeterminate' ? <Minus className="size-3.5" /> : <Check className="size-3.5" />}
+        {props.checked === 'indeterminate' ? (
+          <Minus className="size-3.5" />
+        ) : (
+          <Check className="size-3.5" />
+        )}
       </CheckboxPrimitive.Indicator>
     </CheckboxPrimitive.Root>
   );

@@ -25,7 +25,6 @@ import { api, apiErrorMessage } from '@/api/client.js';
 
 import type { CouponValidateResponse, DeviceDto, PlanDto } from '@sl/shared';
 
-
 const deviceColumns: ColumnDef<DeviceDto, unknown>[] = [
   {
     accessorKey: 'name',
@@ -39,8 +38,16 @@ const deviceColumns: ColumnDef<DeviceDto, unknown>[] = [
     ),
   },
   { accessorKey: 'os', header: 'OS', cell: (c) => (c.getValue() as string | null) ?? '—' },
-  { accessorKey: 'browser', header: 'Browser', cell: (c) => (c.getValue() as string | null) ?? '—' },
-  { accessorKey: 'lastSeenAt', header: 'Last seen', cell: (c) => formatDate(c.getValue() as string) },
+  {
+    accessorKey: 'browser',
+    header: 'Browser',
+    cell: (c) => (c.getValue() as string | null) ?? '—',
+  },
+  {
+    accessorKey: 'lastSeenAt',
+    header: 'Last seen',
+    cell: (c) => formatDate(c.getValue() as string),
+  },
 ];
 
 export function SubscriptionsPage() {
@@ -98,12 +105,15 @@ export function SubscriptionsPage() {
 
   const portalMutation = useMutation({
     mutationFn: async () => {
-      const { data, error } = await api.POST('/api/v1/payments/portal', { body: { returnUrl: window.location.href } });
+      const { data, error } = await api.POST('/api/v1/payments/portal', {
+        body: { returnUrl: window.location.href },
+      });
       if (error) throw error;
       return data;
     },
     onSuccess: (data) => window.location.assign(data.portalUrl),
-    onError: (error) => toast.error("Couldn't open billing portal", { description: apiErrorMessage(error) }),
+    onError: (error) =>
+      toast.error("Couldn't open billing portal", { description: apiErrorMessage(error) }),
   });
 
   const trialMutation = useMutation({
@@ -115,7 +125,8 @@ export function SubscriptionsPage() {
       toast.success('Trial started');
       void queryClient.invalidateQueries({ queryKey: ['subscription'] });
     },
-    onError: (error) => toast.error("Couldn't start trial", { description: apiErrorMessage(error) }),
+    onError: (error) =>
+      toast.error("Couldn't start trial", { description: apiErrorMessage(error) }),
   });
 
   const cancelMutation = useMutation({
@@ -153,7 +164,8 @@ export function SubscriptionsPage() {
       void queryClient.invalidateQueries({ queryKey: ['subscription'] });
       void queryClient.invalidateQueries({ queryKey: ['license'] });
     },
-    onError: (error) => toast.error("Couldn't regenerate license", { description: apiErrorMessage(error) }),
+    onError: (error) =>
+      toast.error("Couldn't regenerate license", { description: apiErrorMessage(error) }),
   });
 
   const revokeDeviceMutation = useMutation({
@@ -165,12 +177,15 @@ export function SubscriptionsPage() {
       toast.success('Device revoked');
       void queryClient.invalidateQueries({ queryKey: ['devices'] });
     },
-    onError: (error) => toast.error("Couldn't revoke device", { description: apiErrorMessage(error) }),
+    onError: (error) =>
+      toast.error("Couldn't revoke device", { description: apiErrorMessage(error) }),
   });
 
   async function handleValidateCoupon(planCode: string) {
     if (!couponCode.trim()) return;
-    const { data, error } = await api.POST('/api/v1/coupons/validate', { body: { code: couponCode.trim(), planCode: planCode as never } });
+    const { data, error } = await api.POST('/api/v1/coupons/validate', {
+      body: { code: couponCode.trim(), planCode: planCode as never },
+    });
     if (error) {
       toast.error('Invalid coupon', { description: apiErrorMessage(error) });
       return;
@@ -197,27 +212,55 @@ export function SubscriptionsPage() {
               <div>
                 <p className="text-lg font-semibold text-ink">{subscription.plan.name}</p>
                 <div className="mt-1 flex items-center gap-2">
-                  <Badge tone={subscription.status === 'active' || subscription.status === 'lifetime' ? 'positive' : subscription.status === 'past_due' ? 'warning' : 'neutral'}>
+                  <Badge
+                    tone={
+                      subscription.status === 'active' || subscription.status === 'lifetime'
+                        ? 'positive'
+                        : subscription.status === 'past_due'
+                          ? 'warning'
+                          : 'neutral'
+                    }
+                  >
                     {subscription.status}
                   </Badge>
-                  {subscription.cancelAtPeriodEnd && <Badge tone="warning">Ends at period end</Badge>}
+                  {subscription.cancelAtPeriodEnd && (
+                    <Badge tone="warning">Ends at period end</Badge>
+                  )}
                 </div>
                 {subscription.currentPeriodEnd && (
-                  <p className="mt-1 text-xs text-ink-2">Renews / ends {formatDate(subscription.currentPeriodEnd)}</p>
+                  <p className="mt-1 text-xs text-ink-2">
+                    Renews / ends {formatDate(subscription.currentPeriodEnd)}
+                  </p>
                 )}
-                {subscription.trialEndsAt && <p className="mt-1 text-xs text-ink-2">Trial ends {formatDate(subscription.trialEndsAt)}</p>}
+                {subscription.trialEndsAt && (
+                  <p className="mt-1 text-xs text-ink-2">
+                    Trial ends {formatDate(subscription.trialEndsAt)}
+                  </p>
+                )}
               </div>
               <div className="flex gap-2">
-                <Button variant="outline" loading={portalMutation.isPending} onClick={() => portalMutation.mutate()}>
+                <Button
+                  variant="outline"
+                  loading={portalMutation.isPending}
+                  onClick={() => portalMutation.mutate()}
+                >
                   Customer portal
                 </Button>
                 {subscription.status !== 'lifetime' &&
                   (subscription.cancelAtPeriodEnd ? (
-                    <Button variant="outline" loading={resumeMutation.isPending} onClick={() => resumeMutation.mutate()}>
+                    <Button
+                      variant="outline"
+                      loading={resumeMutation.isPending}
+                      onClick={() => resumeMutation.mutate()}
+                    >
                       Resume
                     </Button>
                   ) : (
-                    <Button variant="destructive" loading={cancelMutation.isPending} onClick={() => cancelMutation.mutate()}>
+                    <Button
+                      variant="destructive"
+                      loading={cancelMutation.isPending}
+                      onClick={() => cancelMutation.mutate()}
+                    >
                       Cancel
                     </Button>
                   ))}
@@ -244,15 +287,22 @@ export function SubscriptionsPage() {
             <>
               <CopyField label="License key prefix" value={`${license.keyPrefix}…`} />
               <p className="text-xs text-ink-2">
-                For security, the full key is only ever shown once — right after it's issued or regenerated. Regenerating
-                immediately revokes the current key on every device.
+                For security, the full key is only ever shown once — right after it's issued or
+                regenerated. Regenerating immediately revokes the current key on every device.
               </p>
-              <Button variant="outline" size="sm" className="w-fit" onClick={() => setRegenerateOpen(true)}>
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-fit"
+                onClick={() => setRegenerateOpen(true)}
+              >
                 Regenerate license key
               </Button>
             </>
           ) : (
-            <p className="text-sm text-ink-2">A license key is issued once you have an active subscription or trial.</p>
+            <p className="text-sm text-ink-2">
+              A license key is issued once you have an active subscription or trial.
+            </p>
           )}
         </CardContent>
       </Card>
@@ -264,12 +314,20 @@ export function SubscriptionsPage() {
         <CardContent>
           <div className="mb-4 flex items-end gap-2">
             <FormField label="Coupon code" htmlFor="coupon" className="max-w-xs">
-              <Input id="coupon" value={couponCode} onChange={(e) => setCouponCode(e.target.value.toUpperCase())} placeholder="SAVE20" />
+              <Input
+                id="coupon"
+                value={couponCode}
+                onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
+                placeholder="SAVE20"
+              />
             </FormField>
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {(plansQuery.data?.items ?? []).map((plan) => (
-              <Card key={plan.id} className={plan.code === subscription?.plan.code ? 'border-gold' : undefined}>
+              <Card
+                key={plan.id}
+                className={plan.code === subscription?.plan.code ? 'border-gold' : undefined}
+              >
                 <CardHeader>
                   <CardTitle>{plan.name}</CardTitle>
                   {plan.code === subscription?.plan.code && <Badge tone="accent">Current</Badge>}
@@ -277,20 +335,34 @@ export function SubscriptionsPage() {
                 <CardContent>
                   <p className="font-mono text-2xl font-semibold text-ink">
                     {formatCurrencyFromCents(plan.priceCents, plan.currency.toUpperCase())}
-                    <span className="text-sm font-normal text-ink-2"> / {plan.isLifetime ? 'lifetime' : plan.interval}</span>
+                    <span className="text-sm font-normal text-ink-2">
+                      {' '}
+                      / {plan.isLifetime ? 'lifetime' : plan.interval}
+                    </span>
                   </p>
                   <ul className="mt-3 flex flex-col gap-1 text-xs text-ink-2">
-                    <li>{plan.deviceLimit} device{plan.deviceLimit > 1 ? 's' : ''}</li>
+                    <li>
+                      {plan.deviceLimit} device{plan.deviceLimit > 1 ? 's' : ''}
+                    </li>
                     {plan.features.slice(0, 4).map((f) => (
                       <li key={f}>{f}</li>
                     ))}
                   </ul>
                 </CardContent>
                 <CardFooter>
-                  <Button size="sm" onClick={() => void handleValidateCoupon(plan.code)} variant="ghost" disabled={!couponCode}>
+                  <Button
+                    size="sm"
+                    onClick={() => void handleValidateCoupon(plan.code)}
+                    variant="ghost"
+                    disabled={!couponCode}
+                  >
                     Apply coupon
                   </Button>
-                  <Button size="sm" loading={checkoutMutation.isPending} onClick={() => checkoutMutation.mutate(plan)}>
+                  <Button
+                    size="sm"
+                    loading={checkoutMutation.isPending}
+                    onClick={() => checkoutMutation.mutate(plan)}
+                  >
                     Checkout
                   </Button>
                 </CardFooter>
@@ -315,7 +387,12 @@ export function SubscriptionsPage() {
             getRowId={(row) => row.id}
             rowActions={(row) =>
               !row.isCurrent && (
-                <Button size="sm" variant="outline" loading={revokeDeviceMutation.isPending} onClick={() => revokeDeviceMutation.mutate(row.id)}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  loading={revokeDeviceMutation.isPending}
+                  onClick={() => revokeDeviceMutation.mutate(row.id)}
+                >
                   Revoke
                 </Button>
               )

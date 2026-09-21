@@ -23,9 +23,13 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { type AppError } from '../../../lib/errors.js';
 import * as service from '../../../modules/auth/service.js';
-import { buildTestApp, createUserSession, device, TEST_PASSWORD, type TestApp } from '../helpers.js';
-
-
+import {
+  buildTestApp,
+  createUserSession,
+  device,
+  TEST_PASSWORD,
+  type TestApp,
+} from '../helpers.js';
 
 import type { AuthContext } from '../../../modules/auth/service.js';
 
@@ -70,7 +74,12 @@ describe('login() Redis sliding-window rate limit is env-configurable (defect #5
     let lastError: unknown;
     for (let i = 0; i < 20; i += 1) {
       try {
-        await service.login(ctx, { email, password: 'wrong-password-attempt', device: device(`fp-rl-default-loop-${i}`) }, `198.51.100.${i + 1}`, 'vitest');
+        await service.login(
+          ctx,
+          { email, password: 'wrong-password-attempt', device: device(`fp-rl-default-loop-${i}`) },
+          `198.51.100.${i + 1}`,
+          'vitest',
+        );
       } catch (err) {
         lastError = err;
         if (i < 19) {
@@ -92,7 +101,12 @@ describe('login() Redis sliding-window rate limit is env-configurable (defect #5
     for (let i = 0; i < 6 && !sawRateLimited; i += 1) {
       attempts += 1;
       try {
-        await service.login(ctx, { email, password: 'wrong-password-attempt', device: device(`fp-rl-custom-loop-${i}`) }, `198.51.100.${100 + i}`, 'vitest');
+        await service.login(
+          ctx,
+          { email, password: 'wrong-password-attempt', device: device(`fp-rl-custom-loop-${i}`) },
+          `198.51.100.${100 + i}`,
+          'vitest',
+        );
       } catch (err) {
         if ((err as AppError).code === 'RATE_LIMITED') sawRateLimited = true;
       }
@@ -114,7 +128,11 @@ describe('login() Redis sliding-window rate limit is env-configurable (defect #5
     // tests above are what actually pin the override behaviour.
     const email = 'rl-wired@example.com';
     await createUserSession(app, email, 'fp-rl-wired-00000000001');
-    expect(app.config.RATE_LIMIT_LOGIN_MAX).toBe(20);
+    // Whatever the environment sets (apps/api/.env.example → 20, CI's
+    // infra/env/.env.development.example → 100) must be what the app runs
+    // with: a positive integer, not the old hardcoded constant's shape.
+    expect(Number.isInteger(app.config.RATE_LIMIT_LOGIN_MAX)).toBe(true);
+    expect(app.config.RATE_LIMIT_LOGIN_MAX).toBeGreaterThan(0);
 
     // Same device fingerprint createUserSession() registered above — a new
     // one would trip the (unrelated) per-plan device-limit check instead of

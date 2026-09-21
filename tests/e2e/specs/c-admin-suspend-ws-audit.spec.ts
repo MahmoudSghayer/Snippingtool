@@ -43,40 +43,58 @@ function wsUrl(ticket: string): string {
   return `${API_ORIGIN.replace(/^http/, 'ws')}/ws?ticket=${encodeURIComponent(ticket)}`;
 }
 
-test('admin TOTP login -> suspend (audited, before/after) -> force-logout on the already-suspended account (WS session.revoked) -> audit trail has both', async ({ request }) => {
-  const admin = await test.step('admin TOTP login (register + promote + real enrollment flow)', () => createAdminSession(API_ORIGIN, ADMIN_EMAIL, 'journey-c-admin'));
-  const target = await test.step('target user registers, verifies, logs in', () => registerAndLogin(API_ORIGIN, TARGET_EMAIL, 'journey-c-target'));
+test('admin TOTP login -> suspend (audited, before/after) -> force-logout on the already-suspended account (WS session.revoked) -> audit trail has both', async ({
+  request,
+}) => {
+  const admin =
+    await test.step('admin TOTP login (register + promote + real enrollment flow)', () =>
+      createAdminSession(API_ORIGIN, ADMIN_EMAIL, 'journey-c-admin'));
+  const target = await test.step('target user registers, verifies, logs in', () =>
+    registerAndLogin(API_ORIGIN, TARGET_EMAIL, 'journey-c-target'));
 
   let ticket = '';
-  await test.step("target opens a WS ticket for its own live connection", async () => {
-    const res = await request.post(`${API_ORIGIN}/api/v1/ws/ticket`, { headers: bearer(target.accessToken) });
+  await test.step('target opens a WS ticket for its own live connection', async () => {
+    const res = await request.post(`${API_ORIGIN}/api/v1/ws/ticket`, {
+      headers: bearer(target.accessToken),
+    });
     expect(res.status(), await res.text()).toBe(200);
     ({ ticket } = (await res.json()) as { ticket: string });
   });
 
   const socket = new WebSocket(wsUrl(ticket));
   const seenMessages: string[] = [];
-  const revokedEvent = new Promise<{ type: string; sessionId: string; reason: string }>((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error(`timed out waiting for session.revoked over WS (messages seen: ${JSON.stringify(seenMessages)}, readyState: ${socket.readyState})`)),
-      20_000,
-    );
-    socket.on('message', (raw) => {
-      seenMessages.push(raw.toString());
-      const event = JSON.parse(raw.toString()) as { type: string; sessionId: string; reason: string };
-      if (event.type === 'session.revoked') {
+  const revokedEvent = new Promise<{ type: string; sessionId: string; reason: string }>(
+    (resolve, reject) => {
+      const timer = setTimeout(
+        () =>
+          reject(
+            new Error(
+              `timed out waiting for session.revoked over WS (messages seen: ${JSON.stringify(seenMessages)}, readyState: ${socket.readyState})`,
+            ),
+          ),
+        20_000,
+      );
+      socket.on('message', (raw) => {
+        seenMessages.push(raw.toString());
+        const event = JSON.parse(raw.toString()) as {
+          type: string;
+          sessionId: string;
+          reason: string;
+        };
+        if (event.type === 'session.revoked') {
+          clearTimeout(timer);
+          resolve(event);
+        }
+      });
+      socket.on('error', (err) => {
         clearTimeout(timer);
-        resolve(event);
-      }
-    });
-    socket.on('error', (err) => {
-      clearTimeout(timer);
-      reject(err);
-    });
-    socket.on('close', (code, reason) => {
-      seenMessages.push(`[closed: code=${code} reason=${reason.toString()}]`);
-    });
-  });
+        reject(err);
+      });
+      socket.on('close', (code, reason) => {
+        seenMessages.push(`[closed: code=${code} reason=${reason.toString()}]`);
+      });
+    },
+  );
   await new Promise<void>((resolve, reject) => {
     socket.once('open', () => resolve());
     socket.once('error', reject);
@@ -97,7 +115,9 @@ test('admin TOTP login -> suspend (audited, before/after) -> force-logout on the
     // 'suspended'` *before* the row_version-staleness check, so a suspended
     // account's already-stale token gets the more specific `FORBIDDEN`
     // (403) instead of `AUTH_SESSION_REVOKED` (401).
-    const res = await request.get(`${API_ORIGIN}/api/v1/users/me`, { headers: bearer(target.accessToken) });
+    const res = await request.get(`${API_ORIGIN}/api/v1/users/me`, {
+      headers: bearer(target.accessToken),
+    });
     expect(res.status()).toBe(403);
     expect((await res.json()) as { code: string }).toMatchObject({ code: 'FORBIDDEN' });
   });
@@ -108,12 +128,19 @@ test('admin TOTP login -> suspend (audited, before/after) -> force-logout on the
   // catch it); now it explicitly reports 0 revoked while still notifying
   // the still-open WS connection.
   await test.step('admin force-logs-out the already-suspended target -> sessionsRevoked is 0, but the live WS connection still gets session.revoked', async () => {
-    const res = await request.post(`${API_ORIGIN}/api/v1/admin/users/${target.userId}/force-logout`, {
-      headers: bearer(admin.accessToken),
-      data: { reason: 'e2e journey (c): force-logout half' },
-    });
+    const res = await request.post(
+      `${API_ORIGIN}/api/v1/admin/users/${target.userId}/force-logout`,
+      {
+        headers: bearer(admin.accessToken),
+        data: { reason: 'e2e journey (c): force-logout half' },
+      },
+    );
     expect(res.status(), await res.text()).toBe(200);
-    const body = (await res.json()) as { ok: true; sessionsRevoked: number; sessionsNotified: number };
+    const body = (await res.json()) as {
+      ok: true;
+      sessionsRevoked: number;
+      sessionsNotified: number;
+    };
     expect(body.sessionsRevoked).toBe(0); // suspend already revoked the only session
     expect(body.sessionsNotified).toBeGreaterThanOrEqual(1); // still notified regardless
 
@@ -124,9 +151,18 @@ test('admin TOTP login -> suspend (audited, before/after) -> force-logout on the
   });
 
   await test.step('the audit log has both actions, each with the admin as actor and a request id', async () => {
-    const res = await request.get(`${API_ORIGIN}/api/v1/admin/audit?entityId=${target.userId}&limit=50`, { headers: bearer(admin.accessToken) });
+    const res = await request.get(
+      `${API_ORIGIN}/api/v1/admin/audit?entityId=${target.userId}&limit=50`,
+      { headers: bearer(admin.accessToken) },
+    );
     expect(res.status(), await res.text()).toBe(200);
-    const entries = (await res.json()) as Array<{ action: string; actorId: string | null; before: unknown; after: unknown; requestId: string | null }>;
+    const entries = (await res.json()) as Array<{
+      action: string;
+      actorId: string | null;
+      before: unknown;
+      after: unknown;
+      requestId: string | null;
+    }>;
 
     const suspended = entries.find((e) => e.action === 'user.suspended');
     expect(suspended, JSON.stringify(entries)).toBeTruthy();

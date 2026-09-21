@@ -11,7 +11,9 @@ describe('pagination helpers', () => {
   it('decodeCursor returns null for undefined, garbage, or malformed payloads', () => {
     expect(decodeCursor(undefined)).toBeNull();
     expect(decodeCursor('not-base64url-json')).toBeNull();
-    expect(decodeCursor(Buffer.from(JSON.stringify({ foo: 'bar' })).toString('base64url'))).toBeNull();
+    expect(
+      decodeCursor(Buffer.from(JSON.stringify({ foo: 'bar' })).toString('base64url')),
+    ).toBeNull();
   });
 
   it('paginate returns all rows with a null cursor when under the limit', () => {

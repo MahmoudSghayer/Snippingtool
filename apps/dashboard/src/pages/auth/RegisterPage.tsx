@@ -1,6 +1,15 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { registerRequestSchema } from '@sl/shared';
-import { Button, Card, CardContent, CardHeader, CardTitle, FormField, Input, PasswordInput } from '@sl/ui';
+import {
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  FormField,
+  Input,
+  PasswordInput,
+} from '@sl/ui';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
@@ -15,7 +24,10 @@ import { buildDevicePayload, defaultDeviceName } from '@/lib/device.js';
 export const registerFormSchema = registerRequestSchema
   .omit({ device: true })
   .extend({ deviceName: z.string().min(1).max(120), confirmPassword: z.string() })
-  .refine((v) => v.password === v.confirmPassword, { message: 'Passwords do not match', path: ['confirmPassword'] });
+  .refine((v) => v.password === v.confirmPassword, {
+    message: 'Passwords do not match',
+    path: ['confirmPassword'],
+  });
 type FormValues = z.infer<typeof registerFormSchema>;
 
 export function RegisterPage() {
@@ -23,7 +35,12 @@ export function RegisterPage() {
   const [submitting, setSubmitting] = useState(false);
   const form = useForm<FormValues>({
     resolver: zodResolver(registerFormSchema),
-    defaultValues: { email: '', password: '', confirmPassword: '', deviceName: defaultDeviceName() },
+    defaultValues: {
+      email: '',
+      password: '',
+      confirmPassword: '',
+      deviceName: defaultDeviceName(),
+    },
   });
 
   async function onSubmit(values: FormValues) {
@@ -55,7 +72,13 @@ export function RegisterPage() {
       <CardContent>
         <form className="flex flex-col gap-4" onSubmit={form.handleSubmit(onSubmit)}>
           <FormField label="Email" htmlFor="email" error={form.formState.errors.email?.message}>
-            <Input id="email" type="email" autoComplete="email" autoFocus {...form.register('email')} />
+            <Input
+              id="email"
+              type="email"
+              autoComplete="email"
+              autoFocus
+              {...form.register('email')}
+            />
           </FormField>
           <FormField
             label="Password"
@@ -63,12 +86,28 @@ export function RegisterPage() {
             hint="At least 12 characters, with a letter and a digit."
             error={form.formState.errors.password?.message}
           >
-            <PasswordInput id="password" autoComplete="new-password" {...form.register('password')} />
+            <PasswordInput
+              id="password"
+              autoComplete="new-password"
+              {...form.register('password')}
+            />
           </FormField>
-          <FormField label="Confirm password" htmlFor="confirmPassword" error={form.formState.errors.confirmPassword?.message}>
-            <PasswordInput id="confirmPassword" autoComplete="new-password" {...form.register('confirmPassword')} />
+          <FormField
+            label="Confirm password"
+            htmlFor="confirmPassword"
+            error={form.formState.errors.confirmPassword?.message}
+          >
+            <PasswordInput
+              id="confirmPassword"
+              autoComplete="new-password"
+              {...form.register('confirmPassword')}
+            />
           </FormField>
-          <FormField label="This device" htmlFor="deviceName" error={form.formState.errors.deviceName?.message}>
+          <FormField
+            label="This device"
+            htmlFor="deviceName"
+            error={form.formState.errors.deviceName?.message}
+          >
             <Input id="deviceName" {...form.register('deviceName')} />
           </FormField>
           <Button type="submit" loading={submitting} className="w-full">

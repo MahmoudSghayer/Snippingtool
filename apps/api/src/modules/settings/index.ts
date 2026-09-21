@@ -3,7 +3,6 @@
 // ceilings read from system_config (docs/02-database.md §10, "system /
 // feature flags").
 
-
 import { settingsHistory, userSettings } from '@sl/db';
 import { updateUserSettingsRequestSchema, userSettingsSchema, type UserSettings } from '@sl/shared';
 import { desc, eq } from 'drizzle-orm';
@@ -27,16 +26,26 @@ const GOVERNOR_CONFIG_KEYS = {
 /** Reads the admin-tunable governor ceilings from system_config and
  * validates the requested governor settings never exceed them (a user may
  * tighten their own budget, never loosen it past the plan-wide ceiling). */
-async function assertWithinGovernorCeilings(db: FastifyInstance['db'], governor: UserSettings['governor']) {
+async function assertWithinGovernorCeilings(
+  db: FastifyInstance['db'],
+  governor: UserSettings['governor'],
+) {
   const rows = await db.query.systemConfig.findMany();
   const byKey = new Map(rows.map((r) => [r.key, r.value]));
 
-  for (const [field, configKey] of Object.entries(GOVERNOR_CONFIG_KEYS) as [keyof typeof GOVERNOR_CONFIG_KEYS, string][]) {
+  for (const [field, configKey] of Object.entries(GOVERNOR_CONFIG_KEYS) as [
+    keyof typeof GOVERNOR_CONFIG_KEYS,
+    string,
+  ][]) {
     const ceiling = byKey.get(configKey);
     if (typeof ceiling !== 'number') continue; // not configured — absolute schema limits still apply
     const value = governor[field];
     if (value > ceiling) {
-      throw AppErrors.validation(`${field} exceeds the plan's configured ceiling (${ceiling}).`, { field, value, ceiling });
+      throw AppErrors.validation(`${field} exceeds the plan's configured ceiling (${ceiling}).`, {
+        field,
+        value,
+        ceiling,
+      });
     }
   }
 }
@@ -47,7 +56,10 @@ export default fp(
 
     app.get(
       '/api/v1/settings',
-      { onRequest: [fastify.authenticate], schema: { tags: ['settings'], response: { 200: userSettingsSchema } } },
+      {
+        onRequest: [fastify.authenticate],
+        schema: { tags: ['settings'], response: { 200: userSettingsSchema } },
+      },
       async (request) => {
         const { settings } = await getOrCreateUserSettings(fastify.db, request.authUser!.id);
         return settings;
@@ -59,7 +71,11 @@ export default fp(
       {
         onRequest: [fastify.authenticate],
         preHandler: [fastify.verifyCsrf],
-        schema: { tags: ['settings'], body: updateUserSettingsRequestSchema, response: { 200: userSettingsSchema } },
+        schema: {
+          tags: ['settings'],
+          body: updateUserSettingsRequestSchema,
+          response: { 200: userSettingsSchema },
+        },
       },
       async (request) => {
         const current = await getOrCreateUserSettings(fastify.db, request.authUser!.id);
@@ -78,7 +94,10 @@ export default fp(
         await assertWithinGovernorCeilings(fastify.db, validated.governor);
 
         try {
-          await fastify.db.update(userSettings).set({ settings: validated, version: validated.version }).where(eq(userSettings.id, current.id));
+          await fastify.db
+            .update(userSettings)
+            .set({ settings: validated, version: validated.version })
+            .where(eq(userSettings.id, current.id));
           await fastify.db.insert(settingsHistory).values({
             id: newId(),
             userId: request.authUser!.id,
@@ -100,11 +119,16 @@ export default fp(
           // or on `.cause.code` depending on the wrapping (see the same
           // pattern in modules/payments/webhooks.ts's
           // receiveWebhookEvent()).
-          const code = (err as { code?: string; cause?: { code?: string } } | null)?.code ?? (err as { cause?: { code?: string } } | null)?.cause?.code;
+          const code =
+            (err as { code?: string; cause?: { code?: string } } | null)?.code ??
+            (err as { cause?: { code?: string } } | null)?.cause?.code;
           if (code === '23505') {
-            throw AppErrors.conflict('Settings were updated concurrently; refetch the latest version and retry.', {
-              attemptedVersion: validated.version,
-            });
+            throw AppErrors.conflict(
+              'Settings were updated concurrently; refetch the latest version and retry.',
+              {
+                attemptedVersion: validated.version,
+              },
+            );
           }
           throw err;
         }
@@ -120,7 +144,13 @@ export default fp(
         schema: {
           tags: ['settings'],
           response: {
-            200: z.array(z.object({ version: z.number(), settings: userSettingsSchema, createdAt: z.string().datetime() })),
+            200: z.array(
+              z.object({
+                version: z.number(),
+                settings: userSettingsSchema,
+                createdAt: z.string().datetime(),
+              }),
+            ),
           },
         },
       },
@@ -130,7 +160,11 @@ export default fp(
           orderBy: [desc(settingsHistory.version)],
           limit: 50,
         });
-        return rows.map((r) => ({ version: r.version, settings: r.settings as UserSettings, createdAt: r.createdAt.toISOString() }));
+        return rows.map((r) => ({
+          version: r.version,
+          settings: r.settings as UserSettings,
+          createdAt: r.createdAt.toISOString(),
+        }));
       },
     );
   },

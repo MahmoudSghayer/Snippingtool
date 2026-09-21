@@ -24,7 +24,7 @@ alerting:
 scrape_configs:
   - job_name: prometheus
     static_configs:
-      - targets: ["localhost:9090"]
+      - targets: ['localhost:9090']
 
   # apps/api exposes prom-client metrics at GET /metrics (see
   # docs/03-api.md §3 `health / metrics`). One target per role; both are the
@@ -41,21 +41,21 @@ scrape_configs:
   - job_name: sniper-ledger-api
     metrics_path: /metrics
     static_configs:
-      - targets: ["api:3000"]
-        labels: { role: "server" }
+      - targets: ['api:3000']
+        labels: { role: 'server' }
 
   - job_name: otel-collector
     static_configs:
-      - targets: ["otel-collector:8889"]
+      - targets: ['otel-collector:8889']
 
   - job_name: postgres
     static_configs:
-      - targets: ["postgres-exporter:9187"]
+      - targets: ['postgres-exporter:9187']
 
   - job_name: redis
     static_configs:
-      - targets: ["redis-exporter:9121"]
+      - targets: ['redis-exporter:9121']
 
   - job_name: node
     static_configs:
-      - targets: ["node-exporter:9100"]
+      - targets: ['node-exporter:9100']

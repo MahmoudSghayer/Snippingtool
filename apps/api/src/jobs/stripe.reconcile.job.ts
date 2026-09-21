@@ -28,7 +28,9 @@ export default defineJob({
       return;
     }
 
-    const unprocessed = await db.query.stripeWebhookEvents.findMany({ where: isNull(stripeWebhookEvents.processedAt) });
+    const unprocessed = await db.query.stripeWebhookEvents.findMany({
+      where: isNull(stripeWebhookEvents.processedAt),
+    });
     let retried = 0;
     for (const row of unprocessed) {
       try {
@@ -38,11 +40,17 @@ export default defineJob({
         await receiveWebhookEvent(db, redis, stripe, row.payload as unknown as Stripe.Event);
         retried += 1;
       } catch (err) {
-        log.warn({ err, eventId: row.eventId }, 'stripe.reconcile: retry of unprocessed webhook event failed again');
+        log.warn(
+          { err, eventId: row.eventId },
+          'stripe.reconcile: retry of unprocessed webhook event failed again',
+        );
       }
     }
 
     const { reconciledCount, errorCount } = await reconcileStripeSubscriptions(db, redis, stripe);
-    log.info({ retriedWebhooks: retried, reconciledCount, errorCount }, 'stripe.reconcile completed');
+    log.info(
+      { retriedWebhooks: retried, reconciledCount, errorCount },
+      'stripe.reconcile completed',
+    );
   },
 });

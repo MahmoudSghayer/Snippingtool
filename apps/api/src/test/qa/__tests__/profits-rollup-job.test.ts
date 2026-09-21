@@ -15,7 +15,11 @@ import { newId } from '../../../lib/ids.js';
 import type { JobContext } from '../../../jobs/types.js';
 import type { FastifyInstance } from 'fastify';
 
-const noopLog: JobContext['log'] = { info: () => undefined, warn: () => undefined, error: () => undefined };
+const noopLog: JobContext['log'] = {
+  info: () => undefined,
+  warn: () => undefined,
+  error: () => undefined,
+};
 
 function jobContext(app: FastifyInstance): JobContext {
   return { db: app.db, redis: app.redis, env: app.config, mailer: app.mailer, log: noopLog };
@@ -23,7 +27,12 @@ function jobContext(app: FastifyInstance): JobContext {
 
 async function createVerifiedUser(app: FastifyInstance, email: string): Promise<string> {
   const id = newId();
-  await app.db.insert(users).values({ id, email, passwordHash: await hashSecret('irrelevant-password-123'), emailVerifiedAt: new Date() });
+  await app.db.insert(users).values({
+    id,
+    email,
+    passwordHash: await hashSecret('irrelevant-password-123'),
+    emailVerifiedAt: new Date(),
+  });
   return id;
 }
 
@@ -55,11 +64,35 @@ describe('profits.rollup job', () => {
     await resetDatabase(app.db);
   });
 
-  it('creates today\'s profits row from trades sold/bought today', async () => {
+  it("creates today's profits row from trades sold/bought today", async () => {
     const userId = await createVerifiedUser(app, 'rollup-basic@example.com');
     await app.db.insert(trades).values([
-      { id: newId(), userId, tradeId: 't-1', resourceId: 'r-1', status: 'sold', buyPrice: 1_000, sellPrice: 1_500, eaTax: 75, netProfit: 425, boughtAt: todayUtc(1), soldAt: todayUtc(2) },
-      { id: newId(), userId, tradeId: 't-2', resourceId: 'r-2', status: 'sold', buyPrice: 2_000, sellPrice: 2_800, eaTax: 140, netProfit: 660, boughtAt: todayUtc(3), soldAt: todayUtc(4) },
+      {
+        id: newId(),
+        userId,
+        tradeId: 't-1',
+        resourceId: 'r-1',
+        status: 'sold',
+        buyPrice: 1_000,
+        sellPrice: 1_500,
+        eaTax: 75,
+        netProfit: 425,
+        boughtAt: todayUtc(1),
+        soldAt: todayUtc(2),
+      },
+      {
+        id: newId(),
+        userId,
+        tradeId: 't-2',
+        resourceId: 'r-2',
+        status: 'sold',
+        buyPrice: 2_000,
+        sellPrice: 2_800,
+        eaTax: 140,
+        netProfit: 660,
+        boughtAt: todayUtc(3),
+        soldAt: todayUtc(4),
+      },
     ]);
 
     await runJob(app);
@@ -75,7 +108,19 @@ describe('profits.rollup job', () => {
   it('is idempotent: re-running the same hour upserts (does not double-count) rather than duplicating', async () => {
     const userId = await createVerifiedUser(app, 'rollup-idempotent@example.com');
     await app.db.insert(trades).values([
-      { id: newId(), userId, tradeId: 't-idem', resourceId: 'r-idem', status: 'sold', buyPrice: 500, sellPrice: 900, eaTax: 45, netProfit: 355, boughtAt: todayUtc(1), soldAt: todayUtc(2) },
+      {
+        id: newId(),
+        userId,
+        tradeId: 't-idem',
+        resourceId: 'r-idem',
+        status: 'sold',
+        buyPrice: 500,
+        sellPrice: 900,
+        eaTax: 45,
+        netProfit: 355,
+        boughtAt: todayUtc(1),
+        soldAt: todayUtc(2),
+      },
     ]);
 
     await runJob(app);
@@ -90,13 +135,37 @@ describe('profits.rollup job', () => {
   it('re-derives the whole day, self-healing a late-arriving trade recorded after the first run', async () => {
     const userId = await createVerifiedUser(app, 'rollup-late-arrival@example.com');
     await app.db.insert(trades).values([
-      { id: newId(), userId, tradeId: 't-early', resourceId: 'r-early', status: 'sold', buyPrice: 100, sellPrice: 200, eaTax: 10, netProfit: 90, boughtAt: todayUtc(1), soldAt: todayUtc(2) },
+      {
+        id: newId(),
+        userId,
+        tradeId: 't-early',
+        resourceId: 'r-early',
+        status: 'sold',
+        buyPrice: 100,
+        sellPrice: 200,
+        eaTax: 10,
+        netProfit: 90,
+        boughtAt: todayUtc(1),
+        soldAt: todayUtc(2),
+      },
     ]);
     await runJob(app);
 
     // A second trade for the same user/day arrives (e.g. a delayed extension batch) after the first hourly run.
     await app.db.insert(trades).values([
-      { id: newId(), userId, tradeId: 't-late', resourceId: 'r-late', status: 'sold', buyPrice: 300, sellPrice: 700, eaTax: 35, netProfit: 365, boughtAt: todayUtc(5), soldAt: todayUtc(6) },
+      {
+        id: newId(),
+        userId,
+        tradeId: 't-late',
+        resourceId: 'r-late',
+        status: 'sold',
+        buyPrice: 300,
+        sellPrice: 700,
+        eaTax: 35,
+        netProfit: 365,
+        boughtAt: todayUtc(5),
+        soldAt: todayUtc(6),
+      },
     ]);
     await runJob(app);
 

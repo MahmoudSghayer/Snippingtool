@@ -131,12 +131,18 @@ export function DataTable<TData>({
         <table className="w-full border-collapse text-sm">
           <thead className="sticky top-0 z-10">
             {table.getHeaderGroups().map((headerGroup) => (
-              <tr key={headerGroup.id} className="border-b border-[--sl-border] bg-[--sl-surface-2]">
+              <tr
+                key={headerGroup.id}
+                className="border-b border-[--sl-border] bg-[--sl-surface-2]"
+              >
                 {headerGroup.headers.map((header) => {
                   const canSort = header.column.getCanSort();
                   const sortDir = header.column.getIsSorted();
                   return (
-                    <th key={header.id} className="whitespace-nowrap px-4 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-[--sl-fg-muted]">
+                    <th
+                      key={header.id}
+                      className="whitespace-nowrap px-4 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-[--sl-fg-muted]"
+                    >
                       {header.isPlaceholder ? null : canSort ? (
                         <button
                           type="button"
@@ -169,7 +175,13 @@ export function DataTable<TData>({
                     icon={<AlertTriangle className="size-6" />}
                     title="Couldn't load this data"
                     description={errorMessage}
-                    action={onRetry && <Button size="sm" variant="outline" onClick={onRetry}>Retry</Button>}
+                    action={
+                      onRetry && (
+                        <Button size="sm" variant="outline" onClick={onRetry}>
+                          Retry
+                        </Button>
+                      )
+                    }
                   />
                 </td>
               </tr>
@@ -186,7 +198,11 @@ export function DataTable<TData>({
             ) : showEmpty ? (
               <tr>
                 <td colSpan={allColumns.length} className="p-0">
-                  <EmptyState icon={<Inbox className="size-6" />} title={emptyTitle} description={emptyDescription} />
+                  <EmptyState
+                    icon={<Inbox className="size-6" />}
+                    title={emptyTitle}
+                    description={emptyDescription}
+                  />
                 </td>
               </tr>
             ) : (

@@ -4,11 +4,15 @@
 // (docs/07-dashboard.md §11 gap #6).
 
 import { riskBudgetEvents } from '@sl/db';
-import { paginatedResponseSchema, reportRiskBudgetEventsRequestSchema, riskBudgetEventRowSchema, riskEventQuerySchema } from '@sl/shared';
+import {
+  paginatedResponseSchema,
+  reportRiskBudgetEventsRequestSchema,
+  riskBudgetEventRowSchema,
+  riskEventQuerySchema,
+} from '@sl/shared';
 import { and, desc, eq, gte, lt, lte } from 'drizzle-orm';
 import fp from 'fastify-plugin';
 import { z } from 'zod';
-
 
 import { newId } from '../../lib/ids.js';
 import { decodeCursor, encodeCursor } from '../../lib/pagination.js';
@@ -41,7 +45,11 @@ export default fp(
         onRequest: [fastify.authenticate],
         preHandler: [fastify.verifyCsrf],
         config: { rateLimit: INGEST_RATE_LIMIT },
-        schema: { tags: ['risk'], body: reportRiskBudgetEventsRequestSchema, response: { 200: z.object({ accepted: z.number() }) } },
+        schema: {
+          tags: ['risk'],
+          body: reportRiskBudgetEventsRequestSchema,
+          response: { 200: z.object({ accepted: z.number() }) },
+        },
       },
       async (request) => {
         const userId = request.authUser!.id;
@@ -68,7 +76,11 @@ export default fp(
       '/api/v1/risk-events',
       {
         onRequest: [fastify.authenticate],
-        schema: { tags: ['risk'], querystring: riskEventQuerySchema, response: { 200: paginatedResponseSchema(riskBudgetEventRowSchema) } },
+        schema: {
+          tags: ['risk'],
+          querystring: riskEventQuerySchema,
+          response: { 200: paginatedResponseSchema(riskBudgetEventRowSchema) },
+        },
       },
       async (request) => {
         const { from, to, kind, cursor: cursorRaw, limit } = request.query;
@@ -89,7 +101,10 @@ export default fp(
         const last = page.at(-1);
         return {
           items: page.map(toRow),
-          nextCursor: hasMore && last ? encodeCursor({ v: last.occurredAt.toISOString(), id: last.id }) : null,
+          nextCursor:
+            hasMore && last
+              ? encodeCursor({ v: last.occurredAt.toISOString(), id: last.id })
+              : null,
         };
       },
     );
@@ -129,7 +144,10 @@ export default fp(
         const last = page.at(-1);
         return {
           items: page.map(toRow),
-          nextCursor: hasMore && last ? encodeCursor({ v: last.occurredAt.toISOString(), id: last.id }) : null,
+          nextCursor:
+            hasMore && last
+              ? encodeCursor({ v: last.occurredAt.toISOString(), id: last.id })
+              : null,
         };
       },
     );

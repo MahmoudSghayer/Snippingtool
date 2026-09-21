@@ -13,9 +13,15 @@ export interface FeatureUsageParams {
   to: string;
 }
 
-export async function getFeatureUsage(db: Database, params: FeatureUsageParams): Promise<Record<string, number>> {
+export async function getFeatureUsage(
+  db: Database,
+  params: FeatureUsageParams,
+): Promise<Record<string, number>> {
   const rows = await db.query.userActivity.findMany({
-    where: and(gte(userActivity.occurredAt, parseDayUtc(params.from)), lt(userActivity.occurredAt, endOfDayUtc(params.to))),
+    where: and(
+      gte(userActivity.occurredAt, parseDayUtc(params.from)),
+      lt(userActivity.occurredAt, endOfDayUtc(params.to)),
+    ),
     columns: { metadata: true },
   });
   const byFeature: Record<string, number> = {};

@@ -82,5 +82,10 @@ export async function getPerformance(registry: Registry): Promise<PerformanceRes
     return prevLe * 1000;
   };
 
-  return { sampleCount: totalCount, p50Ms: quantileMs(0.5), p95Ms: quantileMs(0.95), p99Ms: quantileMs(0.99) };
+  return {
+    sampleCount: totalCount,
+    p50Ms: quantileMs(0.5),
+    p95Ms: quantileMs(0.95),
+    p99Ms: quantileMs(0.99),
+  };
 }

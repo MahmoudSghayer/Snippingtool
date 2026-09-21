@@ -1,6 +1,5 @@
 // /api/v1/devices — list/rename/revoke the caller's own devices.
 
-
 import { devices } from '@sl/db';
 import { deviceDtoSchema, type DeviceDto } from '@sl/shared';
 import { and, desc, eq, isNull } from 'drizzle-orm';
@@ -35,7 +34,10 @@ export default fp(
 
     app.get(
       '/api/v1/devices',
-      { onRequest: [fastify.authenticate], schema: { tags: ['devices'], response: { 200: z.array(deviceDtoSchema) } } },
+      {
+        onRequest: [fastify.authenticate],
+        schema: { tags: ['devices'], response: { 200: z.array(deviceDtoSchema) } },
+      },
       async (request) => {
         const rows = await fastify.db.query.devices.findMany({
           where: and(eq(devices.userId, request.authUser!.id), isNull(devices.deletedAt)),
@@ -59,11 +61,19 @@ export default fp(
       },
       async (request) => {
         const device = await fastify.db.query.devices.findFirst({
-          where: and(eq(devices.id, request.params.id), eq(devices.userId, request.authUser!.id), isNull(devices.deletedAt)),
+          where: and(
+            eq(devices.id, request.params.id),
+            eq(devices.userId, request.authUser!.id),
+            isNull(devices.deletedAt),
+          ),
         });
         if (!device) throw AppErrors.deviceNotFound();
 
-        const [updated] = await fastify.db.update(devices).set({ name: request.body.name }).where(eq(devices.id, device.id)).returning();
+        const [updated] = await fastify.db
+          .update(devices)
+          .set({ name: request.body.name })
+          .where(eq(devices.id, device.id))
+          .returning();
         return toDto(updated!, request.authUser!.deviceId);
       },
     );
@@ -73,15 +83,26 @@ export default fp(
       {
         onRequest: [fastify.authenticate],
         preHandler: [fastify.verifyCsrf],
-        schema: { tags: ['devices'], params: z.object({ id: z.string().uuid() }), response: { 200: z.object({ revoked: z.literal(true) }) } },
+        schema: {
+          tags: ['devices'],
+          params: z.object({ id: z.string().uuid() }),
+          response: { 200: z.object({ revoked: z.literal(true) }) },
+        },
       },
       async (request) => {
         const device = await fastify.db.query.devices.findFirst({
-          where: and(eq(devices.id, request.params.id), eq(devices.userId, request.authUser!.id), isNull(devices.deletedAt)),
+          where: and(
+            eq(devices.id, request.params.id),
+            eq(devices.userId, request.authUser!.id),
+            isNull(devices.deletedAt),
+          ),
         });
         if (!device) throw AppErrors.deviceNotFound();
 
-        await fastify.db.update(devices).set({ status: 'revoked' }).where(eq(devices.id, device.id));
+        await fastify.db
+          .update(devices)
+          .set({ status: 'revoked' })
+          .where(eq(devices.id, device.id));
 
         // Revoking a device also kills every session bound to it.
         const { sessions } = await import('@sl/db');

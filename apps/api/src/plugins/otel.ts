@@ -23,9 +23,18 @@ export default fp(
       const traceExporterModule = '@opentelemetry/exporter-trace-otlp-http';
       const autoInstrumentationsModule = '@opentelemetry/auto-instrumentations-node';
 
-      const { NodeSDK } = (await import(sdkModule)) as { NodeSDK: new (opts: Record<string, unknown>) => { start: () => void; shutdown: () => Promise<void> } };
-      const { OTLPTraceExporter } = (await import(traceExporterModule)) as { OTLPTraceExporter: new (opts: Record<string, unknown>) => unknown };
-      const { getNodeAutoInstrumentations } = (await import(autoInstrumentationsModule)) as { getNodeAutoInstrumentations: () => unknown[] };
+      const { NodeSDK } = (await import(sdkModule)) as {
+        NodeSDK: new (opts: Record<string, unknown>) => {
+          start: () => void;
+          shutdown: () => Promise<void>;
+        };
+      };
+      const { OTLPTraceExporter } = (await import(traceExporterModule)) as {
+        OTLPTraceExporter: new (opts: Record<string, unknown>) => unknown;
+      };
+      const { getNodeAutoInstrumentations } = (await import(autoInstrumentationsModule)) as {
+        getNodeAutoInstrumentations: () => unknown[];
+      };
 
       const sdk = new NodeSDK({
         traceExporter: new OTLPTraceExporter({ url: endpoint }),
@@ -37,7 +46,10 @@ export default fp(
       });
       fastify.log.info({ endpoint }, 'OpenTelemetry tracing enabled');
     } catch (err) {
-      fastify.log.warn({ err }, 'OTEL packages not installed; tracing disabled. Add @opentelemetry/* deps to enable.');
+      fastify.log.warn(
+        { err },
+        'OTEL packages not installed; tracing disabled. Add @opentelemetry/* deps to enable.',
+      );
     }
   },
   { name: 'otel', dependencies: ['config'] },

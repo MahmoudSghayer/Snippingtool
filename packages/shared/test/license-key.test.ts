@@ -9,7 +9,8 @@ import {
   validateLicenseKeyFormat,
 } from '../src/license-key.js';
 
-const KEY_SHAPE = /^SL-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/;
+const KEY_SHAPE =
+  /^SL-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/;
 
 describe('generateLicenseKey', () => {
   it('produces the SL-XXXX-XXXX-XXXX-XXXX shape using only Crockford base32 characters', () => {
@@ -38,7 +39,9 @@ describe('generateLicenseKey', () => {
 
   it('never emits the excluded look-alike characters I, L, O, U (outside the fixed SL- prefix)', () => {
     for (let seed = 0; seed < 50; seed++) {
-      const bytes = new Uint8Array(LICENSE_KEY_RANDOM_BYTES).map((_, i) => (seed * 37 + i * 91) % 256);
+      const bytes = new Uint8Array(LICENSE_KEY_RANDOM_BYTES).map(
+        (_, i) => (seed * 37 + i * 91) % 256,
+      );
       const key = generateLicenseKey(bytes);
       const dataPortion = key.slice('SL-'.length);
       expect(dataPortion).not.toMatch(/[ILOU]/);
@@ -52,7 +55,9 @@ describe('generateLicenseKey', () => {
 
   it('every generated key passes its own format validation', () => {
     for (let seed = 0; seed < 25; seed++) {
-      const bytes = new Uint8Array(LICENSE_KEY_RANDOM_BYTES).map((_, i) => (seed * 13 + i * 7) % 256);
+      const bytes = new Uint8Array(LICENSE_KEY_RANDOM_BYTES).map(
+        (_, i) => (seed * 13 + i * 7) % 256,
+      );
       const key = generateLicenseKey(bytes);
       expect(validateLicenseKeyFormat(key)).toEqual({ valid: true, normalised: key });
     }

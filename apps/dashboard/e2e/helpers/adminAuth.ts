@@ -36,7 +36,10 @@ const FIXED_DEVICE_FINGERPRINT = 'e2e00000'.repeat(6); // 48 hex-ish chars, well
 /** Logs the given page in as the seeded admin, completing TOTP
  * enrollment (first spec of the run) or step-up verification (every spec
  * after), and waits for `/dashboard` to load. */
-export async function loginAsAdmin(page: Page, deviceName = 'Playwright e2e runner'): Promise<void> {
+export async function loginAsAdmin(
+  page: Page,
+  deviceName = 'Playwright e2e runner',
+): Promise<void> {
   await page.addInitScript((fingerprint) => {
     try {
       window.localStorage.setItem('sl_dashboard_device_fingerprint', fingerprint);

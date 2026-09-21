@@ -12,10 +12,15 @@
 // grace").
 
 import { devices, licenses, subscriptions, plans, type Database } from '@sl/db';
-import { type FeatureKey, PLAN_FEATURES, DEVICE_LIMITS, type PlanCode, isPlanCode } from '@sl/shared';
+import {
+  type FeatureKey,
+  PLAN_FEATURES,
+  DEVICE_LIMITS,
+  type PlanCode,
+  isPlanCode,
+} from '@sl/shared';
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import { SignJWT, importPKCS8 } from 'jose';
-
 
 export interface EntitlementSnapshot {
   plan: PlanCode | null;
@@ -25,14 +30,23 @@ export interface EntitlementSnapshot {
   deviceLimit: number;
   expiresAt: string | null;
   currentPeriodEnd: string | null;
-  license: { keyPrefix: string; status: string; maxDevices: number; expiresAt: string | null } | null;
+  license: {
+    keyPrefix: string;
+    status: string;
+    maxDevices: number;
+    expiresAt: string | null;
+  } | null;
 }
 
 export interface EntitlementProvider {
   getEntitlements(userId: string): Promise<EntitlementSnapshot>;
   /** Signs an entitlement snapshot into the opaque blob the extension caches
    * for its offline-grace window. */
-  signEntitlementBlob(snapshot: EntitlementSnapshot, userId: string, deviceId: string): Promise<string>;
+  signEntitlementBlob(
+    snapshot: EntitlementSnapshot,
+    userId: string,
+    deviceId: string,
+  ): Promise<string>;
 }
 
 /** Reads the most recent non-deleted subscription for a user (any status —
@@ -95,11 +109,17 @@ export class DefaultEntitlementProvider implements EntitlementProvider {
     };
   }
 
-  async signEntitlementBlob(snapshot: EntitlementSnapshot, userId: string, deviceId: string): Promise<string> {
+  async signEntitlementBlob(
+    snapshot: EntitlementSnapshot,
+    userId: string,
+    deviceId: string,
+  ): Promise<string> {
     if (!this.signingKeyPem) {
       // Dev/test fallback: an unsigned-but-structured blob, clearly marked as
       // such. Never used when ENTITLEMENT_SIGNING_KEY is configured.
-      return Buffer.from(JSON.stringify({ unsigned: true, snapshot, userId, deviceId })).toString('base64url');
+      return Buffer.from(JSON.stringify({ unsigned: true, snapshot, userId, deviceId })).toString(
+        'base64url',
+      );
     }
     const key = await importPKCS8(this.signingKeyPem, 'EdDSA');
     return new SignJWT({ snapshot, deviceId })

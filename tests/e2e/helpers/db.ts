@@ -36,7 +36,10 @@ export function connect() {
 
 /** Marks a user's email verified without going through the token flow (see
  * file header). Returns the user id. */
-export async function markEmailVerified(db: ReturnType<typeof connect>, email: string): Promise<string> {
+export async function markEmailVerified(
+  db: ReturnType<typeof connect>,
+  email: string,
+): Promise<string> {
   const rows = await db<{ id: string }[]>`
     update users set email_verified_at = now() where email = ${email} returning id
   `;
@@ -66,7 +69,10 @@ export async function promoteToAdmin(
  * state without needing a full db:reset every time (globalSetup still does
  * a full reset+seed once per run — see prepare.mjs — this is extra
  * belt-and-braces for anyone re-running a single spec file directly). */
-export async function deleteUsersByEmailPrefix(db: ReturnType<typeof connect>, prefix: string): Promise<void> {
+export async function deleteUsersByEmailPrefix(
+  db: ReturnType<typeof connect>,
+  prefix: string,
+): Promise<void> {
   const rows = await db<{ id: string }[]>`select id from users where email like ${prefix + '%'}`;
   for (const { id } of rows) {
     // admin_actions.admin_user_id -> admin_users.id (no cascade) — a fixture

@@ -1,7 +1,6 @@
 // Auth module — /api/v1/auth/*. See docs/04-auth.md for the full flow
 // diagrams; this file is just HTTP wiring around modules/auth/service.ts.
 
-
 import {
   changePasswordRequestSchema,
   deviceFingerprintSchema,
@@ -33,7 +32,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 
 function ctx(fastify: FastifyInstance): AuthContext {
-  if (!fastify.config.JWT_PRIVATE_KEY) throw AppErrors.internal('JWT_PRIVATE_KEY is not configured.');
+  if (!fastify.config.JWT_PRIVATE_KEY)
+    throw AppErrors.internal('JWT_PRIVATE_KEY is not configured.');
   return {
     db: fastify.db,
     redis: fastify.redis,
@@ -46,7 +46,10 @@ function ctx(fastify: FastifyInstance): AuthContext {
     // `plugins/rate-limit.ts` already reads for this route's HTTP-level
     // limiter (`loginRateLimit` below, `config: { rateLimit: ... }`) — one
     // vocabulary for "how many login attempts per window", not two.
-    loginRateLimit: { max: fastify.config.RATE_LIMIT_LOGIN_MAX, windowMs: fastify.config.RATE_LIMIT_LOGIN_WINDOW_MS },
+    loginRateLimit: {
+      max: fastify.config.RATE_LIMIT_LOGIN_MAX,
+      windowMs: fastify.config.RATE_LIMIT_LOGIN_WINDOW_MS,
+    },
   };
 }
 
@@ -94,7 +97,10 @@ export default fp(
   async function authModule(fastify: FastifyInstance) {
     const app = fastify.withTypeProvider<ZodTypeProvider>();
     const cookieAttrs = resolveCookieAttrs(fastify.config);
-    const loginRateLimit = { max: fastify.config.RATE_LIMIT_LOGIN_MAX, timeWindow: fastify.config.RATE_LIMIT_LOGIN_WINDOW_MS };
+    const loginRateLimit = {
+      max: fastify.config.RATE_LIMIT_LOGIN_MAX,
+      timeWindow: fastify.config.RATE_LIMIT_LOGIN_WINDOW_MS,
+    };
 
     app.post(
       '/api/v1/auth/register',
@@ -115,7 +121,13 @@ export default fp(
 
     app.post(
       '/api/v1/auth/verify-email',
-      { schema: { tags: ['auth'], body: emailVerifyRequestSchema, response: { 200: z.object({ verified: z.literal(true) }) } } },
+      {
+        schema: {
+          tags: ['auth'],
+          body: emailVerifyRequestSchema,
+          response: { 200: z.object({ verified: z.literal(true) }) },
+        },
+      },
       async (request) => {
         await service.verifyEmail(ctx(fastify), request.body.token);
         return { verified: true as const };
@@ -126,7 +138,11 @@ export default fp(
       '/api/v1/auth/resend-verification',
       {
         config: { rateLimit: loginRateLimit },
-        schema: { tags: ['auth'], body: resendVerificationRequestSchema, response: { 200: z.object({ sent: z.literal(true) }) } },
+        schema: {
+          tags: ['auth'],
+          body: resendVerificationRequestSchema,
+          response: { 200: z.object({ sent: z.literal(true) }) },
+        },
       },
       async (request) => {
         await service.resendVerification(ctx(fastify), request.body.email.trim().toLowerCase());
@@ -138,11 +154,27 @@ export default fp(
       '/api/v1/auth/login',
       {
         config: { rateLimit: loginRateLimit },
-        schema: { tags: ['auth'], body: loginRequestSchema, response: { 200: loginResponseSchema } },
+        schema: {
+          tags: ['auth'],
+          body: loginRequestSchema,
+          response: { 200: loginResponseSchema },
+        },
       },
       async (request, reply) => {
-        const result = await service.login(ctx(fastify), request.body, clientIp(request), request.headers['user-agent'] ?? null);
-        if (result.status === 'ok') setSessionCookies(reply, result.accessToken, result.refreshToken, cookieAttrs, result.expiresIn);
+        const result = await service.login(
+          ctx(fastify),
+          request.body,
+          clientIp(request),
+          request.headers['user-agent'] ?? null,
+        );
+        if (result.status === 'ok')
+          setSessionCookies(
+            reply,
+            result.accessToken,
+            result.refreshToken,
+            cookieAttrs,
+            result.expiresIn,
+          );
         return result;
       },
     );
@@ -159,7 +191,13 @@ export default fp(
       },
       async (request, reply) => {
         const result = await service.mfaVerify(ctx(fastify), request.body);
-        setSessionCookies(reply, result.accessToken, result.refreshToken, cookieAttrs, result.expiresIn);
+        setSessionCookies(
+          reply,
+          result.accessToken,
+          result.refreshToken,
+          cookieAttrs,
+          result.expiresIn,
+        );
         return result;
       },
     );
@@ -167,7 +205,11 @@ export default fp(
     app.post(
       '/api/v1/auth/refresh',
       {
-        schema: { tags: ['auth'], body: refreshRequestSchema.partial(), response: { 200: refreshResponseSchema } },
+        schema: {
+          tags: ['auth'],
+          body: refreshRequestSchema.partial(),
+          response: { 200: refreshResponseSchema },
+        },
       },
       async (request, reply) => {
         const token = request.body.refreshToken ?? request.cookies.sl_rt;
@@ -176,14 +218,26 @@ export default fp(
           userAgent: request.headers['user-agent'] ?? null,
           device: request.body.device ?? null,
         });
-        setSessionCookies(reply, result.accessToken, result.refreshToken, cookieAttrs, result.expiresIn);
+        setSessionCookies(
+          reply,
+          result.accessToken,
+          result.refreshToken,
+          cookieAttrs,
+          result.expiresIn,
+        );
         return result;
       },
     );
 
     app.post(
       '/api/v1/auth/logout',
-      { schema: { tags: ['auth'], body: logoutRequestSchema.partial(), response: { 200: z.object({ ok: z.literal(true) }) } } },
+      {
+        schema: {
+          tags: ['auth'],
+          body: logoutRequestSchema.partial(),
+          response: { 200: z.object({ ok: z.literal(true) }) },
+        },
+      },
       async (request, reply) => {
         const token = request.body.refreshToken ?? request.cookies.sl_rt;
         if (request.body.allDevices) {
@@ -215,7 +269,11 @@ export default fp(
       '/api/v1/auth/password/reset-request',
       {
         config: { rateLimit: loginRateLimit },
-        schema: { tags: ['auth'], body: passwordResetRequestSchema, response: { 200: z.object({ sent: z.literal(true) }) } },
+        schema: {
+          tags: ['auth'],
+          body: passwordResetRequestSchema,
+          response: { 200: z.object({ sent: z.literal(true) }) },
+        },
       },
       async (request) => {
         await service.requestPasswordReset(ctx(fastify), request.body.email, clientIp(request));
@@ -226,7 +284,11 @@ export default fp(
     app.post(
       '/api/v1/auth/password/reset-confirm',
       {
-        schema: { tags: ['auth'], body: passwordResetConfirmSchema, response: { 200: z.object({ ok: z.literal(true) }) } },
+        schema: {
+          tags: ['auth'],
+          body: passwordResetConfirmSchema,
+          response: { 200: z.object({ ok: z.literal(true) }) },
+        },
       },
       async (request) => {
         await service.confirmPasswordReset(ctx(fastify), request.body.token, request.body.password);
@@ -239,10 +301,19 @@ export default fp(
       {
         onRequest: [fastify.authenticate],
         preHandler: [fastify.verifyCsrf],
-        schema: { tags: ['auth'], body: changePasswordRequestSchema, response: { 200: z.object({ ok: z.literal(true) }) } },
+        schema: {
+          tags: ['auth'],
+          body: changePasswordRequestSchema,
+          response: { 200: z.object({ ok: z.literal(true) }) },
+        },
       },
       async (request) => {
-        await service.changePassword(ctx(fastify), request.authUser!.id, request.body.currentPassword, request.body.newPassword);
+        await service.changePassword(
+          ctx(fastify),
+          request.authUser!.id,
+          request.body.currentPassword,
+          request.body.newPassword,
+        );
         return { ok: true as const };
       },
     );
@@ -257,17 +328,31 @@ export default fp(
 
     app.post(
       '/api/v1/auth/totp/enroll',
-      { schema: { tags: ['auth'], body: enrollStartBody, response: { 200: mfaEnrollResponseSchema } } },
+      {
+        schema: {
+          tags: ['auth'],
+          body: enrollStartBody,
+          response: { 200: mfaEnrollResponseSchema },
+        },
+      },
       async (request) => {
         const authUser = await fastify.tryAuthenticate(request);
-        const userId = await service.resolveEnrollmentSubject(ctx(fastify), authUser?.id, request.body.mfaTicket);
-        const user = await fastify.db.query.users.findFirst({ where: (u, { eq }) => eq(u.id, userId) });
+        const userId = await service.resolveEnrollmentSubject(
+          ctx(fastify),
+          authUser?.id,
+          request.body.mfaTicket,
+        );
+        const user = await fastify.db.query.users.findFirst({
+          where: (u, { eq }) => eq(u.id, userId),
+        });
         if (!user) throw AppErrors.notFound('user');
         return service.beginTotpEnrollment(ctx(fastify), userId, user.email);
       },
     );
 
-    const enrollConfirmBody = mfaEnrollConfirmSchema.extend({ mfaTicket: z.string().min(1).optional() });
+    const enrollConfirmBody = mfaEnrollConfirmSchema.extend({
+      mfaTicket: z.string().min(1).optional(),
+    });
 
     app.post(
       '/api/v1/auth/totp/enroll/confirm',
@@ -276,15 +361,40 @@ export default fp(
           tags: ['auth'],
           body: enrollConfirmBody,
           response: {
-            200: z.object({ enabled: z.literal(true), tokens: z.object({ accessToken: z.string(), refreshToken: z.string(), expiresIn: z.number() }).optional() }),
+            200: z.object({
+              enabled: z.literal(true),
+              tokens: z
+                .object({
+                  accessToken: z.string(),
+                  refreshToken: z.string(),
+                  expiresIn: z.number(),
+                })
+                .optional(),
+            }),
           },
         },
       },
       async (request, reply) => {
         const authUser = await fastify.tryAuthenticate(request);
-        const userId = await service.resolveEnrollmentSubject(ctx(fastify), authUser?.id, request.body.mfaTicket);
-        const result = await service.confirmTotpEnrollment(ctx(fastify), userId, request.body.code, request.body.mfaTicket);
-        if (result.tokens) setSessionCookies(reply, result.tokens.accessToken, result.tokens.refreshToken, cookieAttrs, result.tokens.expiresIn);
+        const userId = await service.resolveEnrollmentSubject(
+          ctx(fastify),
+          authUser?.id,
+          request.body.mfaTicket,
+        );
+        const result = await service.confirmTotpEnrollment(
+          ctx(fastify),
+          userId,
+          request.body.code,
+          request.body.mfaTicket,
+        );
+        if (result.tokens)
+          setSessionCookies(
+            reply,
+            result.tokens.accessToken,
+            result.tokens.refreshToken,
+            cookieAttrs,
+            result.tokens.expiresIn,
+          );
         return { enabled: true as const, tokens: result.tokens };
       },
     );
@@ -301,7 +411,12 @@ export default fp(
         },
       },
       async (request) => {
-        await service.disableTotp(ctx(fastify), request.authUser!.id, request.body.currentPassword, request.body.code);
+        await service.disableTotp(
+          ctx(fastify),
+          request.authUser!.id,
+          request.body.currentPassword,
+          request.body.code,
+        );
         return { disabled: true as const };
       },
     );
@@ -317,11 +432,21 @@ export default fp(
       {
         onRequest: [fastify.authenticate],
         preHandler: [fastify.verifyCsrf],
-        schema: { tags: ['auth'], body: deviceFingerprintSchema, response: { 200: z.object({ deviceId: z.string().uuid() }) } },
+        schema: {
+          tags: ['auth'],
+          body: deviceFingerprintSchema,
+          response: { 200: z.object({ deviceId: z.string().uuid() }) },
+        },
       },
       async (request) => {
         const { findOrRegisterDevice } = await import('../../lib/devices.js');
-        const { id } = await findOrRegisterDevice(fastify.db, fastify.entitlements, request.authUser!.id, request.body, clientIp(request));
+        const { id } = await findOrRegisterDevice(
+          fastify.db,
+          fastify.entitlements,
+          request.authUser!.id,
+          request.body,
+          clientIp(request),
+        );
         return { deviceId: id };
       },
     );

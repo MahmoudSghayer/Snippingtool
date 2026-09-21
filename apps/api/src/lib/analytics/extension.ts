@@ -20,10 +20,17 @@ export interface ExtensionUsage {
   byBrowser: Record<string, number>;
 }
 
-export async function getExtensionUsage(db: Database, params: ExtensionUsageParams): Promise<ExtensionUsage> {
+export async function getExtensionUsage(
+  db: Database,
+  params: ExtensionUsageParams,
+): Promise<ExtensionUsage> {
   const [heartbeatRows, installRows] = await Promise.all([
     db.query.userActivity.findMany({
-      where: and(eq(userActivity.type, 'heartbeat'), gte(userActivity.occurredAt, parseDayUtc(params.from)), lt(userActivity.occurredAt, endOfDayUtc(params.to))),
+      where: and(
+        eq(userActivity.type, 'heartbeat'),
+        gte(userActivity.occurredAt, parseDayUtc(params.from)),
+        lt(userActivity.occurredAt, endOfDayUtc(params.to)),
+      ),
       columns: { id: true },
     }),
     db.query.extensionInstalls.findMany({
@@ -40,5 +47,10 @@ export async function getExtensionUsage(db: Database, params: ExtensionUsagePara
     byBrowser[browser] = (byBrowser[browser] ?? 0) + 1;
   }
 
-  return { heartbeats: heartbeatRows.length, activeInstalls: installRows.length, byVersion, byBrowser };
+  return {
+    heartbeats: heartbeatRows.length,
+    activeInstalls: installRows.length,
+    byVersion,
+    byBrowser,
+  };
 }

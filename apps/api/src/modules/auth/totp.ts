@@ -26,7 +26,11 @@ export function verifyTotpCode(secret: string, code: string): boolean {
 export function generateRecoveryCodes(count = 10): string[] {
   const codes: string[] = [];
   for (let i = 0; i < count; i++) {
-    const raw = randomToken(5).replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 8).padEnd(8, '0');
+    const raw = randomToken(5)
+      .replace(/[^A-Za-z0-9]/g, '')
+      .toUpperCase()
+      .slice(0, 8)
+      .padEnd(8, '0');
     codes.push(`${raw.slice(0, 4)}-${raw.slice(4, 8)}`);
   }
   return codes;

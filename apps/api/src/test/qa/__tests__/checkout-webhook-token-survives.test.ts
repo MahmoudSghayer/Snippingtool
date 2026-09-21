@@ -30,7 +30,7 @@ import { bearer, buildTestApp, createUserSession, type TestApp } from '../helper
 
 import type Stripe from 'stripe';
 
-describe('checkout.session.completed does not invalidate the buyer\'s own pre-checkout access token (defect #8)', () => {
+describe("checkout.session.completed does not invalidate the buyer's own pre-checkout access token (defect #8)", () => {
   let app: TestApp;
 
   beforeAll(async () => {
@@ -48,14 +48,22 @@ describe('checkout.session.completed does not invalidate the buyer\'s own pre-ch
   });
 
   it('the same access token still authenticates after the webhook backfills stripe_customer_id, and row_version is unchanged', async () => {
-    const user = await createUserSession(app, 'webhook-token-survives@example.com', 'fp-webhook-token-000001');
+    const user = await createUserSession(
+      app,
+      'webhook-token-survives@example.com',
+      'fp-webhook-token-000001',
+    );
 
     const before = await app.db.query.users.findFirst({ where: eq(users.id, user.userId) });
     expect(before).toBeDefined();
     const rowVersionBefore = before!.rowVersion;
 
     // Sanity check: the token works before the webhook.
-    const preRes = await app.inject({ method: 'GET', url: '/api/v1/subscriptions/me', headers: bearer(user.accessToken) });
+    const preRes = await app.inject({
+      method: 'GET',
+      url: '/api/v1/subscriptions/me',
+      headers: bearer(user.accessToken),
+    });
     expect(preRes.statusCode).toBe(200);
 
     const event = {
@@ -83,28 +91,45 @@ describe('checkout.session.completed does not invalidate the buyer\'s own pre-ch
     expect(after!.rowVersion).toBe(rowVersionBefore); // ...but it did not bump row_version
 
     // The pre-checkout access token still works — no 401, no forced re-login.
-    const postRes = await app.inject({ method: 'GET', url: '/api/v1/subscriptions/me', headers: bearer(user.accessToken) });
+    const postRes = await app.inject({
+      method: 'GET',
+      url: '/api/v1/subscriptions/me',
+      headers: bearer(user.accessToken),
+    });
     expect(postRes.statusCode).toBe(200);
-    const body = postRes.json() as { subscription: { status: string; plan: { code: string } } | null };
+    const body = postRes.json() as {
+      subscription: { status: string; plan: { code: string } } | null;
+    };
     expect(body.subscription?.status).toBe('active');
     expect(body.subscription?.plan.code).toBe('pro');
   });
 
   it('a genuinely security-relevant users UPDATE (password change) still invalidates the token, unaffected by this fix', async () => {
-    const user = await createUserSession(app, 'webhook-security-still-bumps@example.com', 'fp-webhook-security-0001');
+    const user = await createUserSession(
+      app,
+      'webhook-security-still-bumps@example.com',
+      'fp-webhook-security-0001',
+    );
 
     const changeRes = await app.inject({
       method: 'POST',
       url: '/api/v1/auth/password/change',
       headers: bearer(user.accessToken),
-      payload: { currentPassword: 'correcthorsebattery12', newPassword: 'a-new-correct-horse-battery-12' },
+      payload: {
+        currentPassword: 'correcthorsebattery12',
+        newPassword: 'a-new-correct-horse-battery-12',
+      },
     });
     expect(changeRes.statusCode).toBe(200);
 
     // The now-stale access token (issued before the password change) must
     // still be rejected — this fix only excludes stripe_customer_id, never
     // password_hash.
-    const res = await app.inject({ method: 'GET', url: '/api/v1/subscriptions/me', headers: bearer(user.accessToken) });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/v1/subscriptions/me',
+      headers: bearer(user.accessToken),
+    });
     expect(res.statusCode).toBe(401);
     expect(res.json()).toMatchObject({ code: 'AUTH_SESSION_REVOKED' });
   });

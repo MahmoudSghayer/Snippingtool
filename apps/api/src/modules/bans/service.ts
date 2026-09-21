@@ -32,15 +32,21 @@ export interface CheckBansInput {
  * (`lifted_at IS NULL`) bans, honouring `expires_at`. Returns the
  * first matching ban (there is no meaningful "most severe" ordering across
  * ban types — any live match is a hard block). */
-export async function checkBans(db: Database, input: CheckBansInput): Promise<{ banned: boolean; ban: BanRow | null }> {
+export async function checkBans(
+  db: Database,
+  input: CheckBansInput,
+): Promise<{ banned: boolean; ban: BanRow | null }> {
   const conditions: SQL[] = [];
   if (input.userId) conditions.push(and(eq(bans.type, 'account'), eq(bans.userId, input.userId))!);
   if (input.ip) conditions.push(and(eq(bans.type, 'ip'), eq(bans.value, input.ip))!);
-  if (input.deviceFingerprintHash) conditions.push(and(eq(bans.type, 'device'), eq(bans.value, input.deviceFingerprintHash))!);
+  if (input.deviceFingerprintHash)
+    conditions.push(and(eq(bans.type, 'device'), eq(bans.value, input.deviceFingerprintHash))!);
   if (input.hwid) conditions.push(and(eq(bans.type, 'hwid'), eq(bans.value, input.hwid))!);
   if (conditions.length === 0) return { banned: false, ban: null };
 
-  const rows = await db.query.bans.findMany({ where: and(isNull(bans.liftedAt), or(...conditions)) });
+  const rows = await db.query.bans.findMany({
+    where: and(isNull(bans.liftedAt), or(...conditions)),
+  });
   const now = Date.now();
   const active = rows.find((r) => r.expiresAt === null || r.expiresAt.getTime() > now);
   return active ? { banned: true, ban: active } : { banned: false, ban: null };
@@ -48,7 +54,11 @@ export async function checkBans(db: Database, input: CheckBansInput): Promise<{ 
 
 /** Revokes every currently-active session for a user and pushes
  * `session.revoked` for each — called for an `account`-type ban. */
-export async function revokeAllSessionsForBan(db: Database, redis: Redis, userId: string): Promise<number> {
+export async function revokeAllSessionsForBan(
+  db: Database,
+  redis: Redis,
+  userId: string,
+): Promise<number> {
   const activeSessions = await db.query.sessions.findMany({
     where: and(eq(sessions.userId, userId), isNull(sessions.revokedAt)),
   });
@@ -57,7 +67,11 @@ export async function revokeAllSessionsForBan(db: Database, redis: Redis, userId
       .update(sessions)
       .set({ revokedAt: new Date(), revokedReason: 'admin_force_logout' })
       .where(eq(sessions.id, session.id));
-    await publishToUser(redis, userId, { type: 'session.revoked', sessionId: session.id, reason: 'admin_force_logout' });
+    await publishToUser(redis, userId, {
+      type: 'session.revoked',
+      sessionId: session.id,
+      reason: 'admin_force_logout',
+    });
   }
   return activeSessions.length;
 }
@@ -71,7 +85,11 @@ export interface CreateBanInput {
   expiresAt: Date | null;
 }
 
-export async function createBan(db: Database, redis: Redis, input: CreateBanInput): Promise<BanRow> {
+export async function createBan(
+  db: Database,
+  redis: Redis,
+  input: CreateBanInput,
+): Promise<BanRow> {
   if (input.type === 'account' && !input.userId) {
     throw AppErrors.validation('userId is required for an account ban.');
   }
@@ -101,7 +119,11 @@ export async function liftBan(db: Database, banId: string): Promise<BanRow> {
   if (!existing) throw AppErrors.notFound('ban');
   if (existing.liftedAt) throw AppErrors.conflict('Ban is already lifted.');
 
-  const [row] = await db.update(bans).set({ liftedAt: new Date() }).where(eq(bans.id, banId)).returning();
+  const [row] = await db
+    .update(bans)
+    .set({ liftedAt: new Date() })
+    .where(eq(bans.id, banId))
+    .returning();
   return row!;
 }
 

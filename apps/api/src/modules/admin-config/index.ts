@@ -2,7 +2,6 @@
 // masking for anyone without config.write (read-only viewers still see that
 // a secret key exists, just not its value).
 
-
 import { systemConfig } from '@sl/db';
 import { systemConfigDtoSchema } from '@sl/shared';
 import { eq } from 'drizzle-orm';
@@ -30,7 +29,10 @@ export default fp(
 
     app.get(
       '/api/v1/admin/config',
-      { onRequest: [fastify.requirePermission('system.read')], schema: { tags: ['admin'], response: { 200: z.array(systemConfigDtoSchema) } } },
+      {
+        onRequest: [fastify.requirePermission('system.read')],
+        schema: { tags: ['admin'], response: { 200: z.array(systemConfigDtoSchema) } },
+      },
       async (request) => {
         const canReveal = await hasConfigWrite(fastify, request.authUser!.id);
         const rows = await fastify.db.query.systemConfig.findMany();
@@ -46,12 +48,18 @@ export default fp(
         schema: {
           tags: ['admin'],
           params: z.object({ key: z.string().min(1) }),
-          body: z.object({ value: z.unknown(), isSecret: z.boolean().optional(), description: z.string().max(500).optional() }),
+          body: z.object({
+            value: z.unknown(),
+            isSecret: z.boolean().optional(),
+            description: z.string().max(500).optional(),
+          }),
           response: { 200: systemConfigDtoSchema },
         },
       },
       async (request) => {
-        const existing = await fastify.db.query.systemConfig.findFirst({ where: eq(systemConfig.key, request.params.key) });
+        const existing = await fastify.db.query.systemConfig.findFirst({
+          where: eq(systemConfig.key, request.params.key),
+        });
 
         let after: typeof systemConfig.$inferSelect;
         if (existing) {

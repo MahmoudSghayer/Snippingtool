@@ -116,7 +116,10 @@ export interface RecordSuspiciousIpInput {
  * configured, or the lookup failed) — an unknown country can't be compared
  * to anything, so this silently no-ops rather than guessing.
  */
-export async function recordSuspiciousIpIfAny(db: Database, input: RecordSuspiciousIpInput): Promise<void> {
+export async function recordSuspiciousIpIfAny(
+  db: Database,
+  input: RecordSuspiciousIpInput,
+): Promise<void> {
   const country = input.activity.country;
   if (!country) return;
 
@@ -127,7 +130,9 @@ export async function recordSuspiciousIpIfAny(db: Database, input: RecordSuspici
   });
   if (priorRows.length === 0) return; // no prior history for this user — nothing to compare against
 
-  const knownCountries = new Set(priorRows.map((r) => r.country).filter((c): c is string => Boolean(c)));
+  const knownCountries = new Set(
+    priorRows.map((r) => r.country).filter((c): c is string => Boolean(c)),
+  );
   if (knownCountries.size === 0) return; // prior rows exist but none are enriched — nothing to compare against
   if (knownCountries.has(country)) return; // already seen this country from this user — not new
 
@@ -136,7 +141,8 @@ export async function recordSuspiciousIpIfAny(db: Database, input: RecordSuspici
     ? Math.round((Date.now() - mostRecentDifferentCountry.lastSeen.getTime()) / 60_000)
     : null;
   const isImpossibleTravel =
-    mostRecentDifferentCountry != null && Date.now() - mostRecentDifferentCountry.lastSeen.getTime() < IMPOSSIBLE_TRAVEL_WINDOW_MS;
+    mostRecentDifferentCountry != null &&
+    Date.now() - mostRecentDifferentCountry.lastSeen.getTime() < IMPOSSIBLE_TRAVEL_WINDOW_MS;
 
   await createFlag(db, {
     userId: input.userId,

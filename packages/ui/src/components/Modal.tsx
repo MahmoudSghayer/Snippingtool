@@ -19,7 +19,15 @@ const sizeClasses = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl' };
 
 /** Dialog for confirmations and focused forms. For anything that needs a
  * scrollable, wide surface with in-place navigation, prefer Drawer. */
-export function Modal({ open, onOpenChange, title, description, children, footer, size = 'md' }: ModalProps) {
+export function Modal({
+  open,
+  onOpenChange,
+  title,
+  description,
+  children,
+  footer,
+  size = 'md',
+}: ModalProps) {
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
@@ -33,7 +41,9 @@ export function Modal({ open, onOpenChange, title, description, children, footer
         >
           <div className="mb-4 flex items-start justify-between gap-4">
             <div>
-              <DialogPrimitive.Title className="text-base font-semibold text-[--sl-fg]">{title}</DialogPrimitive.Title>
+              <DialogPrimitive.Title className="text-base font-semibold text-[--sl-fg]">
+                {title}
+              </DialogPrimitive.Title>
               {description && (
                 <DialogPrimitive.Description className="mt-1 text-sm text-[--sl-fg-muted]">
                   {description}

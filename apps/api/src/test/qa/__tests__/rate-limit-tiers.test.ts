@@ -16,7 +16,14 @@ import { resetDatabase } from '@sl/db/test-utils';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { ADMIN_RATE_LIMIT, INGEST_RATE_LIMIT } from '../../../lib/rate-limit-tiers.js';
-import { bearer, buildTestApp, createAdminSession, createUserSession, nextIp, type TestApp } from '../helpers.js';
+import {
+  bearer,
+  buildTestApp,
+  createAdminSession,
+  createUserSession,
+  nextIp,
+  type TestApp,
+} from '../helpers.js';
 
 describe('rate-limit tiers per route class', () => {
   let app: TestApp;
@@ -40,7 +47,8 @@ describe('rate-limit tiers per route class', () => {
     const headers = { ...bearer(user.accessToken), 'x-forwarded-for': ip };
 
     let last200Count = 0;
-    let firstRejection: { index: number; status: number; retryAfterHeader: string | undefined } | undefined;
+    let firstRejection:
+      { index: number; status: number; retryAfterHeader: string | undefined } | undefined;
 
     // reportRiskBudgetEventsRequestSchema requires at least one event, with
     // a real deviceId/sessionId (FK-checked at the DB layer) — reuse the
@@ -60,11 +68,21 @@ describe('rate-limit tiers per route class', () => {
     };
 
     for (let i = 1; i <= INGEST_RATE_LIMIT.max + 1; i++) {
-      const res = await app.inject({ method: 'POST', url: '/api/v1/risk-events', headers, payload: { events: [event] }, remoteAddress: ip });
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/v1/risk-events',
+        headers,
+        payload: { events: [event] },
+        remoteAddress: ip,
+      });
       if (res.statusCode === 200) {
         last200Count++;
       } else if (!firstRejection) {
-        firstRejection = { index: i, status: res.statusCode, retryAfterHeader: res.headers['retry-after'] as string | undefined };
+        firstRejection = {
+          index: i,
+          status: res.statusCode,
+          retryAfterHeader: res.headers['retry-after'] as string | undefined,
+        };
       }
     }
 
@@ -74,8 +92,17 @@ describe('rate-limit tiers per route class', () => {
   }, 20_000);
 
   it(`ADMIN_RATE_LIMIT (${ADMIN_RATE_LIMIT.max}/${ADMIN_RATE_LIMIT.timeWindow}ms): the (max+1)th admin mutation in the window is rejected with 429`, async () => {
-    const admin = await createAdminSession(app, 'super_admin', 'ingest-rl-admin@example.com', 'fp-admin-rl-0000000000001');
-    const target = await createUserSession(app, 'admin-rl-target@example.com', 'fp-admin-rl-target-000001');
+    const admin = await createAdminSession(
+      app,
+      'super_admin',
+      'ingest-rl-admin@example.com',
+      'fp-admin-rl-0000000000001',
+    );
+    const target = await createUserSession(
+      app,
+      'admin-rl-target@example.com',
+      'fp-admin-rl-target-000001',
+    );
     const ip = nextIp();
     const headers = { ...bearer(admin.accessToken), 'x-forwarded-for': ip };
 

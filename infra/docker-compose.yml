@@ -30,8 +30,8 @@ x-api-env: &api-env
     TEST_DATABASE_URL: postgres://sl:sl@postgres:5432/sniper_ledger_test
     REDIS_URL: redis://redis:6379
     SMTP_HOST: mailpit
-    SMTP_PORT: "1025"
-    SMTP_SECURE: "false"
+    SMTP_PORT: '1025'
+    SMTP_SECURE: 'false'
     OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
 
 services:
@@ -43,12 +43,12 @@ services:
       POSTGRES_PASSWORD: sl
       POSTGRES_DB: sniper_ledger
     ports:
-      - "127.0.0.1:5432:5432"
+      - '127.0.0.1:5432:5432'
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U sl -d sniper_ledger"]
+      test: ['CMD-SHELL', 'pg_isready -U sl -d sniper_ledger']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -56,14 +56,14 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    command: ['redis-server', '/usr/local/etc/redis/redis.conf']
     ports:
-      - "127.0.0.1:6379:6379"
+      - '127.0.0.1:6379:6379'
     volumes:
       - redisdata:/data
       - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ['CMD', 'redis-cli', 'ping']
       interval: 5s
       timeout: 3s
       retries: 10
@@ -72,10 +72,10 @@ services:
     image: axllent/mailpit:v1.21.3
     restart: unless-stopped
     ports:
-      - "127.0.0.1:1025:1025" # SMTP
-      - "127.0.0.1:8025:8025" # web UI
+      - '127.0.0.1:1025:1025' # SMTP
+      - '127.0.0.1:8025:8025' # web UI
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8025/"]
+      test: ['CMD', 'wget', '--spider', '-q', 'http://127.0.0.1:8025/']
       interval: 10s
       timeout: 3s
       retries: 5
@@ -89,11 +89,11 @@ services:
       DATABASE_URL: postgres://sl:sl@postgres:5432/sniper_ledger
       SEED_ADMIN_EMAIL: admin@sniperledger.local
       SEED_ADMIN_PASSWORD: dev-only-change-me
-      RUN_SEED: "true"
+      RUN_SEED: 'true'
     depends_on:
       postgres:
         condition: service_healthy
-    profiles: ["tools"]
+    profiles: ['tools']
 
   api:
     image: node:22-alpine
@@ -106,7 +106,7 @@ services:
     restart: unless-stopped
     <<: *api-env
     ports:
-      - "127.0.0.1:3000:3000"
+      - '127.0.0.1:3000:3000'
     volumes:
       - ..:/repo
       - node_modules_root:/repo/node_modules
@@ -155,12 +155,12 @@ services:
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.116.1
     restart: unless-stopped
-    command: ["--config=/etc/otel-collector-config.yaml"]
+    command: ['--config=/etc/otel-collector-config.yaml']
     volumes:
       - ./monitoring/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
     ports:
-      - "127.0.0.1:4318:4318" # OTLP HTTP
-    profiles: ["monitoring"]
+      - '127.0.0.1:4318:4318' # OTLP HTTP
+    profiles: ['monitoring']
 
   prometheus:
     image: prom/prometheus:v3.1.0
@@ -170,11 +170,11 @@ services:
       - ./monitoring/prometheus/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
       - promdata:/prometheus
     command:
-      - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.path=/prometheus"
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
     ports:
-      - "127.0.0.1:9090:9090"
-    profiles: ["monitoring"]
+      - '127.0.0.1:9090:9090'
+    profiles: ['monitoring']
 
   postgres-exporter:
     image: prometheuscommunity/postgres-exporter:v0.15.0
@@ -184,7 +184,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    profiles: ["monitoring"]
+    profiles: ['monitoring']
 
   redis-exporter:
     image: oliver006/redis_exporter:v1.66.0
@@ -194,11 +194,11 @@ services:
       # Exports each BullMQ list/zset's length as redis_key_size{key=...} —
       # what QueueBacklogGrowing (infra/monitoring/prometheus/alert-rules.yml)
       # alerts on.
-      REDIS_EXPORTER_CHECK_KEYS: "bull:*:wait,bull:*:active,bull:*:delayed"
+      REDIS_EXPORTER_CHECK_KEYS: 'bull:*:wait,bull:*:active,bull:*:delayed'
     depends_on:
       redis:
         condition: service_healthy
-    profiles: ["monitoring"]
+    profiles: ['monitoring']
 
   node-exporter:
     image: prom/node-exporter:v1.8.2
@@ -209,11 +209,11 @@ services:
       - /sys:/host/sys:ro
       - /:/rootfs:ro
     command:
-      - "--path.procfs=/host/proc"
-      - "--path.sysfs=/host/sys"
-      - "--path.rootfs=/rootfs"
-      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
-    profiles: ["monitoring"]
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    profiles: ['monitoring']
 
   grafana:
     image: grafana/grafana:11.4.0
@@ -221,9 +221,9 @@ services:
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
-      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_USERS_ALLOW_SIGN_UP: 'false'
       GRAFANA_PG_HOST: postgres
-      GRAFANA_PG_PORT: "5432"
+      GRAFANA_PG_PORT: '5432'
       GRAFANA_PG_DATABASE: sniper_ledger
       GRAFANA_PG_USER: sl
       GRAFANA_PG_PASSWORD: sl
@@ -233,34 +233,34 @@ services:
       - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafanadata:/var/lib/grafana
     ports:
-      - "127.0.0.1:3001:3000"
+      - '127.0.0.1:3001:3000'
     depends_on:
       - prometheus
       - loki
-    profiles: ["monitoring"]
+    profiles: ['monitoring']
 
   loki:
     image: grafana/loki:3.3.2
     restart: unless-stopped
-    command: ["-config.file=/etc/loki/loki-config.yaml"]
+    command: ['-config.file=/etc/loki/loki-config.yaml']
     volumes:
       - ./monitoring/loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
       - lokidata:/loki
     ports:
-      - "127.0.0.1:3100:3100"
-    profiles: ["monitoring"]
+      - '127.0.0.1:3100:3100'
+    profiles: ['monitoring']
 
   promtail:
     image: grafana/promtail:3.3.2
     restart: unless-stopped
-    command: ["-config.file=/etc/promtail/promtail-config.yaml"]
+    command: ['-config.file=/etc/promtail/promtail-config.yaml']
     volumes:
       - ./monitoring/promtail/promtail-config.yaml:/etc/promtail/promtail-config.yaml:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       - loki
-    profiles: ["monitoring"]
+    profiles: ['monitoring']
 
 volumes:
   pgdata:

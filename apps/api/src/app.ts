@@ -12,7 +12,12 @@ import { fileURLToPath } from 'node:url';
 
 import autoload from '@fastify/autoload';
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
-import { serializerCompiler, validatorCompiler, jsonSchemaTransform, createJsonSchemaTransform } from 'fastify-type-provider-zod';
+import {
+  serializerCompiler,
+  validatorCompiler,
+  jsonSchemaTransform,
+  createJsonSchemaTransform,
+} from 'fastify-type-provider-zod';
 
 import { loadEnv } from './config/env.js';
 import authPlugin from './plugins/auth.js';
@@ -45,32 +50,30 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   const env = loadEnv();
 
   const app = Fastify({
-    logger:
-      options.logger ??
-      {
-        level: env.LOG_LEVEL,
-        redact: {
-          paths: [
-            'req.headers.authorization',
-            'req.headers.cookie',
-            'req.body.password',
-            'req.body.currentPassword',
-            'req.body.newPassword',
-            'req.body.refreshToken',
-            'req.body.token',
-            'req.body.code',
-            'res.headers["set-cookie"]',
-            '*.password',
-            '*.passwordHash',
-            '*.refreshToken',
-            '*.accessToken',
-            '*.totpSecret',
-            '*.email', // PII: emails are redacted from structured logs by default
-          ],
-          censor: '[redacted]',
-          remove: false,
-        },
+    logger: options.logger ?? {
+      level: env.LOG_LEVEL,
+      redact: {
+        paths: [
+          'req.headers.authorization',
+          'req.headers.cookie',
+          'req.body.password',
+          'req.body.currentPassword',
+          'req.body.newPassword',
+          'req.body.refreshToken',
+          'req.body.token',
+          'req.body.code',
+          'res.headers["set-cookie"]',
+          '*.password',
+          '*.passwordHash',
+          '*.refreshToken',
+          '*.accessToken',
+          '*.totpSecret',
+          '*.email', // PII: emails are redacted from structured logs by default
+        ],
+        censor: '[redacted]',
+        remove: false,
       },
+    },
     genReqId: (req) => (req.headers['x-request-id'] as string | undefined) ?? crypto.randomUUID(),
     trustProxy: true,
     ajv: { customOptions: { removeAdditional: false } },
@@ -102,7 +105,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       info: {
         title: "The Sniper's Ledger API",
         version: '1.0.0',
-        description: 'REST + WebSocket API for The Sniper\'s Ledger backend.',
+        description: "REST + WebSocket API for The Sniper's Ledger backend.",
       },
       servers: [{ url: env.APP_ORIGIN }],
       components: {

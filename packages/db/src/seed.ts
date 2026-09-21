@@ -59,9 +59,13 @@ async function upsertFeatureToggle(
   db: ReturnType<typeof createDb>['db'],
   toggle: { key: string; enabled: boolean; description: string; rolloutPercent?: number },
 ) {
-  const existing = await db.query.featureToggles.findFirst({ where: eq(featureToggles.key, toggle.key) });
+  const existing = await db.query.featureToggles.findFirst({
+    where: eq(featureToggles.key, toggle.key),
+  });
   if (existing) {
-    console.log(`  feature_toggle ${toggle.key}: already present, leaving enabled=${existing.enabled} (admin-controlled)`);
+    console.log(
+      `  feature_toggle ${toggle.key}: already present, leaving enabled=${existing.enabled} (admin-controlled)`,
+    );
     return;
   }
   await db.insert(featureToggles).values({
@@ -77,9 +81,13 @@ async function upsertSystemConfig(
   db: ReturnType<typeof createDb>['db'],
   config: { key: string; value: unknown; description: string; isSecret?: boolean },
 ) {
-  const existing = await db.query.systemConfig.findFirst({ where: eq(systemConfig.key, config.key) });
+  const existing = await db.query.systemConfig.findFirst({
+    where: eq(systemConfig.key, config.key),
+  });
   if (existing) {
-    console.log(`  system_config ${config.key}: already present, leaving value as-is (admin-controlled)`);
+    console.log(
+      `  system_config ${config.key}: already present, leaving value as-is (admin-controlled)`,
+    );
     return;
   }
   await db.insert(systemConfig).values({
@@ -100,7 +108,11 @@ async function upsertUser(
   if (existing) {
     await db
       .update(users)
-      .set({ passwordHash, role: user.role, emailVerifiedAt: existing.emailVerifiedAt ?? new Date() })
+      .set({
+        passwordHash,
+        role: user.role,
+        emailVerifiedAt: existing.emailVerifiedAt ?? new Date(),
+      })
       .where(eq(users.id, existing.id));
     console.log(`  user ${user.email}: updated`);
     return existing.id;
@@ -184,17 +196,20 @@ export async function seed(connectionString: string = getDatabaseUrl()) {
     await upsertFeatureToggle(db, {
       key: 'automation.enabled',
       enabled: false,
-      description: 'Master switch for the M3 autobuyer (ledger-auto build). Off by default; automation ships gated behind this and the safety governor.',
+      description:
+        'Master switch for the M3 autobuyer (ledger-auto build). Off by default; automation ships gated behind this and the safety governor.',
     });
     await upsertFeatureToggle(db, {
       key: 'kill_switch',
       enabled: false,
-      description: 'Server-pushed emergency stop. When true, every extension instance halts sniping/automation on next heartbeat.',
+      description:
+        'Server-pushed emergency stop. When true, every extension instance halts sniping/automation on next heartbeat.',
     });
     await upsertFeatureToggle(db, {
       key: 'telemetry.enabled',
       enabled: true,
-      description: 'Master switch for extension telemetry upload (account-agnostic product data only; user-visible opt-out in Settings overrides this per-user).',
+      description:
+        'Master switch for extension telemetry upload (account-agnostic product data only; user-visible opt-out in Settings overrides this per-user).',
     });
     await upsertFeatureToggle(db, {
       key: 'trial.enabled',
@@ -204,14 +219,16 @@ export async function seed(connectionString: string = getDatabaseUrl()) {
     await upsertFeatureToggle(db, {
       key: 'hibp_check',
       enabled: false,
-      description: 'Check new passwords against the HaveIBeenPwned k-anonymity range API during registration/reset.',
+      description:
+        'Check new passwords against the HaveIBeenPwned k-anonymity range API during registration/reset.',
     });
 
     console.log('Seeding system config (safety-governor defaults, device limits, heartbeat)...');
     await upsertSystemConfig(db, {
       key: 'governor.max_actions_per_hour',
       value: 90,
-      description: 'Default safety-governor ceiling on total in-page actions per hour, before a hard stop.',
+      description:
+        'Default safety-governor ceiling on total in-page actions per hour, before a hard stop.',
     });
     await upsertSystemConfig(db, {
       key: 'governor.max_session_minutes',
@@ -221,49 +238,71 @@ export async function seed(connectionString: string = getDatabaseUrl()) {
     await upsertSystemConfig(db, {
       key: 'governor.max_buy_search_ratio',
       value: 0.35,
-      description: 'Default safety-governor ceiling on the ratio of buy attempts to searches (a human-plausible shape).',
+      description:
+        'Default safety-governor ceiling on the ratio of buy attempts to searches (a human-plausible shape).',
     });
     await upsertSystemConfig(db, {
       key: 'governor.max_coin_flow_per_hour',
       value: 200000,
-      description: 'Default safety-governor ceiling on total coins moved (spent + earned) per hour.',
+      description:
+        'Default safety-governor ceiling on total coins moved (spent + earned) per hour.',
     });
     await upsertSystemConfig(db, {
       key: 'device_limits',
       value: { trial: 1, basic: 1, pro: 2, ultimate: 3, lifetime: 3 },
-      description: 'Fallback device-limit-per-plan-code map, mirrors plans.device_limit; used when a plan lookup is unavailable.',
+      description:
+        'Fallback device-limit-per-plan-code map, mirrors plans.device_limit; used when a plan lookup is unavailable.',
     });
     await upsertSystemConfig(db, {
       key: 'offline_grace_hours',
       value: 24,
-      description: 'How long a license stays valid on a device without contacting the server (cached signed entitlement blob).',
+      description:
+        'How long a license stays valid on a device without contacting the server (cached signed entitlement blob).',
     });
     await upsertSystemConfig(db, {
       key: 'heartbeat_minutes',
       value: 10,
-      description: 'Extension heartbeat interval in minutes (license re-validation, kill-switch/feature-toggle sync).',
+      description:
+        'Extension heartbeat interval in minutes (license re-validation, kill-switch/feature-toggle sync).',
     });
 
     console.log('Seeding super admin...');
     const adminEmail = process.env.SEED_ADMIN_EMAIL;
     const adminPassword = process.env.SEED_ADMIN_PASSWORD;
     if (!adminEmail || !adminPassword) {
-      console.warn('  SEED_ADMIN_EMAIL/SEED_ADMIN_PASSWORD not set — skipping super admin seed. Set both in .env to seed one.');
+      console.warn(
+        '  SEED_ADMIN_EMAIL/SEED_ADMIN_PASSWORD not set — skipping super admin seed. Set both in .env to seed one.',
+      );
     } else {
-      const adminUserId = await upsertUser(db, { email: adminEmail, password: adminPassword, role: 'admin' });
-      const existingAdmin = await db.query.adminUsers.findFirst({ where: eq(adminUsers.userId, adminUserId) });
+      const adminUserId = await upsertUser(db, {
+        email: adminEmail,
+        password: adminPassword,
+        role: 'admin',
+      });
+      const existingAdmin = await db.query.adminUsers.findFirst({
+        where: eq(adminUsers.userId, adminUserId),
+      });
       if (existingAdmin) {
-        await db.update(adminUsers).set({ adminRole: 'super_admin' }).where(eq(adminUsers.id, existingAdmin.id));
+        await db
+          .update(adminUsers)
+          .set({ adminRole: 'super_admin' })
+          .where(eq(adminUsers.id, existingAdmin.id));
         console.log(`  admin_users for ${adminEmail}: updated`);
       } else {
-        await db.insert(adminUsers).values({ userId: adminUserId, adminRole: 'super_admin', permissions: {} });
+        await db
+          .insert(adminUsers)
+          .values({ userId: adminUserId, adminRole: 'super_admin', permissions: {} });
         console.log(`  admin_users for ${adminEmail}: created`);
       }
     }
 
     if (process.env.NODE_ENV !== 'production') {
       console.log('Seeding dev user (NODE_ENV != production)...');
-      await upsertUser(db, { email: 'dev@sniperledger.local', password: 'dev-password-123', role: 'user' });
+      await upsertUser(db, {
+        email: 'dev@sniperledger.local',
+        password: 'dev-password-123',
+        role: 'user',
+      });
     }
 
     console.log('Seed complete.');

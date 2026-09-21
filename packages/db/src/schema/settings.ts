@@ -3,26 +3,30 @@
 import { isNull, relations } from 'drizzle-orm';
 import { index, integer, jsonb, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
-import { createdAt, idPk, notificationChannelEnum, rowVersion, timestamptz, updatedAt } from './common.js';
+import {
+  createdAt,
+  idPk,
+  notificationChannelEnum,
+  rowVersion,
+  timestamptz,
+  updatedAt,
+} from './common.js';
 import { users } from './users.js';
 
-export const userSettings = pgTable(
-  'user_settings',
-  {
-    id: idPk(),
-    userId: uuid('user_id')
-      .notNull()
-      .unique()
-      .references(() => users.id, { onDelete: 'cascade' }),
+export const userSettings = pgTable('user_settings', {
+  id: idPk(),
+  userId: uuid('user_id')
+    .notNull()
+    .unique()
+    .references(() => users.id, { onDelete: 'cascade' }),
 
-    settings: jsonb('settings').notNull().default({}).$type<Record<string, unknown>>(),
-    version: integer('version').notNull().default(1),
+  settings: jsonb('settings').notNull().default({}).$type<Record<string, unknown>>(),
+  version: integer('version').notNull().default(1),
 
-    createdAt: createdAt(),
-    updatedAt: updatedAt(),
-    rowVersion: rowVersion(),
-  },
-);
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+  rowVersion: rowVersion(),
+});
 
 export const userSettingsRelations = relations(userSettings, ({ one }) => ({
   user: one(users, { fields: [userSettings.userId], references: [users.id] }),

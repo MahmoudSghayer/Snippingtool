@@ -18,7 +18,9 @@ const dirname = path.dirname(fileURLToPath(import.meta.url));
 const [scenario, profile, summaryPath] = process.argv.slice(2);
 
 const BASE_URL = (process.env.LOAD_BASE_URL || 'http://127.0.0.1:3100').replace(/\/$/, '');
-const fixtures = JSON.parse(readFileSync(path.join(dirname, '.artifacts', 'fixtures.json'), 'utf8'));
+const fixtures = JSON.parse(
+  readFileSync(path.join(dirname, '.artifacts', 'fixtures.json'), 'utf8'),
+);
 
 const DURATIONS = { smoke: 15, soak: 120, stress: 60 };
 const CONNECTIONS = { smoke: 5, soak: 20, stress: 50 };
@@ -26,7 +28,16 @@ const CONNECTIONS = { smoke: 5, soak: 20, stress: 50 };
 const REQUESTS_BY_SCENARIO = {
   'auth-login-refresh': () => {
     const u = fixtures.users[0];
-    return { method: 'POST', path: '/api/v1/auth/login', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: u.email, password: fixtures.password, device: { fingerprint: 'autocannon-fallback-000000000001' } }) };
+    return {
+      method: 'POST',
+      path: '/api/v1/auth/login',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: u.email,
+        password: fixtures.password,
+        device: { fingerprint: 'autocannon-fallback-000000000001' },
+      }),
+    };
   },
   'activity-ingest': () => {
     const u = fixtures.users[Math.floor(Math.random() * fixtures.users.length)];
@@ -34,17 +45,37 @@ const REQUESTS_BY_SCENARIO = {
       method: 'POST',
       path: '/api/v1/activity/batch',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${u.accessToken}` },
-      body: JSON.stringify({ events: [{ type: 'heartbeat', occurredAt: new Date().toISOString(), metadata: { extensionVersion: '0.1.0' } }] }),
+      body: JSON.stringify({
+        events: [
+          {
+            type: 'heartbeat',
+            occurredAt: new Date().toISOString(),
+            metadata: { extensionVersion: '0.1.0' },
+          },
+        ],
+      }),
     };
   },
   'extension-heartbeat': () => {
     const u = fixtures.users[Math.floor(Math.random() * fixtures.users.length)];
-    return { method: 'GET', path: '/api/v1/extension/kill-switch', headers: { authorization: `Bearer ${u.accessToken}` } };
+    return {
+      method: 'GET',
+      path: '/api/v1/extension/kill-switch',
+      headers: { authorization: `Bearer ${u.accessToken}` },
+    };
   },
-  'admin-analytics-overview': () => ({ method: 'GET', path: '/api/v1/admin/system/health', headers: { authorization: `Bearer ${fixtures.admin.accessToken}` } }),
+  'admin-analytics-overview': () => ({
+    method: 'GET',
+    path: '/api/v1/admin/system/health',
+    headers: { authorization: `Bearer ${fixtures.admin.accessToken}` },
+  }),
   'profits-queries': () => {
     const u = fixtures.users[Math.floor(Math.random() * fixtures.users.length)];
-    return { method: 'GET', path: '/api/v1/profits?from=2026-01-01&to=2026-12-31&granularity=daily', headers: { authorization: `Bearer ${u.accessToken}` } };
+    return {
+      method: 'GET',
+      path: '/api/v1/profits?from=2026-01-01&to=2026-12-31&granularity=daily',
+      headers: { authorization: `Bearer ${u.accessToken}` },
+    };
   },
 };
 
@@ -73,7 +104,8 @@ autocannon.track(instance, { renderProgressBar: false });
 
 instance.on('done', (result) => {
   const p95 = result.latency.p97_5 ?? result.latency.p99; // autocannon's histogram doesn't expose p95 directly on every version
-  const errorRate = (result.errors + result['4xx'] + result['5xx']) / Math.max(1, result.requests.total);
+  const errorRate =
+    (result.errors + result['4xx'] + result['5xx']) / Math.max(1, result.requests.total);
   const summary = {
     scenario,
     profile,
@@ -85,7 +117,9 @@ instance.on('done', (result) => {
   };
   console.warn(JSON.stringify(summary, null, 2));
   if (summaryPath) {
-    import('node:fs').then(({ writeFileSync }) => writeFileSync(summaryPath, JSON.stringify(summary, null, 2)));
+    import('node:fs').then(({ writeFileSync }) =>
+      writeFileSync(summaryPath, JSON.stringify(summary, null, 2)),
+    );
   }
   process.exitCode = summary.thresholdsPassed ? 0 : 1;
 });

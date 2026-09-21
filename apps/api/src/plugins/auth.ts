@@ -19,7 +19,6 @@ import { hasPermission, isAdminRole, type Permission } from '@sl/shared';
 import { eq } from 'drizzle-orm';
 import fp from 'fastify-plugin';
 
-
 import { AppErrors } from '../lib/errors.js';
 import { verifyAccessToken, type AccessTokenClaims } from '../lib/tokens.js';
 
@@ -45,11 +44,15 @@ declare module 'fastify' {
      * session or some other credential (e.g. an out-of-band ticket). */
     tryAuthenticate: (request: FastifyRequest) => Promise<AuthUser | undefined>;
     requireAdmin: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
-    requirePermission: (permission: Permission) => (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
+    requirePermission: (
+      permission: Permission,
+    ) => (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
   }
 }
 
-function extractToken(request: FastifyRequest): { token: string; method: 'bearer' | 'cookie' } | null {
+function extractToken(
+  request: FastifyRequest,
+): { token: string; method: 'bearer' | 'cookie' } | null {
   const header = request.headers.authorization;
   if (header?.startsWith('Bearer ')) {
     return { token: header.slice('Bearer '.length), method: 'bearer' };
@@ -78,7 +81,8 @@ async function resolveAuthUser(fastify: FastifyInstance, request: FastifyRequest
 
   const user = await fastify.db.query.users.findFirst({ where: eq(users.id, claims.sub) });
   if (!user || user.deletedAt) throw AppErrors.tokenInvalid('Account no longer exists.');
-  if (user.status === 'banned' || user.status === 'suspended') throw AppErrors.forbidden('Account is not active.');
+  if (user.status === 'banned' || user.status === 'suspended')
+    throw AppErrors.forbidden('Account is not active.');
   if (user.rowVersion !== claims.ver) throw AppErrors.sessionRevoked();
 
   request.authUser = {
@@ -117,7 +121,12 @@ export default fp(
         const adminRow = await fastify.db.query.adminUsers.findFirst({
           where: eq(adminUsers.userId, request.authUser!.id),
         });
-        if (!adminRow || adminRow.deletedAt || !isAdminRole(adminRow.adminRole) || !hasPermission(adminRow.adminRole, permission)) {
+        if (
+          !adminRow ||
+          adminRow.deletedAt ||
+          !isAdminRole(adminRow.adminRole) ||
+          !hasPermission(adminRow.adminRole, permission)
+        ) {
           throw AppErrors.forbidden(`Missing permission: ${permission}`);
         }
       };

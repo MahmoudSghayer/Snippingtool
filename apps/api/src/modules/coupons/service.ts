@@ -11,14 +11,18 @@ import { newId } from '../../lib/ids.js';
 
 export type CouponRow = typeof coupons.$inferSelect;
 
-export async function findActiveCouponByCode(db: Database, code: string): Promise<CouponRow | null> {
+export async function findActiveCouponByCode(
+  db: Database,
+  code: string,
+): Promise<CouponRow | null> {
   const row = await db.query.coupons.findFirst({
     where: and(eq(coupons.code, code.toUpperCase()), isNull(coupons.deletedAt)),
   });
   return row ?? null;
 }
 
-export type CouponIneligibleReason = 'NOT_FOUND' | 'EXPIRED' | 'MAX_REDEMPTIONS' | 'ALREADY_REDEEMED' | 'PLAN_NOT_ELIGIBLE';
+export type CouponIneligibleReason =
+  'NOT_FOUND' | 'EXPIRED' | 'MAX_REDEMPTIONS' | 'ALREADY_REDEEMED' | 'PLAN_NOT_ELIGIBLE';
 
 export interface CouponEligibility {
   eligible: boolean;
@@ -38,7 +42,8 @@ export async function checkCouponEligibility(
 ): Promise<CouponEligibility> {
   const coupon = await findActiveCouponByCode(db, code);
   if (!coupon || !coupon.isActive) return { eligible: false, coupon: null, reason: 'NOT_FOUND' };
-  if (coupon.expiresAt && coupon.expiresAt.getTime() < Date.now()) return { eligible: false, coupon, reason: 'EXPIRED' };
+  if (coupon.expiresAt && coupon.expiresAt.getTime() < Date.now())
+    return { eligible: false, coupon, reason: 'EXPIRED' };
   if (coupon.maxRedemptions !== null && coupon.redeemedCount >= coupon.maxRedemptions) {
     return { eligible: false, coupon, reason: 'MAX_REDEMPTIONS' };
   }
@@ -64,8 +69,13 @@ export async function redeemCoupon(
   userId: string,
   subscriptionId: string | null,
 ): Promise<void> {
-  await db.insert(couponRedemptions).values({ id: newId(), couponId: coupon.id, userId, subscriptionId, redeemedAt: new Date() });
-  await db.update(coupons).set({ redeemedCount: coupon.redeemedCount + 1 }).where(eq(coupons.id, coupon.id));
+  await db
+    .insert(couponRedemptions)
+    .values({ id: newId(), couponId: coupon.id, userId, subscriptionId, redeemedAt: new Date() });
+  await db
+    .update(coupons)
+    .set({ redeemedCount: coupon.redeemedCount + 1 })
+    .where(eq(coupons.id, coupon.id));
 }
 
 // ---------------------------------------------------------------------------
@@ -82,7 +92,10 @@ export async function listAllCoupons(db: Database): Promise<CouponRow[]> {
 /** `coupons.plan_ids` stores `plans.id` uuids; the DTO (`CouponDto`) is
  * expressed in plan *codes*, which is what an admin actually typed when
  * creating the coupon and what every other DTO in this domain uses. */
-export async function resolvePlanCodes(db: Database, planIds: readonly string[]): Promise<string[]> {
+export async function resolvePlanCodes(
+  db: Database,
+  planIds: readonly string[],
+): Promise<string[]> {
   if (planIds.length === 0) return [];
   const rows = await db.query.plans.findMany({ where: inArray(plans.id, [...planIds]) });
   return rows.map((r) => r.code);
@@ -105,7 +118,9 @@ export async function createCoupon(db: Database, input: CreateCouponInput): Prom
 
   const planIds: string[] = [];
   for (const planCode of input.planCodes) {
-    const plan = await db.query.plans.findFirst({ where: and(eq(plans.code, planCode), isNull(plans.deletedAt)) });
+    const plan = await db.query.plans.findFirst({
+      where: and(eq(plans.code, planCode), isNull(plans.deletedAt)),
+    });
     if (!plan) throw AppErrors.validation(`Unknown plan code "${planCode}".`);
     planIds.push(plan.id);
   }
@@ -146,7 +161,8 @@ export async function updateCoupon(
   const patch: Partial<typeof coupons.$inferInsert> = { updatedBy: actorId };
   if (input.isActive !== undefined) patch.isActive = input.isActive;
   if (input.maxRedemptions !== undefined) patch.maxRedemptions = input.maxRedemptions;
-  if (input.expiresAt !== undefined) patch.expiresAt = input.expiresAt ? new Date(input.expiresAt) : null;
+  if (input.expiresAt !== undefined)
+    patch.expiresAt = input.expiresAt ? new Date(input.expiresAt) : null;
 
   const [after] = await db.update(coupons).set(patch).where(eq(coupons.id, couponId)).returning();
   return { before, after: after! };

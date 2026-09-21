@@ -45,7 +45,12 @@ export default fp(
       async (request) => {
         const plan = await getPlanByCode(fastify.db, request.body.planCode);
         if (!plan) {
-          return { valid: false, coupon: null, discountPreview: null, reason: 'PLAN_NOT_ELIGIBLE' as const };
+          return {
+            valid: false,
+            coupon: null,
+            discountPreview: null,
+            reason: 'PLAN_NOT_ELIGIBLE' as const,
+          };
         }
 
         // This route deliberately never runs `fastify.authenticate`, so
@@ -58,7 +63,12 @@ export default fp(
         const result = await checkCouponEligibility(fastify.db, request.body.code, plan.id, userId);
 
         if (!result.eligible || !result.coupon) {
-          return { valid: false, coupon: null, discountPreview: null, reason: result.reason ?? ('NOT_FOUND' as const) };
+          return {
+            valid: false,
+            coupon: null,
+            discountPreview: null,
+            reason: result.reason ?? ('NOT_FOUND' as const),
+          };
         }
 
         return {

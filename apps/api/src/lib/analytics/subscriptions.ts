@@ -5,7 +5,14 @@
 import { couponRedemptions, plans, subscriptions, type Database } from '@sl/db';
 import { and, count, eq, gte, inArray, isNull, lt } from 'drizzle-orm';
 
-import { bucketKeyFor, endOfDayUtc, formatDayUtc, listBuckets, parseDayUtc, type Granularity } from './dates.js';
+import {
+  bucketKeyFor,
+  endOfDayUtc,
+  formatDayUtc,
+  listBuckets,
+  parseDayUtc,
+  type Granularity,
+} from './dates.js';
 
 const LIVE_STATUSES = ['trialing', 'active', 'past_due', 'suspended', 'lifetime'] as const;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -32,14 +39,24 @@ export interface SubscriptionPoint {
  * billing started* (`current_period_start`) rather than by cohort/trial
  * start, so it lines up with "conversions that happened in this bucket".
  */
-export async function getSubscriptionSeries(db: Database, params: SubscriptionRangeParams): Promise<SubscriptionPoint[]> {
+export async function getSubscriptionSeries(
+  db: Database,
+  params: SubscriptionRangeParams,
+): Promise<SubscriptionPoint[]> {
   const start = parseDayUtc(params.from);
   const end = endOfDayUtc(params.to);
 
   const [subRows, couponRows] = await Promise.all([
     db.query.subscriptions.findMany({
       where: isNull(subscriptions.deletedAt),
-      columns: { id: true, createdAt: true, canceledAt: true, trialEndsAt: true, currentPeriodStart: true, status: true },
+      columns: {
+        id: true,
+        createdAt: true,
+        canceledAt: true,
+        trialEndsAt: true,
+        currentPeriodStart: true,
+        status: true,
+      },
     }),
     db.query.couponRedemptions.findMany({
       where: and(gte(couponRedemptions.redeemedAt, start), lt(couponRedemptions.redeemedAt, end)),
@@ -59,7 +76,10 @@ export async function getSubscriptionSeries(db: Database, params: SubscriptionRa
   }));
 
   const bucketOf = (d: Date): number | undefined => {
-    const key = params.granularity === 'lifetime' ? 'lifetime' : bucketKeyFor(formatDayUtc(d), params.granularity);
+    const key =
+      params.granularity === 'lifetime'
+        ? 'lifetime'
+        : bucketKeyFor(formatDayUtc(d), params.granularity);
     return idx.get(key);
   };
   const inRange = (d: Date) => d.getTime() >= start.getTime() && d.getTime() < end.getTime();

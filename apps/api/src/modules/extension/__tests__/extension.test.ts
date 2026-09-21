@@ -1,22 +1,42 @@
 import { resetDatabase } from '@sl/db/test-utils';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-
 import { buildApp } from '../../../app.js';
 
 import type { FastifyInstance } from 'fastify';
 
-const device = { fingerprint: 'ext-test-fingerprint-000000001', name: 'Ext Test', browser: 'chrome', os: 'linux', extensionVersion: '0.1.0' };
+const device = {
+  fingerprint: 'ext-test-fingerprint-000000001',
+  name: 'Ext Test',
+  browser: 'chrome',
+  os: 'linux',
+  extensionVersion: '0.1.0',
+};
 
 function extractToken(html: string): string {
   return decodeURIComponent(html.match(/token=([A-Za-z0-9_-]+)/)![1]!);
 }
 
 async function registerLoginVerified(app: FastifyInstance, email: string, ip: string) {
-  await app.inject({ method: 'POST', url: '/api/v1/auth/register', remoteAddress: ip, payload: { email, password: 'correcthorsebattery12', device } });
+  await app.inject({
+    method: 'POST',
+    url: '/api/v1/auth/register',
+    remoteAddress: ip,
+    payload: { email, password: 'correcthorsebattery12', device },
+  });
   const token = extractToken(app.mailer.sentEmails.at(-1)!.html);
-  await app.inject({ method: 'POST', url: '/api/v1/auth/verify-email', remoteAddress: ip, payload: { token } });
-  const login = await app.inject({ method: 'POST', url: '/api/v1/auth/login', remoteAddress: ip, payload: { email, password: 'correcthorsebattery12', device } });
+  await app.inject({
+    method: 'POST',
+    url: '/api/v1/auth/verify-email',
+    remoteAddress: ip,
+    payload: { token },
+  });
+  const login = await app.inject({
+    method: 'POST',
+    url: '/api/v1/auth/login',
+    remoteAddress: ip,
+    payload: { email, password: 'correcthorsebattery12', device },
+  });
   return login.json().accessToken as string;
 }
 

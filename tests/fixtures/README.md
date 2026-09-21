@@ -11,7 +11,7 @@ and, read-only, by
 (see that file's header). Duplicating it here would mean two copies of the
 same recorded payloads to keep in sync for no benefit — this directory
 exists so `tests/fixtures/**` (this package's declared file ownership) has
-somewhere to live if a genuinely new *cross-app* fixture is ever needed that
+somewhere to live if a genuinely new _cross-app_ fixture is ever needed that
 doesn't belong to one specific app (e.g. a shared Stripe event fixture, or a
 recorded OpenAPI response set) — see `tests/e2e/helpers/stripe.ts` for the
 one fixture-shaped thing this suite currently generates instead of storing

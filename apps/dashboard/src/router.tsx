@@ -73,7 +73,10 @@ const verifyEmailRoute = createRoute({
 const forgotPasswordRoute = createRoute({
   getParentRoute: () => publicLayoutRoute,
   path: '/forgot-password',
-  component: lazyRouteComponent(() => import('@/pages/auth/ForgotPasswordPage.js'), 'ForgotPasswordPage'),
+  component: lazyRouteComponent(
+    () => import('@/pages/auth/ForgotPasswordPage.js'),
+    'ForgotPasswordPage',
+  ),
 });
 
 const resetPasswordSearchSchema = z.object({ token: z.string().optional() });
@@ -82,7 +85,10 @@ const resetPasswordRoute = createRoute({
   getParentRoute: () => publicLayoutRoute,
   path: '/reset-password',
   validateSearch: resetPasswordSearchSchema,
-  component: lazyRouteComponent(() => import('@/pages/auth/ResetPasswordPage.js'), 'ResetPasswordPage'),
+  component: lazyRouteComponent(
+    () => import('@/pages/auth/ResetPasswordPage.js'),
+    'ResetPasswordPage',
+  ),
 });
 
 // --- Authenticated shell -----------------------------------------------------
@@ -114,7 +120,10 @@ const analyticsRoute = createRoute({
 const subscriptionsRoute = createRoute({
   getParentRoute: () => appLayoutRoute,
   path: '/subscriptions',
-  component: lazyRouteComponent(() => import('@/pages/user/SubscriptionsPage.js'), 'SubscriptionsPage'),
+  component: lazyRouteComponent(
+    () => import('@/pages/user/SubscriptionsPage.js'),
+    'SubscriptionsPage',
+  ),
 });
 
 const settingsRoute = createRoute({
@@ -191,7 +200,10 @@ const adminAuditRoute = createRoute({
 const adminSubscriptionsRoute = createRoute({
   getParentRoute: () => adminLayoutRoute,
   path: '/subscriptions',
-  component: lazyRouteComponent(() => import('@/pages/admin/SubscriptionsAdminPage.js'), 'SubscriptionsAdminPage'),
+  component: lazyRouteComponent(
+    () => import('@/pages/admin/SubscriptionsAdminPage.js'),
+    'SubscriptionsAdminPage',
+  ),
   beforeLoad: () => requireAdminNavPermission('admin-subscriptions'),
 });
 
@@ -226,7 +238,10 @@ const adminBansRoute = createRoute({
 const adminFeatureTogglesRoute = createRoute({
   getParentRoute: () => adminLayoutRoute,
   path: '/feature-toggles',
-  component: lazyRouteComponent(() => import('@/pages/admin/FeatureTogglesPage.js'), 'FeatureTogglesPage'),
+  component: lazyRouteComponent(
+    () => import('@/pages/admin/FeatureTogglesPage.js'),
+    'FeatureTogglesPage',
+  ),
   beforeLoad: () => requireAdminNavPermission('admin-toggles'),
 });
 
@@ -249,7 +264,13 @@ const devComponentsRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
-  publicLayoutRoute.addChildren([loginRoute, registerRoute, verifyEmailRoute, forgotPasswordRoute, resetPasswordRoute]),
+  publicLayoutRoute.addChildren([
+    loginRoute,
+    registerRoute,
+    verifyEmailRoute,
+    forgotPasswordRoute,
+    resetPasswordRoute,
+  ]),
   appLayoutRoute.addChildren([
     dashboardRoute,
     analyticsRoute,
@@ -325,7 +346,9 @@ const PAGE_TITLES: [string, string][] = [
 PAGE_TITLES.sort((a, b) => b[0].length - a[0].length);
 
 function titleForPath(pathname: string): string {
-  const match = PAGE_TITLES.find(([prefix]) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+  const match = PAGE_TITLES.find(
+    ([prefix]) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
   return match ? `${match[1]} · The Sniper's Ledger` : "The Sniper's Ledger";
 }
 

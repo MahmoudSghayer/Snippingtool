@@ -14,7 +14,12 @@ import { z } from 'zod';
 
 import { AppErrors } from '../../lib/errors.js';
 
-import { findLatestForUser, regenerateForUser, validateLicense, type LicenseRow } from './service.js';
+import {
+  findLatestForUser,
+  regenerateForUser,
+  validateLicense,
+  type LicenseRow,
+} from './service.js';
 
 import type { FastifyInstance } from 'fastify';
 
@@ -54,7 +59,8 @@ export default fp(
         preHandler: [fastify.verifyCsrf],
         schema: {
           tags: ['licenses'],
-          summary: 'Revoke the current license and issue a new one. Returns the full key exactly once.',
+          summary:
+            'Revoke the current license and issue a new one. Returns the full key exactly once.',
           response: { 200: regenerateLicenseResponseSchema },
         },
       },

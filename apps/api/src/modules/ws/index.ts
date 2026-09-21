@@ -78,7 +78,9 @@ export default fp(
         await markOnline(fastify.redis, userId);
 
         const touchInterval = setInterval(() => {
-          touchPresence(fastify.redis, userId).catch((err) => fastify.log.warn({ err }, 'presence touch failed'));
+          touchPresence(fastify.redis, userId).catch((err) =>
+            fastify.log.warn({ err }, 'presence touch failed'),
+          );
         }, PRESENCE_TOUCH_INTERVAL_MS);
 
         socket.on('pong', () => {

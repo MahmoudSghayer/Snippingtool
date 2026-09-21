@@ -20,7 +20,10 @@ declare module 'fastify' {
 
 export default fp(
   async function entitlementsPlugin(fastify: FastifyInstance) {
-    fastify.decorate('entitlements', new DefaultEntitlementProvider(fastify.db, fastify.config.ENTITLEMENT_SIGNING_KEY));
+    fastify.decorate(
+      'entitlements',
+      new DefaultEntitlementProvider(fastify.db, fastify.config.ENTITLEMENT_SIGNING_KEY),
+    );
   },
   { name: 'entitlements', dependencies: ['config', 'db'] },
 );

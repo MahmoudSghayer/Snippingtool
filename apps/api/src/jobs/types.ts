@@ -11,7 +11,6 @@ import type { Database } from '@sl/db';
 import type { Job } from 'bullmq';
 import type { Redis } from 'ioredis';
 
-
 export interface JobContext {
   db: Database;
   redis: Redis;

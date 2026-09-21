@@ -11,11 +11,16 @@ import { loginAsAdmin } from './helpers/adminAuth.js';
  * violation (rule id, impact, the offending selector(s)) rather than a
  * bare boolean — axe's own assertion message is otherwise too terse to
  * act on from CI output. */
-function expectNoSeriousOrCriticalViolations(results: Awaited<ReturnType<AxeBuilder['analyze']>>): void {
+function expectNoSeriousOrCriticalViolations(
+  results: Awaited<ReturnType<AxeBuilder['analyze']>>,
+): void {
   const bad = results.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical');
   if (bad.length > 0) {
     const details = bad
-      .map((v) => `  [${v.impact}] ${v.id}: ${v.help}\n    ${v.nodes.map((n) => n.target.join(' ')).join('\n    ')}`)
+      .map(
+        (v) =>
+          `  [${v.impact}] ${v.id}: ${v.help}\n    ${v.nodes.map((n) => n.target.join(' ')).join('\n    ')}`,
+      )
       .join('\n');
     throw new Error(`${bad.length} serious/critical axe violation(s):\n${details}`);
   }

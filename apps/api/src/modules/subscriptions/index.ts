@@ -2,7 +2,12 @@
 // protection), POST /subscriptions/cancel, POST /subscriptions/resume.
 
 import { devices, featureToggles, users } from '@sl/db';
-import { deviceDtoSchema, entitlementSnapshotSchema, licenseDtoSchema, subscriptionDtoSchema } from '@sl/shared';
+import {
+  deviceDtoSchema,
+  entitlementSnapshotSchema,
+  licenseDtoSchema,
+  subscriptionDtoSchema,
+} from '@sl/shared';
 import { and, eq, isNull } from 'drizzle-orm';
 import fp from 'fastify-plugin';
 import { type ZodTypeProvider } from 'fastify-type-provider-zod';
@@ -121,7 +126,9 @@ export default fp(
         let fingerprintHash: string | null = null;
         const deviceId = request.authUser!.deviceId;
         if (deviceId) {
-          const device = await fastify.db.query.devices.findFirst({ where: eq(devices.id, deviceId) });
+          const device = await fastify.db.query.devices.findFirst({
+            where: eq(devices.id, deviceId),
+          });
           fingerprintHash = device?.fingerprintHash ?? null;
         }
 

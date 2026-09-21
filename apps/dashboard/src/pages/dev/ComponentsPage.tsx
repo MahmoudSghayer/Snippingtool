@@ -41,7 +41,6 @@ import {
 } from '@sl/ui';
 import { useState } from 'react';
 
-
 interface DemoRow {
   id: string;
   name: string;
@@ -78,7 +77,10 @@ export function ComponentsPage() {
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-8 p-6">
-      <PageHeader title="Component gallery" description="Every @sl/ui component, for visual QA. Dev-only." />
+      <PageHeader
+        title="Component gallery"
+        description="Every @sl/ui component, for visual QA. Dev-only."
+      />
 
       <Section title="Buttons">
         <div className="flex flex-wrap gap-2">
@@ -135,7 +137,13 @@ export function ComponentsPage() {
 
       <Section title="Stat tiles">
         <KpiGrid>
-          <StatTile label="Net profit" value="1,240,000" delta={0.124} deltaLabel="vs prior 7d" sparkline={<Sparkline data={[3, 5, 4, 8, 7, 9, 12]} />} />
+          <StatTile
+            label="Net profit"
+            value="1,240,000"
+            delta={0.124}
+            deltaLabel="vs prior 7d"
+            sparkline={<Sparkline data={[3, 5, 4, 8, 7, 9, 12]} />}
+          />
           <StatTile label="Error rate" value="2.1%" delta={0.5} invertDeltaTone />
           <StatTile label="Active users" value="482" />
           <StatTile label="Churn" value="3.2%" delta={-0.1} />
@@ -145,16 +153,38 @@ export function ComponentsPage() {
       <Section title="Charts">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <ChartCard title="Line" height={200}>
-            <LineChart data={chartData} xKey="bucket" series={[{ key: 'value', label: 'Value', colorIndex: 0 }]} />
+            <LineChart
+              data={chartData}
+              xKey="bucket"
+              series={[{ key: 'value', label: 'Value', colorIndex: 0 }]}
+            />
           </ChartCard>
           <ChartCard title="Area" height={200}>
-            <AreaChart data={chartData} xKey="bucket" series={[{ key: 'value', label: 'Value', colorIndex: 1 }]} />
+            <AreaChart
+              data={chartData}
+              xKey="bucket"
+              series={[{ key: 'value', label: 'Value', colorIndex: 1 }]}
+            />
           </ChartCard>
           <ChartCard title="Bar" height={200}>
-            <BarChart data={chartData} xKey="bucket" series={[{ key: 'value', label: 'A', colorIndex: 0 }, { key: 'alt', label: 'B', colorIndex: 2 }]} />
+            <BarChart
+              data={chartData}
+              xKey="bucket"
+              series={[
+                { key: 'value', label: 'A', colorIndex: 0 },
+                { key: 'alt', label: 'B', colorIndex: 2 },
+              ]}
+            />
           </ChartCard>
           <ChartCard title="Donut" height={200}>
-            <DonutChart data={[{ key: 'a', label: 'A', value: 40 }, { key: 'b', label: 'B', value: 60 }]} centerLabel="total" centerValue="100" />
+            <DonutChart
+              data={[
+                { key: 'a', label: 'A', value: 40 },
+                { key: 'b', label: 'B', value: 60 },
+              ]}
+              centerLabel="total"
+              centerValue="100"
+            />
           </ChartCard>
         </div>
       </Section>
@@ -164,7 +194,12 @@ export function ComponentsPage() {
       </Section>
 
       <Section title="Data table">
-        <DataTable columns={demoColumns} data={demoRows} getRowId={(row) => row.id} enableColumnVisibility />
+        <DataTable
+          columns={demoColumns}
+          data={demoRows}
+          getRowId={(row) => row.id}
+          enableColumnVisibility
+        />
       </Section>
 
       <Section title="Empty / loading / error">
@@ -191,7 +226,10 @@ export function ComponentsPage() {
       </Section>
 
       <Section title="Diff viewer">
-        <DiffViewer before={{ status: 'active', plan: 'pro' }} after={{ status: 'suspended', plan: 'pro' }} />
+        <DiffViewer
+          before={{ status: 'active', plan: 'pro' }}
+          after={{ status: 'suspended', plan: 'pro' }}
+        />
       </Section>
 
       <Section title="Copy field">
@@ -208,7 +246,12 @@ export function ComponentsPage() {
             Fire toast
           </Button>
         </div>
-        <Modal open={modalOpen} onOpenChange={setModalOpen} title="Example modal" footer={<Button onClick={() => setModalOpen(false)}>Close</Button>}>
+        <Modal
+          open={modalOpen}
+          onOpenChange={setModalOpen}
+          title="Example modal"
+          footer={<Button onClick={() => setModalOpen(false)}>Close</Button>}
+        >
           <p className="text-sm text-ink-2">Modal body content.</p>
         </Modal>
         <Drawer open={drawerOpen} onOpenChange={setDrawerOpen} title="Example drawer">

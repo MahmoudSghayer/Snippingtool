@@ -16,7 +16,6 @@ import { and, desc, eq, gte, lte, lt } from 'drizzle-orm';
 import fp from 'fastify-plugin';
 import { z } from 'zod';
 
-
 import { decodeCursor, encodeCursor } from '../../lib/pagination.js';
 
 import type { FastifyInstance } from 'fastify';
@@ -36,7 +35,14 @@ export default fp(
 
     app.get(
       '/api/v1/admin/activity/logins',
-      { onRequest: [gate], schema: { tags: ['admin'], querystring: rangeQuery, response: { 200: paginatedResponseSchema(adminLoginActivityRowSchema) } } },
+      {
+        onRequest: [gate],
+        schema: {
+          tags: ['admin'],
+          querystring: rangeQuery,
+          response: { 200: paginatedResponseSchema(adminLoginActivityRowSchema) },
+        },
+      },
       async (request) => {
         const { from, to, cursor: cursorRaw, limit } = request.query;
         const cursor = decodeCursor(cursorRaw);
@@ -45,7 +51,11 @@ export default fp(
         if (to) conditions.push(lte(userActivity.occurredAt, new Date(to)));
         if (cursor) conditions.push(lt(userActivity.occurredAt, new Date(cursor.v)));
 
-        const rows = await fastify.db.query.userActivity.findMany({ where: and(...conditions), orderBy: [desc(userActivity.occurredAt)], limit: limit + 1 });
+        const rows = await fastify.db.query.userActivity.findMany({
+          where: and(...conditions),
+          orderBy: [desc(userActivity.occurredAt)],
+          limit: limit + 1,
+        });
         return paginated(rows, limit, (r) => ({
           id: r.id,
           userId: r.userId,
@@ -60,7 +70,14 @@ export default fp(
 
     app.get(
       '/api/v1/admin/activity/errors',
-      { onRequest: [gate], schema: { tags: ['admin'], querystring: rangeQuery, response: { 200: paginatedResponseSchema(adminErrorActivityRowSchema) } } },
+      {
+        onRequest: [gate],
+        schema: {
+          tags: ['admin'],
+          querystring: rangeQuery,
+          response: { 200: paginatedResponseSchema(adminErrorActivityRowSchema) },
+        },
+      },
       async (request) => {
         const { from, to, cursor: cursorRaw, limit } = request.query;
         const cursor = decodeCursor(cursorRaw);
@@ -69,7 +86,11 @@ export default fp(
         if (to) conditions.push(lte(userActivity.occurredAt, new Date(to)));
         if (cursor) conditions.push(lt(userActivity.occurredAt, new Date(cursor.v)));
 
-        const rows = await fastify.db.query.userActivity.findMany({ where: and(...conditions), orderBy: [desc(userActivity.occurredAt)], limit: limit + 1 });
+        const rows = await fastify.db.query.userActivity.findMany({
+          where: and(...conditions),
+          orderBy: [desc(userActivity.occurredAt)],
+          limit: limit + 1,
+        });
         return paginated(rows, limit, (r) => ({
           id: r.id,
           userId: r.userId,
@@ -86,7 +107,14 @@ export default fp(
     // only `user_activity` type with no dedicated admin route at all.
     app.get(
       '/api/v1/admin/activity/filter-changes',
-      { onRequest: [gate], schema: { tags: ['admin'], querystring: rangeQuery, response: { 200: paginatedResponseSchema(adminFilterChangeActivityRowSchema) } } },
+      {
+        onRequest: [gate],
+        schema: {
+          tags: ['admin'],
+          querystring: rangeQuery,
+          response: { 200: paginatedResponseSchema(adminFilterChangeActivityRowSchema) },
+        },
+      },
       async (request) => {
         const { from, to, cursor: cursorRaw, limit } = request.query;
         const cursor = decodeCursor(cursorRaw);
@@ -95,13 +123,20 @@ export default fp(
         if (to) conditions.push(lte(userActivity.occurredAt, new Date(to)));
         if (cursor) conditions.push(lt(userActivity.occurredAt, new Date(cursor.v)));
 
-        const rows = await fastify.db.query.userActivity.findMany({ where: and(...conditions), orderBy: [desc(userActivity.occurredAt)], limit: limit + 1 });
+        const rows = await fastify.db.query.userActivity.findMany({
+          where: and(...conditions),
+          orderBy: [desc(userActivity.occurredAt)],
+          limit: limit + 1,
+        });
         return paginated(rows, limit, (r) => ({
           id: r.id,
           userId: r.userId,
           deviceId: r.deviceId,
           type: 'filter_change' as const,
-          metadata: r.metadata as { filterId?: string; action: 'created' | 'updated' | 'deleted' | 'activated' | 'deactivated' },
+          metadata: r.metadata as {
+            filterId?: string;
+            action: 'created' | 'updated' | 'deleted' | 'activated' | 'deactivated';
+          },
           occurredAt: r.occurredAt.toISOString(),
         }));
       },
@@ -109,7 +144,14 @@ export default fp(
 
     app.get(
       '/api/v1/admin/activity/searches',
-      { onRequest: [gate], schema: { tags: ['admin'], querystring: rangeQuery, response: { 200: paginatedResponseSchema(adminSearchActivityRowSchema) } } },
+      {
+        onRequest: [gate],
+        schema: {
+          tags: ['admin'],
+          querystring: rangeQuery,
+          response: { 200: paginatedResponseSchema(adminSearchActivityRowSchema) },
+        },
+      },
       async (request) => {
         const { from, to, cursor: cursorRaw, limit } = request.query;
         const cursor = decodeCursor(cursorRaw);
@@ -138,7 +180,14 @@ export default fp(
 
     app.get(
       '/api/v1/admin/activity/snipes',
-      { onRequest: [gate], schema: { tags: ['admin'], querystring: rangeQuery, response: { 200: paginatedResponseSchema(adminSnipeActivityRowSchema) } } },
+      {
+        onRequest: [gate],
+        schema: {
+          tags: ['admin'],
+          querystring: rangeQuery,
+          response: { 200: paginatedResponseSchema(adminSnipeActivityRowSchema) },
+        },
+      },
       async (request) => {
         const { from, to, cursor: cursorRaw, limit } = request.query;
         const cursor = decodeCursor(cursorRaw);
@@ -175,7 +224,9 @@ export default fp(
         schema: { tags: ['admin'], response: { 200: adminActivityDevicesSummarySchema } },
       },
       async () => {
-        const rows = await fastify.db.query.devices.findMany({ where: eq(devices.status, 'active') });
+        const rows = await fastify.db.query.devices.findMany({
+          where: eq(devices.status, 'active'),
+        });
         const byVersion: Record<string, number> = {};
         const byOs: Record<string, number> = {};
         for (const d of rows) {
@@ -194,7 +245,10 @@ export default fp(
         onRequest: [gate],
         schema: {
           tags: ['admin'],
-          querystring: z.object({ flaggedOnly: z.coerce.boolean().default(false), limit: z.coerce.number().int().min(1).max(500).default(100) }),
+          querystring: z.object({
+            flaggedOnly: z.coerce.boolean().default(false),
+            limit: z.coerce.number().int().min(1).max(500).default(100),
+          }),
           response: { 200: z.array(adminIpActivityRowSchema) },
         },
       },
@@ -220,17 +274,17 @@ export default fp(
   { name: 'module:admin-activity', dependencies: ['auth', 'db'] },
 );
 
-function paginated<Row extends { id: string; occurredAt: Date }, Dto extends { id: string; occurredAt: string }>(
-  rows: Row[],
-  limit: number,
-  toDto: (row: Row) => Dto,
-) {
+function paginated<
+  Row extends { id: string; occurredAt: Date },
+  Dto extends { id: string; occurredAt: string },
+>(rows: Row[], limit: number, toDto: (row: Row) => Dto) {
   const hasMore = rows.length > limit;
   const page = hasMore ? rows.slice(0, limit) : rows;
   const items = page.map(toDto);
   const last = page.at(-1);
   return {
     items,
-    nextCursor: hasMore && last ? encodeCursor({ v: last.occurredAt.toISOString(), id: last.id }) : null,
+    nextCursor:
+      hasMore && last ? encodeCursor({ v: last.occurredAt.toISOString(), id: last.id }) : null,
   };
 }

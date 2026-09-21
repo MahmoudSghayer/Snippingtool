@@ -46,7 +46,8 @@ async function captureVitals(page: Page): Promise<VitalsResult> {
       new Promise<VitalsResult>((resolve) => {
         const vitals: VitalsResult = { ttfb: null, fcp: null, lcp: null, cls: 0 };
         try {
-          const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
+          const nav = performance.getEntriesByType('navigation')[0] as
+            PerformanceNavigationTiming | undefined;
           if (nav) vitals.ttfb = Math.round(nav.responseStart);
         } catch {
           // Navigation timing unavailable — leave ttfb null.
@@ -63,8 +64,12 @@ async function captureVitals(page: Page): Promise<VitalsResult> {
             if (last) vitals.lcp = Math.round(last.startTime);
           }).observe({ type: 'largest-contentful-paint', buffered: true });
           new PerformanceObserver((list) => {
-            for (const entry of list.getEntries() as (PerformanceEntry & { hadRecentInput?: boolean; value?: number })[]) {
-              if (!entry.hadRecentInput && typeof entry.value === 'number') vitals.cls += entry.value;
+            for (const entry of list.getEntries() as (PerformanceEntry & {
+              hadRecentInput?: boolean;
+              value?: number;
+            })[]) {
+              if (!entry.hadRecentInput && typeof entry.value === 'number')
+                vitals.cls += entry.value;
             }
           }).observe({ type: 'layout-shift', buffered: true });
         } catch {
@@ -103,14 +108,27 @@ test.describe('visual smoke (screenshots + no console errors)', () => {
     });
     page.on('pageerror', (err) => consoleErrors.push(`[pageerror] ${err.message}`));
 
-    async function visit(routePath: string, name: string, heading: string | RegExp, viewportName: string) {
+    async function visit(
+      routePath: string,
+      name: string,
+      heading: string | RegExp,
+      viewportName: string,
+    ) {
       consoleErrors.length = 0;
       await page.goto(routePath);
-      await expect(page.getByRole('heading', { name: heading }).first()).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByRole('heading', { name: heading }).first()).toBeVisible({
+        timeout: 15_000,
+      });
       // Let charts/animations/fonts settle before the screenshot.
       await page.waitForTimeout(400);
-      await page.screenshot({ path: path.join(SCREENSHOT_DIR, `${name}-${viewportName}.png`), fullPage: true });
-      expect(consoleErrors, `console/page errors on ${routePath} @ ${viewportName}px:\n${consoleErrors.join('\n')}`).toEqual([]);
+      await page.screenshot({
+        path: path.join(SCREENSHOT_DIR, `${name}-${viewportName}.png`),
+        fullPage: true,
+      });
+      expect(
+        consoleErrors,
+        `console/page errors on ${routePath} @ ${viewportName}px:\n${consoleErrors.join('\n')}`,
+      ).toEqual([]);
     }
 
     // --- Public pages, every breakpoint, before any auth state exists ---
@@ -164,7 +182,10 @@ test.describe('visual smoke (screenshots + no console errors)', () => {
 
     // eslint-disable-next-line no-console
     console.log('[web-vitals] /dashboard (dev server, 1440px):', JSON.stringify(dashboardVitals));
-    await testInfo.attach('web-vitals-dashboard', { body: JSON.stringify(dashboardVitals, null, 2), contentType: 'application/json' });
+    await testInfo.attach('web-vitals-dashboard', {
+      body: JSON.stringify(dashboardVitals, null, 2),
+      contentType: 'application/json',
+    });
 
     await page.context().clearCookies();
     await page.goto('/login');
@@ -173,6 +194,9 @@ test.describe('visual smoke (screenshots + no console errors)', () => {
 
     // eslint-disable-next-line no-console
     console.log('[web-vitals] /login (dev server, 1440px):', JSON.stringify(loginVitals));
-    await testInfo.attach('web-vitals-login', { body: JSON.stringify(loginVitals, null, 2), contentType: 'application/json' });
+    await testInfo.attach('web-vitals-login', {
+      body: JSON.stringify(loginVitals, null, 2),
+      contentType: 'application/json',
+    });
   });
 });

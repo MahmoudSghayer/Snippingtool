@@ -37,7 +37,8 @@ export const useAuthStore = create<AuthState>((set) => ({
   setSession: (user) =>
     set({
       user,
-      admin: user.role === 'admin' ? { adminRole: user.adminRole, permissions: user.permissions } : null,
+      admin:
+        user.role === 'admin' ? { adminRole: user.adminRole, permissions: user.permissions } : null,
       status: 'authenticated',
     }),
   clearSession: () => set({ user: null, admin: null, status: 'anonymous' }),

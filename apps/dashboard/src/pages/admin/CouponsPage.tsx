@@ -1,11 +1,21 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { createCouponRequestSchema, PLAN_CODES } from '@sl/shared';
-import { Badge, Button, Checkbox, DataTable, FormField, Input, Modal, PageHeader, Select, type ColumnDef } from '@sl/ui';
+import {
+  Badge,
+  Button,
+  Checkbox,
+  DataTable,
+  FormField,
+  Input,
+  Modal,
+  PageHeader,
+  Select,
+  type ColumnDef,
+} from '@sl/ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
-
 
 import { api, apiErrorMessage } from '@/api/client.js';
 import { ReasonDialog } from '@/components/ReasonDialog.js';
@@ -31,7 +41,15 @@ export function CouponsPage() {
 
   const createForm = useForm<CreateForm>({
     resolver: zodResolver(createCouponRequestSchema),
-    defaultValues: { code: '', type: 'percent', value: 10, planCodes: [...PLAN_CODES], maxRedemptions: null, expiresAt: null, reason: '' },
+    defaultValues: {
+      code: '',
+      type: 'percent',
+      value: 10,
+      planCodes: [...PLAN_CODES],
+      maxRedemptions: null,
+      expiresAt: null,
+      reason: '',
+    },
   });
 
   const createMutation = useMutation({
@@ -45,12 +63,16 @@ export function CouponsPage() {
       createForm.reset();
       void queryClient.invalidateQueries({ queryKey: ['admin', 'coupons'] });
     },
-    onError: (error) => toast.error("Couldn't create coupon", { description: apiErrorMessage(error) }),
+    onError: (error) =>
+      toast.error("Couldn't create coupon", { description: apiErrorMessage(error) }),
   });
 
   const disableMutation = useMutation({
     mutationFn: async ({ id, reason }: { id: string; reason: string }) => {
-      const { error } = await api.PATCH('/api/v1/admin/coupons/{id}', { params: { path: { id } }, body: { isActive: false, reason } });
+      const { error } = await api.PATCH('/api/v1/admin/coupons/{id}', {
+        params: { path: { id } },
+        body: { isActive: false, reason },
+      });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -58,21 +80,42 @@ export function CouponsPage() {
       setDisableTarget(null);
       void queryClient.invalidateQueries({ queryKey: ['admin', 'coupons'] });
     },
-    onError: (error) => toast.error("Couldn't disable coupon", { description: apiErrorMessage(error) }),
+    onError: (error) =>
+      toast.error("Couldn't disable coupon", { description: apiErrorMessage(error) }),
   });
 
   const columns: ColumnDef<CouponRow, unknown>[] = [
-    { accessorKey: 'code', header: 'Code', cell: (c) => <span className="font-mono">{c.getValue() as string}</span> },
+    {
+      accessorKey: 'code',
+      header: 'Code',
+      cell: (c) => <span className="font-mono">{c.getValue() as string}</span>,
+    },
     { accessorKey: 'type', header: 'Type' },
     { accessorKey: 'value', header: 'Value' },
     { accessorKey: 'redeemedCount', header: 'Redeemed' },
-    { accessorKey: 'maxRedemptions', header: 'Max', cell: (c) => (c.getValue() as number | null) ?? '∞' },
-    { accessorKey: 'isActive', header: 'Status', cell: (c) => <Badge tone={c.getValue() ? 'positive' : 'neutral'}>{c.getValue() ? 'Active' : 'Disabled'}</Badge> },
+    {
+      accessorKey: 'maxRedemptions',
+      header: 'Max',
+      cell: (c) => (c.getValue() as number | null) ?? '∞',
+    },
+    {
+      accessorKey: 'isActive',
+      header: 'Status',
+      cell: (c) => (
+        <Badge tone={c.getValue() ? 'positive' : 'neutral'}>
+          {c.getValue() ? 'Active' : 'Disabled'}
+        </Badge>
+      ),
+    },
   ];
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title="Coupons" description="Percent, fixed, free-days and lifetime coupons." actions={<Button onClick={() => setCreateOpen(true)}>New coupon</Button>} />
+      <PageHeader
+        title="Coupons"
+        description="Percent, fixed, free-days and lifetime coupons."
+        actions={<Button onClick={() => setCreateOpen(true)}>New coupon</Button>}
+      />
 
       <DataTable
         columns={columns}
@@ -101,7 +144,10 @@ export function CouponsPage() {
             <Button variant="outline" onClick={() => setCreateOpen(false)}>
               Cancel
             </Button>
-            <Button loading={createMutation.isPending} onClick={createForm.handleSubmit((v) => createMutation.mutate(v))}>
+            <Button
+              loading={createMutation.isPending}
+              onClick={createForm.handleSubmit((v) => createMutation.mutate(v))}
+            >
               Create
             </Button>
           </>
@@ -109,7 +155,10 @@ export function CouponsPage() {
       >
         <form className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <FormField label="Code" htmlFor="code" error={createForm.formState.errors.code?.message}>
-            <Input id="code" {...createForm.register('code', { setValueAs: (v) => String(v).toUpperCase() })} />
+            <Input
+              id="code"
+              {...createForm.register('code', { setValueAs: (v) => String(v).toUpperCase() })}
+            />
           </FormField>
           <FormField label="Type" htmlFor="type">
             <Select
@@ -123,17 +172,33 @@ export function CouponsPage() {
               ]}
             />
           </FormField>
-          <FormField label="Value" htmlFor="value" error={createForm.formState.errors.value?.message}>
-            <Input id="value" type="number" step="0.01" {...createForm.register('value', { valueAsNumber: true })} />
+          <FormField
+            label="Value"
+            htmlFor="value"
+            error={createForm.formState.errors.value?.message}
+          >
+            <Input
+              id="value"
+              type="number"
+              step="0.01"
+              {...createForm.register('value', { valueAsNumber: true })}
+            />
           </FormField>
           <FormField label="Max redemptions" htmlFor="maxRedemptions" hint="Empty = unlimited">
             <Input
               id="maxRedemptions"
               type="number"
-              {...createForm.register('maxRedemptions', { setValueAs: (v) => (v === '' ? null : Number(v)) })}
+              {...createForm.register('maxRedemptions', {
+                setValueAs: (v) => (v === '' ? null : Number(v)),
+              })}
             />
           </FormField>
-          <FormField label="Eligible plans" htmlFor="planCodes" className="sm:col-span-2" error={createForm.formState.errors.planCodes?.message}>
+          <FormField
+            label="Eligible plans"
+            htmlFor="planCodes"
+            className="sm:col-span-2"
+            error={createForm.formState.errors.planCodes?.message}
+          >
             <div className="flex flex-wrap gap-3">
               {PLAN_CODES.map((code) => (
                 <label key={code} className="flex items-center gap-1.5 text-sm text-ink">
@@ -141,7 +206,10 @@ export function CouponsPage() {
                     checked={createForm.watch('planCodes').includes(code)}
                     onCheckedChange={(checked) => {
                       const current = createForm.getValues('planCodes');
-                      createForm.setValue('planCodes', checked ? [...current, code] : current.filter((c) => c !== code));
+                      createForm.setValue(
+                        'planCodes',
+                        checked ? [...current, code] : current.filter((c) => c !== code),
+                      );
                     }}
                   />
                   {code}
@@ -149,7 +217,12 @@ export function CouponsPage() {
               ))}
             </div>
           </FormField>
-          <FormField label="Reason" htmlFor="reason" className="sm:col-span-2" error={createForm.formState.errors.reason?.message}>
+          <FormField
+            label="Reason"
+            htmlFor="reason"
+            className="sm:col-span-2"
+            error={createForm.formState.errors.reason?.message}
+          >
             <Input id="reason" {...createForm.register('reason')} />
           </FormField>
         </form>
@@ -162,7 +235,9 @@ export function CouponsPage() {
         destructive
         confirmLabel="Disable"
         loading={disableMutation.isPending}
-        onConfirm={(reason) => disableTarget && disableMutation.mutate({ id: disableTarget.id, reason })}
+        onConfirm={(reason) =>
+          disableTarget && disableMutation.mutate({ id: disableTarget.id, reason })
+        }
       />
     </div>
   );

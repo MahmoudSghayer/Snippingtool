@@ -113,7 +113,11 @@ export default fp(
     // `plugins/error-handler.ts` exactly like a thrown AppError would.
     fastify.decorate(
       'verifyCsrf',
-      function verifyCsrf(request: FastifyRequest, _reply: FastifyReply, done: (err?: Error) => void) {
+      function verifyCsrf(
+        request: FastifyRequest,
+        _reply: FastifyReply,
+        done: (err?: Error) => void,
+      ) {
         if (request.headers.authorization) {
           done();
           return;
@@ -137,7 +141,8 @@ export default fp(
         // percent-encoded) or decoded form of both sides, since the
         // dashboard's client copies `document.cookie` verbatim into the
         // header without normalising encoding either way.
-        const matches = safeEqual(rawCookie, header) || safeEqual(decodedCookie, decodeURIComponent(header));
+        const matches =
+          safeEqual(rawCookie, header) || safeEqual(decodedCookie, decodeURIComponent(header));
         if (!matches) {
           done(AppErrors.forbidden('Invalid CSRF token.'));
           return;

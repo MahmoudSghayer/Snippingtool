@@ -16,7 +16,11 @@ import { signAccessToken } from '../../../lib/tokens.js';
 
 import type { FastifyInstance } from 'fastify';
 
-async function createAdmin(app: FastifyInstance, adminRole: 'super_admin' | 'support' | 'analyst' | 'billing', email: string) {
+async function createAdmin(
+  app: FastifyInstance,
+  adminRole: 'super_admin' | 'support' | 'analyst' | 'billing',
+  email: string,
+) {
   const userId = newId();
   await app.db.insert(users).values({
     id: userId,
@@ -53,14 +57,39 @@ describe('admin-audit module: filters + UUID validation', () => {
   });
 
   it('lists audit_logs rows and filters by a valid actorId/entityId (both real UUIDs)', async () => {
-    const { userId: adminUserId, token } = await createAdmin(app, 'support', 'audit-support@example.com');
+    const { userId: adminUserId, token } = await createAdmin(
+      app,
+      'support',
+      'audit-support@example.com',
+    );
     const entityId = newId();
     const otherEntityId = newId();
 
     await app.db.insert(auditLogs).values([
-      { id: newId(), actorType: 'admin', actorId: adminUserId, action: 'subscription.suspend', entityType: 'subscription', entityId },
-      { id: newId(), actorType: 'admin', actorId: adminUserId, action: 'subscription.cancel', entityType: 'subscription', entityId: otherEntityId },
-      { id: newId(), actorType: 'system', actorId: null, action: 'subscription.suspend', entityType: 'subscription', entityId },
+      {
+        id: newId(),
+        actorType: 'admin',
+        actorId: adminUserId,
+        action: 'subscription.suspend',
+        entityType: 'subscription',
+        entityId,
+      },
+      {
+        id: newId(),
+        actorType: 'admin',
+        actorId: adminUserId,
+        action: 'subscription.cancel',
+        entityType: 'subscription',
+        entityId: otherEntityId,
+      },
+      {
+        id: newId(),
+        actorType: 'system',
+        actorId: null,
+        action: 'subscription.suspend',
+        entityType: 'subscription',
+        entityId,
+      },
     ]);
 
     const byEntity = await app.inject({

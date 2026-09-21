@@ -5,7 +5,9 @@ import { StatTile } from '../src/components/StatTile.js';
 
 describe('StatTile', () => {
   it('renders a positive delta with an up arrow and green tone', () => {
-    render(<StatTile label="Net profit" value="1,240,000" delta={0.124} deltaLabel="vs prior 7d" />);
+    render(
+      <StatTile label="Net profit" value="1,240,000" delta={0.124} deltaLabel="vs prior 7d" />,
+    );
     expect(screen.getByText('Net profit')).toBeInTheDocument();
     expect(screen.getByText('1,240,000')).toBeInTheDocument();
     expect(screen.getByText('+12.4%')).toBeInTheDocument();

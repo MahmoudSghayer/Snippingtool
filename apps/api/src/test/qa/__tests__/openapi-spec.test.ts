@@ -81,14 +81,20 @@ describe('OpenAPI spec (apps/api/openapi/openapi.json)', () => {
       const live = pathMethodSet(liveSpec);
       const committed = pathMethodSet(committedSpec);
       const missing = [...live].filter((entry) => !committed.has(entry));
-      expect(missing, `routes registered by the app but missing from committed openapi.json (run \`pnpm --filter @sl/api openapi\`):\n${missing.join('\n')}`).toEqual([]);
+      expect(
+        missing,
+        `routes registered by the app but missing from committed openapi.json (run \`pnpm --filter @sl/api openapi\`):\n${missing.join('\n')}`,
+      ).toEqual([]);
     });
 
     it('the committed spec has no path/method the app does not actually serve', () => {
       const live = pathMethodSet(liveSpec);
       const committed = pathMethodSet(committedSpec);
       const stale = [...committed].filter((entry) => !live.has(entry));
-      expect(stale, `routes in committed openapi.json that the app no longer serves (stale spec):\n${stale.join('\n')}`).toEqual([]);
+      expect(
+        stale,
+        `routes in committed openapi.json that the app no longer serves (stale spec):\n${stale.join('\n')}`,
+      ).toEqual([]);
     });
   });
 });

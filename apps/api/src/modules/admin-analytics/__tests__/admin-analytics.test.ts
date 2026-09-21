@@ -14,7 +14,11 @@ import { signAccessToken } from '../../../lib/tokens.js';
 
 import type { FastifyInstance } from 'fastify';
 
-async function createAdmin(app: FastifyInstance, adminRole: 'super_admin' | 'support' | 'analyst', email: string) {
+async function createAdmin(
+  app: FastifyInstance,
+  adminRole: 'super_admin' | 'support' | 'analyst',
+  email: string,
+) {
   const userId = newId();
   await app.db.insert(users).values({
     id: userId,
@@ -25,7 +29,10 @@ async function createAdmin(app: FastifyInstance, adminRole: 'super_admin' | 'sup
     totpEnabledAt: new Date(),
   });
   await app.db.insert(adminUsers).values({ id: newId(), userId, adminRole, permissions: {} });
-  const token = await signAccessToken({ sub: userId, sid: newId(), did: null, role: 'admin', plan: null, ver: 0 }, app.config.JWT_PRIVATE_KEY!);
+  const token = await signAccessToken(
+    { sub: userId, sid: newId(), did: null, role: 'admin', plan: null, ver: 0 },
+    app.config.JWT_PRIVATE_KEY!,
+  );
   return { userId, token };
 }
 
@@ -77,9 +84,23 @@ describe('admin-analytics module', () => {
   });
 
   it('reports/profits CSV: streams a header + one row per day and writes an analytics.export audit row', async () => {
-    const { userId: adminUserId, token } = await createAdmin(app, 'super_admin', 'analytics-admin2@example.com');
+    const { userId: adminUserId, token } = await createAdmin(
+      app,
+      'super_admin',
+      'analytics-admin2@example.com',
+    );
     const u = await createUser(app, 'report-user@example.com');
-    await app.db.insert(profits).values({ id: newId(), userId: u, day: '2024-06-05', netProfit: 250, coinsSpent: 50, coinsEarned: 300, snipes: 2, successes: 1, tradesClosed: 1 });
+    await app.db.insert(profits).values({
+      id: newId(),
+      userId: u,
+      day: '2024-06-05',
+      netProfit: 250,
+      coinsSpent: 50,
+      coinsEarned: 300,
+      snipes: 2,
+      successes: 1,
+      tradesClosed: 1,
+    });
 
     const res = await app.inject({
       method: 'GET',
@@ -91,7 +112,9 @@ describe('admin-analytics module', () => {
     expect(res.headers['content-disposition']).toContain('attachment');
 
     const lines = res.body.trim().split('\r\n');
-    expect(lines[0]).toBe('day,net_profit,coins_spent,coins_earned,coins_traded,snipes,successes,trades_closed,active_traders,snipe_success_rate');
+    expect(lines[0]).toBe(
+      'day,net_profit,coins_spent,coins_earned,coins_traded,snipes,successes,trades_closed,active_traders,snipe_success_rate',
+    );
     expect(lines[1]).toBe('2024-06-05,250,50,300,350,2,1,1,1,0.5');
 
     const auditRows = await app.db.query.auditLogs.findMany({
@@ -146,7 +169,10 @@ describe('admin-analytics module', () => {
   });
 
   it('unauthenticated requests are rejected', async () => {
-    const res = await app.inject({ method: 'GET', url: '/api/v1/admin/analytics/overview?from=2024-06-01&to=2024-06-01' });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/v1/admin/analytics/overview?from=2024-06-01&to=2024-06-01',
+    });
     expect(res.statusCode).toBe(401);
   });
 });

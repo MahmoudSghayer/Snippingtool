@@ -1,11 +1,7 @@
 {
   "uid": "sl-business-kpis",
   "title": "Business KPIs",
-  "tags": [
-    "sniper-ledger",
-    "business",
-    "kpi"
-  ],
+  "tags": ["sniper-ledger", "business", "kpi"],
   "timezone": "utc",
   "schemaVersion": 39,
   "version": 1,

@@ -29,15 +29,27 @@ describe('settings versioning and sync-conflict policy', () => {
   });
 
   it('GET creates and returns default settings at version 1', async () => {
-    const user = await createUserSession(app, 'settings-default@example.com', 'fp-settings-default-00001');
-    const res = await app.inject({ method: 'GET', url: '/api/v1/settings', headers: bearer(user.accessToken) });
+    const user = await createUserSession(
+      app,
+      'settings-default@example.com',
+      'fp-settings-default-00001',
+    );
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/v1/settings',
+      headers: bearer(user.accessToken),
+    });
     expect(res.statusCode).toBe(200);
     const body = res.json() as { version: number };
     expect(body.version).toBe(1);
   });
 
   it('PUT increments version, merges only the patched sections, and appends a settings_history row', async () => {
-    const user = await createUserSession(app, 'settings-put@example.com', 'fp-settings-put-000000001');
+    const user = await createUserSession(
+      app,
+      'settings-put@example.com',
+      'fp-settings-put-000000001',
+    );
 
     const first = await app.inject({
       method: 'PUT',
@@ -46,7 +58,11 @@ describe('settings versioning and sync-conflict policy', () => {
       payload: { targets: { minProfitPerSnipe: 2000 } },
     });
     expect(first.statusCode).toBe(200);
-    const firstBody = first.json() as { version: number; targets: { minProfitPerSnipe: number; dailyProfitGoal: number | null }; budgets: unknown };
+    const firstBody = first.json() as {
+      version: number;
+      targets: { minProfitPerSnipe: number; dailyProfitGoal: number | null };
+      budgets: unknown;
+    };
     expect(firstBody.version).toBe(2);
     expect(firstBody.targets.minProfitPerSnipe).toBe(2000);
     // Untouched sections carry over from the default, not wiped by the partial patch.
@@ -63,7 +79,11 @@ describe('settings versioning and sync-conflict policy', () => {
     // First patch's change is still there — merge, not overwrite.
     expect(secondBody.targets.minProfitPerSnipe).toBe(2000);
 
-    const history = await app.inject({ method: 'GET', url: '/api/v1/settings/history', headers: bearer(user.accessToken) });
+    const history = await app.inject({
+      method: 'GET',
+      url: '/api/v1/settings/history',
+      headers: bearer(user.accessToken),
+    });
     const historyBody = history.json() as Array<{ version: number }>;
     expect(historyBody.map((h) => h.version).sort((a, b) => a - b)).toEqual([2, 3]);
   });
@@ -83,7 +103,7 @@ describe('settings versioning and sync-conflict policy', () => {
   // the handler now catches the Postgres unique-violation (23505) around
   // the update+insert and throws AppErrors.conflict(), so the loser gets a
   // clean, documented `409 CONFLICT` instead of a raw crash.
-  it('concurrent PUTs race on settings_history\'s unique (user_id, version) index — the loser gets a clean 409 CONFLICT, never a raw 500', async () => {
+  it("concurrent PUTs race on settings_history's unique (user_id, version) index — the loser gets a clean 409 CONFLICT, never a raw 500", async () => {
     // The race is timing-dependent (Postgres connection-pool/scheduler
     // timing shifts which SELECTs interleave with which INSERTs), so this
     // loops several racing pairs on fresh users to reliably surface it at
@@ -95,9 +115,23 @@ describe('settings versioning and sync-conflict policy', () => {
     let sawTheRace = false;
 
     for (let i = 0; i < 8; i += 1) {
-      const user = await createUserSession(app, `settings-race-${i}@example.com`, `fp-settings-race-000${i}`);
-      const patchA = app.inject({ method: 'PUT', url: '/api/v1/settings', headers: bearer(user.accessToken), payload: { targets: { minProfitPerSnipe: 111 } } });
-      const patchB = app.inject({ method: 'PUT', url: '/api/v1/settings', headers: bearer(user.accessToken), payload: { targets: { minProfitPerSnipe: 222 } } });
+      const user = await createUserSession(
+        app,
+        `settings-race-${i}@example.com`,
+        `fp-settings-race-000${i}`,
+      );
+      const patchA = app.inject({
+        method: 'PUT',
+        url: '/api/v1/settings',
+        headers: bearer(user.accessToken),
+        payload: { targets: { minProfitPerSnipe: 111 } },
+      });
+      const patchB = app.inject({
+        method: 'PUT',
+        url: '/api/v1/settings',
+        headers: bearer(user.accessToken),
+        payload: { targets: { minProfitPerSnipe: 222 } },
+      });
       const [resA, resB] = await Promise.all([patchA, patchB]);
 
       for (const res of [resA, resB]) {
@@ -110,7 +144,11 @@ describe('settings versioning and sync-conflict policy', () => {
         }
       }
 
-      const final = await app.inject({ method: 'GET', url: '/api/v1/settings', headers: bearer(user.accessToken) });
+      const final = await app.inject({
+        method: 'GET',
+        url: '/api/v1/settings',
+        headers: bearer(user.accessToken),
+      });
       expect(final.statusCode).toBe(200);
     }
 
@@ -123,8 +161,14 @@ describe('settings versioning and sync-conflict policy', () => {
   });
 
   it('rejects a governor patch that exceeds the admin-configured ceiling', async () => {
-    const user = await createUserSession(app, 'settings-ceiling@example.com', 'fp-settings-ceiling-0001');
-    await app.db.insert(systemConfig).values({ key: 'governor.max_actions_per_hour', value: 20, isSecret: false });
+    const user = await createUserSession(
+      app,
+      'settings-ceiling@example.com',
+      'fp-settings-ceiling-0001',
+    );
+    await app.db
+      .insert(systemConfig)
+      .values({ key: 'governor.max_actions_per_hour', value: 20, isSecret: false });
 
     const res = await app.inject({
       method: 'PUT',
@@ -155,7 +199,11 @@ describe('settings versioning and sync-conflict policy', () => {
   // PATCH handler by design — asserted below so a future regression (the
   // extension reverting to PATCH) is caught here too.
   it('the server still has no PATCH handler for this route — the extension must use PUT', async () => {
-    const user = await createUserSession(app, 'settings-defect@example.com', 'fp-settings-defect-0001');
+    const user = await createUserSession(
+      app,
+      'settings-defect@example.com',
+      'fp-settings-defect-0001',
+    );
     const patchRes = await app.inject({
       method: 'PATCH',
       url: '/api/v1/settings',

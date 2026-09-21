@@ -41,8 +41,16 @@ export default fp(
     const isTest = fastify.config.NODE_ENV === 'test';
     const db = isTest ? fastify.config.REDIS_TEST_DB : undefined;
 
-    const redis = new Redis(fastify.config.REDIS_URL, { maxRetriesPerRequest: null, lazyConnect: false, db });
-    const redisSub = new Redis(fastify.config.REDIS_URL, { maxRetriesPerRequest: null, lazyConnect: false, db });
+    const redis = new Redis(fastify.config.REDIS_URL, {
+      maxRetriesPerRequest: null,
+      lazyConnect: false,
+      db,
+    });
+    const redisSub = new Redis(fastify.config.REDIS_URL, {
+      maxRetriesPerRequest: null,
+      lazyConnect: false,
+      db,
+    });
 
     redis.on('error', (err) => fastify.log.error({ err }, 'redis connection error'));
     redisSub.on('error', (err) => fastify.log.error({ err }, 'redis pub/sub connection error'));

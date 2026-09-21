@@ -3,7 +3,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { toast } from 'sonner';
 
-
 import { api, apiErrorMessage } from '@/api/client.js';
 import { ReasonDialog } from '@/components/ReasonDialog.js';
 
@@ -18,7 +17,9 @@ import type { FeatureToggleDto } from '@sl/shared';
  * the API itself demands for this one endpoint. */
 export function FeatureTogglesPage() {
   const queryClient = useQueryClient();
-  const [pending, setPending] = useState<{ toggle: FeatureToggleDto; enabled: boolean } | null>(null);
+  const [pending, setPending] = useState<{ toggle: FeatureToggleDto; enabled: boolean } | null>(
+    null,
+  );
 
   const togglesQuery = useQuery({
     queryKey: ['admin', 'toggles'],
@@ -31,7 +32,10 @@ export function FeatureTogglesPage() {
 
   const updateMutation = useMutation({
     mutationFn: async ({ key, enabled }: { key: string; enabled: boolean }) => {
-      const { error } = await api.PATCH('/api/v1/admin/toggles/{key}', { params: { path: { key } }, body: { enabled } });
+      const { error } = await api.PATCH('/api/v1/admin/toggles/{key}', {
+        params: { path: { key } },
+        body: { enabled },
+      });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -39,7 +43,8 @@ export function FeatureTogglesPage() {
       setPending(null);
       void queryClient.invalidateQueries({ queryKey: ['admin', 'toggles'] });
     },
-    onError: (error) => toast.error("Couldn't update toggle", { description: apiErrorMessage(error) }),
+    onError: (error) =>
+      toast.error("Couldn't update toggle", { description: apiErrorMessage(error) }),
   });
 
   function handleToggle(toggle: FeatureToggleDto, enabled: boolean) {
@@ -57,17 +62,25 @@ export function FeatureTogglesPage() {
       <Card>
         <CardContent className="divide-y divide-line pt-5">
           {(togglesQuery.data ?? []).map((toggle) => (
-            <div key={toggle.key} className="flex items-center justify-between py-3 first:pt-0 last:pb-0">
+            <div
+              key={toggle.key}
+              className="flex items-center justify-between py-3 first:pt-0 last:pb-0"
+            >
               <div>
                 <div className="flex items-center gap-2">
                   <p className="font-mono text-sm text-ink">{toggle.key}</p>
                   {toggle.key === 'kill_switch' && <Badge tone="negative">Critical</Badge>}
                 </div>
                 <p className="text-xs text-ink-2">
-                  Rollout {toggle.rolloutPercent}% {toggle.planGate ? `· gated to ${toggle.planGate}` : ''}
+                  Rollout {toggle.rolloutPercent}%{' '}
+                  {toggle.planGate ? `· gated to ${toggle.planGate}` : ''}
                 </p>
               </div>
-              <Switch checked={toggle.enabled} onCheckedChange={(v) => handleToggle(toggle, v)} aria-label={toggle.key} />
+              <Switch
+                checked={toggle.enabled}
+                onCheckedChange={(v) => handleToggle(toggle, v)}
+                aria-label={toggle.key}
+              />
             </div>
           ))}
           {togglesQuery.isLoading && <p className="py-3 text-sm text-ink-2">Loading…</p>}
@@ -94,7 +107,9 @@ export function FeatureTogglesPage() {
         destructive={!!pending?.enabled}
         confirmLabel={pending?.enabled ? 'Activate kill switch' : 'Deactivate'}
         loading={updateMutation.isPending}
-        onConfirm={() => pending && updateMutation.mutate({ key: pending.toggle.key, enabled: pending.enabled })}
+        onConfirm={() =>
+          pending && updateMutation.mutate({ key: pending.toggle.key, enabled: pending.enabled })
+        }
       />
     </div>
   );

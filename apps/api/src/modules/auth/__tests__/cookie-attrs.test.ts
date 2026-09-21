@@ -17,7 +17,13 @@ import { resetEnvCacheForTests } from '../../../config/env.js';
 
 import type { FastifyInstance } from 'fastify';
 
-const device = { fingerprint: 'test-fingerprint-cookie-attrs-00001', name: 'Test Device', browser: 'chrome', os: 'linux', extensionVersion: '1.0.0' };
+const device = {
+  fingerprint: 'test-fingerprint-cookie-attrs-00001',
+  name: 'Test Device',
+  browser: 'chrome',
+  os: 'linux',
+  extensionVersion: '1.0.0',
+};
 
 function extractToken(html: string): string {
   const match = html.match(/token=([A-Za-z0-9_-]+)/);
@@ -25,7 +31,11 @@ function extractToken(html: string): string {
   return decodeURIComponent(match[1]!);
 }
 
-async function registerVerifyLogin(app: FastifyInstance & { mailer: { sentEmails: Array<{ html: string }> } }, email: string, ip: string) {
+async function registerVerifyLogin(
+  app: FastifyInstance & { mailer: { sentEmails: Array<{ html: string }> } },
+  email: string,
+  ip: string,
+) {
   const registerRes = await app.inject({
     method: 'POST',
     url: '/api/v1/auth/register',
@@ -35,10 +45,19 @@ async function registerVerifyLogin(app: FastifyInstance & { mailer: { sentEmails
   expect(registerRes.statusCode).toBe(201);
   const verifyEmail = app.mailer.sentEmails.at(-1)!;
   const token = extractToken(verifyEmail.html);
-  const verifyRes = await app.inject({ method: 'POST', url: '/api/v1/auth/verify-email', payload: { token } });
+  const verifyRes = await app.inject({
+    method: 'POST',
+    url: '/api/v1/auth/verify-email',
+    payload: { token },
+  });
   expect(verifyRes.statusCode).toBe(200);
 
-  return app.inject({ method: 'POST', url: '/api/v1/auth/login', remoteAddress: ip, payload: { email, password: 'correcthorsebattery12', device } });
+  return app.inject({
+    method: 'POST',
+    url: '/api/v1/auth/login',
+    remoteAddress: ip,
+    payload: { email, password: 'correcthorsebattery12', device },
+  });
 }
 
 describe('cookie attributes — default (COOKIE_SAME_SITE unset -> lax)', () => {

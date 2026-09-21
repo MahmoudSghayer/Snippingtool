@@ -16,7 +16,9 @@ export async function loadJobs(): Promise<JobDefinition[]> {
   const files = readdirSync(__dirname).filter((f) => /\.job\.(ts|js)$/.test(f));
   const jobs: JobDefinition[] = [];
   for (const file of files) {
-    const mod = (await import(pathToFileURL(join(__dirname, file)).href)) as { default: JobDefinition };
+    const mod = (await import(pathToFileURL(join(__dirname, file)).href)) as {
+      default: JobDefinition;
+    };
     jobs.push(mod.default);
   }
   return jobs;

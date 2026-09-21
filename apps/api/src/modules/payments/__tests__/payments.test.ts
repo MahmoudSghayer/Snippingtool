@@ -26,14 +26,22 @@ import type { FastifyInstance } from 'fastify';
 const FAKE_STRIPE_CONFIG: StripeConfig = {
   secretKey: 'sk_test_fake',
   webhookSecret: 'whsec_test_fake_secret',
-  priceIds: { basic: 'price_basic', pro: 'price_pro', ultimate: 'price_ultimate', lifetime: 'price_lifetime' },
+  priceIds: {
+    basic: 'price_basic',
+    pro: 'price_pro',
+    ultimate: 'price_ultimate',
+    lifetime: 'price_lifetime',
+  },
 };
 
 function makeFakeStripe(overrides: Partial<Record<string, unknown>> = {}): Stripe {
   return {
     checkout: {
       sessions: {
-        create: async (_params: unknown) => ({ id: `cs_test_${newId()}`, url: 'https://checkout.stripe.com/test-session' }),
+        create: async (_params: unknown) => ({
+          id: `cs_test_${newId()}`,
+          url: 'https://checkout.stripe.com/test-session',
+        }),
       },
     },
     subscriptions: {
@@ -58,7 +66,12 @@ function makeFakeStripe(overrides: Partial<Record<string, unknown>> = {}): Strip
 
 async function createVerifiedUser(app: FastifyInstance, email: string): Promise<string> {
   const id = newId();
-  await app.db.insert(users).values({ id, email, passwordHash: await hashSecret('irrelevant-password-123'), emailVerifiedAt: new Date() });
+  await app.db.insert(users).values({
+    id,
+    email,
+    passwordHash: await hashSecret('irrelevant-password-123'),
+    emailVerifiedAt: new Date(),
+  });
   return id;
 }
 
@@ -117,8 +130,15 @@ describe('payments module', () => {
 
   it('webhook signature verification: real Stripe.webhooks rejects a payload signed with the wrong secret (400)', async () => {
     const realStripe = new Stripe('sk_test_irrelevant_no_network_call_made');
-    const payload = JSON.stringify({ id: 'evt_test_sig', type: 'checkout.session.completed', data: { object: {} } });
-    const wrongSecretHeader = realStripe.webhooks.generateTestHeaderString({ payload, secret: 'whsec_the_wrong_one' });
+    const payload = JSON.stringify({
+      id: 'evt_test_sig',
+      type: 'checkout.session.completed',
+      data: { object: {} },
+    });
+    const wrongSecretHeader = realStripe.webhooks.generateTestHeaderString({
+      payload,
+      secret: 'whsec_the_wrong_one',
+    });
 
     const res = await app.inject({
       method: 'POST',
@@ -162,7 +182,9 @@ describe('payments module', () => {
     const second = await receiveWebhookEvent(app.db, app.redis, makeFakeStripe(), event);
     expect(second.alreadyProcessed).toBe(true);
 
-    const subs = await app.db.query.subscriptions.findMany({ where: eq(subscriptions.userId, userId) });
+    const subs = await app.db.query.subscriptions.findMany({
+      where: eq(subscriptions.userId, userId),
+    });
     expect(subs).toHaveLength(1);
     expect(subs[0]!.planId).toBe(trialPlan!.id);
   });
@@ -205,10 +227,14 @@ describe('payments module', () => {
     const result = await receiveWebhookEvent(app.db, app.redis, makeFakeStripe(), event);
     expect(result.alreadyProcessed).toBe(false);
 
-    const after = await app.db.query.subscriptions.findFirst({ where: eq(subscriptions.id, sub!.id) });
+    const after = await app.db.query.subscriptions.findFirst({
+      where: eq(subscriptions.id, sub!.id),
+    });
     expect(after!.status).toBe('active');
 
-    const license = await app.db.query.licenses.findFirst({ where: eq(licenses.subscriptionId, sub!.id) });
+    const license = await app.db.query.licenses.findFirst({
+      where: eq(licenses.subscriptionId, sub!.id),
+    });
     expect(license).toBeTruthy();
     expect(license!.status).toBe('active');
   });
@@ -252,11 +278,15 @@ describe('payments module', () => {
 
     await receiveWebhookEvent(app.db, app.redis, makeFakeStripe(), event);
 
-    const after = await app.db.query.subscriptions.findFirst({ where: eq(subscriptions.id, sub!.id) });
+    const after = await app.db.query.subscriptions.findFirst({
+      where: eq(subscriptions.id, sub!.id),
+    });
     expect(after!.status).toBe('canceled');
     expect(after!.endedAt).toBeTruthy();
 
-    const license = await app.db.query.licenses.findFirst({ where: eq(licenses.subscriptionId, sub!.id) });
+    const license = await app.db.query.licenses.findFirst({
+      where: eq(licenses.subscriptionId, sub!.id),
+    });
     expect(license!.status).toBe('revoked');
     expect(license!.revokedReason).toBe('subscription_ended');
   });
@@ -311,17 +341,25 @@ describe('payments module', () => {
 
     await receiveWebhookEvent(app.db, app.redis, makeFakeStripe(), event);
 
-    const after = await app.db.query.subscriptions.findFirst({ where: eq(subscriptions.id, sub!.id) });
+    const after = await app.db.query.subscriptions.findFirst({
+      where: eq(subscriptions.id, sub!.id),
+    });
     expect(after!.status).toBe('suspended');
 
-    const paymentAfter = await app.db.query.payments.findFirst({ where: eq(payments.id, payment!.id) });
+    const paymentAfter = await app.db.query.payments.findFirst({
+      where: eq(payments.id, payment!.id),
+    });
     expect(paymentAfter!.status).toBe('disputed');
 
-    const flagRows = await app.db.query.flags.findMany({ where: and(eq(flags.userId, userId), eq(flags.kind, 'chargeback')) });
+    const flagRows = await app.db.query.flags.findMany({
+      where: and(eq(flags.userId, userId), eq(flags.kind, 'chargeback')),
+    });
     expect(flagRows).toHaveLength(1);
     expect(flagRows[0]!.severity).toBe('critical');
 
-    const auditRows = await app.db.query.auditLogs.findMany({ where: (t, { eq: eqOp }) => eqOp(t.entityId, sub!.id) });
+    const auditRows = await app.db.query.auditLogs.findMany({
+      where: (t, { eq: eqOp }) => eqOp(t.entityId, sub!.id),
+    });
     const suspendAudit = auditRows.find((r) => r.action === 'subscription.suspend');
     expect(suspendAudit).toBeTruthy();
     expect(suspendAudit!.actorType).toBe('system');
@@ -388,10 +426,17 @@ describe('payments module', () => {
     const proPlan = await app.db.query.plans.findFirst({ where: eq(plans.code, 'pro') });
     const { trialSub, trialLicense } = await seedTrialingSubscription(app, userId);
 
-    const result = await receiveWebhookEvent(app.db, app.redis, makeFakeStripe(), trialUpgradeEvent('evt_trial_upgrade_1', userId));
+    const result = await receiveWebhookEvent(
+      app.db,
+      app.redis,
+      makeFakeStripe(),
+      trialUpgradeEvent('evt_trial_upgrade_1', userId),
+    );
     expect(result.alreadyProcessed).toBe(false);
 
-    const allSubs = await app.db.query.subscriptions.findMany({ where: eq(subscriptions.userId, userId) });
+    const allSubs = await app.db.query.subscriptions.findMany({
+      where: eq(subscriptions.userId, userId),
+    });
     expect(allSubs).toHaveLength(2); // the original trial row + the new paid row
 
     const trialAfter = allSubs.find((s) => s.id === trialSub.id)!;
@@ -408,11 +453,15 @@ describe('payments module', () => {
     expect(liveSubs).toHaveLength(1);
     expect(liveSubs[0]!.id).toBe(paidSub.id);
 
-    const trialLicenseAfter = await app.db.query.licenses.findFirst({ where: eq(licenses.id, trialLicense.id) });
+    const trialLicenseAfter = await app.db.query.licenses.findFirst({
+      where: eq(licenses.id, trialLicense.id),
+    });
     expect(trialLicenseAfter!.status).toBe('revoked');
     expect(trialLicenseAfter!.revokedReason).toBe('upgraded_to_paid');
 
-    const paidLicense = await app.db.query.licenses.findFirst({ where: eq(licenses.subscriptionId, paidSub.id) });
+    const paidLicense = await app.db.query.licenses.findFirst({
+      where: eq(licenses.subscriptionId, paidSub.id),
+    });
     expect(paidLicense).toBeTruthy();
     expect(paidLicense!.status).toBe('active');
 
@@ -430,7 +479,9 @@ describe('payments module', () => {
     const second = await receiveWebhookEvent(app.db, app.redis, makeFakeStripe(), event);
     expect(second.alreadyProcessed).toBe(true);
 
-    const allSubs = await app.db.query.subscriptions.findMany({ where: eq(subscriptions.userId, userId) });
+    const allSubs = await app.db.query.subscriptions.findMany({
+      where: eq(subscriptions.userId, userId),
+    });
     expect(allSubs).toHaveLength(2); // still just the ended trial + the one paid row, not a second paid row
 
     const liveSubs = allSubs.filter((s) => LIVE_SUBSCRIPTION_STATUSES.includes(s.status));
@@ -439,7 +490,9 @@ describe('payments module', () => {
     const trialAfter = allSubs.find((s) => s.id === trialSub.id)!;
     expect(trialAfter.status).toBe('canceled');
 
-    const licenseRows = await app.db.query.licenses.findMany({ where: eq(licenses.userId, userId) });
+    const licenseRows = await app.db.query.licenses.findMany({
+      where: eq(licenses.userId, userId),
+    });
     expect(licenseRows.filter((l) => l.status === 'active')).toHaveLength(1);
   });
 
@@ -450,12 +503,27 @@ describe('payments module', () => {
 
   it('createPortalSession looks up by stripe_customer_id first, skipping the email lookup entirely', async () => {
     const userId = await createVerifiedUser(app, 'portal-has-customer@example.com');
-    await app.db.update(users).set({ stripeCustomerId: 'cus_already_known' }).where(eq(users.id, userId));
+    await app.db
+      .update(users)
+      .set({ stripeCustomerId: 'cus_already_known' })
+      .where(eq(users.id, userId));
 
     let listCalls = 0;
     const stripe = makeFakeStripe({
-      customers: { list: async () => { listCalls += 1; return { data: [] }; }, create: async () => ({ id: 'cus_should_not_be_created' }) },
-      billingPortal: { sessions: { create: async (params: { customer: string }) => ({ url: `https://billing.stripe.com/session/${params.customer}` }) } },
+      customers: {
+        list: async () => {
+          listCalls += 1;
+          return { data: [] };
+        },
+        create: async () => ({ id: 'cus_should_not_be_created' }),
+      },
+      billingPortal: {
+        sessions: {
+          create: async (params: { customer: string }) => ({
+            url: `https://billing.stripe.com/session/${params.customer}`,
+          }),
+        },
+      },
     });
 
     const result = await createPortalSession(stripe, app.db, {
@@ -477,7 +545,13 @@ describe('payments module', () => {
         list: async () => ({ data: [{ id: 'cus_found_by_email' }] }),
         create: async () => ({ id: 'cus_should_not_be_created' }),
       },
-      billingPortal: { sessions: { create: async (params: { customer: string }) => ({ url: `https://billing.stripe.com/session/${params.customer}` }) } },
+      billingPortal: {
+        sessions: {
+          create: async (params: { customer: string }) => ({
+            url: `https://billing.stripe.com/session/${params.customer}`,
+          }),
+        },
+      },
     });
 
     const result = await createPortalSession(stripe, app.db, {

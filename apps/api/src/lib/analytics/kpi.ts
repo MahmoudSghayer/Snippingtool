@@ -6,9 +6,18 @@
 // one. Pure functions over Drizzle + (for online users) the existing WS
 // presence Redis helper; no mutation, no interpolated `sql` templates.
 
-import { extensionInstalls, payments, plans, subscriptions, userActivity, users, vArr, vMrr, type Database } from '@sl/db';
+import {
+  extensionInstalls,
+  payments,
+  plans,
+  subscriptions,
+  userActivity,
+  users,
+  vArr,
+  vMrr,
+  type Database,
+} from '@sl/db';
 import { and, count, countDistinct, eq, gte, inArray, isNull, lt, lte, ne, sum } from 'drizzle-orm';
-
 
 import { countOnline } from '../../ws/presence.js';
 
@@ -35,7 +44,11 @@ export async function getTotalUsers(db: Database, asOf: string): Promise<number>
 
 /** Distinct users with at least one `user_activity` row in the `windowDays`
  * ending at `asOf` (inclusive of `asOf`'s full day). */
-export async function getActiveUsers(db: Database, asOf: string, windowDays: number): Promise<number> {
+export async function getActiveUsers(
+  db: Database,
+  asOf: string,
+  windowDays: number,
+): Promise<number> {
   const end = endOfDayUtc(asOf);
   const start = new Date(end.getTime() - windowDays * DAY_MS);
   const [row] = await db
@@ -56,7 +69,13 @@ export async function getTotalRevenueCents(db: Database, params: KpiRangeParams)
   const [row] = await db
     .select({ total: sum(payments.amountCents) })
     .from(payments)
-    .where(and(eq(payments.status, 'succeeded'), gte(payments.createdAt, parseDayUtc(params.from)), lt(payments.createdAt, endOfDayUtc(params.to))));
+    .where(
+      and(
+        eq(payments.status, 'succeeded'),
+        gte(payments.createdAt, parseDayUtc(params.from)),
+        lt(payments.createdAt, endOfDayUtc(params.to)),
+      ),
+    );
   return Number(row?.total ?? 0);
 }
 
@@ -93,7 +112,10 @@ export interface ConversionResult {
  * `trial_ends_at` for one still in progress at query time). See
  * docs/08-analytics.md for the worked example.
  */
-export async function getConversion(db: Database, params: KpiRangeParams): Promise<ConversionResult> {
+export async function getConversion(
+  db: Database,
+  params: KpiRangeParams,
+): Promise<ConversionResult> {
   const trialPlan = await db.query.plans.findFirst({ where: eq(plans.code, 'trial') });
   if (!trialPlan) return { cohortSize: 0, converted: 0, rate: 0 };
 
@@ -194,9 +216,16 @@ export interface RetentionCohort {
  * cohort with at least one `user_activity` row on the exact calendar day
  * `signup_day + 7` (D7) / `signup_day + 30` (D30).
  */
-export async function getRetentionCohorts(db: Database, params: KpiRangeParams): Promise<RetentionCohort[]> {
+export async function getRetentionCohorts(
+  db: Database,
+  params: KpiRangeParams,
+): Promise<RetentionCohort[]> {
   const cohortUsers = await db.query.users.findMany({
-    where: and(isNull(users.deletedAt), gte(users.createdAt, parseDayUtc(params.from)), lt(users.createdAt, endOfDayUtc(params.to))),
+    where: and(
+      isNull(users.deletedAt),
+      gte(users.createdAt, parseDayUtc(params.from)),
+      lt(users.createdAt, endOfDayUtc(params.to)),
+    ),
     columns: { id: true, createdAt: true },
   });
   if (cohortUsers.length === 0) return [];
@@ -229,8 +258,10 @@ export async function getRetentionCohorts(db: Database, params: KpiRangeParams):
       const activities = activityByUser.get(u.id) ?? [];
       const d7Start = u.createdAt.getTime() + 7 * DAY_MS;
       const d30Start = u.createdAt.getTime() + 30 * DAY_MS;
-      if (activities.some((t) => t.getTime() >= d7Start && t.getTime() < d7Start + DAY_MS)) retainedD7++;
-      if (activities.some((t) => t.getTime() >= d30Start && t.getTime() < d30Start + DAY_MS)) retainedD30++;
+      if (activities.some((t) => t.getTime() >= d7Start && t.getTime() < d7Start + DAY_MS))
+        retainedD7++;
+      if (activities.some((t) => t.getTime() >= d30Start && t.getTime() < d30Start + DAY_MS))
+        retainedD30++;
     }
     results.push({
       cohortWeek: week,
@@ -245,7 +276,9 @@ export async function getRetentionCohorts(db: Database, params: KpiRangeParams):
 }
 
 /** Live (not-uninstalled) extension installs, total and by browser. */
-export async function getExtensionInstalls(db: Database): Promise<{ total: number; byBrowser: Record<string, number> }> {
+export async function getExtensionInstalls(
+  db: Database,
+): Promise<{ total: number; byBrowser: Record<string, number> }> {
   const rows = await db.query.extensionInstalls.findMany({
     where: isNull(extensionInstalls.uninstalledAt),
     columns: { browser: true },
@@ -288,21 +321,36 @@ export interface KpiOverview {
 
 /** Assembles the full admin overview KPI screen's data in one call — every
  * field documented individually above and in docs/08-analytics.md. */
-export async function getKpiOverview(db: Database, redis: Redis, params: KpiRangeParams): Promise<KpiOverview> {
-  const [totalUsers, activeUsers7d, activeUsers30d, onlineUsers, totalRevenueCents, mrrArr, conversion, churn, retention, installs, versionDistribution] =
-    await Promise.all([
-      getTotalUsers(db, params.to),
-      getActiveUsers(db, params.to, 7),
-      getActiveUsers(db, params.to, 30),
-      getOnlineUsers(redis),
-      getTotalRevenueCents(db, params),
-      getMrrArr(db),
-      getConversion(db, params),
-      getChurn(db, params),
-      getRetentionCohorts(db, params),
-      getExtensionInstalls(db),
-      getVersionDistribution(db),
-    ]);
+export async function getKpiOverview(
+  db: Database,
+  redis: Redis,
+  params: KpiRangeParams,
+): Promise<KpiOverview> {
+  const [
+    totalUsers,
+    activeUsers7d,
+    activeUsers30d,
+    onlineUsers,
+    totalRevenueCents,
+    mrrArr,
+    conversion,
+    churn,
+    retention,
+    installs,
+    versionDistribution,
+  ] = await Promise.all([
+    getTotalUsers(db, params.to),
+    getActiveUsers(db, params.to, 7),
+    getActiveUsers(db, params.to, 30),
+    getOnlineUsers(redis),
+    getTotalRevenueCents(db, params),
+    getMrrArr(db),
+    getConversion(db, params),
+    getChurn(db, params),
+    getRetentionCohorts(db, params),
+    getExtensionInstalls(db),
+    getVersionDistribution(db),
+  ]);
 
   return {
     from: params.from,

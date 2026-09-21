@@ -18,7 +18,9 @@ import { loginAsAdmin } from './helpers/adminAuth.js';
  * loads -> users search -> edit a profile -> the edit shows up in the audit
  * log.
  */
-test('admin: login, TOTP bootstrap-or-verify, overview, user search, edit, audit trail', async ({ page }) => {
+test('admin: login, TOTP bootstrap-or-verify, overview, user search, edit, audit trail', async ({
+  page,
+}) => {
   await test.step('login (2FA bootstrap or step-up verify)', async () => {
     await loginAsAdmin(page);
   });
