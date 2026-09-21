@@ -63,6 +63,28 @@ test.describe('popup and options pages', () => {
     await context.close();
   });
 
+  // `Page.captureScreenshot` in headed Chromium (which `--load-extension`
+  // requires) intermittently fails with "Unable to capture screenshot"
+  // when the freshly opened extension page's renderer has not produced a
+  // frame yet — seen under xvfb in CI right after the previous spec's
+  // context closes. The screenshots here are documentation output, not
+  // assertions, so bring the page to the foreground and retry a few times
+  // with a short pause before giving up.
+  async function documentaryScreenshot(page: Page, file: string, options: { fullPage?: boolean } = {}): Promise<void> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        await page.bringToFront();
+        await page.screenshot({ path: path.join(screenshotsDir, file), ...options });
+        return;
+      } catch (err) {
+        lastError = err;
+        await page.waitForTimeout(500 * (attempt + 1));
+      }
+    }
+    throw lastError;
+  }
+
   function trackConsoleErrors(page: Page): { errors: string[] } {
     const tracked = { errors: [] as string[] };
     page.on('console', (msg: ConsoleMessage) => {
@@ -91,7 +113,7 @@ test.describe('popup and options pages', () => {
     // status yet yet in the logged-out state.
     await expect(page.locator('.dot')).toHaveCount(1);
 
-    await page.screenshot({ path: path.join(screenshotsDir, 'popup-logged-out-360x600.png') });
+    await documentaryScreenshot(page, 'popup-logged-out-360x600.png');
 
     expect(tracked.errors, `popup console errors: ${JSON.stringify(tracked.errors)}`).toEqual([]);
     await page.close();
@@ -152,7 +174,7 @@ test.describe('popup and options pages', () => {
     await expect(page.locator('#telemetry-optout')).toBeVisible();
     await expect(page.locator('#export-logs')).toBeVisible();
 
-    await page.screenshot({ path: path.join(screenshotsDir, 'options-900.png'), fullPage: true });
+    await documentaryScreenshot(page, 'options-900.png', { fullPage: true });
 
     expect(tracked.errors, `options console errors: ${JSON.stringify(tracked.errors)}`).toEqual([]);
     await page.close();
