@@ -1,10 +1,11 @@
 // Nightly: creates the next 3 months of partitions for every declaratively
 // partitioned table, using the `create_month_partitions()` Postgres function
-// migrations/0001 defines (idempotent — CREATE TABLE IF NOT EXISTS). Values
-// embedded below (table names, the computed month) are all determined by
-// this file's own code, never by request input, so building the call via
-// `sql.raw()` is the eslint preset's sanctioned pattern, not a shortcut
-// around it.
+// migrations/0001 defines (idempotent — CREATE TABLE IF NOT EXISTS). Its
+// three arguments are plain `text`, `date` and `int` values, so the call is
+// built from constant SQL chunks plus bound parameters (`sql.join` +
+// `sql.param`) — no `sql.raw()`, no interpolation, exactly the shape both
+// the eslint preset and `.github/semgrep/rules.yml` require
+// (docs/09-security.md "SQL injection prevention").
 
 import { sql } from 'drizzle-orm';
 
@@ -27,26 +28,28 @@ export default defineJob({
       .toISOString()
       .slice(0, 10);
 
-    // Defense-in-depth even though both values are internally computed
-    // (never request input): assert their shape before they're ever allowed
-    // near sql.raw(), same reasoning as jobs/audit.retention.job.ts.
+    // Defense-in-depth even though the value is internally computed (never
+    // request input): assert its shape before it is bound, so a clock or
+    // formatting surprise fails loudly here rather than inside Postgres.
     if (!/^\d{4}-\d{2}-\d{2}$/.test(fromMonth)) {
       throw new Error(`partitions.maintain: unexpected fromMonth value: ${fromMonth}`);
     }
 
     for (const table of PARTITIONED_TABLES) {
-      // `create_month_partitions` is a Postgres function whose table-name
-      // argument is a regclass-like identifier, not parameterisable via
-      // Drizzle's `sql` template the usual way for this call shape; `table`
-      // only ever comes from the fixed PARTITIONED_TABLES literal above and
-      // `fromMonth` is validated immediately above, neither is
-      // request-controlled. See docs/09-security.md "No string-interpolated
-      // SQL".
+      // `create_month_partitions(parent text, from_month date, months int)`:
+      // the table name is a text argument (the function quotes the
+      // identifier itself), so all three values bind as $1/$2/$3.
       await db.execute(
-        sql.raw(
-          `SELECT create_month_partitions('${table}', '${fromMonth}'::date, ${MONTHS_AHEAD})`,
-        ),
-      ); // nosemgrep: no-raw-sql-string-interpolation
+        sql.join([
+          sql`SELECT create_month_partitions(`,
+          sql.param(table),
+          sql`, `,
+          sql.param(fromMonth),
+          sql`::date, `,
+          sql.param(MONTHS_AHEAD),
+          sql`)`,
+        ]),
+      );
     }
 
     log.info(

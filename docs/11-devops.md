@@ -171,10 +171,17 @@ branch protection settings — just adding its name to `ci-success`'s
 `needs:` list.
 
 `.github/workflows/codeql.yml`: GitHub's own SAST (`javascript-typescript`,
-`build-mode: none`) on every PR/push to `main` plus a weekly schedule,
-uploading SARIF to the repo's Security tab — complements `security-scan`'s
-dependency/secret/custom-rule checks with continuously-updated CodeQL
-queries.
+`build-mode: none`) on every PR/push to `main` plus a weekly schedule —
+complements `security-scan`'s dependency/secret/custom-rule checks with
+continuously-updated CodeQL queries. The repository is private and has no
+GitHub Advanced Security, so code scanning (the Security-tab upload) is
+unavailable; the workflow therefore runs the analysis with `upload: never`
+and gates on the SARIF itself: `.github/scripts/codeql-gate.mjs` prints
+every finding as a workflow annotation and fails the job on any
+error-level result, and the SARIF is kept as a run artifact
+(`codeql-results`). Once the repository is public or Advanced Security is
+enabled, set `upload: always` on the analyze step and the same results land
+in the Security tab as well.
 
 `.github/workflows/release.yml`: builds+pushes all five images (§3) on
 every push to `main` and on `vX.Y.Z` tags; on a tag, also zips both

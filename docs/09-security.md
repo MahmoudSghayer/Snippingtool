@@ -80,13 +80,18 @@ interpolation` rule (same pattern, different tool, catches anything the
    round-trips as inert data (proving parameterisation) and that the
    `users` table is untouched.
 
-The two legitimate `sql.raw()` call sites in the codebase
-(`apps/api/src/jobs/partitions.maintain.job.ts`,
-`apps/api/src/jobs/audit.retention.job.ts`) build a **partition/table
-name** from a fixed, code-controlled date format — never external input —
-before handing it to `sql.raw()`, and are individually
-`# nosemgrep: no-raw-sql-string-interpolation`-annotated with a comment
-explaining why, not blanket-exempted.
+The one legitimate `sql.raw()` call site in the codebase
+(`apps/api/src/jobs/audit.retention.job.ts`) builds a **partition/table
+name** — an identifier, which cannot be a bind parameter — from a fixed,
+code-controlled date format, never external input, asserts its shape before
+handing it to `sql.raw()`, and is individually
+`// nosemgrep: no-raw-sql-string-interpolation`-annotated on the matching
+line with a comment explaining why, not blanket-exempted.
+`apps/api/src/jobs/partitions.maintain.job.ts` used to be a second one, but
+`create_month_partitions()` takes its table name as a plain `text`
+argument, so that call is now built from constant `sql` chunks plus
+`sql.param()` bind values (`sql.join`), which satisfies both the eslint
+rule and the semgrep rule with no exemption at all.
 
 ## 3. XSS
 
