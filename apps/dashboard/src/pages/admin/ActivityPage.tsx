@@ -1,14 +1,12 @@
 import {
+  Badge,
   BarChart,
   Card,
   CardContent,
-  CardHeader,
-  CardTitle,
   ChartCard,
   DataTable,
   DateRangePicker,
   defaultDateRange,
-  EmptyState,
   KpiGrid,
   PageHeader,
   StatTile,
@@ -25,27 +23,14 @@ import { useState } from 'react';
 
 import { api } from '@/api/client.js';
 
-/** `apps/api`'s `admin-activity` module declares no Zod response schema for
- * `logins`/`searches`/`snipes`/`errors`/`ips` (docs/03-api.md calls them
- * "raw rows from user_activity/search_activity/sniping_activity" but the
- * OpenAPI document's `200.content` is empty for all five — confirmed against
- * the generated `schema.d.ts`, which types their `data` as `never`). This
- * generic row shape and cast is the dashboard's best-effort reading of what
- * `docs/02-database.md`'s underlying tables actually contain; flagged as a
- * follow-up in docs/07-dashboard.md ("Known API gaps") rather than guessed
- * away by adding a stricter interface for a contract that doesn't exist yet. */
-interface RawActivityRow {
-  id?: string;
-  occurredAt?: string;
-  type?: string;
-  deviceId?: string | null;
-  ip?: string | null;
-  resultsCount?: number;
-  outcome?: string;
-  latencyMs?: number;
-  metadata?: Record<string, unknown>;
-  [key: string]: unknown;
-}
+import type {
+  AdminErrorActivityRow,
+  AdminFilterChangeActivityRow,
+  AdminIpActivityRow,
+  AdminLoginActivityRow,
+  AdminSearchActivityRow,
+  AdminSnipeActivityRow,
+} from '@sl/shared';
 
 // `apps/api`'s `admin-activity` routes validate `from`/`to` as full
 // `z.string().datetime()` values (see docs/03-api.md), but `DateRangePicker`
@@ -58,50 +43,125 @@ function toRangeQuery(range: DateRange): { from: string; to: string } {
   return { from: `${range.from}T00:00:00.000Z`, to: `${range.to}T23:59:59.999Z` };
 }
 
-function useRawActivity(path: '/api/v1/admin/activity/logins' | '/api/v1/admin/activity/searches' | '/api/v1/admin/activity/snipes' | '/api/v1/admin/activity/errors', range: DateRange) {
+const deviceCell = (c: { getValue: () => unknown }) => <span className="font-mono text-xs">{(c.getValue() as string | null) ?? '—'}</span>;
+const timeCell = (c: { getValue: () => unknown }) => (c.getValue() ? new Date(c.getValue() as string).toLocaleString() : '—');
+
+const loginColumns: ColumnDef<AdminLoginActivityRow, unknown>[] = [
+  { accessorKey: 'occurredAt', header: 'Time', cell: timeCell },
+  { accessorKey: 'userId', header: 'User', cell: deviceCell },
+  { accessorKey: 'deviceId', header: 'Device', cell: deviceCell },
+  { accessorKey: 'ip', header: 'IP', cell: (c) => (c.getValue() as string | null) ?? '—' },
+  { id: 'mfa', header: 'MFA', cell: ({ row }) => (row.original.metadata.mfaUsed ? <Badge tone="positive">Used</Badge> : '—') },
+];
+
+const errorColumns: ColumnDef<AdminErrorActivityRow, unknown>[] = [
+  { accessorKey: 'occurredAt', header: 'Time', cell: timeCell },
+  { accessorKey: 'userId', header: 'User', cell: deviceCell },
+  { accessorKey: 'deviceId', header: 'Device', cell: deviceCell },
+  { id: 'code', header: 'Code', cell: ({ row }) => <span className="font-mono text-xs">{String(row.original.metadata.code ?? '—')}</span> },
+  { id: 'context', header: 'Context', cell: ({ row }) => String(row.original.metadata.context ?? '—') },
+  { id: 'message', header: 'Message', cell: ({ row }) => <span className="text-xs text-ink-2">{String(row.original.metadata.message ?? '—')}</span> },
+];
+
+const searchColumns: ColumnDef<AdminSearchActivityRow, unknown>[] = [
+  { accessorKey: 'occurredAt', header: 'Time', cell: timeCell },
+  { accessorKey: 'userId', header: 'User', cell: deviceCell },
+  { accessorKey: 'resourceId', header: 'Resource', cell: (c) => (c.getValue() as string | null) ?? '—' },
+  { accessorKey: 'resultsCount', header: 'Results' },
+  { accessorKey: 'floorPrice', header: 'Floor price', cell: (c) => (c.getValue() != null ? (c.getValue() as number).toLocaleString() : '—') },
+];
+
+const snipeOutcomeTone: Record<string, 'positive' | 'negative' | 'warning' | 'neutral'> = {
+  success: 'positive',
+  failed: 'negative',
+  error: 'negative',
+  blocked: 'warning',
+  too_slow: 'warning',
+  attempted: 'neutral',
+};
+
+const snipeColumns: ColumnDef<AdminSnipeActivityRow, unknown>[] = [
+  { accessorKey: 'occurredAt', header: 'Time', cell: timeCell },
+  { accessorKey: 'userId', header: 'User', cell: deviceCell },
+  { accessorKey: 'resourceId', header: 'Resource' },
+  { accessorKey: 'targetPrice', header: 'Target price', cell: (c) => (c.getValue() as number).toLocaleString() },
+  { accessorKey: 'outcome', header: 'Outcome', cell: (c) => <Badge tone={snipeOutcomeTone[c.getValue() as string] ?? 'neutral'}>{c.getValue() as string}</Badge> },
+  { accessorKey: 'latencyMs', header: 'Latency (ms)', cell: (c) => (c.getValue() != null ? c.getValue() : '—') },
+];
+
+const filterChangeColumns: ColumnDef<AdminFilterChangeActivityRow, unknown>[] = [
+  { accessorKey: 'occurredAt', header: 'Time', cell: timeCell },
+  { accessorKey: 'userId', header: 'User', cell: deviceCell },
+  { id: 'action', header: 'Action', cell: ({ row }) => <Badge tone="neutral">{row.original.metadata.action}</Badge> },
+  { id: 'filterId', header: 'Filter', cell: ({ row }) => <span className="font-mono text-xs">{row.original.metadata.filterId ?? '—'}</span> },
+];
+
+const ipColumns: ColumnDef<AdminIpActivityRow, unknown>[] = [
+  { accessorKey: 'ip', header: 'IP' },
+  { accessorKey: 'userId', header: 'User', cell: deviceCell },
+  { accessorKey: 'country', header: 'Country', cell: (c) => (c.getValue() as string | null) ?? '—' },
+  { accessorKey: 'requestCount', header: 'Requests' },
+  { accessorKey: 'lastSeen', header: 'Last seen', cell: timeCell },
+  { accessorKey: 'flagged', header: 'Flagged', cell: (c) => (c.getValue() ? <Badge tone="negative">Flagged</Badge> : '—') },
+];
+
+function useActivity<
+  Path extends
+    | '/api/v1/admin/activity/logins'
+    | '/api/v1/admin/activity/searches'
+    | '/api/v1/admin/activity/snipes'
+    | '/api/v1/admin/activity/errors'
+    | '/api/v1/admin/activity/filter-changes',
+  Row,
+>(path: Path, range: DateRange) {
   return useQuery({
     queryKey: ['admin', 'activity', path, range],
     queryFn: async () => {
       const { data, error } = await api.GET(path, { params: { query: { ...toRangeQuery(range), limit: 100 } } });
       if (error) throw error;
-      const body = data as unknown;
-      const rows = Array.isArray(body) ? body : ((body as { items?: RawActivityRow[] } | undefined)?.items ?? []);
-      return rows as RawActivityRow[];
+      return (data as { items: Row[] }).items;
     },
   });
 }
 
-const rawColumns: ColumnDef<RawActivityRow, unknown>[] = [
-  { accessorKey: 'occurredAt', header: 'Time', cell: (c) => (c.getValue() ? new Date(c.getValue() as string).toLocaleString() : '—') },
-  { accessorKey: 'deviceId', header: 'Device', cell: (c) => <span className="font-mono text-xs">{(c.getValue() as string | null) ?? '—'}</span> },
-  { accessorKey: 'ip', header: 'IP', cell: (c) => (c.getValue() as string | null) ?? '—' },
-  {
-    id: 'details',
-    header: 'Details',
-    cell: ({ row }) => {
-      const { id: _id, occurredAt: _o, deviceId: _d, ip: _i, ...rest } = row.original;
-      return <span className="font-mono text-xs text-ink-2">{JSON.stringify(rest)}</span>;
-    },
-  },
-];
-
-function RawActivityTab({ path, range }: { path: '/api/v1/admin/activity/logins' | '/api/v1/admin/activity/searches' | '/api/v1/admin/activity/snipes' | '/api/v1/admin/activity/errors'; range: DateRange }) {
-  const query = useRawActivity(path, range);
+function ActivityTab<Row extends { id: string }>({
+  path,
+  range,
+  columns,
+  emptyTitle,
+}: {
+  path:
+    | '/api/v1/admin/activity/logins'
+    | '/api/v1/admin/activity/searches'
+    | '/api/v1/admin/activity/snipes'
+    | '/api/v1/admin/activity/errors'
+    | '/api/v1/admin/activity/filter-changes';
+  range: DateRange;
+  columns: ColumnDef<Row, unknown>[];
+  emptyTitle: string;
+}) {
+  const query = useActivity<typeof path, Row>(path, range);
   return (
-    <DataTable
-      columns={rawColumns}
-      data={query.data ?? []}
-      isLoading={query.isLoading}
-      isError={query.isError}
-      onRetry={() => void query.refetch()}
-      emptyTitle="No events in this range"
-      getRowId={(row, i) => row.id ?? String(i)}
-    />
+    <Card>
+      <CardContent className="pt-5">
+        <DataTable
+          columns={columns}
+          data={query.data ?? []}
+          isLoading={query.isLoading}
+          isError={query.isError}
+          onRetry={() => void query.refetch()}
+          emptyTitle={emptyTitle}
+          getRowId={(row) => row.id}
+        />
+      </CardContent>
+    </Card>
   );
 }
 
 /** `/admin/activity` — logins, searches, filter changes, snipes, errors,
- * devices, IPs. Each tab is its own date-ranged, filtered DataTable. */
+ * devices, IPs. Each tab is its own date-ranged, typed DataTable, backed by
+ * the response schemas in `@sl/shared`'s `schemas/activity.ts`
+ * (docs/07-dashboard.md §11 gap #4). */
 export function ActivityPage() {
   const [range, setRange] = useState<DateRange>(defaultDateRange('7d'));
 
@@ -119,8 +179,7 @@ export function ActivityPage() {
     queryFn: async () => {
       const { data, error } = await api.GET('/api/v1/admin/activity/ips', { params: { query: { limit: 100 } } });
       if (error) throw error;
-      const body = data as unknown;
-      return (Array.isArray(body) ? body : ((body as { items?: RawActivityRow[] } | undefined)?.items ?? [])) as RawActivityRow[];
+      return data;
     },
   });
 
@@ -129,7 +188,7 @@ export function ActivityPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title="Activity" description="Logins, searches, snipes, errors and network activity." actions={<DateRangePicker value={range} onChange={setRange} />} />
+      <PageHeader title="Activity" description="Logins, searches, filter changes, snipes, errors and network activity." actions={<DateRangePicker value={range} onChange={setRange} />} />
 
       <Tabs defaultValue="logins">
         <TabsList>
@@ -143,45 +202,19 @@ export function ActivityPage() {
         </TabsList>
 
         <TabsContent value="logins">
-          <Card>
-            <CardContent className="pt-5">
-              <RawActivityTab path="/api/v1/admin/activity/logins" range={range} />
-            </CardContent>
-          </Card>
+          <ActivityTab path="/api/v1/admin/activity/logins" range={range} columns={loginColumns} emptyTitle="No logins in this range" />
         </TabsContent>
         <TabsContent value="searches">
-          <Card>
-            <CardContent className="pt-5">
-              <RawActivityTab path="/api/v1/admin/activity/searches" range={range} />
-            </CardContent>
-          </Card>
+          <ActivityTab path="/api/v1/admin/activity/searches" range={range} columns={searchColumns} emptyTitle="No searches in this range" />
         </TabsContent>
         <TabsContent value="filters">
-          <Card>
-            <CardHeader>
-              <CardTitle>Filter changes</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <EmptyState
-                title="No dedicated endpoint yet"
-                description="user_activity rows of type filter_change aren't exposed by a dedicated /admin/activity route — only logins, searches, snipes and errors are. Flagged as a follow-up in docs/07-dashboard.md."
-              />
-            </CardContent>
-          </Card>
+          <ActivityTab path="/api/v1/admin/activity/filter-changes" range={range} columns={filterChangeColumns} emptyTitle="No filter changes in this range" />
         </TabsContent>
         <TabsContent value="snipes">
-          <Card>
-            <CardContent className="pt-5">
-              <RawActivityTab path="/api/v1/admin/activity/snipes" range={range} />
-            </CardContent>
-          </Card>
+          <ActivityTab path="/api/v1/admin/activity/snipes" range={range} columns={snipeColumns} emptyTitle="No snipe attempts in this range" />
         </TabsContent>
         <TabsContent value="errors">
-          <Card>
-            <CardContent className="pt-5">
-              <RawActivityTab path="/api/v1/admin/activity/errors" range={range} />
-            </CardContent>
-          </Card>
+          <ActivityTab path="/api/v1/admin/activity/errors" range={range} columns={errorColumns} emptyTitle="No errors in this range" />
         </TabsContent>
         <TabsContent value="devices">
           <div className="flex flex-col gap-4">
@@ -202,13 +235,13 @@ export function ActivityPage() {
           <Card>
             <CardContent className="pt-5">
               <DataTable
-                columns={rawColumns}
+                columns={ipColumns}
                 data={ipsQuery.data ?? []}
                 isLoading={ipsQuery.isLoading}
                 isError={ipsQuery.isError}
                 onRetry={() => void ipsQuery.refetch()}
                 emptyTitle="No IP activity recorded"
-                getRowId={(row, i) => row.id ?? String(i)}
+                getRowId={(row) => row.ip}
               />
             </CardContent>
           </Card>

@@ -802,13 +802,21 @@ disk. This resume:
   change) or splitting the extra pages into their own lower-frequency e2e
   spec (fewer requests per wall-clock second).
 - **Extension surfaces** — done this pass once `docs/09-security.md`
-  landed; see §15. Follow-ups from that work specifically: the popup has no
-  *live* risk gauge (only the in-page panel does — §15 explains why, a
-  file-ownership boundary, not an oversight); the panel's font stays
-  system-ui rather than Inter/JetBrains Mono (a deliberate CSP/host-page
-  call, also explained in §15); and `ledger-auto`'s popup/options are
-  byte-identical to `ledger`'s (the M3 automation build adds no UI surface
-  of its own yet).
+  landed; see §15, including a correction sub-pass that added the missing
+  `test/e2e/ui-pages.spec.ts` (console-error + key-element + axe-core
+  checks for popup/options) and the `tokens:sync` script, then used the new
+  spec to find and fix two real bugs (a Google Fonts `<link>` that failed
+  outright on a network with no route to `fonts.googleapis.com`, and two
+  unlabeled "Add filter" inputs — a critical axe violation). Follow-ups
+  from that work specifically: the popup has no *live* risk gauge (only the
+  in-page panel does — §15 explains why, a file-ownership boundary, not an
+  oversight); the panel's font stays system-ui rather than Inter/JetBrains
+  Mono (a deliberate CSP/host-page call, also explained in §15);
+  `ledger-auto`'s popup/options are byte-identical to `ledger`'s (the M3
+  automation build adds no UI surface of its own yet); and the
+  panel-in-page.png screenshot is still a one-off capture, not regenerated
+  by a maintained spec the way the popup/options screenshots now are (§15,
+  "Screenshot inventory").
 
 ## 15. Extension surfaces
 
@@ -844,20 +852,53 @@ contexts:
   dashboard's over three passes; this pass eliminates that drift mechanism
   entirely rather than just re-syncing the numbers once more.
 
+**Refresh procedure**: `pnpm --filter @sl/extension tokens:sync`
+(`apps/extension/scripts/sync-tokens.mjs`, new) copies
+`packages/ui/src/tokens.css`'s `:root`/reduced-motion/`body` blocks into
+`src/styles/tokens.css` verbatim (minus the chart-series ramp — nothing in
+the extension renders a chart), rewriting only the file's own header
+comment. Whoever changes the dashboard's palette next runs this one
+command instead of hand-copying hex values across the two files — the
+script was written and verified (byte-identical `--sl-*` values before/after
+against the file already checked into this pass) but **not run against the
+committed file**, since the committed copy's values already matched the
+source exactly; running it would have only replaced a hand-written,
+extension-specific header comment with a shorter generated one, which
+would have been pure churn against a file this pass otherwise left alone.
+
 ### Typography
 
-Popup and options load Inter + JetBrains Mono the same way the dashboard
-does (Google Fonts `<link>`, `index.html`), and every numeric value
-(`.row .v`, governor bound labels, table cells) gets
-`font-variant-numeric: tabular-nums` via a monospace stack. **The in-page
-panel deliberately does not** — it renders inside a shadow root injected
-into EA's page via the content script, so a `<style>`-level `@import`/
-external `<link>` there would be a cross-origin stylesheet request made
-*from EA's own page's execution context*, subject to EA's CSP, not the
-extension's. `host_permissions` are EA's domains plus the API origin only
-(project instruction 6), so this was already implicitly out of scope; the
-panel keeps its original `system-ui` stack, which was the right call
-already made before this pass, not a gap introduced by it.
+**No remote font CDN anywhere in the extension** — popup and options no
+longer `<link>` Google Fonts (an earlier state in this same pass did; a
+follow-up correction, below, removed it). `style.css`'s stack is `Inter,
+system-ui, -apple-system, "Segoe UI", sans-serif` for UI text and
+`'JetBrains Mono', ui-monospace, monospace` (`font-variant-numeric:
+tabular-nums`) for every numeric value (`.row .v`, governor bound labels,
+table cells) — "Inter"/"JetBrains Mono" are named first so a machine that
+happens to have them installed locally uses them, but nothing is fetched
+over the network to guarantee it, matching the brief's "system fallback for
+Inter is fine — extensions should not load Google Fonts." **The in-page
+panel already followed this rule** — it renders inside a shadow root
+injected into EA's page via the content script, so a `<style>`-level
+`@import`/external `<link>` there would be a cross-origin stylesheet
+request made *from EA's own page's execution context*, subject to EA's
+CSP, not the extension's; `host_permissions` are EA's domains plus the API
+origin only (project instruction 6), so a remote font was already out of
+scope there. The panel keeps its `system-ui` stack.
+
+**Correction, found by `test/e2e/ui-pages.spec.ts`**: this pass originally
+shipped popup/options with the Google Fonts `<link>` described above (`<link
+rel="preconnect">` ×2 + a `css2?family=...` stylesheet), reasoning that the
+`chrome-extension://` origin has no page-CSP/`host_permissions` objection to
+it. That reasoning was correct as far as it went, but missed that a person
+can open either page with no route to `fonts.googleapis.com` (offline, a
+captive portal, a restrictive proxy) — and this repo's own sandbox is
+exactly such a network: the new e2e spec's console-error assertion caught a
+real, reproducible `net::ERR_CERT_AUTHORITY_INVALID` on both pages the first
+time it ran. Fixed by dropping the three tags from both `index.html` files
+(`popup/index.html`, `options/index.html`) — no CSS change needed, since
+`style.css` already led with `Inter`/`'JetBrains Mono'` before falling back
+to system fonts.
 
 ### Segmented risk gauge
 
@@ -930,6 +971,17 @@ list) is unchanged — it was already specific, accurate against
 and exactly what project instruction 6 asks for; this pass's job here was
 the surrounding page's visual/interaction polish, not the copy.
 
+**Correction, found by `test/e2e/ui-pages.spec.ts`'s axe-core check**: the
+"Saved filters" section's three "Add filter" inputs
+(`#new-filter-name`/`#new-filter-min-rating`/`#new-filter-max-price`) had a
+`<label>` immediately before each one, but the label wasn't associated with
+its input (no `for`, and the inputs aren't nested inside the label). Axe
+flagged the two number inputs as a **critical** `label` violation (the name
+input happened to pass on its `placeholder` alone, but that's a weak name
+source, not a real fix); a screen reader announces either field with no
+name at all. Fixed by adding the matching `for="new-filter-…"` to all three
+labels — the one-line fix every other input on this page already had.
+
 ### Reduced motion
 
 Inherited for free from `styles/tokens.css`'s
@@ -960,44 +1012,89 @@ pnpm --filter @sl/extension build       # pass — both ledger and ledger-auto t
 ```
 
 ```
-xvfb-run -a pnpm --filter @sl/extension test:e2e   # 2 passed: the autobuyer-
-                                                     # absence static check,
-                                                     # and the real Chromium
-                                                     # load against the mock
-                                                     # EA app (panel attaches,
-                                                     # an observation is
-                                                     # recorded, the bundle
-                                                     # probe reports ok) —
-                                                     # confirms the tokens/
-                                                     # risk-gauge CSS changes
-                                                     # above didn't break the
-                                                     # panel's actual DOM
-                                                     # wiring, though the spec
-                                                     # itself asserts behavior,
-                                                     # not styling.
+xvfb-run -a pnpm --filter @sl/extension test:e2e   # 7 passed:
+  # extension.spec.ts (2) — the autobuyer-absence static check, and the
+  #   real Chromium load against the mock EA app (panel attaches, an
+  #   observation is recorded, the bundle probe reports ok) — confirms the
+  #   tokens/risk-gauge CSS changes didn't break the panel's actual DOM
+  #   wiring, though the spec itself asserts behavior, not styling.
+  # ui-pages.spec.ts (5, new) — loads popup/index.html and options/
+  #   index.html as real chrome-extension:// pages from the loaded
+  #   extension (not file:// — MV3's service-worker-backed pages need the
+  #   extension origin to resolve `browser.runtime.sendMessage` at all)
+  #   and asserts: zero console errors on either page, every key element
+  #   present (status header + sign-in form for the popup; every section
+  #   heading + representative field for options), a screenshot of each,
+  #   Tab/Enter keyboard operability through the popup's sign-in form, and
+  #   zero serious/critical axe-core violations on either page. Found and
+  #   fixed two real bugs the first time it ran — see the "Correction"
+  #   notes under Typography and "Options: sections + inline validation"
+  #   above.
 ```
+
+### Bundle size — panel/content, before vs. after
+
+No clean *pre*-design-system build exists to diff against:
+`apps/extension/src/styles/tokens.css` and the popup/options/panel tokens
+work were all introduced together in the same commit
+(`git log --diff-filter=A -- apps/extension/src/styles/tokens.css` →
+`69360f7`, "Phase 9: security hardening..." — a WIP snapshot that mixed
+concerns), so there is no earlier commit with a buildable, tokens-free
+extension to compare against. `69360f7` itself doesn't build at all: its
+`ui/panel.ts` has a real syntax bug (a literal backtick inside a `` ` ``-CSS-
+comment *inside* the `css` template literal terminates the string early,
+`Expected ";" but found "meterClass"`) — fixed by a later commit in this
+same pass before this document's own §15 was written. Confirmed by actually
+trying: `git worktree add` at `69360f7`, `pnpm install`, then
+`node scripts/build.mjs ledger` fails with exactly that esbuild parse
+error. Per this pass's own instructions, reporting **current sizes only**
+in that case:
+
+| File | Size | Gzip |
+| --- | --- | --- |
+| `adapter.js` (MAIN world; no panel code) | 5.63 kB | 1.82 kB |
+| `content.js` (ISOLATED world — bundles `ui/panel.ts`) | 36.08 kB | 12.19 kB |
+| `popup.js` | 4.60 kB | 1.61 kB |
+| `assets/popup-*.css` | 2.87 kB | 0.99 kB |
+| `options.js` | 10.84 kB | 3.87 kB |
+| `assets/options-*.css` | 2.89 kB | 0.98 kB |
+
+(`dist/ledger-auto/content.js` is 38.97 kB / 13.02 kB gzip — larger than
+`dist/ledger`'s by the autobuyer module, expected and unrelated to the
+panel.) The two real fixes this pass made inside `ui/panel.ts`/`style.css`
+(risk-gauge tick marks, tokens migration) predate this document's own
+§15 draft and are already reflected in the numbers above — nothing in
+*this* correction pass touched `ui/panel.ts`'s size at all (the two bugs
+found and fixed were in `options/main.ts` and the two `index.html` files).
 
 ### Screenshot inventory
 
-`apps/extension/screenshots/` (3 PNGs, ~256KB total):
+`apps/extension/screenshots/` (3 PNGs, ~256KB total, well under the 5MB
+budget):
 
 - `popup-logged-out-360x600.png` — the popup at its target 360×600 size,
   logged-out state (email/password/sign-in — the only state reachable
-  without a running `apps/api` instance during this capture).
+  without a running `apps/api` instance during this capture). Captured by
+  `test/e2e/ui-pages.spec.ts` (below), not a one-off.
 - `options-900.png` — the full options page, every section, at a
-  representative desktop width, full-page capture.
+  representative desktop width, full-page capture. Also captured by
+  `test/e2e/ui-pages.spec.ts`.
 - `panel-in-page.png` — the in-page panel against the mock EA app fixture,
   with every optional section (session P&L, risk budget, ranker) forced
   visible via a one-off `evaluate()` (the fixture's single passive search
   doesn't naturally populate all three in one capture) so the full
-  polished surface — including the new segmented risk-meter tick marks —
-  is visible in one screenshot rather than requiring several partial ones.
+  polished surface — including the segmented risk-meter tick marks — is
+  visible in one screenshot rather than requiring several partial ones.
+  Still captured with a throwaway script and not re-taken by this
+  correction pass (unchanged from the state described when this section
+  was first written) — a maintained equivalent would mean either forcing
+  those three sections visible from inside `extension.spec.ts` (changing
+  what that spec asserts, not just adding a screenshot) or accepting a
+  panel screenshot with mostly-empty optional sections; left as a follow-up
+  rather than done partially here.
 
-Captured with a throwaway script (loads the real built `ledger` extension
-into Chromium via `launchPersistentContext` + `--load-extension`, the same
-pattern `test/e2e/extension.spec.ts` uses) run once from outside the repo
-and deleted immediately after — not committed, since it duplicates that
-spec file's loading logic rather than adding a second permanent copy of it;
-re-running it would mean copying `test/e2e/extension.spec.ts`'s pattern
-into a new one-off script again, which is one line of guidance rather than
-a maintained file.
+`popup-logged-out-360x600.png` and `options-900.png` are now reproducible
+on demand — `xvfb-run -a pnpm --filter @sl/extension test:e2e` regenerates
+both every run, overwriting the checked-in PNGs with a current capture, as
+a side effect of the console-error/key-element assertions above (not a
+separate screenshot-only step).

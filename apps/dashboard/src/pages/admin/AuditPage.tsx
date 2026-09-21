@@ -12,43 +12,50 @@ import {
   type ColumnDef,
   type DateRange,
 } from '@sl/ui';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
+import { toast } from 'sonner';
 
 
-import { api } from '@/api/client.js';
-import { downloadCsv } from '@/lib/csv.js';
+import { api, apiErrorMessage } from '@/api/client.js';
+import { downloadServerCsv } from '@/lib/csv.js';
 
 import type { AuditLogEntry } from '@sl/shared';
 
 /** `/admin/audit` — filterable audit log with a before/after diff viewer.
- * `GET /admin/audit/export.csv` is documented (docs/03-api.md) but not
- * present in the current apps/api/openapi/openapi.json, so Export CSV
- * builds a CSV from the currently filtered/loaded rows client-side instead
- * (src/lib/csv.ts) — see docs/07-dashboard.md "Known API gaps". */
+ * "Export CSV" streams the full filtered range server-side (`GET
+ * /admin/audit/export.csv`, same status/entity/date filters as the list
+ * above) rather than only exporting what's currently loaded on screen. */
 export function AuditPage() {
   const [range, setRange] = useState<DateRange>(defaultDateRange('30d'));
   const [entityType, setEntityType] = useState('');
   const [entityId, setEntityId] = useState('');
   const [selected, setSelected] = useState<AuditLogEntry | null>(null);
 
+  const filterQuery = {
+    from: `${range.from}T00:00:00.000Z`,
+    to: `${range.to}T23:59:59.999Z`,
+    ...(entityType ? { entityType } : {}),
+    ...(entityId ? { entityId } : {}),
+  };
+
   const auditQuery = useQuery({
     queryKey: ['admin', 'audit', range, entityType, entityId],
     queryFn: async () => {
       const { data, error } = await api.GET('/api/v1/admin/audit', {
-        params: {
-          query: {
-            from: `${range.from}T00:00:00.000Z`,
-            to: `${range.to}T23:59:59.999Z`,
-            ...(entityType ? { entityType } : {}),
-            ...(entityId ? { entityId } : {}),
-            limit: 200,
-          },
-        },
+        params: { query: { ...filterQuery, limit: 200 } },
       });
       if (error) throw error;
       return data as AuditLogEntry[];
     },
+  });
+
+  const exportMutation = useMutation({
+    mutationFn: async () => {
+      const qs = new URLSearchParams(filterQuery as Record<string, string>).toString();
+      await downloadServerCsv(`audit-${range.from}-${range.to}.csv`, `/api/v1/admin/audit/export.csv?${qs}`);
+    },
+    onError: (error) => toast.error("Couldn't export audit log", { description: apiErrorMessage(error) }),
   });
 
   const columns: ColumnDef<AuditLogEntry, unknown>[] = [
@@ -69,7 +76,7 @@ export function AuditPage() {
         actions={
           <div className="flex items-center gap-2">
             <DateRangePicker value={range} onChange={setRange} />
-            <Button variant="outline" size="sm" disabled={rows.length === 0} onClick={() => downloadCsv(`audit-${range.from}-${range.to}.csv`, rows)}>
+            <Button variant="outline" size="sm" loading={exportMutation.isPending} onClick={() => exportMutation.mutate()}>
               Export CSV
             </Button>
           </div>

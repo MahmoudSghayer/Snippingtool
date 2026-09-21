@@ -183,11 +183,11 @@ async function render(): Promise<void> {
             .join('')}
         </tbody>
       </table>
-      <label>New filter name</label>
+      <label for="new-filter-name">New filter name</label>
       <input id="new-filter-name" placeholder="e.g. 83-84 rated fodder" />
-      <label>Min rating</label>
+      <label for="new-filter-min-rating">Min rating</label>
       <input id="new-filter-min-rating" type="number" min="0" max="99" />
-      <label>Max price</label>
+      <label for="new-filter-max-price">Max price</label>
       <input id="new-filter-max-price" type="number" min="0" />
       <button id="add-filter">Add filter</button>
     </section>

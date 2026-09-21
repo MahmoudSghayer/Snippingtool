@@ -155,6 +155,19 @@ export const adminErrorActivityRowSchema = adminActivityRowBase.extend({
 });
 export type AdminErrorActivityRow = z.infer<typeof adminErrorActivityRowSchema>;
 
+/** `GET /admin/activity/filter-changes` — `user_activity` rows where
+ * `type = 'filter_change'` (`filterChangeActivitySchema`'s ingest shape,
+ * above). Previously the only `user_activity` type with no dedicated admin
+ * route at all. */
+export const adminFilterChangeActivityRowSchema = adminActivityRowBase.extend({
+  type: z.literal('filter_change'),
+  metadata: z.object({
+    filterId: z.string().uuid().optional(),
+    action: z.enum(['created', 'updated', 'deleted', 'activated', 'deactivated']),
+  }),
+});
+export type AdminFilterChangeActivityRow = z.infer<typeof adminFilterChangeActivityRowSchema>;
+
 /** `GET /admin/activity/searches` — `search_activity` rows. */
 export const adminSearchActivityRowSchema = adminActivityRowBase.extend({
   filterHash: z.string(),

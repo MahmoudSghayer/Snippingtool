@@ -64,6 +64,30 @@ signed in, a small, typed, itemised set of product telemetry is sent — see
 "What it sends" panel for the same list in-product. Raw market listings
 never leave the browser, in any state, signed in or not.
 
+## UI / design system
+
+Popup, options page and the in-page panel all read the same tokens as
+`apps/dashboard` (`apps/extension/src/styles/tokens.css`, a build-time copy
+of `packages/ui/src/tokens.css` — refresh it with `pnpm --filter
+@sl/extension tokens:sync` after the source palette changes). No remote
+font CDN anywhere: the popup and options page use a system font stack
+(`Inter, system-ui, -apple-system, "Segoe UI", sans-serif`; `'JetBrains
+Mono', ui-monospace, monospace` with `tabular-nums` for every number), and
+the shadow-DOM panel injected into EA's page (`ui/panel.ts`) was never
+going to load one anyway (a cross-origin stylesheet request from *EA's*
+page context, subject to EA's CSP, not this extension's). The full spec —
+palette, the segmented risk-budget gauge, popup/options page-by-page detail
+— lives in [`docs/10-design-system.md`](../../docs/10-design-system.md)
+§15 ("Extension surfaces").
+
+Screenshots: [`screenshots/`](./screenshots) — `popup-logged-out-360x600.png`
+(the popup at its target 360×600 size), `options-900.png` (every settings
+section, full-page), `panel-in-page.png` (the in-page panel against the
+mock EA app fixture, every optional section forced visible). The first two
+are captured by `test/e2e/ui-pages.spec.ts` on every `test:e2e` run (not a
+one-off) alongside that spec's console-error, key-element and zero
+serious/critical axe-core assertions for both pages.
+
 ## Honest limits
 
 Unchanged from milestone 1 (`model/prices.ts` is ported, not rewritten):

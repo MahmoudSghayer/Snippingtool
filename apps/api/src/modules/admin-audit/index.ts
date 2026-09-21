@@ -2,12 +2,12 @@
 
 import { auditLogs } from '@sl/db';
 import { auditLogEntrySchema, auditLogQuerySchema } from '@sl/shared';
-import { and, desc, eq, gte, lte } from 'drizzle-orm';
+import { and, desc, eq, gte, lt, lte, type SQL } from 'drizzle-orm';
 import fp from 'fastify-plugin';
 import { z } from 'zod';
 
-import { recordAudit } from '../../lib/audit.js';
 import { csvStream } from '../../lib/analytics/csv.js';
+import { recordAudit } from '../../lib/audit.js';
 
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
@@ -74,7 +74,7 @@ export default fp(
       },
       async (request, reply) => {
         const { actorId, entityType, entityId, from, to } = request.query;
-        const conditions = [];
+        const conditions: SQL[] = [];
         if (actorId) conditions.push(eq(auditLogs.actorId, actorId));
         if (entityType) conditions.push(eq(auditLogs.entityType, entityType));
         if (entityId) conditions.push(eq(auditLogs.entityId, entityId));
@@ -102,9 +102,7 @@ export default fp(
         async function* pages() {
           let cursor: { occurredAt: Date; id: string } | null = null;
           for (;;) {
-            const pageConditions = cursor
-              ? [...conditions, lt(auditLogs.occurredAt, cursor.occurredAt)]
-              : conditions;
+            const pageConditions: SQL[] = cursor ? [...conditions, lt(auditLogs.occurredAt, cursor.occurredAt)] : conditions;
             const rows = await fastify.db.query.auditLogs.findMany({
               where: pageConditions.length > 0 ? and(...pageConditions) : undefined,
               orderBy: [desc(auditLogs.occurredAt)],

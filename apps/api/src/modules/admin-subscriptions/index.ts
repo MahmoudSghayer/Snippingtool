@@ -25,6 +25,7 @@ import { z } from 'zod';
 import { recordAudit } from '../../lib/audit.js';
 import { AppErrors } from '../../lib/errors.js';
 import { decodeCursor, encodeCursor } from '../../lib/pagination.js';
+import { findActiveForSubscription } from '../licenses/service.js';
 import {
   activateManual,
   cancelByAdmin,
@@ -146,9 +147,12 @@ export default fp(
 
         const dtos = rows.map((r) => toSubscriptionDto(r, r.plan));
         const currentIndex = rows.findIndex((r) => isLiveStatus(r.status));
+        const currentRow = currentIndex === -1 ? null : rows[currentIndex]!;
+        const currentLicense = currentRow ? await findActiveForSubscription(fastify.db, currentRow.id) : null;
 
         return {
           current: currentIndex === -1 ? null : dtos[currentIndex]!,
+          currentLicenseId: currentLicense?.id ?? null,
           history: dtos,
         };
       },

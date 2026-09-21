@@ -324,6 +324,11 @@ export type AdminSubscriptionListQuery = z.infer<typeof adminSubscriptionListQue
  * actions need `current.id`; `history` is for the drawer's own context. */
 export const adminSubscriptionByUserResponseSchema = z.object({
   current: subscriptionDtoSchema.nullable(),
+  // The active license id for `current`, if any — the device-limit override
+  // route (`POST /admin/licenses/:id/device-limit`) is keyed by license id,
+  // not subscription id, and this is otherwise undiscoverable from this
+  // response alone. Null when `current` is null or has no active license.
+  currentLicenseId: z.string().uuid().nullable(),
   history: z.array(subscriptionDtoSchema),
 });
 export type AdminSubscriptionByUserResponse = z.infer<typeof adminSubscriptionByUserResponseSchema>;

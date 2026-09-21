@@ -5,17 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="dark" />
     <title>Sniper's Ledger</title>
-    <!-- The popup runs in the extension's own chrome-extension:// origin
-         (not injected into EA's page like ui/panel.ts), so loading Google
-         Fonts here has no page-CSP or host_permissions implication —
-         see docs/10-design-system.md's extension section for why the
-         in-page panel deliberately does NOT do this. -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
-      rel="stylesheet"
-    />
+    <!-- No remote font CDN, even though the popup's chrome-extension://
+         origin has no page-CSP/host_permissions objection to one — a
+         person can open this popup offline or on a captive-portal/proxied
+         network with no route to fonts.googleapis.com, and a failed
+         Google Fonts fetch is a real, reproducible console error there
+         (confirmed by test/e2e/ui-pages.spec.ts in this repo's own
+         sandbox: net::ERR_CERT_AUTHORITY_INVALID through the environment's
+         TLS-intercepting proxy). style.css's font stack instead leads with
+         "Inter" (used if the OS happens to have it installed) and falls
+         back to the system UI font — see docs/10-design-system.md's
+         extension section. -->
     <link rel="stylesheet" href="../styles/tokens.css" />
     <link rel="stylesheet" href="./style.css" />
   </head>

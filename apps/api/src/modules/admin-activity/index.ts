@@ -5,6 +5,7 @@ import { devices, ipActivity, searchActivity, snipingActivity, userActivity } fr
 import {
   adminActivityDevicesSummarySchema,
   adminErrorActivityRowSchema,
+  adminFilterChangeActivityRowSchema,
   adminIpActivityRowSchema,
   adminLoginActivityRowSchema,
   adminSearchActivityRowSchema,
@@ -76,6 +77,31 @@ export default fp(
           type: 'error' as const,
           ip: r.ip,
           metadata: r.metadata,
+          occurredAt: r.occurredAt.toISOString(),
+        }));
+      },
+    );
+
+    // docs/07-dashboard.md §11 gap #4 (extended): `filter_change` was the
+    // only `user_activity` type with no dedicated admin route at all.
+    app.get(
+      '/api/v1/admin/activity/filter-changes',
+      { onRequest: [gate], schema: { tags: ['admin'], querystring: rangeQuery, response: { 200: paginatedResponseSchema(adminFilterChangeActivityRowSchema) } } },
+      async (request) => {
+        const { from, to, cursor: cursorRaw, limit } = request.query;
+        const cursor = decodeCursor(cursorRaw);
+        const conditions = [eq(userActivity.type, 'filter_change')];
+        if (from) conditions.push(gte(userActivity.occurredAt, new Date(from)));
+        if (to) conditions.push(lte(userActivity.occurredAt, new Date(to)));
+        if (cursor) conditions.push(lt(userActivity.occurredAt, new Date(cursor.v)));
+
+        const rows = await fastify.db.query.userActivity.findMany({ where: and(...conditions), orderBy: [desc(userActivity.occurredAt)], limit: limit + 1 });
+        return paginated(rows, limit, (r) => ({
+          id: r.id,
+          userId: r.userId,
+          deviceId: r.deviceId,
+          type: 'filter_change' as const,
+          metadata: r.metadata as { filterId?: string; action: 'created' | 'updated' | 'deleted' | 'activated' | 'deactivated' },
           occurredAt: r.occurredAt.toISOString(),
         }));
       },
