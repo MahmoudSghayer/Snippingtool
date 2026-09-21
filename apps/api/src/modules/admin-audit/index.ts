@@ -6,6 +6,9 @@ import { and, desc, eq, gte, lte } from 'drizzle-orm';
 import fp from 'fastify-plugin';
 import { z } from 'zod';
 
+import { recordAudit } from '../../lib/audit.js';
+import { csvStream } from '../../lib/analytics/csv.js';
+
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 
@@ -23,11 +26,6 @@ function toDto(row: typeof auditLogs.$inferSelect) {
     requestId: row.requestId,
     occurredAt: row.occurredAt.toISOString(),
   };
-}
-
-function csvEscape(value: unknown): string {
-  const str = value === null || value === undefined ? '' : typeof value === 'string' ? value : JSON.stringify(value);
-  return `"${str.replace(/"/g, '""')}"`;
 }
 
 export default fp(
@@ -62,11 +60,17 @@ export default fp(
       },
     );
 
+    // docs/07-dashboard.md §11 gap #3 / docs/09-security.md: a server-side
+    // export with the *same* filters as the list above (auditLogQuerySchema,
+    // no separate/narrower filter set), streamed via `csvStream` (matches
+    // admin-analytics' reports/* pattern) instead of buffering a 10k-row cap
+    // in memory, and recording an `audit.export` audit row before streaming
+    // starts — same shape as admin-analytics' `analytics.export`.
     app.get(
       '/api/v1/admin/audit/export.csv',
       {
         onRequest: [fastify.requirePermission('audit.read')],
-        schema: { tags: ['admin'], querystring: auditLogQuerySchema, hide: true },
+        schema: { tags: ['admin'], summary: 'Stream every audit_logs row matching the given filters as CSV.', querystring: auditLogQuerySchema },
       },
       async (request, reply) => {
         const { actorId, entityType, entityId, from, to } = request.query;
@@ -77,20 +81,71 @@ export default fp(
         if (from) conditions.push(gte(auditLogs.occurredAt, new Date(from)));
         if (to) conditions.push(lte(auditLogs.occurredAt, new Date(to)));
 
-        const rows = await fastify.db.query.auditLogs.findMany({
-          where: conditions.length > 0 ? and(...conditions) : undefined,
-          orderBy: [desc(auditLogs.occurredAt)],
-          limit: 10_000,
+        await recordAudit({
+          db: fastify.db,
+          actor: { type: 'admin', id: request.authUser!.id },
+          action: 'audit.export',
+          entityType: 'audit_log',
+          entityId: null,
+          before: null,
+          after: { actorId: actorId ?? null, entityType: entityType ?? null, entityId: entityId ?? null, from: from ?? null, to: to ?? null },
+          ip: request.ip,
+          userAgent: request.headers['user-agent'] ?? null,
+          requestId: request.id,
         });
 
-        const header = 'id,occurred_at,actor_type,actor_id,action,entity_type,entity_id,diff\n';
-        const body = rows
-          .map((r) => [r.id, r.occurredAt.toISOString(), r.actorType, r.actorId, r.action, r.entityType, r.entityId, JSON.stringify(r.diff)].map(csvEscape).join(','))
-          .join('\n');
+        // Keyset-paginated generator (occurred_at DESC, id tiebreaker) so
+        // `csvStream` never has to hold more than one page of rows in memory
+        // at a time, however large the export — each page is fetched lazily
+        // as the previous one is consumed by the HTTP response stream.
+        const PAGE_SIZE = 1000;
+        async function* pages() {
+          let cursor: { occurredAt: Date; id: string } | null = null;
+          for (;;) {
+            const pageConditions = cursor
+              ? [...conditions, lt(auditLogs.occurredAt, cursor.occurredAt)]
+              : conditions;
+            const rows = await fastify.db.query.auditLogs.findMany({
+              where: pageConditions.length > 0 ? and(...pageConditions) : undefined,
+              orderBy: [desc(auditLogs.occurredAt)],
+              limit: PAGE_SIZE,
+            });
+            if (rows.length === 0) return;
+            for (const r of rows) {
+              yield {
+                id: r.id,
+                occurredAt: r.occurredAt.toISOString(),
+                actorType: r.actorType,
+                actorId: r.actorId ?? '',
+                action: r.action,
+                entityType: r.entityType,
+                entityId: r.entityId ?? '',
+                diff: r.diff,
+              };
+            }
+            if (rows.length < PAGE_SIZE) return;
+            const last = rows.at(-1)!;
+            cursor = { occurredAt: last.occurredAt, id: last.id };
+          }
+        }
 
         reply.header('content-type', 'text/csv; charset=utf-8');
         reply.header('content-disposition', 'attachment; filename="audit-log.csv"');
-        return header + body + '\n';
+        return reply.send(
+          csvStream(
+            [
+              { key: 'id', header: 'id' },
+              { key: 'occurredAt', header: 'occurred_at' },
+              { key: 'actorType', header: 'actor_type' },
+              { key: 'actorId', header: 'actor_id' },
+              { key: 'action', header: 'action' },
+              { key: 'entityType', header: 'entity_type' },
+              { key: 'entityId', header: 'entity_id' },
+              { key: 'diff', header: 'diff' },
+            ],
+            pages(),
+          ),
+        );
       },
     );
   },

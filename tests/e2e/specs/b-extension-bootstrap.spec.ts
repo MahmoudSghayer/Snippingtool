@@ -87,29 +87,15 @@ test('extension: loads against the mock EA page, popup login against the real AP
     const sw = context.serviceWorkers()[0] ?? (await context.waitForEvent('serviceworker', { timeout: 15_000 }));
     expect(new URL(sw.url()).hostname).toBe(EXTENSION_ID);
 
-    await routeMockEa(context);
-    const eaPage = await context.newPage();
-    await eaPage.goto(EA_PAGE_URL, { waitUntil: 'load' });
-
-    await test.step('the panel appears against the mock EA page and the bundle probe reports ok', async () => {
-      const host = eaPage.locator('#ledger-root');
-      await expect(host).toHaveCount(1, { timeout: 15_000 });
-      const dotClass = await host.evaluate((el) => (el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.getElementById('dot')?.className);
-      expect(dotClass).not.toContain('warn');
-
-      // The mock page's own passive search happens shortly after load
-      // (mock-service-layer.js), same as
-      // apps/extension/test/e2e/extension.spec.ts's own wait — without
-      // this, the later "flush and check search_activity" step can race
-      // ahead of the observation itself ever having enqueued anything
-      // (reproduced while authoring this spec: the flush step consistently
-      // saw `sent: 0` because there was nothing queued yet, not because
-      // flushing itself was broken).
-      await expect
-        .poll(async () => host.evaluate((el) => (el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.getElementById('total')?.textContent), { timeout: 15_000 })
-        .not.toBe('—');
-    });
-
+    // Popup login runs *before* visiting the EA page — deliberately, not
+    // just plausible real-world ordering: apps/extension/src/lib/telemetry.ts's
+    // queue is a bare in-memory variable in the service worker (see
+    // docs/12-testing.md "Defects found" row #9), and MV3 kills an idle
+    // service worker and restarts it with that state gone. Minimising the
+    // gap between "the observation is enqueued" and "flush is attempted"
+    // keeps this step's own pass/fail about the enqueue-then-flush
+    // mechanism itself, not about how long everything else in the test
+    // happened to take.
     const popup = await context.newPage();
     await test.step('popup login against the real API', async () => {
       // Vite's multi-page build preserves each HTML entry's source path
@@ -142,6 +128,28 @@ test('extension: loads against the mock EA page, popup login against the real AP
       }
     });
 
+    await routeMockEa(context);
+    const eaPage = await context.newPage();
+    await eaPage.goto(EA_PAGE_URL, { waitUntil: 'load' });
+
+    const host = eaPage.locator('#ledger-root');
+    await test.step('the panel appears against the mock EA page and the bundle probe reports ok', async () => {
+      await expect(host).toHaveCount(1, { timeout: 15_000 });
+      const dotClass = await host.evaluate((el) => (el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.getElementById('dot')?.className);
+      expect(dotClass).not.toContain('warn');
+
+      // The mock page's own passive search happens shortly after load
+      // (mock-service-layer.js), same as
+      // apps/extension/test/e2e/extension.spec.ts's own wait — without
+      // this, the next step can race ahead of the observation itself ever
+      // having enqueued anything (reproduced while authoring this spec:
+      // the flush step consistently saw `sent: 0` because there was
+      // nothing queued yet, not because flushing itself was broken).
+      await expect
+        .poll(async () => host.evaluate((el) => (el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.getElementById('total')?.textContent), { timeout: 15_000 })
+        .not.toBe('—');
+    });
+
     await test.step("the mock page's passive search was recorded and, once flushed, reaches the API (search_activity)", async () => {
       // content/index.ts enqueues a 'search' activity event as soon as the
       // mock service layer's own passive search response is observed (the
@@ -149,9 +157,12 @@ test('extension: loads against the mock EA page, popup login against the real AP
       // already proven non-zero by apps/extension/test/e2e/extension.spec.ts —
       // this step is the cross-app half: does it reach apps/api). Flushed
       // on a 2-minute chrome.alarms tick in real usage
-      // (background/telemetry.ts) — forced immediately here via the same
-      // 'telemetry.flush' message the alarm itself sends, from an extension
-      // page context (popup), rather than waiting out the real interval.
+      // (background/telemetry.ts) — forced immediately here (right after
+      // the observation was confirmed above, deliberately with as little
+      // else happening in between as possible — see this test's own note
+      // near where `popup` is created) via the same 'telemetry.flush'
+      // message the alarm itself sends, from an extension page context
+      // (popup), rather than waiting out the real interval.
       await expect
         .poll(
           async () => {

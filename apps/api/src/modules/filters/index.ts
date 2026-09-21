@@ -7,12 +7,14 @@ import { createHash } from 'node:crypto';
 import { filterStats, savedFilters } from '@sl/db';
 import {
   createSavedFilterRequestSchema,
+  filterStatsQuerySchema,
+  filterStatsSchema,
   reportFilterStatsRequestSchema,
   savedFilterSchema,
   updateSavedFilterRequestSchema,
   type SavedFilter,
 } from '@sl/shared';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, lte } from 'drizzle-orm';
 import fp from 'fastify-plugin';
 import { z } from 'zod';
 
@@ -120,6 +122,54 @@ export default fp(
         if (!existing) throw AppErrors.notFound('filter');
         await fastify.db.update(savedFilters).set({ deletedAt: new Date() }).where(eq(savedFilters.id, existing.id));
         return { deleted: true as const };
+      },
+    );
+
+    // docs/07-dashboard.md §11 gap #5: reads back what `POST /filters/stats`
+    // (below) ingests — the ranker's realised-return history, for the user
+    // Analytics page's "Filter performance" tab. Scoped to the caller's own
+    // filters only, same as every other route in this module.
+    app.get(
+      '/api/v1/filters/stats',
+      {
+        onRequest: [fastify.authenticate],
+        schema: { tags: ['filters'], querystring: filterStatsQuerySchema, response: { 200: z.array(filterStatsSchema) } },
+      },
+      async (request) => {
+        const { filterId, from, to } = request.query;
+
+        if (filterId) {
+          const owned = await fastify.db.query.savedFilters.findFirst({
+            where: and(eq(savedFilters.id, filterId), eq(savedFilters.userId, request.authUser!.id)),
+          });
+          if (!owned) throw AppErrors.notFound('filter');
+        }
+
+        const ownFilterIds = filterId
+          ? [filterId]
+          : (
+              await fastify.db.query.savedFilters.findMany({
+                where: eq(savedFilters.userId, request.authUser!.id),
+                columns: { id: true },
+              })
+            ).map((f) => f.id);
+        if (ownFilterIds.length === 0) return [];
+
+        const conditions = [inArray(filterStats.filterId, ownFilterIds)];
+        if (from) conditions.push(gte(filterStats.windowStart, new Date(from)));
+        if (to) conditions.push(lte(filterStats.windowStart, new Date(to)));
+
+        const rows = await fastify.db.query.filterStats.findMany({ where: and(...conditions), orderBy: [desc(filterStats.windowStart)] });
+        return rows.map((r) => ({
+          filterId: r.filterId,
+          windowStart: r.windowStart.toISOString(),
+          searches: r.searches,
+          attempts: r.attempts,
+          successes: r.successes,
+          coinsSpent: r.coinsSpent,
+          coinsEarned: r.coinsEarned,
+          coinsPerHour: Number(r.coinsPerHour),
+        }));
       },
     );
 

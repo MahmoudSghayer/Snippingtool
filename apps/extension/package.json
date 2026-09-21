@@ -13,13 +13,15 @@
     "lint": "eslint . --max-warnings=0",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "tokens:sync": "node scripts/sync-tokens.mjs"
   },
   "dependencies": {
     "@sl/shared": "workspace:*",
     "webextension-polyfill": "^0.12.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.10.1",
     "@playwright/test": "^1.49.1",
     "@sl/config": "workspace:*",
     "@types/chrome": "^0.0.287",

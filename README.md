@@ -38,7 +38,7 @@ phase lands on this branch.
 | 8 Analytics | KPI engine, profit analytics, reports, CSV exports, materialisation jobs | Done | `apps/api/src/modules/{analytics,admin-analytics}`, `docs/08-analytics.md` |
 | 9 Security | Hardening pass, 167 security tests, threat model, controls inventory | Done | `docs/09-security.md`, `docs/threat-model.md` |
 | 10 UI/UX | Design system and dashboard polish done; extension surfaces in progress | In progress | `packages/ui`, `docs/10-design-system.md` |
-| 11 Testing | Unit, integration, e2e, load, security suites | In progress | `tests/`, `docs/12-testing.md` |
+| 11 Testing | Unit, integration, cross-app e2e, k6 load, security suites, coverage | Done | `tests/`, `docs/12-testing.md` |
 | DevOps | Docker, Compose, Caddy, CI/CD, monitoring, backups, deploy guides | Done | `infra/`, `.github/`, `docs/11-devops.md` |
 
 Follow-ups from the phase reports have been closed: users carry a
@@ -148,9 +148,8 @@ the step-by-step deployment guide live under `infra/`, `.github/` and
 | `docs/threat-model.md` | STRIDE per component, attack vectors with mitigations, residual risks, non-goals |
 | `docs/10-design-system.md` | Tokens, typography, components, chart rules, page specs, accessibility |
 | `docs/11-devops.md` | Local dev, environments, deployment guide, monitoring runbook, backups, readiness checklist |
+| `docs/12-testing.md` | Test strategy, commands, isolation rules, coverage, load thresholds, defects found |
 | `docs/13-roadmap.md` | Remaining phases, exit criteria, go-live checklist |
-
-The testing strategy document is added by its phase.
 
 ## What this product will and will not do
 

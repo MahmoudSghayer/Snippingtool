@@ -2,6 +2,15 @@
 // errors, devices, IPs. Date range + cursor on every list.
 
 import { devices, ipActivity, searchActivity, snipingActivity, userActivity } from '@sl/db';
+import {
+  adminActivityDevicesSummarySchema,
+  adminErrorActivityRowSchema,
+  adminIpActivityRowSchema,
+  adminLoginActivityRowSchema,
+  adminSearchActivityRowSchema,
+  adminSnipeActivityRowSchema,
+  paginatedResponseSchema,
+} from '@sl/shared';
 import { and, desc, eq, gte, lte, lt } from 'drizzle-orm';
 import fp from 'fastify-plugin';
 import { z } from 'zod';
@@ -26,7 +35,7 @@ export default fp(
 
     app.get(
       '/api/v1/admin/activity/logins',
-      { onRequest: [gate], schema: { tags: ['admin'], querystring: rangeQuery } },
+      { onRequest: [gate], schema: { tags: ['admin'], querystring: rangeQuery, response: { 200: paginatedResponseSchema(adminLoginActivityRowSchema) } } },
       async (request) => {
         const { from, to, cursor: cursorRaw, limit } = request.query;
         const cursor = decodeCursor(cursorRaw);
@@ -36,13 +45,21 @@ export default fp(
         if (cursor) conditions.push(lt(userActivity.occurredAt, new Date(cursor.v)));
 
         const rows = await fastify.db.query.userActivity.findMany({ where: and(...conditions), orderBy: [desc(userActivity.occurredAt)], limit: limit + 1 });
-        return paginated(rows, limit, (r) => r.occurredAt);
+        return paginated(rows, limit, (r) => ({
+          id: r.id,
+          userId: r.userId,
+          deviceId: r.deviceId,
+          type: 'login' as const,
+          ip: r.ip,
+          metadata: r.metadata,
+          occurredAt: r.occurredAt.toISOString(),
+        }));
       },
     );
 
     app.get(
       '/api/v1/admin/activity/errors',
-      { onRequest: [gate], schema: { tags: ['admin'], querystring: rangeQuery } },
+      { onRequest: [gate], schema: { tags: ['admin'], querystring: rangeQuery, response: { 200: paginatedResponseSchema(adminErrorActivityRowSchema) } } },
       async (request) => {
         const { from, to, cursor: cursorRaw, limit } = request.query;
         const cursor = decodeCursor(cursorRaw);
@@ -52,13 +69,21 @@ export default fp(
         if (cursor) conditions.push(lt(userActivity.occurredAt, new Date(cursor.v)));
 
         const rows = await fastify.db.query.userActivity.findMany({ where: and(...conditions), orderBy: [desc(userActivity.occurredAt)], limit: limit + 1 });
-        return paginated(rows, limit, (r) => r.occurredAt);
+        return paginated(rows, limit, (r) => ({
+          id: r.id,
+          userId: r.userId,
+          deviceId: r.deviceId,
+          type: 'error' as const,
+          ip: r.ip,
+          metadata: r.metadata,
+          occurredAt: r.occurredAt.toISOString(),
+        }));
       },
     );
 
     app.get(
       '/api/v1/admin/activity/searches',
-      { onRequest: [gate], schema: { tags: ['admin'], querystring: rangeQuery } },
+      { onRequest: [gate], schema: { tags: ['admin'], querystring: rangeQuery, response: { 200: paginatedResponseSchema(adminSearchActivityRowSchema) } } },
       async (request) => {
         const { from, to, cursor: cursorRaw, limit } = request.query;
         const cursor = decodeCursor(cursorRaw);
@@ -72,13 +97,22 @@ export default fp(
           orderBy: [desc(searchActivity.occurredAt)],
           limit: limit + 1,
         });
-        return paginated(rows, limit, (r) => r.occurredAt);
+        return paginated(rows, limit, (r) => ({
+          id: r.id,
+          userId: r.userId,
+          deviceId: r.deviceId,
+          filterHash: r.filterHash,
+          resultsCount: r.resultsCount,
+          resourceId: r.resourceId,
+          floorPrice: r.floorPrice,
+          occurredAt: r.occurredAt.toISOString(),
+        }));
       },
     );
 
     app.get(
       '/api/v1/admin/activity/snipes',
-      { onRequest: [gate], schema: { tags: ['admin'], querystring: rangeQuery } },
+      { onRequest: [gate], schema: { tags: ['admin'], querystring: rangeQuery, response: { 200: paginatedResponseSchema(adminSnipeActivityRowSchema) } } },
       async (request) => {
         const { from, to, cursor: cursorRaw, limit } = request.query;
         const cursor = decodeCursor(cursorRaw);
@@ -92,7 +126,19 @@ export default fp(
           orderBy: [desc(snipingActivity.occurredAt)],
           limit: limit + 1,
         });
-        return paginated(rows, limit, (r) => r.occurredAt);
+        return paginated(rows, limit, (r) => ({
+          id: r.id,
+          userId: r.userId,
+          deviceId: r.deviceId,
+          resourceId: r.resourceId,
+          tradeId: r.tradeId,
+          targetPrice: r.targetPrice,
+          listedPrice: r.listedPrice,
+          outcome: r.outcome,
+          latencyMs: r.latencyMs,
+          errorCode: r.errorCode,
+          occurredAt: r.occurredAt.toISOString(),
+        }));
       },
     );
 
@@ -100,7 +146,7 @@ export default fp(
       '/api/v1/admin/activity/devices',
       {
         onRequest: [gate],
-        schema: { tags: ['admin'], response: { 200: z.object({ byVersion: z.record(z.number()), byOs: z.record(z.number()), total: z.number() }) } },
+        schema: { tags: ['admin'], response: { 200: adminActivityDevicesSummarySchema } },
       },
       async () => {
         const rows = await fastify.db.query.devices.findMany({ where: eq(devices.status, 'active') });
@@ -118,7 +164,14 @@ export default fp(
 
     app.get(
       '/api/v1/admin/activity/ips',
-      { onRequest: [gate], schema: { tags: ['admin'], querystring: z.object({ flaggedOnly: z.coerce.boolean().default(false), limit: z.coerce.number().int().min(1).max(500).default(100) }) } },
+      {
+        onRequest: [gate],
+        schema: {
+          tags: ['admin'],
+          querystring: z.object({ flaggedOnly: z.coerce.boolean().default(false), limit: z.coerce.number().int().min(1).max(500).default(100) }),
+          response: { 200: z.array(adminIpActivityRowSchema) },
+        },
+      },
       async (request) => {
         const rows = await fastify.db.query.ipActivity.findMany({
           where: request.query.flaggedOnly ? eq(ipActivity.flagged, true) : undefined,
@@ -141,12 +194,17 @@ export default fp(
   { name: 'module:admin-activity', dependencies: ['auth', 'db'] },
 );
 
-function paginated<T extends { id: string }>(rows: T[], limit: number, sortValue: (row: T) => Date) {
+function paginated<Row extends { id: string; occurredAt: Date }, Dto extends { id: string; occurredAt: string }>(
+  rows: Row[],
+  limit: number,
+  toDto: (row: Row) => Dto,
+) {
   const hasMore = rows.length > limit;
-  const items = hasMore ? rows.slice(0, limit) : rows;
-  const last = items.at(-1);
+  const page = hasMore ? rows.slice(0, limit) : rows;
+  const items = page.map(toDto);
+  const last = page.at(-1);
   return {
     items,
-    nextCursor: hasMore && last ? encodeCursor({ v: sortValue(last).toISOString(), id: last.id }) : null,
+    nextCursor: hasMore && last ? encodeCursor({ v: last.occurredAt.toISOString(), id: last.id }) : null,
   };
 }

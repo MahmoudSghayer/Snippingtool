@@ -2,6 +2,8 @@ import { z } from 'zod';
 
 import { PLAN_CODES } from '../constants/plans.js';
 
+import { emailSchema } from './auth.js';
+
 export const SUBSCRIPTION_STATUSES = [
   'trialing',
   'active',
@@ -284,3 +286,44 @@ export const adminDeviceLimitOverrideRequestSchema = z.object({
   reason: z.string().min(1).max(1000),
 }).strict();
 export type AdminDeviceLimitOverrideRequest = z.infer<typeof adminDeviceLimitOverrideRequestSchema>;
+
+// ---------------------------------------------------------------------------
+// Admin subscriptions list/lookup (docs/07-dashboard.md §11 gap #2): the
+// admin-subscriptions module only had per-id/per-user action routes
+// (extend/suspend/cancel keyed by a subscription id the admin had no way to
+// discover, plus activate/grant-lifetime keyed by userId) — no way to list
+// subscriptions or look one up by user. `GET /admin/subscriptions` and
+// `GET /admin/subscriptions/by-user/:userId` close that.
+// ---------------------------------------------------------------------------
+
+/** One row of `GET /admin/subscriptions` — `subscriptionDtoSchema` plus the
+ * owning user's id/email, since the list view has no other user context. */
+export const adminSubscriptionListItemSchema = subscriptionDtoSchema.extend({
+  userId: z.string().uuid(),
+  userEmail: emailSchema,
+});
+export type AdminSubscriptionListItem = z.infer<typeof adminSubscriptionListItemSchema>;
+
+export const adminSubscriptionListQuerySchema = z
+  .object({
+    status: z.enum(SUBSCRIPTION_STATUSES).optional(),
+    plan: z.string().min(1).max(40).optional(), // plan code
+    userId: z.string().uuid().optional(),
+    search: z.string().min(1).max(320).optional(), // owning user's email, substring
+    cursor: z.string().min(1).max(2048).optional(),
+    limit: z.coerce.number().int().min(1).max(200).default(50),
+  })
+  .strict();
+export type AdminSubscriptionListQuery = z.infer<typeof adminSubscriptionListQuerySchema>;
+
+/** `GET /admin/subscriptions/by-user/:userId` — the user's current *live*
+ * subscription (see `LIVE_SUBSCRIPTION_STATUSES`, apps/api's
+ * modules/subscriptions/service.ts), or null if they've never had one/it
+ * lapsed with nothing live, plus every subscription row that ever existed
+ * for that user (newest first) — the extend/suspend/cancel/device-limit
+ * actions need `current.id`; `history` is for the drawer's own context. */
+export const adminSubscriptionByUserResponseSchema = z.object({
+  current: subscriptionDtoSchema.nullable(),
+  history: z.array(subscriptionDtoSchema),
+});
+export type AdminSubscriptionByUserResponse = z.infer<typeof adminSubscriptionByUserResponseSchema>;

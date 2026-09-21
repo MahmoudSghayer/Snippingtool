@@ -414,25 +414,60 @@ pointed a second, dedicated `apps/api` process at its own
 `sniper_ledger_test_qa` database — see §9's note for why the same technique
 was used for `tests/load`, and what that turned up.
 
-**Verified**: journey (a) fully passes as an API-only Playwright test
-against the seeded dev DB pattern above (register/verify/login/device/
-trial/license, including the "second trial is denied" and "license key
-never shown twice" assertions). Journeys (b)/(c)/(d) are complete and were
-exercised piece-by-piece against a locally running `apps/api` (manual
-`curl`/`fetch` equivalents of every step in each spec, all confirmed to
-behave as asserted — including the real WS `session.revoked` delivery for
-(c) and the real signed-webhook idempotency/rejection behaviour for (d));
-a full `xvfb-run -a pnpm --filter @sl/tests test:e2e` end-to-end pass
-(Playwright driving the whole `webServer` array together, including the
-built extension in a headed Chromium context) was not completed in this
-session — the environment's own resource contention while multiple agents
-run concurrently (see §9's database-wipe note) made a full multi-minute,
-multi-process Playwright run risky to attempt reliably in the remaining
-time. The suite is correct and ready to run; **CI's new `e2e-cross-app` job
-is where its first full, clean, uncontended run should happen** — see
-`.github/workflows/ci.yml`.
+**Verified**: a full `xvfb-run -a pnpm --filter @sl/tests test:e2e` run —
+Playwright driving the whole `webServer` array together (real `apps/api`,
+real `apps/dashboard`, the built extension in a headed Chromium context) —
+was completed multiple times against a dedicated `sniper_ledger_test_qa`
+database (this agent's own, not the shared dev DB — see the note above and
+§9's database-wipe note for why). **Journeys (a), (c) and (d) pass
+cleanly and repeatably**: register→verify→login→device→trial→license
+(including "second trial denied" and "license key never shown twice");
+admin TOTP login→force-logout (real WS `session.revoked` delivery,
+confirmed over a real socket, not simulated)→suspend (real audited
+before/after)→both actions in the audit trail; a real signed
+`checkout.session.completed` webhook activating a plan, replay-idempotency,
+bad-signature rejection, and the dashboard (real cookie session) rendering
+the new plan. Several real, non-obvious bugs were found and fixed in this
+suite's own code while getting there (wrong extension-build path
+resolution, a Vite dev-server port-forwarding footgun, a locator ambiguity,
+an admin-action *ordering* bug that silently no-ops a WS push — see
+[§12](#12-defects-found) — and a User-Agent-family mismatch between this
+suite's own two HTTP clients that the server's refresh-token-theft
+detection correctly, if inconveniently, caught).
 
-## 9. tests/load — k6
+**Journey (b) is complete and 5 of its 6 steps pass** (extension loads
+against the mock EA page and the bundle probe reports ok; popup login
+against the real API succeeds; the device registers server-side; the
+kill-switch step — admin flips it, the popup's next bootstrap reports it —
+passes). The one step that does not yet pass:
+"the mock page's passive search was recorded and, once flushed, reaches
+the API" — the panel's own observation counter confirms the observation
+genuinely happened, but the subsequent forced `telemetry.flush()` reports
+`sent: 0` every time. The leading hypothesis, with supporting evidence but
+not a live-instrumented confirmation in this session, is
+[§12 row #9](#12-defects-found): `apps/extension/src/lib/telemetry.ts`'s
+queue is a bare in-memory variable, and MV3 service workers are killed for
+inactivity and restart with that state gone — this suite's own popup-login
+round trip between the observation and the flush attempt is itself
+plausible idle time for that to happen. Documented, not silently retried
+away or hidden.
+
+**A final environment note**: the very last re-run attempted in this
+session hit `apps/api`'s dev process failing to boot at all
+(`SyntaxError: ... does not provide an export named
+'adminSubscriptionByUserResponseSchema'`) — a genuine, in-progress edit by
+a concurrently-running agent to `apps/api/src/modules/admin-subscriptions`
+and `packages/shared`, not this suite's own code (confirmed: `pnpm
+typecheck` at the repo root failed the same way, and separately in
+`apps/dashboard`, at the same moment, for the same reason — other agents'
+own in-flight work, reported here per this agent's brief, not fixed).
+`apps/api/src/test/qa/__tests__/openapi-spec.test.ts`'s own "matches the
+live app" check independently caught the same drift from the other
+direction moments later (three new admin routes registered by the live app
+that the committed `openapi/openapi.json` doesn't have yet) — exactly what
+that test exists to catch, and exactly what a `pnpm --filter @sl/api
+openapi` regeneration once that other agent's route work lands will
+resolve; not a defect in this suite.
 
 `@sl/tests`'s `tests/load/` (k6). See `tests/load/README.md` for the full
 detail (profiles, thresholds, installing k6, interpreting results) — this

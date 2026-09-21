@@ -73,3 +73,18 @@ export const reportFilterStatsRequestSchema = z
   })
   .strict();
 export type ReportFilterStatsRequest = z.infer<typeof reportFilterStatsRequestSchema>;
+
+/** `GET /filters/stats` (docs/07-dashboard.md §11 gap #5): only the
+ * extension's ingest (`POST /filters/stats` above) existed — the user
+ * Analytics page's "Filter performance" tab had no realised-return series
+ * to read back. `filterId` narrows to one filter's history (the ranker/
+ * "Filter performance" tab's normal case); omitted, every one of the
+ * caller's own filters' stats in range are returned. */
+export const filterStatsQuerySchema = z
+  .object({
+    filterId: z.string().uuid().optional(),
+    from: z.string().datetime().optional(),
+    to: z.string().datetime().optional(),
+  })
+  .strict();
+export type FilterStatsQuery = z.infer<typeof filterStatsQuerySchema>;
