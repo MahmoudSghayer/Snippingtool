@@ -644,6 +644,21 @@ implementations — this pass is polish, not a rebuild):
       directly and making the positioning `<div>` + badge siblings of the
       trigger instead of its child.
 12. **This document.**
+13. **Real bug found while trying to widen screenshot coverage to every
+    admin sub-page** (`ActivityPage.tsx`): its four raw-activity queries
+    (`logins`/`searches`/`snipes`/`errors`) sent `DateRangePicker`'s bare
+    `YYYY-MM-DD` `range.from`/`range.to` straight through as `from`/`to`
+    query params, but `apps/api`'s `admin-activity` module validates both as
+    full `z.string().datetime()` — every request 400'd, so `/admin/activity`
+    silently rendered four permanently-broken/empty tabs. `AuditPage.tsx`
+    already had the fix for the same mismatch (expand to inclusive UTC day
+    bounds, `${range.from}T00:00:00.000Z` / `${range.to}T23:59:59.999Z`);
+    `ActivityPage.tsx` now does the same via a small `toRangeQuery()`
+    helper. Confirmed by hand (a one-off e2e visit + console-error assertion,
+    not committed) that the page loads clean after the fix. This route
+    wasn't in the existing visual-smoke screenshot set, which is exactly why
+    it went unnoticed — see the note below on why the fix is kept but the
+    screenshot-set expansion that surfaced it was not.
 
 ### Testing additions
 
@@ -712,6 +727,44 @@ retention %" dots), and the 404 page is calm and on-brand. Re-run
 `test:e2e` after any further visual change rather than trusting these as
 permanently current.
 
+## 13a. Resume note (2026-09-21, second interruption)
+
+This pass was re-entered after a second session-rate-limit interruption; the
+work above (through §13 item 12) was already committed and verified on
+disk. This resume:
+
+- Re-ran the full verification chain (`@sl/ui` and `@sl/dashboard`
+  typecheck/lint/test/build, plus `test:e2e` under `xvfb-run`, axe-core
+  included) — all still green, confirming nothing regressed since the WIP
+  commit.
+- Found and fixed the `ActivityPage.tsx` date-range bug in §13 item 13,
+  while investigating whether the screenshot inventory should extend past
+  the brief's 8 named pages to literally every route (`/admin/users`,
+  `/admin/profits`, `/admin/activity`, `/admin/system`,
+  `/admin/subscriptions`, `/admin/coupons`, `/admin/plans`, `/admin/flags`,
+  `/admin/bans`, `/admin/feature-toggles`, `/admin/config` — 11 more admin
+  CRUD pages). That expansion was tried and then **deliberately reverted**:
+  tripling `visual-smoke.spec.ts`'s route count (from 9 pages × 3 breakpoints
+  to ~19 × 3, all inside one continuous admin session) reproducibly tripped
+  `apps/api`'s global rate limit (`RATE_LIMIT_GLOBAL_MAX=300` req/60s,
+  `plugins/rate-limit.ts`) on the `/ws` ticket handshake by the third
+  breakpoint pass — a real 429, not flakiness, and not something
+  `packages/ui`/`apps/dashboard` ownership can fix by widening a timeout.
+  Rather than either destabilizing the e2e suite Vercel's build depends on,
+  or asking for an `apps/api` config change out of scope, the screenshot set
+  stays as documented in §13's original scope decision (the brief's 8 named
+  pages). The bug the expansion surfaced (item 13 above) was kept since it's
+  real and independently verified; **`/admin/{users,profits,activity,
+  system,subscriptions,coupons,plans,flags,bans,feature-toggles,config}`
+  still have no dedicated screenshots** — flagged in §14.
+- Extension work (`apps/extension/src/{popup,options,ui}`, shared tokens,
+  segmented risk gauge, panel sparkline/P&L styling, "What it sends" page,
+  `apps/extension/screenshots/`) is gated on `docs/09-security.md` existing
+  (file-ownership rule in this pass's brief — the security agent is still
+  editing `apps/extension/src` concurrently). Polled for it through this
+  session; it had not appeared by the time this pass wrapped up. **Not
+  done** — see §14.
+
 ## 14. Known gaps / follow-ups
 
 - **Per-admin-role UI gating** — documented gap carried over from
@@ -734,3 +787,20 @@ permanently current.
   from PHASE 7 (`07-dashboard.md`), not touched by this pass; the
   Analytics page's "Filter performance" tab still shows the honest
   `EmptyState` explaining why.
+- **Screenshots for the 11 admin CRUD sub-pages** (Users, Profits, Activity,
+  System, Subscriptions, Coupons, Plans, Flags, Bans, Feature toggles,
+  Config) — not captured; see §13a for why (a real API global-rate-limit
+  trip, not a design-system issue) and the cost/benefit reasoning. Doable in
+  a follow-up by either raising `apps/api`'s `RATE_LIMIT_GLOBAL_MAX`/
+  `RATE_LIMIT_GLOBAL_WINDOW_MS` for the e2e environment (an `apps/api`-owned
+  change) or splitting the extra pages into their own lower-frequency e2e
+  spec (fewer requests per wall-clock second).
+- **Extension surfaces** (`apps/extension/src/{popup,options,ui,styles}`,
+  shared design tokens ported into the extension build, segmented risk
+  gauge, panel sparkline/P&L styling, options-page inline validation and
+  "What it sends" clarity, 360×600 popup, `apps/extension/screenshots/`) —
+  **not started this pass**, blocked on `docs/09-security.md` existing per
+  this pass's file-ownership gate (the security agent owns
+  `apps/extension/src` until that doc lands). Whoever resumes next should
+  check for that file first and, once present, pick up PHASE 10's extension
+  deliverables from scratch (nothing here has been touched).

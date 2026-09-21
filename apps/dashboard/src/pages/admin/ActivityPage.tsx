@@ -47,11 +47,22 @@ interface RawActivityRow {
   [key: string]: unknown;
 }
 
+// `apps/api`'s `admin-activity` routes validate `from`/`to` as full
+// `z.string().datetime()` values (see docs/03-api.md), but `DateRangePicker`
+// (`@sl/ui`) works in bare `YYYY-MM-DD` dates for its own display/CSV-naming
+// purposes (`AuditPage`'s date-range calls do the same conversion for the
+// same reason) — expand to inclusive UTC day bounds before it ever reaches
+// `fetch`, otherwise every request 400s (caught by the visual-smoke e2e's
+// zero-console-errors assertion).
+function toRangeQuery(range: DateRange): { from: string; to: string } {
+  return { from: `${range.from}T00:00:00.000Z`, to: `${range.to}T23:59:59.999Z` };
+}
+
 function useRawActivity(path: '/api/v1/admin/activity/logins' | '/api/v1/admin/activity/searches' | '/api/v1/admin/activity/snipes' | '/api/v1/admin/activity/errors', range: DateRange) {
   return useQuery({
     queryKey: ['admin', 'activity', path, range],
     queryFn: async () => {
-      const { data, error } = await api.GET(path, { params: { query: { from: range.from, to: range.to, limit: 100 } } });
+      const { data, error } = await api.GET(path, { params: { query: { ...toRangeQuery(range), limit: 100 } } });
       if (error) throw error;
       const body = data as unknown;
       const rows = Array.isArray(body) ? body : ((body as { items?: RawActivityRow[] } | undefined)?.items ?? []);
