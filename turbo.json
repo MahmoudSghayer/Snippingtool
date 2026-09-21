@@ -3,22 +3,42 @@
   "ui": "stream",
   "tasks": {
     "build": {
-      "dependsOn": ["^build"],
-      "outputs": ["dist/**", ".turbo/**"],
-      "inputs": ["src/**", "package.json", "tsconfig*.json"]
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "dist/**",
+        ".turbo/**"
+      ],
+      "inputs": [
+        "src/**",
+        "package.json",
+        "tsconfig*.json"
+      ]
     },
     "lint": {
       "dependsOn": [],
       "outputs": []
     },
     "typecheck": {
-      "dependsOn": ["^build"],
+      "dependsOn": [
+        "^build"
+      ],
       "outputs": []
     },
     "test": {
-      "dependsOn": ["^build"],
-      "outputs": ["coverage/**"],
-      "inputs": ["src/**", "test/**", "package.json"]
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "coverage/**"
+      ],
+      "inputs": [
+        "src/**",
+        "test/**",
+        "package.json"
+      ],
+      "cache": false
     },
     "dev": {
       "cache": false,

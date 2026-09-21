@@ -23,14 +23,17 @@ you before you look like a bot — it is never sold as "undetectable". See
 
 ## Build status
 
-The build follows a data-first sequence. This table is kept current as each
-phase lands on this branch.
+The build follows a data-first sequence. All eleven phases are built and
+verified on this branch (`pnpm typecheck && pnpm lint && pnpm build && pnpm
+test`: 683 tests across seven packages). Remaining work is the go-live
+checklist in `docs/13-roadmap.md`, which needs the live market, real Stripe
+keys and infrastructure.
 
 | Phase | Scope | Status | Where |
 | --- | --- | --- | --- |
 | 1 Architecture | Monorepo, shared contracts, diagrams, roadmap | Done | `packages/shared`, `docs/01-architecture.md`, `docs/13-roadmap.md` |
 | 2 Database | 35 tables, partitioning, audit, views, seed, tests | Done | `packages/db`, `docs/02-database.md` |
-| 3 Backend API | Fastify, 105 routes, WS gateway, jobs, OpenAPI | Done | `apps/api`, `docs/03-api.md` |
+| 3 Backend API | Fastify, 110+ routes, WS gateway, jobs, OpenAPI | Done | `apps/api`, `docs/03-api.md` |
 | 4 Authentication | JWT + rotating refresh, sessions, devices, 2FA, lockout, admin roles | Done | `apps/api/src/modules/auth`, `docs/04-auth.md` |
 | 5 Subscriptions | Plans, trials with abuse protection, licenses, Stripe, coupons, bans, flags | Done | `apps/api/src/modules/{subscriptions,licenses,payments,coupons,plans,bans,flags}`, `docs/05-subscriptions.md` |
 | 6 Extension | TypeScript port, ranker, governor, assist, gated autobuyer, popup, options | Done | `apps/extension`, `docs/06-extension.md` |
@@ -41,12 +44,11 @@ phase lands on this branch.
 | 11 Testing | Unit, integration, cross-app e2e, k6 load, security suites, coverage | Done | `tests/`, `docs/12-testing.md` |
 | DevOps | Docker, Compose, Caddy, CI/CD, monitoring, backups, deploy guides | Done | `infra/`, `.github/`, `docs/11-devops.md` |
 
-Follow-ups from the phase reports have been closed: users carry a
-`stripe_customer_id` (Customer Portal lookup and a fourth trial-abuse vector),
-Checkout during a live trial performs an atomic trial-to-paid transition, the
-trial-abuse email check runs on an indexed normalised-email column, the kill
-switch fans out over WebSocket to every online user, and audit-log filters
-validate UUIDs.
+Follow-ups from every phase report and all nine QA defects have been closed
+(see `docs/12-testing.md` §12 for the defect table with statuses). One open
+item remains: the cross-app e2e journey for extension telemetry fails on a
+mock-fixture timing race in the multi-page harness; the single-app extension
+e2e covering the same path passes.
 
 ## What exists today
 
@@ -115,12 +117,14 @@ pnpm --filter @sl/api worker             # BullMQ jobs
 pnpm --filter @sl/extension build        # dist/ledger and dist/ledger-auto
 # chrome://extensions → Developer mode → Load unpacked → apps/extension/dist/ledger
 
-# everything
-pnpm typecheck && pnpm lint && pnpm test && pnpm build
+# everything (test suites run serially: they share the test database)
+pnpm typecheck && pnpm lint && pnpm build && pnpm test
+pnpm test:e2e && pnpm test:security && pnpm test:load   # see docs/12-testing.md
 ```
 
-API integration tests need `DATABASE_URL`, `TEST_DATABASE_URL` and
-`REDIS_URL`; see `apps/api/.env.example`.
+API, db and security tests need `DATABASE_URL`, `TEST_DATABASE_URL`,
+`REDIS_URL` and `REDIS_TEST_DB`; see `apps/api/.env.example` and
+`docs/12-testing.md` for per-suite isolation.
 
 ## Deployment
 

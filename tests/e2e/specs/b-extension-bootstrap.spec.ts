@@ -107,7 +107,7 @@ test('extension: loads against the mock EA page, popup login against the real AP
     // service worker's own console is otherwise invisible from here, and
     // `void send(...)`'s fire-and-forget calls (reportSearchActivity below)
     // would only ever surface a rejection this way.
-    sw.on('console', (msg) => console.log(`[sw console:${msg.type()}] ${msg.text()}`));
+    sw.on('console', (msg) => console.warn(`[sw console:${msg.type()}] ${msg.text()}`));
 
     // Popup login runs *before* visiting the EA page — deliberately, not
     // just plausible real-world ordering: apps/extension/src/lib/telemetry.ts's
@@ -156,7 +156,7 @@ test('extension: loads against the mock EA page, popup login against the real AP
     // note above) run in the EA page's own JS realm, not the service
     // worker's — captured here for the same reason.
     eaPage.on('console', (msg) => {
-      if (msg.type() === 'warning' || msg.type() === 'error') console.log(`[ea-page console:${msg.type()}] ${msg.text()}`);
+      if (msg.type() === 'warning' || msg.type() === 'error') console.warn(`[ea-page console:${msg.type()}] ${msg.text()}`);
     });
     await eaPage.goto(EA_PAGE_URL, { waitUntil: 'load' });
 
