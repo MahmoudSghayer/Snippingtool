@@ -67,6 +67,32 @@ function refineForProduction(env: z.infer<typeof envSchema>, ctx: z.RefinementCt
       message: 'REDIS_URL must use the rediss:// (TLS) scheme in production.',
     });
   }
+  // `SameSite=None` cookies are rejected outright by browsers unless they
+  // also carry `Secure` (docs/09-security.md open finding #1) — `secure` is
+  // forced true whenever COOKIE_SAME_SITE is 'none' (see the sameSite/secure
+  // helper below), so this is really "did the operator also mean it": a
+  // cross-site dashboard deployment only works end-to-end over HTTPS, so
+  // refuse to boot with `none` unless COOKIE_SECURE was explicitly set too
+  // (redundant with isProd, but production alone isn't sufficient evidence
+  // the operator actually wants cross-site cookies rather than having left
+  // the default `lax` unset by mistake while still setting NODE_ENV=production).
+  if (env.COOKIE_SAME_SITE === 'none' && !env.COOKIE_SECURE) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['COOKIE_SAME_SITE'],
+      message: 'COOKIE_SAME_SITE=none requires COOKIE_SECURE=true (browsers reject SameSite=None cookies without Secure).',
+    });
+  }
+  // A cross-site (SameSite=None) cookie is useless if the two origins that
+  // need to see it aren't even served over HTTPS — the browser would have
+  // rejected the cookie before either side mattered.
+  if (env.COOKIE_SAME_SITE === 'none' && (!env.APP_ORIGIN.startsWith('https://') || !env.DASHBOARD_ORIGIN.startsWith('https://'))) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['DASHBOARD_ORIGIN'],
+      message: 'APP_ORIGIN and DASHBOARD_ORIGIN must both be https:// when COOKIE_SAME_SITE=none.',
+    });
+  }
 }
 
 const envSchema = z.object({
@@ -95,6 +121,19 @@ const envSchema = z.object({
 
   // --- Cookies / CSRF ---
   COOKIE_SECRET: z.string().min(16).default('dev-cookie-secret-change-me-32-bytes-min'),
+  // docs/09-security.md open finding #1: the dashboard is deployed
+  // separately (Vercel) from the API in the documented MVP topology, so a
+  // genuinely cross-site deployment needs `SameSite=None` — `Lax` cookies
+  // are never sent on a cross-site fetch/XHR, only a top-level navigation.
+  // Default stays 'lax' (same-site dev/staging topologies keep working with
+  // zero config); set to 'none' only once both origins are HTTPS (enforced
+  // above) and COOKIE_SECURE=true (also enforced above/below).
+  COOKIE_SAME_SITE: z.enum(['lax', 'strict', 'none']).default('lax'),
+  // `sameSite: 'none'` requires `Secure` per spec even outside production
+  // (e.g. an HTTPS staging/preview deploy that isn't NODE_ENV=production) —
+  // this lets an operator opt into Secure cookies without flipping NODE_ENV.
+  // Cookies are Secure whenever `isProd || COOKIE_SECURE`.
+  COOKIE_SECURE: boolFromString,
 
   // --- JWT (EdDSA) ---
   JWT_PRIVATE_KEY: z.string().min(1).optional(),

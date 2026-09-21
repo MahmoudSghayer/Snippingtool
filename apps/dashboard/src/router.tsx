@@ -15,11 +15,22 @@ import {
 import { z } from 'zod';
 
 import { setUnauthorizedHandler } from '@/api/client.js';
+import { permissionsFor, type AdminNavKey } from '@/lib/adminNav.js';
 import { ensureBootstrapped } from '@/lib/authBootstrap.js';
 import { ErrorPage } from '@/pages/ErrorPage.js';
 import { NotFoundPage } from '@/pages/NotFoundPage.js';
 import { AppLayout, PublicLayout, RootLayout } from '@/routes/layouts.js';
 import { useAuthStore } from '@/stores/auth.js';
+
+/** Route-level counterpart to the nav filtering in routes/layouts.tsx
+ * (lib/adminNav.ts): reaching an admin page directly (deep link, back
+ * button) 404s the same way `adminLayoutRoute` already 404s a non-admin,
+ * when the caller's real permission set grants none of that page's
+ * permissions. */
+function requireAdminNavPermission(key: AdminNavKey) {
+  const permissions = useAuthStore.getState().admin?.permissions ?? [];
+  if (!permissionsFor(key).some((p) => permissions.includes(p))) throw notFound();
+}
 
 const rootRoute = createRootRoute({
   component: RootLayout,

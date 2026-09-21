@@ -87,6 +87,25 @@ export default defineConfig({
     baseURL: DASHBOARD_ORIGIN,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
+    // Defect found while authoring this suite: apps/api/src/modules/auth/
+    // service.ts's refresh-token-family reuse detection also revokes the
+    // whole family on a *User-Agent family* mismatch between the session
+    // that issued the token and the request presenting it for refresh
+    // (`uaFamiliesCompatible`, docs/09-security.md "Session security") —
+    // real, deliberate anti-theft behaviour. helpers/auth.ts's fixture
+    // setup uses plain Node `fetch` (whatever UA that sends) to register/
+    // log in; a spec's own `request.post('/auth/refresh', ...)` calls go
+    // through Playwright's APIRequestContext instead, whose default UA is a
+    // different family — a real session hijacking pattern doesn't apply
+    // here, it's just two different HTTP clients in one test process, but
+    // the server correctly can't tell the difference and revokes the
+    // family (`AUTH_TOKEN_REUSED`), reproduced directly while authoring
+    // journey (d)'s refresh step. Pinning one explicit UA for every
+    // `request.*` call this suite makes keeps it consistent with
+    // helpers/auth.ts's own fetch calls (which send this same header —
+    // see that file's `postJson`), so the two clients always look like the
+    // same "browser family" to the server.
+    extraHTTPHeaders: { 'user-agent': 'sniper-ledger-e2e-suite/1.0' },
   },
   projects: [
     {

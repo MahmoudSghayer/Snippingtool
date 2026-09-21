@@ -28,6 +28,12 @@ import { revokeAllUserSessions, bumpUserVersion } from '../auth/repo.js';
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 
+// `adminRole`/`permissions` are this *user's own* grant (packages/shared's
+// userDtoSchema doc comment) — not meaningful for "an admin looking up
+// someone else", so every row from this admin-listing module returns the
+// null/[] default rather than an extra per-row admin_users lookup.
+// `GET /users/me` (modules/users/index.ts) is the one route that resolves
+// it for real, for the caller's own account.
 function toDto(user: User): UserDto {
   return {
     id: user.id,
@@ -40,6 +46,8 @@ function toDto(user: User): UserDto {
     referralCode: user.referralCode,
     createdAt: user.createdAt.toISOString(),
     lastLoginAt: user.lastLoginAt ? user.lastLoginAt.toISOString() : null,
+    adminRole: null,
+    permissions: [],
   };
 }
 

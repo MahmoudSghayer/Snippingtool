@@ -30,6 +30,7 @@ import { api } from '@/api/client.js';
 import { CommandPalette, useCommandPaletteShortcut } from '@/components/CommandPalette.js';
 import { NotificationsBell } from '@/components/NotificationsBell.js';
 import { useWsGateway } from '@/hooks/useWsGateway.js';
+import { ADMIN_NAV_PERMISSIONS, type AdminNavKey } from '@/lib/adminNav.js';
 import { resetBootstrap } from '@/lib/authBootstrap.js';
 import { useAuthStore } from '@/stores/auth.js';
 import { useConnectionStore } from '@/stores/connection.js';
@@ -91,6 +92,7 @@ export function AppLayout() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const isAdmin = useAuthStore((s) => s.admin !== null);
+  const adminPermissions = useAuthStore((s) => s.admin?.permissions ?? []);
   const connectionStatus = useConnectionStore((s) => s.status);
   const [navOpen, setNavOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -112,13 +114,20 @@ export function AppLayout() {
     void navigate({ to: '/login' });
   }
 
+  // A nav item is shown only when the caller's real permission set grants
+  // at least one of the permissions its page needs (docs/07-dashboard.md §2,
+  // lib/adminNav.ts) — real per-role gating, not `isAdmin` alone.
+  const visibleAdminNav = adminNav.filter((item) =>
+    ADMIN_NAV_PERMISSIONS[item.key as AdminNavKey].some((p) => adminPermissions.includes(p)),
+  );
+
   const sections = [
     { items: userNav.map((item) => ({ ...item, active: !!matchRoute({ to: item.href, fuzzy: item.href !== '/dashboard' }) })) },
-    ...(isAdmin
+    ...(isAdmin && visibleAdminNav.length > 0
       ? [
           {
             title: 'Admin',
-            items: adminNav.map((item) => ({
+            items: visibleAdminNav.map((item) => ({
               ...item,
               active: !!matchRoute({ to: item.href, fuzzy: item.href !== '/admin' }),
             })),

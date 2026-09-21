@@ -7,6 +7,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import fp from 'fastify-plugin';
 import { z } from 'zod';
 
+import { resolveAdminSession, type AdminSessionInfo } from '../../lib/admin-session.js';
 import { recordAudit } from '../../lib/audit.js';
 import { AppErrors } from '../../lib/errors.js';
 
@@ -14,7 +15,7 @@ import type { User } from '@sl/db';
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 
-function toDto(user: User): UserDto {
+function toDto(user: User, admin: AdminSessionInfo): UserDto {
   return {
     id: user.id,
     email: user.email,
@@ -26,6 +27,8 @@ function toDto(user: User): UserDto {
     referralCode: user.referralCode,
     createdAt: user.createdAt.toISOString(),
     lastLoginAt: user.lastLoginAt ? user.lastLoginAt.toISOString() : null,
+    adminRole: admin.adminRole,
+    permissions: admin.permissions,
   };
 }
 
@@ -39,7 +42,8 @@ export default fp(
       async (request) => {
         const user = await fastify.db.query.users.findFirst({ where: and(eq(users.id, request.authUser!.id), isNull(users.deletedAt)) });
         if (!user) throw AppErrors.notFound('user');
-        return toDto(user);
+        const admin = await resolveAdminSession(fastify.db, user.id, user.role);
+        return toDto(user, admin);
       },
     );
 
@@ -73,7 +77,8 @@ export default fp(
           requestId: request.id,
         });
 
-        return toDto(after!);
+        const admin = await resolveAdminSession(fastify.db, after!.id, after!.role);
+        return toDto(after!, admin);
       },
     );
 

@@ -40,6 +40,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 
 import fp from 'fastify-plugin';
 
+import { resolveCookieAttrs } from '../lib/cookie-options.js';
 import { AppErrors } from '../lib/errors.js';
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -79,6 +80,12 @@ function safeEqual(a: string, b: string): boolean {
 
 export default fp(
   async function csrfPlugin(fastify: FastifyInstance) {
+    // docs/09-security.md open finding #1: the CSRF cookie follows the same
+    // configurable SameSite/Secure as the session cookies (config/env.ts's
+    // COOKIE_SAME_SITE) — a cross-site (SameSite=None) dashboard deployment
+    // needs this cookie readable/sendable cross-site too, not just sl_at/sl_rt.
+    const cookieAttrs = resolveCookieAttrs(fastify.config);
+
     // Issuance: every non-bearer request that doesn't already carry a
     // validly-signed sl_csrf cookie gets a fresh one minted, so the cookie
     // exists from the dashboard's very first page load (any GET) — a
@@ -91,7 +98,13 @@ export default fp(
       const raw = readRawCookie(request.headers.cookie, CSRF_COOKIE);
       if (raw && fastify.unsignCookie(decodeURIComponent(raw)).valid) return;
       const token = randomBytes(32).toString('base64url');
-      reply.setCookie(CSRF_COOKIE, token, { signed: true, httpOnly: false, sameSite: 'lax', path: '/' });
+      reply.setCookie(CSRF_COOKIE, token, {
+        signed: true,
+        httpOnly: false,
+        sameSite: cookieAttrs.sameSite,
+        secure: cookieAttrs.secure,
+        path: '/',
+      });
     });
 
     // Kept as a (request, reply, done) callback (rather than async) purely

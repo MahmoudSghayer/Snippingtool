@@ -73,6 +73,37 @@ describe('env schema: production hardening', () => {
     expect(() => loadEnv({ NODE_ENV: 'test' } as NodeJS.ProcessEnv)).not.toThrow();
   });
 
+  it('refuses COOKIE_SAME_SITE=none without COOKIE_SECURE in production', () => {
+    expect(() => loadEnv(baseProdSource({ COOKIE_SAME_SITE: 'none' } as Partial<NodeJS.ProcessEnv>))).toThrow(
+      /COOKIE_SAME_SITE=none requires COOKIE_SECURE/,
+    );
+  });
+
+  it('refuses COOKIE_SAME_SITE=none when APP_ORIGIN/DASHBOARD_ORIGIN are not https', () => {
+    expect(() =>
+      loadEnv(
+        baseProdSource({
+          COOKIE_SAME_SITE: 'none',
+          COOKIE_SECURE: 'true',
+          DASHBOARD_ORIGIN: 'http://dashboard.example.com',
+        } as Partial<NodeJS.ProcessEnv>),
+      ),
+    ).toThrow(/must both be https/);
+  });
+
+  it('accepts COOKIE_SAME_SITE=none with COOKIE_SECURE=true and both origins https', () => {
+    expect(() =>
+      loadEnv(
+        baseProdSource({
+          COOKIE_SAME_SITE: 'none',
+          COOKIE_SECURE: 'true',
+          APP_ORIGIN: 'https://api.example.com',
+          DASHBOARD_ORIGIN: 'https://dashboard.example.com',
+        } as Partial<NodeJS.ProcessEnv>),
+      ),
+    ).not.toThrow();
+  });
+
   it('reports every production violation at once, not just the first', () => {
     resetEnvCacheForTests();
     try {

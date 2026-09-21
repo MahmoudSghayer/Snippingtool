@@ -96,6 +96,18 @@ test('extension: loads against the mock EA page, popup login against the real AP
       await expect(host).toHaveCount(1, { timeout: 15_000 });
       const dotClass = await host.evaluate((el) => (el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.getElementById('dot')?.className);
       expect(dotClass).not.toContain('warn');
+
+      // The mock page's own passive search happens shortly after load
+      // (mock-service-layer.js), same as
+      // apps/extension/test/e2e/extension.spec.ts's own wait — without
+      // this, the later "flush and check search_activity" step can race
+      // ahead of the observation itself ever having enqueued anything
+      // (reproduced while authoring this spec: the flush step consistently
+      // saw `sent: 0` because there was nothing queued yet, not because
+      // flushing itself was broken).
+      await expect
+        .poll(async () => host.evaluate((el) => (el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.getElementById('total')?.textContent), { timeout: 15_000 })
+        .not.toBe('—');
     });
 
     const popup = await context.newPage();

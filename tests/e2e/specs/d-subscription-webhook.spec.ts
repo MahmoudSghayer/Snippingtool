@@ -124,7 +124,12 @@ test('checkout.session.completed webhook activates a plan -> dashboard shows it'
   await test.step('dashboard (logged in as this user, real cookie session) shows the Pro plan on /subscriptions', async () => {
     await page.goto(`${DASHBOARD_ORIGIN}/login`);
     await page.getByLabel('Email').fill(EMAIL);
-    await page.getByLabel('Password').fill(TEST_PASSWORD);
+    // exact: true — apps/dashboard's PasswordInput also renders a
+    // `<button aria-label="Show password">` next to the field, and
+    // `getByLabel` substring-matches by default, so plain
+    // `getByLabel('Password')` resolves to 2 elements (reproduced while
+    // authoring this spec).
+    await page.getByLabel('Password', { exact: true }).fill(TEST_PASSWORD);
     await page.getByLabel('This device').fill('e2e journey d browser');
     await page.getByRole('button', { name: 'Sign in' }).click();
 

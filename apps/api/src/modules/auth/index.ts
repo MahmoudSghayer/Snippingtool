@@ -21,6 +21,7 @@ import {
 import fp from 'fastify-plugin';
 import { z } from 'zod';
 
+import { resolveCookieAttrs, type ResolvedCookieAttrs } from '../../lib/cookie-options.js';
 import { AppErrors } from '../../lib/errors.js';
 
 import * as service from './service.js';
@@ -55,13 +56,13 @@ function setSessionCookies(
   reply: FastifyReply,
   accessToken: string,
   refreshToken: string,
-  isProd: boolean,
+  cookieAttrs: ResolvedCookieAttrs,
   accessTokenMaxAgeSeconds: number,
 ) {
   reply.setCookie('sl_at', accessToken, {
     httpOnly: true,
-    sameSite: 'lax',
-    secure: isProd,
+    sameSite: cookieAttrs.sameSite,
+    secure: cookieAttrs.secure,
     path: '/',
     // Matches the JWT's own `exp` (shorter for an admin session — see
     // lib/tokens.ts's `accessTokenTtlSeconds`) so the cookie never outlives
@@ -70,8 +71,8 @@ function setSessionCookies(
   });
   reply.setCookie('sl_rt', refreshToken, {
     httpOnly: true,
-    sameSite: 'lax',
-    secure: isProd,
+    sameSite: cookieAttrs.sameSite,
+    secure: cookieAttrs.secure,
     path: '/api/v1/auth',
     maxAge: 30 * 24 * 60 * 60,
   });
@@ -85,7 +86,7 @@ function clearSessionCookies(reply: FastifyReply) {
 export default fp(
   async function authModule(fastify: FastifyInstance) {
     const app = fastify.withTypeProvider<ZodTypeProvider>();
-    const isProd = fastify.config.NODE_ENV === 'production';
+    const cookieAttrs = resolveCookieAttrs(fastify.config);
     const loginRateLimit = { max: fastify.config.RATE_LIMIT_LOGIN_MAX, timeWindow: fastify.config.RATE_LIMIT_LOGIN_WINDOW_MS };
 
     app.post(
@@ -134,7 +135,7 @@ export default fp(
       },
       async (request, reply) => {
         const result = await service.login(ctx(fastify), request.body, clientIp(request), request.headers['user-agent'] ?? null);
-        if (result.status === 'ok') setSessionCookies(reply, result.accessToken, result.refreshToken, isProd, result.expiresIn);
+        if (result.status === 'ok') setSessionCookies(reply, result.accessToken, result.refreshToken, cookieAttrs, result.expiresIn);
         return result;
       },
     );
@@ -151,7 +152,7 @@ export default fp(
       },
       async (request, reply) => {
         const result = await service.mfaVerify(ctx(fastify), request.body);
-        setSessionCookies(reply, result.accessToken, result.refreshToken, isProd, result.expiresIn);
+        setSessionCookies(reply, result.accessToken, result.refreshToken, cookieAttrs, result.expiresIn);
         return result;
       },
     );
@@ -168,7 +169,7 @@ export default fp(
           userAgent: request.headers['user-agent'] ?? null,
           device: request.body.device ?? null,
         });
-        setSessionCookies(reply, result.accessToken, result.refreshToken, isProd, result.expiresIn);
+        setSessionCookies(reply, result.accessToken, result.refreshToken, cookieAttrs, result.expiresIn);
         return result;
       },
     );
@@ -276,7 +277,7 @@ export default fp(
         const authUser = await fastify.tryAuthenticate(request);
         const userId = await service.resolveEnrollmentSubject(ctx(fastify), authUser?.id, request.body.mfaTicket);
         const result = await service.confirmTotpEnrollment(ctx(fastify), userId, request.body.code, request.body.mfaTicket);
-        if (result.tokens) setSessionCookies(reply, result.tokens.accessToken, result.tokens.refreshToken, isProd, result.tokens.expiresIn);
+        if (result.tokens) setSessionCookies(reply, result.tokens.accessToken, result.tokens.refreshToken, cookieAttrs, result.tokens.expiresIn);
         return { enabled: true as const, tokens: result.tokens };
       },
     );

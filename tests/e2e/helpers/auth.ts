@@ -20,8 +20,18 @@ export function deviceFingerprint(seed: string) {
   return { fingerprint: `e2e-${seed}-${'x'.repeat(Math.max(0, 24 - seed.length))}`.slice(0, 64), name: 'QA e2e device', browser: 'chrome', os: 'linux', extensionVersion: '0.1.0' };
 }
 
-async function postJson(baseURL: string, path: string, body: unknown): Promise<{ status: number; json: unknown }> {
-  const res = await fetch(`${baseURL}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+// Same literal string as playwright.config.ts's top-level
+// `use.extraHTTPHeaders` — see that config's own comment for why: a
+// session this file creates via plain `fetch` must present the same
+// "User-Agent family" a spec's later `request.post('/auth/refresh', ...)`
+// call does (Playwright's APIRequestContext, not this file's `fetch`), or
+// the refresh-token-family reuse detector treats the mismatch as theft and
+// revokes the whole family (`AUTH_TOKEN_REUSED`) — reproduced directly
+// while authoring journey (d).
+const E2E_USER_AGENT = 'sniper-ledger-e2e-suite/1.0';
+
+async function postJson(baseURL: string, path: string, body: unknown, headers: Record<string, string> = {}): Promise<{ status: number; json: unknown }> {
+  const res = await fetch(`${baseURL}${path}`, { method: 'POST', headers: { 'content-type': 'application/json', 'user-agent': E2E_USER_AGENT, ...headers }, body: JSON.stringify(body) });
   const json = res.status === 204 ? null : await res.json().catch(() => null);
   return { status: res.status, json };
 }

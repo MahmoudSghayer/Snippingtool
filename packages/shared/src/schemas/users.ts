@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { ADMIN_ROLES, PERMISSIONS } from '../permissions.js';
+
 import { emailSchema } from './auth.js';
 
 export const USER_STATUSES = ['active', 'suspended', 'banned', 'deleted'] as const;
@@ -19,6 +21,16 @@ export const userDtoSchema = z.object({
   referralCode: z.string().min(1).max(40).nullable(),
   createdAt: z.string().datetime(),
   lastLoginAt: z.string().datetime().nullable(),
+  // docs/07-dashboard.md §11 gap #1 / docs/09-security.md: the caller's own
+  // resolved `admin_users.admin_role` + the `PERMISSION_MATRIX` permission
+  // set it grants — `null`/`[]` for a non-admin, and for any *other* user's
+  // DTO returned from an admin-listing route (e.g. `GET /admin/users`),
+  // where "this user's own admin grant" isn't the meaningful question the
+  // caller is asking. Only `GET /users/me` resolves this for real (its own
+  // caller); every other `userDtoSchema` producer returns the null/[]
+  // default deliberately rather than doing an extra per-row lookup.
+  adminRole: z.enum(ADMIN_ROLES).nullable(),
+  permissions: z.array(z.enum(PERMISSIONS)),
 });
 export type UserDto = z.infer<typeof userDtoSchema>;
 
