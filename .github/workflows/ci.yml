@@ -223,10 +223,14 @@ jobs:
         run: pnpm audit --prod --audit-level=high
         continue-on-error: false
 
-      - name: gitleaks (secret scanning)
+      - name: gitleaks (secret scanning — rules + allowlist in .gitleaks.toml)
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The default GITHUB_TOKEN cannot post PR comments from a
+          # fork/PR context (403 "Resource not accessible by integration");
+          # findings still fail the step and are listed in the job log.
+          GITLEAKS_ENABLE_COMMENTS: 'false'
 
       - name: semgrep (custom ruleset — see .github/semgrep/rules.yml)
         run: |
@@ -331,8 +335,8 @@ jobs:
           workspace-filter: '@sl/dashboard'
       - name: write apps/api/.env (the e2e-spawned api process reads this via dotenv/config)
         run: cp infra/env/.env.development.example apps/api/.env
-      - name: build @sl/api's deps (the e2e webServer runs apps/api from source via tsx, but @sl/db/@sl/shared resolve through their built dist)
-        run: pnpm exec turbo run build --filter=@sl/api^...
+      - name: build @sl/api's and @sl/dashboard's deps (both webServers run from source, but @sl/db/@sl/shared/@sl/ui resolve through their built dist)
+        run: pnpm exec turbo run build --filter=@sl/api^... --filter=@sl/dashboard^...
       - name: migrate + seed (seeds the admin dashboard.spec.ts / global-setup.ts drive)
         run: pnpm --filter @sl/db migrate
       - run: pnpm --filter @sl/db seed
@@ -431,8 +435,8 @@ jobs:
           workspace-filter: '@sl/tests'
       - name: write apps/api/.env (dotenv'd by the tsx-spawned api/worker processes — see tests/e2e/playwright.config.ts's webServer env)
         run: cp infra/env/.env.development.example apps/api/.env
-      - name: build @sl/api's deps (webServer runs apps/api from source via tsx, but @sl/db/@sl/shared resolve through their built dist)
-        run: pnpm exec turbo run build --filter=@sl/api^...
+      - name: build @sl/api's and @sl/dashboard's deps (both webServers run from source, but @sl/db/@sl/shared/@sl/ui resolve through their built dist)
+        run: pnpm exec turbo run build --filter=@sl/api^... --filter=@sl/dashboard^...
       - name: cross-app e2e (xvfb — prepare.mjs resets+seeds the database and builds the extension as a prefix to the api webServer entry, then Playwright starts api+dashboard)
         run: xvfb-run -a pnpm --filter @sl/tests test:e2e
         env:

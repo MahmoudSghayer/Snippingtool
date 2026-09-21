@@ -95,16 +95,24 @@ test.describe('extension against the mock EA web app', () => {
       const host = page.locator('#ledger-root');
       await expect(host).toHaveCount(1, { timeout: 15_000 });
 
-      // The mock page fires one passive search shortly after load
-      // (mock-service-layer.js) — the panel's "Auctions recorded" row
-      // should move off its initial "—" once content.js has flushed it.
-      await expect
-        .poll(
-          async () =>
-            host.evaluate((el) => (el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.getElementById('total')?.textContent),
-          { timeout: 15_000 },
-        )
-        .not.toBe('—');
+      // The mock page fires one passive search 50ms after load
+      // (mock-service-layer.js) — usually *before* the ISOLATED-world
+      // content script (`run_at: document_idle`) is listening on this
+      // instantly-fulfilled page, so that first observation may be lost.
+      // The "Auctions recorded" row moving off "—" is not proof of an
+      // observation either (content/index.ts fills it from the boot-time
+      // `counts` reply). So, with the panel host proving the content script
+      // is live, trigger the same passive search again via the fixture's
+      // own hook and assert on the counters that only move once an
+      // observation has crossed from the MAIN world into content.js.
+      await page.evaluate(() => (window as unknown as { __mock: { triggerPassiveSearch(): Promise<void> } }).__mock.triggerPassiveSearch());
+      const panelNumber = (id: string) =>
+        host.evaluate(
+          (el, elementId) => Number(((el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.getElementById(elementId)?.textContent ?? '').replace(/[^\d]/g, '')),
+          id,
+        );
+      await expect.poll(() => panelNumber('searches'), { timeout: 15_000 }).toBeGreaterThanOrEqual(1);
+      await expect.poll(() => panelNumber('total'), { timeout: 15_000 }).toBeGreaterThan(0);
 
       // The bundle probe should report ok — the fixture's `window.services`
       // matches adapter.ts's ASSUMED SHAPE exactly, so the status dot must

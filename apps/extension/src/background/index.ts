@@ -12,6 +12,7 @@
  */
 import {
   backgroundMessageEnvelopeSchema,
+  extBackgroundEngineStateSetPayloadSchema,
   extBackgroundFiltersSavePayloadSchema,
   extBackgroundGovernorSnapshotPushPayloadSchema,
   extBackgroundLicenseHeartbeatPayloadSchema,
@@ -33,7 +34,7 @@ import * as db from '../store/db.js';
 
 import { handleAuthLogin, handleAuthLogout, handleAuthMfaVerify, handleAuthRegister, handleAuthResendVerification, handleAuthStatus } from './auth.js';
 import { installGlobalErrorHandlers, handleErrorsReport, ensureErrorFlushAlarm, onErrorFlushAlarm } from './errors.js';
-import { handleGovernorSnapshotGet, handleGovernorSnapshotPush } from './governor.js';
+import { handleEngineStateGet, handleEngineStateSet, handleGovernorSnapshotGet, handleGovernorSnapshotPush } from './governor.js';
 import { ensureHeartbeatAlarm, handleLicenseBootstrap, handleLicenseHeartbeat, onHeartbeatAlarm, runBootstrap } from './license.js';
 import {
   handleDevicesList,
@@ -104,6 +105,9 @@ const handlers: Record<string, Handler> = {
   'governor.snapshotPush': (payload) => handleGovernorSnapshotPush(payload as never),
   'governor.snapshotGet': () => handleGovernorSnapshotGet(),
 
+  'engine.stateSet': (payload) => handleEngineStateSet(payload as never),
+  'engine.stateGet': () => handleEngineStateGet(),
+
   async 'engine.state'() {
     return { ok: true };
   },
@@ -119,7 +123,7 @@ const handlers: Record<string, Handler> = {
 // `background/auth.ts` itself). A handler with no payload (`auth.refresh`,
 // `auth.status`, `license.bootstrap`, `settings.get`, `filters.list`,
 // `devices.list`, `logs.export`, `telemetry.flush`, `errors.report`,
-// `governor.snapshotGet`, `engine.state`, `counts`) has nothing to validate and is deliberately
+// `governor.snapshotGet`, `engine.stateGet`, `engine.state`, `counts`) has nothing to validate and is deliberately
 // left out — every handler still gets the envelope-level check above plus
 // the try/catch's crash safety net (an `async` handler's thrown `TypeError`
 // from a malformed payload always becomes a rejected promise, never an
@@ -137,6 +141,7 @@ const payloadSchemas: Partial<Record<string, { safeParse: (v: unknown) => { succ
   'filters.save': extBackgroundFiltersSavePayloadSchema,
   'telemetry.enqueue': extBackgroundTelemetryEnqueuePayloadSchema,
   'governor.snapshotPush': extBackgroundGovernorSnapshotPushPayloadSchema,
+  'engine.stateSet': extBackgroundEngineStateSetPayloadSchema,
 };
 
 // webextension-polyfill's promise-based `onMessage` API: a listener that

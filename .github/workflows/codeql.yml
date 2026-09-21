@@ -17,6 +17,7 @@ on:
 
 permissions:
   contents: read
+  actions: read # codeql-action v3 reads its own workflow run metadata
   security-events: write # upload SARIF results to the repo's Security tab
 
 jobs:

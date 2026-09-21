@@ -1,0 +1,19 @@
+# gitleaks configuration for CI's `security-scan` job
+# (.github/workflows/ci.yml) — the stock ruleset plus one allowlist entry.
+#
+# infra/env/.env.development.example carries the *documented dev-only*
+# JWT_PRIVATE_KEY / ENTITLEMENT_SIGNING_KEY defaults that every local and CI
+# run copies into apps/api/.env. They are not secrets: apps/api/src/config/env.ts
+# refuses to boot in production unless real keys are supplied, and the same
+# guard is what the docs/09-security.md key-rotation section points at. Any
+# other committed PEM block is still a finding.
+title = "sniper-ledger"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "dev-only example keys the API refuses to run with in production"
+paths = [
+  '''^infra/env/\.env\.development\.example$''',
+]

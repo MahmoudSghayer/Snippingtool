@@ -7,10 +7,15 @@
  * mean something.
  *
  * Also owns crash recovery: the governor's counters (and a little session
- * bookkeeping) are persisted to `storage.session` on an interval and
- * restored on load, so a page reload within the same browser session
- * resumes the risk budget instead of quietly resetting it to zero (which
- * would be a governor bypass, not a convenience).
+ * bookkeeping) are persisted on an interval and restored on load, so a page
+ * reload within the same browser session resumes the risk budget instead of
+ * quietly resetting it to zero (which would be a governor bypass, not a
+ * convenience). The persistence itself goes through background
+ * (`engine.stateSet` / `engine.stateGet`, backed by `storage.session`
+ * there) — never the session storage API from this file: MV3 content
+ * scripts are not a trusted context for it, the call throws, and a thrown
+ * boot here used to take M1 recording down with it (docs/12-testing.md
+ * "Defects found" row #10). Nothing in this file touches `lib/storage.ts`.
  */
 import browser from 'webextension-polyfill';
 
@@ -18,7 +23,6 @@ import { AssistEngine } from '../engine/assist.js';
 import { Governor, type GovernorState } from '../engine/governor.js';
 import { rankCandidates, type OpportunityCandidate, type ScoredOpportunity } from '../engine/ranker.js';
 import { logger } from '../lib/logger.js';
-import { getSession, setSession } from '../lib/storage.js';
 import { createPanel, type Panel } from '../ui/panel.js';
 
 import { createAdapterClient } from './adapter-client.js';
@@ -48,7 +52,6 @@ const RISK_UI_TICK_MS = 3000;
 const AUTOBUYER_TICK_MS = 8000;
 const WATCHDOG_MS = 15000;
 const WATCHDOG_STALE_MS = 60000;
-const SESSION_STATE_KEY = 'sl.engine.state.v1';
 
 // ---- background messaging ---------------------------------------------------
 
@@ -88,6 +91,19 @@ async function main(): Promise<void> {
   let lastResourceId: number | null = null;
   let lastRating: number | null = null;
   const tracked = new Map<string, TrimmedAuction>();
+
+  // Engine bindings are declared *here*, before any adapter callback is
+  // registered, and only ever assigned further down once the account-gated
+  // M2/M3 bootstrap has finished. `adapter.onAuctions` (M1 recording) and
+  // `engineHealthState()` read them on every observation — if they were
+  // `const`s declared after that bootstrap's `await`s, an observation
+  // arriving before (or a bootstrap failure preventing) their initialisation
+  // would throw a temporal-dead-zone ReferenceError from inside the
+  // callback and silently kill recording + telemetry for the whole page
+  // (docs/12-testing.md "Defects found" row #10). M1 never depends on M2
+  // having booted.
+  let governor: Governor | null = null;
+  let assist: AssistEngine | null = null;
 
   function dominantResource(auctions: TrimmedAuction[]): number | null {
     const tally = new Map<number, number>();
@@ -228,9 +244,11 @@ async function main(): Promise<void> {
   }
 
   // Crash recovery: resume the governor's counters if this is a reload
-  // within the same browsing session, not a brand-new one.
-  const savedState = await getSession<GovernorState | null>(SESSION_STATE_KEY, null);
-  const governor: Governor | null =
+  // within the same browsing session, not a brand-new one. Read via
+  // background (see this file's header) — a `null` reply (nothing saved, or
+  // the service worker didn't answer) simply means "start fresh".
+  const savedState = await send<GovernorState | null>('engine.stateGet');
+  governor =
     features.includes('assist.ranker') || AUTOMATION_ENABLED
       ? savedState
         ? Governor.hydrate(settingsCache.governor, savedState)
@@ -238,7 +256,6 @@ async function main(): Promise<void> {
       : null;
   governor?.setKillSwitch(killSwitchActive, killSwitchActive ? 'server kill switch active at bootstrap' : undefined);
 
-  let assist: AssistEngine | null = null;
   let rankedCandidates: ScoredOpportunity[] = [];
 
   function recordAttempt(input: AttemptInput): void {
@@ -407,11 +424,11 @@ async function main(): Promise<void> {
     void send('governor.snapshotPush', snapshot);
   }, RISK_UI_TICK_MS);
 
-  // ---- crash recovery: persist governor state to storage.session ----------
+  // ---- crash recovery: persist governor state via background -------------
 
   async function persistState(): Promise<void> {
     if (!governor) return;
-    await setSession(SESSION_STATE_KEY, governor.serialize());
+    await send('engine.stateSet', governor.serialize());
   }
   setInterval(() => void persistState(), STATE_PERSIST_MS);
   window.addEventListener('pagehide', () => void persistState());
@@ -447,4 +464,9 @@ async function main(): Promise<void> {
   }
 }
 
-void main();
+void main().catch((err) => {
+  // M1 recording is wired up synchronously at the top of main() and keeps
+  // working whatever happens below it; a failed M2/M3 bootstrap is reported,
+  // never allowed to become a silent unhandled rejection.
+  logger.error(`content bootstrap failed (recording continues): ${String(err)}`, 'content');
+});

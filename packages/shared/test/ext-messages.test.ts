@@ -5,6 +5,7 @@ import {
   adapterActRequestMessageSchema,
   adapterProbeMessageSchema,
   backgroundMessageEnvelopeSchema,
+  extBackgroundEngineStateSetPayloadSchema,
   extBackgroundGovernorSnapshotPushPayloadSchema,
 } from '../src/ext-messages.js';
 
@@ -46,6 +47,34 @@ describe('backgroundMessageEnvelopeSchema', () => {
   it('accepts governor.snapshotGet with no payload', () => {
     const result = backgroundMessageEnvelopeSchema.safeParse({ type: 'governor.snapshotGet' });
     expect(result.success).toBe(true);
+  });
+
+  // Regression (docs/12-testing.md "Defects found" row #10): the content
+  // script's crash-recovery state now round-trips through background
+  // instead of touching storage.session itself — both message types must be
+  // accepted at the envelope, and the set payload must match what
+  // `engine/governor.ts`'s `serialize()` produces.
+  it('accepts engine.stateSet with a serialized governor state, and engine.stateGet with no payload', () => {
+    const state = {
+      sessionStartedAt: 1_000_000,
+      actionTimestamps: [1_000_100, 1_000_200],
+      searchCount: 2,
+      buyCount: 0,
+      coinFlow: [{ at: 1_000_200, coins: 1500 }],
+      cooldownUntil: 0,
+      killSwitchActive: false,
+    };
+    expect(
+      backgroundMessageEnvelopeSchema.safeParse({ type: 'engine.stateSet', payload: state })
+        .success,
+    ).toBe(true);
+    expect(extBackgroundEngineStateSetPayloadSchema.safeParse(state).success).toBe(true);
+    expect(extBackgroundEngineStateSetPayloadSchema.safeParse({ ...state, extra: 1 }).success).toBe(
+      false,
+    );
+    expect(backgroundMessageEnvelopeSchema.safeParse({ type: 'engine.stateGet' }).success).toBe(
+      true,
+    );
   });
 });
 

@@ -180,6 +180,18 @@ export const backgroundMessageTypeSchema = z.enum([
   'governor.snapshotPush',
   'governor.snapshotGet',
   'engine.state',
+  /** Added additively (docs/12-testing.md "Defects found" row #10): the
+   * content script's crash-recovery state (`Governor.serialize()`) used to
+   * be written straight to `browser.storage.session` from the content
+   * script — which Chrome forbids for content scripts (MV3's default
+   * `storage.session` access level is `TRUSTED_CONTEXTS` only), so the
+   * read threw, the content script's boot aborted, and every later market
+   * observation crashed on an uninitialised binding. The state now round-
+   * trips through background (`engine.stateGet` / `engine.stateSet`), the
+   * same way the live risk snapshot does — the access level is deliberately
+   * *not* widened, because `storage.session` also holds the access token. */
+  'engine.stateGet',
+  'engine.stateSet',
   /** Locally-persisted saved filters (`SavedFilter[]`, `storage.local`) —
    * server sync against `/api/v1/filters` lands once `apps/api` ships (see
    * docs/06-extension.md); the message shape already matches that DTO so
@@ -379,3 +391,23 @@ export const extBackgroundGovernorSnapshotPushPayloadSchema = z
 export type ExtGovernorSnapshotPushPayload = z.infer<
   typeof extBackgroundGovernorSnapshotPushPayloadSchema
 >;
+
+/** `engine.stateSet` — `engine/governor.ts`'s `Governor.serialize()` output
+ * (its `GovernorState`), persisted by background in `storage.session` for
+ * crash recovery (docs/06-extension.md §7) and read back with
+ * `engine.stateGet` (no payload; replies with this shape or `null`). Mirrors
+ * that interface field-for-field; `.strict()` per the mass-assignment rule
+ * (docs/09-security.md "Extension"). */
+export const extBackgroundEngineStateSetPayloadSchema = z
+  .object({
+    sessionStartedAt: z.number().min(0),
+    actionTimestamps: z.array(z.number().min(0)).max(10_000),
+    searchCount: z.number().int().min(0),
+    buyCount: z.number().int().min(0),
+    coinFlow: z.array(z.object({ at: z.number().min(0), coins: z.number() }).strict()).max(10_000),
+    cooldownUntil: z.number().min(0),
+    killSwitchActive: z.boolean(),
+    killSwitchReason: z.string().max(500).optional(),
+  })
+  .strict();
+export type ExtEngineStateSetPayload = z.infer<typeof extBackgroundEngineStateSetPayloadSchema>;

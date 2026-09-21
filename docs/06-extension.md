@@ -314,15 +314,26 @@ background context.
 ## 7. Crash recovery
 
 `content/index.ts` persists `Governor.serialize()` (action timestamps, buy/
-search counts, coin-flow entries, cooldown/kill-switch state) to
-`browser.storage.session` every 5 seconds and on `pagehide`. On load, it
-reads that key back before constructing the governor; if present, it
-`Governor.hydrate()`s from it instead of starting fresh. `storage.session`
-is the right primitive here specifically because it survives a page reload
-within the same browsing session but is cleared when the browser closes —
-exactly matching "the risk budget should survive an SPA reload" without
-also matching "the risk budget should survive forever," which would make
-`sessionLengthMinutes` meaningless.
+search counts, coin-flow entries, cooldown/kill-switch state) every 5
+seconds and on `pagehide`, and reads it back before constructing the
+governor on load; if present, it `Governor.hydrate()`s from it instead of
+starting fresh. The store is background's `browser.storage.session`
+(`background/governor.ts`, key `sl.engine.state.v1`), reached through the
+`engine.stateSet` / `engine.stateGet` messages — **never called from the
+content script directly**: MV3 content scripts are not a trusted context
+for `storage.session` (Chrome's default access level is
+`TRUSTED_CONTEXTS`), the call throws, and a thrown boot used to take M1
+recording down with it (docs/12-testing.md "Defects found" row #10). The
+access level is deliberately not widened, because `storage.session` also
+holds the access token (§9). `storage.session` is still the right primitive
+because it survives a page reload within the same browsing session but is
+cleared when the browser closes — exactly matching "the risk budget should
+survive an SPA reload" without also matching "the risk budget should
+survive forever," which would make `sessionLengthMinutes` meaningless.
+
+M1 recording never depends on any of this: the engine bindings are declared
+before the adapter callbacks are registered, and a failed account-gated
+M2/M3 bootstrap is logged, not allowed to abort the page's recorder.
 
 The **watchdog** is a second `setInterval` that tracks the timestamp of the
 last `probe` message received from the MAIN-world adapter; if none has

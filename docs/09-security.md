@@ -335,6 +335,13 @@ DENY`, `Referrer-Policy: strict-origin-when-cross-origin`.
 - `.env` is gitignored at the repo root; every real environment ships as
   `<app>/.env.example` (safe to commit — empty/placeholder values) or
   `infra/env/.env.<environment>.example` (DevOps-owned).
+- CI's `security-scan` job runs gitleaks with the stock ruleset plus the
+  one allowlist entry in `.gitleaks.toml`: `infra/env/.env.development.example`,
+  which carries the documented dev-only `JWT_PRIVATE_KEY` /
+  `ENTITLEMENT_SIGNING_KEY` defaults every local and CI run copies into
+  `apps/api/.env`. They are not secrets — `apps/api/src/config/env.ts`
+  refuses to boot in production without real keys — and any other
+  committed PEM block is still a finding.
 - Semgrep's `no-hardcoded-secret-const`/`no-hardcoded-secret-property`
   rules (`.github/semgrep/rules.yml`) flag a literal string assigned to a
   secret-looking `const`/property name for manual review in CI.

@@ -25,7 +25,7 @@ you before you look like a bot — it is never sold as "undetectable". See
 
 The build follows a data-first sequence. All eleven phases are built and
 verified on this branch (`pnpm typecheck && pnpm lint && pnpm build && pnpm
-test`: 683 tests across seven packages). Remaining work is the go-live
+test`: 688 tests across seven packages). Remaining work is the go-live
 checklist in `docs/13-roadmap.md`, which needs the live market, real Stripe
 keys and infrastructure.
 
@@ -44,11 +44,14 @@ keys and infrastructure.
 | 11 Testing       | Unit, integration, cross-app e2e, k6 load, security suites, coverage        | Done   | `tests/`, `docs/12-testing.md`                                                                                |
 | DevOps           | Docker, Compose, Caddy, CI/CD, monitoring, backups, deploy guides           | Done   | `infra/`, `.github/`, `docs/11-devops.md`                                                                     |
 
-Follow-ups from every phase report and all nine QA defects have been closed
-(see `docs/12-testing.md` §12 for the defect table with statuses). One open
-item remains: the cross-app e2e journey for extension telemetry fails on a
-mock-fixture timing race in the multi-page harness; the single-app extension
-e2e covering the same path passes.
+Follow-ups from every phase report and all ten QA defects have been closed
+(see `docs/12-testing.md` §12 for the defect table with statuses). The last
+one, found while driving the pull request's CI to green, was a critical
+extension bug: the content script's crash-recovery read of `storage.session`
+is forbidden in MV3 content scripts, which aborted its boot and silently
+killed market recording and telemetry on every page load. It is fixed, the
+e2e assertions that had hidden it are now real, and every cross-app journey
+passes.
 
 ## What exists today
 

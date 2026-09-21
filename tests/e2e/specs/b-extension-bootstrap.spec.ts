@@ -131,8 +131,15 @@ test('extension: loads against the mock EA page, popup login against the real AP
     // logger.ts's warn/error levels go to `console` (see that file) — the
     // service worker's own console is otherwise invisible from here, and
     // `void send(...)`'s fire-and-forget calls (reportSearchActivity below)
-    // would only ever surface a rejection this way.
-    sw.on('console', (msg) => console.warn(`[sw console:${msg.type()}] ${msg.text()}`));
+    // would only ever surface a rejection this way. Playwright's `Worker`
+    // object has no 'console' event of its own (only 'close'); service
+    // worker console messages are delivered on the *context*, so listen
+    // there and label them by their originating page/worker URL.
+    context.on('console', (msg) => {
+      if (msg.type() !== 'warning' && msg.type() !== 'error') return;
+      const origin = msg.page()?.url() ?? 'service-worker';
+      console.warn(`[console:${msg.type()} @ ${origin}] ${msg.text()}`);
+    });
 
     // Popup login runs *before* visiting the EA page — deliberately, not
     // just plausible real-world ordering: apps/extension/src/lib/telemetry.ts's
@@ -179,13 +186,9 @@ test('extension: loads against the mock EA page, popup login against the real AP
 
     await routeMockEa(context);
     const eaPage = await context.newPage();
-    // content/index.ts's `logger.warn`/`.error` (see the `sw.on('console', ...)`
-    // note above) run in the EA page's own JS realm, not the service
-    // worker's — captured here for the same reason.
-    eaPage.on('console', (msg) => {
-      if (msg.type() === 'warning' || msg.type() === 'error')
-        console.warn(`[ea-page console:${msg.type()}] ${msg.text()}`);
-    });
+    // (content/index.ts's `logger.warn`/`.error` run in the EA page's own
+    // JS realm — the `context.on('console', ...)` listener above covers
+    // pages as well as the service worker.)
     await eaPage.goto(EA_PAGE_URL, { waitUntil: 'load' });
 
     const host = eaPage.locator('#ledger-root');
@@ -198,24 +201,54 @@ test('extension: loads against the mock EA page, popup login against the real AP
       );
       expect(dotClass).not.toContain('warn');
 
-      // The mock page's own passive search happens shortly after load
-      // (mock-service-layer.js), same as
-      // apps/extension/test/e2e/extension.spec.ts's own wait — without
-      // this, the next step can race ahead of the observation itself ever
-      // having enqueued anything (reproduced while authoring this spec:
-      // the flush step consistently saw `sent: 0` because there was
-      // nothing queued yet, not because flushing itself was broken).
-      await expect
-        .poll(
-          async () =>
-            host.evaluate(
-              (el) =>
-                (el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.getElementById('total')
-                  ?.textContent,
+      // The mock page fires its own passive search 50ms after its module
+      // script runs (mock-service-layer.js) — on this instantly-fulfilled
+      // page that is *before* the ISOLATED-world content script
+      // (`run_at: document_idle`) has attached its adapter listener, so
+      // that first observation is posted into the void and nothing is ever
+      // enqueued (the root cause of docs/12-testing.md row #9's "journey
+      // (b) re-run result": zero `record`/`telemetry.enqueue` traffic). The
+      // panel's "Auctions recorded" row moving off its "—" placeholder is
+      // *not* evidence of an observation either — content/index.ts fills
+      // it from the boot-time `counts` reply ("0") before anything has
+      // been seen. So: now that the panel host proves the content script
+      // is live, trigger the same passive search again through the
+      // fixture's own hook (the exact `fetch` a human's search issues,
+      // which adapter.ts's patch observes), and assert on the panel's
+      // "Searches this session" counter — incremented only inside
+      // `adapter.onAuctions`, i.e. only once the observation has actually
+      // crossed from the MAIN world into the content script.
+      await eaPage.evaluate(() =>
+        (
+          window as unknown as { __mock: { triggerPassiveSearch(): Promise<void> } }
+        ).__mock.triggerPassiveSearch(),
+      );
+      const panelNumber = (id: string) =>
+        host.evaluate(
+          (el, elementId) =>
+            Number(
+              (
+                (el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.getElementById(
+                  elementId,
+                )?.textContent ?? ''
+              ).replace(/[^\d]/g, ''),
             ),
-          { timeout: 15_000 },
-        )
-        .not.toBe('—');
+          id,
+        );
+      await expect
+        .poll(() => panelNumber('searches'), {
+          timeout: 15_000,
+          message: 'waiting for the triggered passive search to be observed by the content script',
+        })
+        .toBeGreaterThanOrEqual(1);
+      // ...and the recorded-auctions counter (refreshed from the service
+      // worker's `counts` reply after `record` round-trips) goes above 0.
+      await expect
+        .poll(() => panelNumber('total'), {
+          timeout: 15_000,
+          message: 'waiting for the observed auctions to be recorded via the service worker',
+        })
+        .toBeGreaterThan(0);
     });
 
     // eslint-disable-next-line no-console -- diagnostic only
@@ -241,7 +274,13 @@ test('extension: loads against the mock EA page, popup login against the real AP
           async () => {
             const result = (await popup.evaluate(() =>
               chrome.runtime.sendMessage({ type: 'telemetry.flush' }),
-            )) as { ok: boolean; data?: { ok: boolean; sent: number } };
+            )) as { ok: boolean; error?: string; data?: { ok: boolean; sent: number } };
+            if (!result?.ok) {
+              // eslint-disable-next-line no-console -- diagnostic only
+              console.log(
+                `[diag] telemetry.flush handler rejected: ${result?.error ?? 'no response'}`,
+              );
+            }
             return result?.data?.sent ?? 0;
           },
           {
@@ -272,7 +311,7 @@ test('extension: loads against the mock EA page, popup login against the real AP
       }
     });
 
-    await test.step('admin flips the kill switch -> the panel (popup) reports halted on its next bootstrap', async () => {
+    await test.step('admin flips the kill switch -> the next heartbeat carries it -> the panel (popup) reports halted', async () => {
       try {
         const patch = await request.patch(`${API_ORIGIN}/api/v1/admin/toggles/kill_switch`, {
           headers: bearer(admin.accessToken),
@@ -280,13 +319,16 @@ test('extension: loads against the mock EA page, popup login against the real AP
         });
         expect(patch.status(), await patch.text()).toBe(200);
 
-        await popup.reload();
-        await expect(popup.getByText('Kill switch active', { exact: false })).toBeVisible({
-          timeout: 15_000,
-        });
-
-        // Also verify the underlying contract directly (not just the UI
-        // string): a fresh heartbeat's own response says the same thing.
+        // The kill switch reaches an installed extension through the
+        // 10-minute `chrome.alarms` heartbeat (docs/06-extension.md §5:
+        // "driven by lib/license.ts's bootstrap/heartbeat response's
+        // killSwitchActive field") — `lib/license.ts`'s `heartbeat()`
+        // refreshes the cached entitlement, and `background/license.ts`'s
+        // `license.bootstrap` handler deliberately serves that cache while
+        // it is under 10 minutes old rather than re-bootstrapping on every
+        // popup open. So: force the same heartbeat the alarm fires (same
+        // message, same handler), assert the contract on its own response,
+        // *then* check the popup renders the refreshed cache.
         const heartbeat = (await popup.evaluate(() =>
           chrome.runtime.sendMessage({
             type: 'license.heartbeat',
@@ -294,6 +336,11 @@ test('extension: loads against the mock EA page, popup login against the real AP
           }),
         )) as { ok: boolean; data?: { killSwitchActive: boolean } };
         expect(heartbeat.data?.killSwitchActive).toBe(true);
+
+        await popup.reload();
+        await expect(popup.getByText('Kill switch active', { exact: false })).toBeVisible({
+          timeout: 15_000,
+        });
       } finally {
         // Cleanup: kill_switch is a single global toggle shared by the whole
         // (dev) database — leaving it 'enabled' would halt every other
