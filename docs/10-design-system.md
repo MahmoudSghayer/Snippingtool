@@ -1,13 +1,15 @@
 # 10 — Design system
 
 Status: implementation-ready, applied. Covers `packages/ui` (the design
-system) and its application across `apps/dashboard` (every page + shell).
-This is the PHASE 10 deliverable: brand + tokens + component inventory +
-motion + accessibility + page-by-page spec, plus the record of what this
-pass changed and verified. Read [`07-dashboard.md`](./07-dashboard.md) for
-the dashboard's information architecture, routing and data flow —
-this document is about *how it looks and behaves*, that one is about *how
-it's built*.
+system) and its application across `apps/dashboard` (every page + shell)
+and, as of §15, `apps/extension`'s popup/options/in-page panel. This is the
+PHASE 10 deliverable: brand + tokens + component inventory + motion +
+accessibility + page-by-page spec, plus the record of what this pass
+changed and verified. Read [`07-dashboard.md`](./07-dashboard.md) for the
+dashboard's information architecture, routing and data flow, and
+[`06-extension.md`](./06-extension.md) for the extension's, respectively —
+this document is about *how it looks and behaves*, those are about *how
+they're built*.
 
 ## Contents
 
@@ -23,8 +25,9 @@ it's built*.
 10. [Accessibility checklist](#10-accessibility-checklist)
 11. [Page-by-page spec](#11-page-by-page-spec)
 12. [Performance](#12-performance)
-13. [What this pass changed](#13-what-this-pass-changed)
+13. [What this pass changed (dashboard)](#13-what-this-pass-changed)
 14. [Known gaps / follow-ups](#14-known-gaps--follow-ups)
+15. [Extension surfaces](#15-extension-surfaces)
 
 ---
 
@@ -759,11 +762,14 @@ disk. This resume:
   still have no dedicated screenshots** — flagged in §14.
 - Extension work (`apps/extension/src/{popup,options,ui}`, shared tokens,
   segmented risk gauge, panel sparkline/P&L styling, "What it sends" page,
-  `apps/extension/screenshots/`) is gated on `docs/09-security.md` existing
-  (file-ownership rule in this pass's brief — the security agent is still
-  editing `apps/extension/src` concurrently). Polled for it through this
-  session; it had not appeared by the time this pass wrapped up. **Not
-  done** — see §14.
+  `apps/extension/screenshots/`) was gated on `docs/09-security.md`
+  existing (file-ownership rule in this pass's brief — the security agent
+  was still editing `apps/extension/src` concurrently). It did not appear
+  before this note was first written; **polling continued in the
+  background, the file landed later in the same session, and the extension
+  work was then completed** — see §15 for the full record. The two
+  sentences above are left as-is (not rewritten after the fact) as an
+  accurate account of how this pass actually went.
 
 ## 14. Known gaps / follow-ups
 
@@ -795,12 +801,203 @@ disk. This resume:
   `RATE_LIMIT_GLOBAL_WINDOW_MS` for the e2e environment (an `apps/api`-owned
   change) or splitting the extra pages into their own lower-frequency e2e
   spec (fewer requests per wall-clock second).
-- **Extension surfaces** (`apps/extension/src/{popup,options,ui,styles}`,
-  shared design tokens ported into the extension build, segmented risk
-  gauge, panel sparkline/P&L styling, options-page inline validation and
-  "What it sends" clarity, 360×600 popup, `apps/extension/screenshots/`) —
-  **not started this pass**, blocked on `docs/09-security.md` existing per
-  this pass's file-ownership gate (the security agent owns
-  `apps/extension/src` until that doc lands). Whoever resumes next should
-  check for that file first and, once present, pick up PHASE 10's extension
-  deliverables from scratch (nothing here has been touched).
+- **Extension surfaces** — done this pass once `docs/09-security.md`
+  landed; see §15. Follow-ups from that work specifically: the popup has no
+  *live* risk gauge (only the in-page panel does — §15 explains why, a
+  file-ownership boundary, not an oversight); the panel's font stays
+  system-ui rather than Inter/JetBrains Mono (a deliberate CSP/host-page
+  call, also explained in §15); and `ledger-auto`'s popup/options are
+  byte-identical to `ledger`'s (the M3 automation build adds no UI surface
+  of its own yet).
+
+## 15. Extension surfaces
+
+`apps/extension`'s file-ownership gate (`popup/`, `options/`, `ui/`,
+`styles/` — everything else, including `background/`, `content/`,
+`engine/`, `lib/`, is owned by the extension-core/security passes) cleared
+mid-session when `docs/09-security.md` landed. This section covers what
+changed, what was deliberately left alone, and why.
+
+### Shared tokens
+
+`apps/extension/src/styles/tokens.css` (new) is `packages/ui/src/tokens.css`
+copied — not imported at the package level (the extension has no
+`@sl/ui`/React dependency and ships as a plain MV3 build) — kept to the same
+`--sl-*` custom-property names so a value only ever needs updating in one
+place conceptually, even though it now physically lives in two files. Two
+consumption paths, because the extension's UI lives in two different CSS
+contexts:
+
+- `popup/index.html` and `options/index.html` `<link>` it directly — both
+  run in the extension's own `chrome-extension://` origin, an ordinary
+  `<head>`, no different from any other page.
+- `ui/panel.ts` (the in-page, shadow-DOM panel injected into EA's page)
+  imports the file's *text* at build time (Vite's `?raw` import) and swaps
+  `:root` for `:host` before splicing it into the shadow root's `<style>` —
+  custom properties are inherited properties, but nothing on EA's own page
+  defines `--sl-*`, so the shadow tree needs its own top-level declaration
+  rather than relying on inheritance from a `:root` it isn't part of. This
+  is a real build-time copy of the shared file's *values*, not a
+  hand-retyped approximation — the previous popup/panel palettes were both
+  close-but-not-exact hand-typed hex (e.g. panel.ts's old `#55c08e` vs the
+  shared token's `#6fbf9b` for "positive") that had drifted from the
+  dashboard's over three passes; this pass eliminates that drift mechanism
+  entirely rather than just re-syncing the numbers once more.
+
+### Typography
+
+Popup and options load Inter + JetBrains Mono the same way the dashboard
+does (Google Fonts `<link>`, `index.html`), and every numeric value
+(`.row .v`, governor bound labels, table cells) gets
+`font-variant-numeric: tabular-nums` via a monospace stack. **The in-page
+panel deliberately does not** — it renders inside a shadow root injected
+into EA's page via the content script, so a `<style>`-level `@import`/
+external `<link>` there would be a cross-origin stylesheet request made
+*from EA's own page's execution context*, subject to EA's CSP, not the
+extension's. `host_permissions` are EA's domains plus the API origin only
+(project instruction 6), so this was already implicitly out of scope; the
+panel keeps its original `system-ui` stack, which was the right call
+already made before this pass, not a gap introduced by it.
+
+### Segmented risk gauge
+
+`ui/panel.ts`'s risk-budget meters (`#risk-actions-meter`,
+`#risk-ratio-meter`, `#risk-flow-meter`) already changed color at 80%
+("high", amber) and 100% ("over", red) of the governor's live limit — this
+pass adds two permanent tick marks to the track itself (a `::after`
+gradient at exactly those two thresholds, in `--sl-ground` for contrast
+against every fill color), so the *shape* of the gauge shows the safety
+zones even before the fill's color crosses into one — matching the same
+visual language the dashboard's own meters would use. Popup/style.css
+carries the identical tick-mark treatment on its own `.meter` (for visual
+consistency), even though — see "known gap" below — nothing currently
+feeds it live numbers.
+
+**Known gap, by design, not oversight**: the popup does not show a *live*
+risk gauge. The governor only runs inside the content script attached to
+the active EA tab (`engine/governor.ts`, outside this pass's file
+ownership); reaching its live snapshot from the popup would need a new
+`background/index.ts` message handler relaying it, which is out of scope
+here, and reconstructing a safety-critical number from the governor's
+serialized crash-recovery state without its own computation logic would
+risk showing a *wrong* one — worse than not showing one. The popup instead
+shows an honest static card pointing at the panel (`popup/main.ts`'s
+`renderLoggedIn`, "Risk budget" card) rather than fabricate a number. A
+`risk.snapshot` background handler forwarding `governor.snapshot()` to the
+popup is the concrete follow-up, for whoever owns `background/index.ts` and
+`content/index.ts` next.
+
+### Panel sparkline + P&L styling
+
+Both already existed and worked (ported forward through this resume's
+verification, not rebuilt); this pass's contribution is purely the tokens
+migration above (they now read `var(--sl-positive)`/`var(--sl-negative)`
+instead of hand-typed hex) plus the risk-gauge tick marks. Verified by eye
+against the mock EA app fixture — see the screenshot inventory below.
+
+### Options: sections + inline validation
+
+The six sections (Account & license, Targets & budgets, Governor
+thresholds, Saved filters, Devices, Telemetry + "What it sends",
+Diagnostics) already existed. This pass adds **real inline validation** to
+the two numeric sections (Targets & budgets, Governor thresholds):
+
+- Reuses `apps/shared`'s own `targetsSchema`, `budgetsSchema` and
+  `governorSettingsSchema` (`packages/shared/src/schemas/settings.ts`) —
+  the exact same zod schemas `background/settings.ts`'s
+  `handleSettingsSet` and `apps/api`'s settings module validate the same
+  fields against — via `.shape.<field>.safeParse(...)`, rather than
+  re-deriving bounds by hand (the previous state: native `min`/`max`
+  attributes only, which constrain the spinner but not a value typed and
+  submitted directly).
+- Each numeric input gets a paired `<p class="field-error">` wired by
+  `aria-describedby`, painted via `aria-invalid` on the input itself (never
+  color alone — the message text is the primary signal, the red border is
+  reinforcement) — validated live on every `input` event, not just on
+  submit.
+- Each section's Save button disables itself the instant any field in that
+  section fails, and the click handler re-validates anyway before ever
+  calling `send('settings.set', …)` — belt-and-braces against a
+  programmatic click or an event-listener race.
+- Toasts gained a `tone: 'success' | 'error'` (a red left border on
+  failure, matching the dashboard's `Toaster` convention) — "Fix the
+  highlighted fields before saving." on a blocked submit, instead of
+  silently doing nothing or letting an invalid value reach `send`.
+
+"What it sends" (already present, `options/main.ts`'s `WHAT_IT_SENDS`
+list) is unchanged — it was already specific, accurate against
+`docs/09-security.md`/`docs/01-architecture.md`'s data-flow description,
+and exactly what project instruction 6 asks for; this pass's job here was
+the surrounding page's visual/interaction polish, not the copy.
+
+### Reduced motion
+
+Inherited for free from `styles/tokens.css`'s
+`@media (prefers-reduced-motion: reduce)` block (popup/options, via the
+`<link>`) and from the same block re-declared under `:host` inside
+`ui/panel.ts`'s inlined copy (the panel's shadow tree needs its own
+`*`/`*::before`/`*::after` rule since a page-level media query's universal
+selector doesn't reach into a shadow root's own elements) — no
+component-level check needed anywhere in the extension, same principle as
+the dashboard (§5).
+
+### 360×600 popup
+
+`popup/style.css`'s `body` is now `width: 360px; max-height: 600px;
+overflow-y: auto` (was `320px`, no height constraint) — the brief's own
+target size, comfortably inside Chrome's popup ceiling (~800px). Height
+grows with content and then scrolls, so a longer logged-in state (once the
+popup ever grows more rows) never gets silently clipped without a way to
+reach the rest of it.
+
+### Verification
+
+```
+pnpm --filter @sl/extension typecheck   # pass
+pnpm --filter @sl/extension lint        # pass
+pnpm --filter @sl/extension test        # 10 files, 74 tests, pass
+pnpm --filter @sl/extension build       # pass — both ledger and ledger-auto targets
+```
+
+```
+xvfb-run -a pnpm --filter @sl/extension test:e2e   # 2 passed: the autobuyer-
+                                                     # absence static check,
+                                                     # and the real Chromium
+                                                     # load against the mock
+                                                     # EA app (panel attaches,
+                                                     # an observation is
+                                                     # recorded, the bundle
+                                                     # probe reports ok) —
+                                                     # confirms the tokens/
+                                                     # risk-gauge CSS changes
+                                                     # above didn't break the
+                                                     # panel's actual DOM
+                                                     # wiring, though the spec
+                                                     # itself asserts behavior,
+                                                     # not styling.
+```
+
+### Screenshot inventory
+
+`apps/extension/screenshots/` (3 PNGs, ~256KB total):
+
+- `popup-logged-out-360x600.png` — the popup at its target 360×600 size,
+  logged-out state (email/password/sign-in — the only state reachable
+  without a running `apps/api` instance during this capture).
+- `options-900.png` — the full options page, every section, at a
+  representative desktop width, full-page capture.
+- `panel-in-page.png` — the in-page panel against the mock EA app fixture,
+  with every optional section (session P&L, risk budget, ranker) forced
+  visible via a one-off `evaluate()` (the fixture's single passive search
+  doesn't naturally populate all three in one capture) so the full
+  polished surface — including the new segmented risk-meter tick marks —
+  is visible in one screenshot rather than requiring several partial ones.
+
+Captured with a throwaway script (loads the real built `ledger` extension
+into Chromium via `launchPersistentContext` + `--load-extension`, the same
+pattern `test/e2e/extension.spec.ts` uses) run once from outside the repo
+and deleted immediately after — not committed, since it duplicates that
+spec file's loading logic rather than adding a second permanent copy of it;
+re-running it would mean copying `test/e2e/extension.spec.ts`'s pattern
+into a new one-off script again, which is one line of guidance rather than
+a maintained file.
