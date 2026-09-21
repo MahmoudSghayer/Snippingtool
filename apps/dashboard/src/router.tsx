@@ -145,6 +145,7 @@ const adminOverviewRoute = createRoute({
   getParentRoute: () => adminLayoutRoute,
   path: '/',
   component: lazyRouteComponent(() => import('@/pages/admin/OverviewPage.js'), 'OverviewPage'),
+  beforeLoad: () => requireAdminNavPermission('admin-overview'),
 });
 
 // `q` lets the command palette (Cmd/Ctrl+K) deep-link straight into a
@@ -156,72 +157,84 @@ const adminUsersRoute = createRoute({
   path: '/users',
   validateSearch: adminUsersSearchSchema,
   component: lazyRouteComponent(() => import('@/pages/admin/UsersPage.js'), 'UsersPage'),
+  beforeLoad: () => requireAdminNavPermission('admin-users'),
 });
 
 const adminProfitsRoute = createRoute({
   getParentRoute: () => adminLayoutRoute,
   path: '/profits',
   component: lazyRouteComponent(() => import('@/pages/admin/ProfitsPage.js'), 'ProfitsPage'),
+  beforeLoad: () => requireAdminNavPermission('admin-profits'),
 });
 
 const adminActivityRoute = createRoute({
   getParentRoute: () => adminLayoutRoute,
   path: '/activity',
   component: lazyRouteComponent(() => import('@/pages/admin/ActivityPage.js'), 'ActivityPage'),
+  beforeLoad: () => requireAdminNavPermission('admin-activity'),
 });
 
 const adminSystemRoute = createRoute({
   getParentRoute: () => adminLayoutRoute,
   path: '/system',
   component: lazyRouteComponent(() => import('@/pages/admin/SystemPage.js'), 'SystemPage'),
+  beforeLoad: () => requireAdminNavPermission('admin-system'),
 });
 
 const adminAuditRoute = createRoute({
   getParentRoute: () => adminLayoutRoute,
   path: '/audit',
   component: lazyRouteComponent(() => import('@/pages/admin/AuditPage.js'), 'AuditPage'),
+  beforeLoad: () => requireAdminNavPermission('admin-audit'),
 });
 
 const adminSubscriptionsRoute = createRoute({
   getParentRoute: () => adminLayoutRoute,
   path: '/subscriptions',
   component: lazyRouteComponent(() => import('@/pages/admin/SubscriptionsAdminPage.js'), 'SubscriptionsAdminPage'),
+  beforeLoad: () => requireAdminNavPermission('admin-subscriptions'),
 });
 
 const adminCouponsRoute = createRoute({
   getParentRoute: () => adminLayoutRoute,
   path: '/coupons',
   component: lazyRouteComponent(() => import('@/pages/admin/CouponsPage.js'), 'CouponsPage'),
+  beforeLoad: () => requireAdminNavPermission('admin-coupons'),
 });
 
 const adminPlansRoute = createRoute({
   getParentRoute: () => adminLayoutRoute,
   path: '/plans',
   component: lazyRouteComponent(() => import('@/pages/admin/PlansPage.js'), 'PlansPage'),
+  beforeLoad: () => requireAdminNavPermission('admin-plans'),
 });
 
 const adminFlagsRoute = createRoute({
   getParentRoute: () => adminLayoutRoute,
   path: '/flags',
   component: lazyRouteComponent(() => import('@/pages/admin/FlagsPage.js'), 'FlagsPage'),
+  beforeLoad: () => requireAdminNavPermission('admin-flags'),
 });
 
 const adminBansRoute = createRoute({
   getParentRoute: () => adminLayoutRoute,
   path: '/bans',
   component: lazyRouteComponent(() => import('@/pages/admin/BansPage.js'), 'BansPage'),
+  beforeLoad: () => requireAdminNavPermission('admin-bans'),
 });
 
 const adminFeatureTogglesRoute = createRoute({
   getParentRoute: () => adminLayoutRoute,
   path: '/feature-toggles',
   component: lazyRouteComponent(() => import('@/pages/admin/FeatureTogglesPage.js'), 'FeatureTogglesPage'),
+  beforeLoad: () => requireAdminNavPermission('admin-toggles'),
 });
 
 const adminConfigRoute = createRoute({
   getParentRoute: () => adminLayoutRoute,
   path: '/config',
   component: lazyRouteComponent(() => import('@/pages/admin/ConfigPage.js'), 'ConfigPage'),
+  beforeLoad: () => requireAdminNavPermission('admin-config'),
 });
 
 // --- Dev-only component gallery ---------------------------------------------
