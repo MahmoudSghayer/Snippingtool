@@ -438,7 +438,76 @@
         ],
         "responses": {
           "200": {
-            "description": "Default Response"
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "userId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "deviceId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "nullable": true
+                          },
+                          "occurredAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "login"
+                            ]
+                          },
+                          "ip": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "metadata": {
+                            "type": "object",
+                            "additionalProperties": {}
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "userId",
+                          "deviceId",
+                          "occurredAt",
+                          "type",
+                          "ip",
+                          "metadata"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "nextCursor": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2048,
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
           }
         }
       }
@@ -489,7 +558,210 @@
         ],
         "responses": {
           "200": {
-            "description": "Default Response"
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "userId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "deviceId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "nullable": true
+                          },
+                          "occurredAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "error"
+                            ]
+                          },
+                          "ip": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "metadata": {
+                            "type": "object",
+                            "additionalProperties": {}
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "userId",
+                          "deviceId",
+                          "occurredAt",
+                          "type",
+                          "ip",
+                          "metadata"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "nextCursor": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2048,
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/activity/filter-changes": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "in": "query",
+            "name": "from",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "in": "query",
+            "name": "to",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "cursor",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "userId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "deviceId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "nullable": true
+                          },
+                          "occurredAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "filter_change"
+                            ]
+                          },
+                          "metadata": {
+                            "type": "object",
+                            "properties": {
+                              "filterId": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "action": {
+                                "type": "string",
+                                "enum": [
+                                  "created",
+                                  "updated",
+                                  "deleted",
+                                  "activated",
+                                  "deactivated"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "action"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "userId",
+                          "deviceId",
+                          "occurredAt",
+                          "type",
+                          "metadata"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "nextCursor": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2048,
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
           }
         }
       }
@@ -540,7 +812,78 @@
         ],
         "responses": {
           "200": {
-            "description": "Default Response"
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "userId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "deviceId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "nullable": true
+                          },
+                          "occurredAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "filterHash": {
+                            "type": "string"
+                          },
+                          "resultsCount": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "resourceId": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "floorPrice": {
+                            "type": "integer",
+                            "nullable": true
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "userId",
+                          "deviceId",
+                          "occurredAt",
+                          "filterHash",
+                          "resultsCount",
+                          "resourceId",
+                          "floorPrice"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "nextCursor": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2048,
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
           }
         }
       }
@@ -591,7 +934,99 @@
         ],
         "responses": {
           "200": {
-            "description": "Default Response"
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "userId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "deviceId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "nullable": true
+                          },
+                          "occurredAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "resourceId": {
+                            "type": "string"
+                          },
+                          "tradeId": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "targetPrice": {
+                            "type": "integer"
+                          },
+                          "listedPrice": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "outcome": {
+                            "type": "string",
+                            "enum": [
+                              "attempted",
+                              "success",
+                              "failed",
+                              "too_slow",
+                              "blocked",
+                              "error"
+                            ]
+                          },
+                          "latencyMs": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "errorCode": {
+                            "type": "string",
+                            "nullable": true
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "userId",
+                          "deviceId",
+                          "occurredAt",
+                          "resourceId",
+                          "tradeId",
+                          "targetPrice",
+                          "listedPrice",
+                          "outcome",
+                          "latencyMs",
+                          "errorCode"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "nextCursor": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2048,
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
           }
         }
       }
@@ -612,17 +1047,20 @@
                     "byVersion": {
                       "type": "object",
                       "additionalProperties": {
-                        "type": "number"
+                        "type": "integer",
+                        "minimum": 0
                       }
                     },
                     "byOs": {
                       "type": "object",
                       "additionalProperties": {
-                        "type": "number"
+                        "type": "integer",
+                        "minimum": 0
                       }
                     },
                     "total": {
-                      "type": "number"
+                      "type": "integer",
+                      "minimum": 0
                     }
                   },
                   "required": [
@@ -667,7 +1105,61 @@
         ],
         "responses": {
           "200": {
-            "description": "Default Response"
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "ip": {
+                        "type": "string"
+                      },
+                      "userId": {
+                        "type": "string",
+                        "format": "uuid",
+                        "nullable": true
+                      },
+                      "country": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "asn": {
+                        "type": "integer",
+                        "nullable": true
+                      },
+                      "firstSeen": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "lastSeen": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "requestCount": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "flagged": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "ip",
+                      "userId",
+                      "country",
+                      "asn",
+                      "firstSeen",
+                      "lastSeen",
+                      "requestCount",
+                      "flagged"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -2088,6 +2580,67 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/audit/export.csv": {
+      "get": {
+        "summary": "Stream every audit_logs row matching the given filters as CSV.",
+        "tags": [
+          "admin"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "query",
+            "name": "actorId",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80
+            },
+            "in": "query",
+            "name": "entityType",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "query",
+            "name": "entityId",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "in": "query",
+            "name": "from",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "in": "query",
+            "name": "to",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
           }
         }
       }
@@ -3746,6 +4299,518 @@
         }
       }
     },
+    "/api/v1/admin/subscriptions": {
+      "get": {
+        "summary": "List subscriptions (cursor-paginated), filterable by status/plan/userId/search (owner email).",
+        "tags": [
+          "admin-subscriptions"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "trialing",
+                "active",
+                "past_due",
+                "canceled",
+                "suspended",
+                "expired",
+                "lifetime"
+              ]
+            },
+            "in": "query",
+            "name": "status",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            },
+            "in": "query",
+            "name": "plan",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "query",
+            "name": "userId",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 320
+            },
+            "in": "query",
+            "name": "search",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "in": "query",
+            "name": "cursor",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "plan": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "code": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 40
+                              },
+                              "name": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 80
+                              },
+                              "priceCents": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "currency": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 3
+                              },
+                              "interval": {
+                                "type": "string",
+                                "enum": [
+                                  "day",
+                                  "week",
+                                  "month",
+                                  "year",
+                                  "one_time"
+                                ]
+                              },
+                              "deviceLimit": {
+                                "type": "integer",
+                                "minimum": 1
+                              },
+                              "features": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "isLifetime": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "code",
+                              "name",
+                              "priceCents",
+                              "currency",
+                              "interval",
+                              "deviceLimit",
+                              "features",
+                              "isLifetime"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "trialing",
+                              "active",
+                              "past_due",
+                              "canceled",
+                              "suspended",
+                              "expired",
+                              "lifetime"
+                            ]
+                          },
+                          "currentPeriodStart": {
+                            "type": "string",
+                            "format": "date-time",
+                            "nullable": true
+                          },
+                          "currentPeriodEnd": {
+                            "type": "string",
+                            "format": "date-time",
+                            "nullable": true
+                          },
+                          "trialEndsAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "nullable": true
+                          },
+                          "cancelAtPeriodEnd": {
+                            "type": "boolean"
+                          },
+                          "autoRenew": {
+                            "type": "boolean"
+                          },
+                          "userId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "userEmail": {
+                            "type": "string",
+                            "format": "email",
+                            "maxLength": 320
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "plan",
+                          "status",
+                          "currentPeriodStart",
+                          "currentPeriodEnd",
+                          "trialEndsAt",
+                          "cancelAtPeriodEnd",
+                          "autoRenew",
+                          "userId",
+                          "userEmail"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "nextCursor": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2048,
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/subscriptions/by-user/{userId}": {
+      "get": {
+        "summary": "A user's current (live) subscription plus their full subscription history.",
+        "tags": [
+          "admin-subscriptions"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "userId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "current": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "plan": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "code": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 40
+                            },
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 80
+                            },
+                            "priceCents": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "currency": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 3
+                            },
+                            "interval": {
+                              "type": "string",
+                              "enum": [
+                                "day",
+                                "week",
+                                "month",
+                                "year",
+                                "one_time"
+                              ]
+                            },
+                            "deviceLimit": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "features": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "isLifetime": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "code",
+                            "name",
+                            "priceCents",
+                            "currency",
+                            "interval",
+                            "deviceLimit",
+                            "features",
+                            "isLifetime"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "trialing",
+                            "active",
+                            "past_due",
+                            "canceled",
+                            "suspended",
+                            "expired",
+                            "lifetime"
+                          ]
+                        },
+                        "currentPeriodStart": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        },
+                        "currentPeriodEnd": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        },
+                        "trialEndsAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        },
+                        "cancelAtPeriodEnd": {
+                          "type": "boolean"
+                        },
+                        "autoRenew": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "plan",
+                        "status",
+                        "currentPeriodStart",
+                        "currentPeriodEnd",
+                        "trialEndsAt",
+                        "cancelAtPeriodEnd",
+                        "autoRenew"
+                      ],
+                      "additionalProperties": false,
+                      "nullable": true
+                    },
+                    "currentLicenseId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "nullable": true
+                    },
+                    "history": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "plan": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "code": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 40
+                              },
+                              "name": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 80
+                              },
+                              "priceCents": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "currency": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 3
+                              },
+                              "interval": {
+                                "type": "string",
+                                "enum": [
+                                  "day",
+                                  "week",
+                                  "month",
+                                  "year",
+                                  "one_time"
+                                ]
+                              },
+                              "deviceLimit": {
+                                "type": "integer",
+                                "minimum": 1
+                              },
+                              "features": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "isLifetime": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "code",
+                              "name",
+                              "priceCents",
+                              "currency",
+                              "interval",
+                              "deviceLimit",
+                              "features",
+                              "isLifetime"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "trialing",
+                              "active",
+                              "past_due",
+                              "canceled",
+                              "suspended",
+                              "expired",
+                              "lifetime"
+                            ]
+                          },
+                          "currentPeriodStart": {
+                            "type": "string",
+                            "format": "date-time",
+                            "nullable": true
+                          },
+                          "currentPeriodEnd": {
+                            "type": "string",
+                            "format": "date-time",
+                            "nullable": true
+                          },
+                          "trialEndsAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "nullable": true
+                          },
+                          "cancelAtPeriodEnd": {
+                            "type": "boolean"
+                          },
+                          "autoRenew": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "plan",
+                          "status",
+                          "currentPeriodStart",
+                          "currentPeriodEnd",
+                          "trialEndsAt",
+                          "cancelAtPeriodEnd",
+                          "autoRenew"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "current",
+                    "currentLicenseId",
+                    "history"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/admin/subscriptions/{userId}/activate": {
       "post": {
         "summary": "Manually activate a subscription for a user (plan + period).",
@@ -5203,6 +6268,40 @@
                             "type": "string",
                             "format": "date-time",
                             "nullable": true
+                          },
+                          "adminRole": {
+                            "type": "string",
+                            "enum": [
+                              "super_admin",
+                              "support",
+                              "analyst",
+                              "billing"
+                            ],
+                            "nullable": true
+                          },
+                          "permissions": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "users.read",
+                                "users.write",
+                                "users.suspend",
+                                "users.ban",
+                                "users.force_logout",
+                                "users.reset_password",
+                                "subscriptions.read",
+                                "subscriptions.write",
+                                "coupons.write",
+                                "plans.write",
+                                "audit.read",
+                                "analytics.read",
+                                "system.read",
+                                "system.write",
+                                "feature_toggles.write",
+                                "config.write"
+                              ]
+                            }
                           }
                         },
                         "required": [
@@ -5215,7 +6314,9 @@
                           "timezone",
                           "referralCode",
                           "createdAt",
-                          "lastLoginAt"
+                          "lastLoginAt",
+                          "adminRole",
+                          "permissions"
                         ],
                         "additionalProperties": false
                       }
@@ -5316,6 +6417,40 @@
                       "type": "string",
                       "format": "date-time",
                       "nullable": true
+                    },
+                    "adminRole": {
+                      "type": "string",
+                      "enum": [
+                        "super_admin",
+                        "support",
+                        "analyst",
+                        "billing"
+                      ],
+                      "nullable": true
+                    },
+                    "permissions": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "users.read",
+                          "users.write",
+                          "users.suspend",
+                          "users.ban",
+                          "users.force_logout",
+                          "users.reset_password",
+                          "subscriptions.read",
+                          "subscriptions.write",
+                          "coupons.write",
+                          "plans.write",
+                          "audit.read",
+                          "analytics.read",
+                          "system.read",
+                          "system.write",
+                          "feature_toggles.write",
+                          "config.write"
+                        ]
+                      }
                     }
                   },
                   "required": [
@@ -5328,7 +6463,9 @@
                     "timezone",
                     "referralCode",
                     "createdAt",
-                    "lastLoginAt"
+                    "lastLoginAt",
+                    "adminRole",
+                    "permissions"
                   ],
                   "additionalProperties": false
                 }
@@ -5431,6 +6568,40 @@
                       "type": "string",
                       "format": "date-time",
                       "nullable": true
+                    },
+                    "adminRole": {
+                      "type": "string",
+                      "enum": [
+                        "super_admin",
+                        "support",
+                        "analyst",
+                        "billing"
+                      ],
+                      "nullable": true
+                    },
+                    "permissions": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "users.read",
+                          "users.write",
+                          "users.suspend",
+                          "users.ban",
+                          "users.force_logout",
+                          "users.reset_password",
+                          "subscriptions.read",
+                          "subscriptions.write",
+                          "coupons.write",
+                          "plans.write",
+                          "audit.read",
+                          "analytics.read",
+                          "system.read",
+                          "system.write",
+                          "feature_toggles.write",
+                          "config.write"
+                        ]
+                      }
                     }
                   },
                   "required": [
@@ -5443,7 +6614,9 @@
                     "timezone",
                     "referralCode",
                     "createdAt",
-                    "lastLoginAt"
+                    "lastLoginAt",
+                    "adminRole",
+                    "permissions"
                   ],
                   "additionalProperties": false
                 }
@@ -5556,6 +6729,40 @@
                       "type": "string",
                       "format": "date-time",
                       "nullable": true
+                    },
+                    "adminRole": {
+                      "type": "string",
+                      "enum": [
+                        "super_admin",
+                        "support",
+                        "analyst",
+                        "billing"
+                      ],
+                      "nullable": true
+                    },
+                    "permissions": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "users.read",
+                          "users.write",
+                          "users.suspend",
+                          "users.ban",
+                          "users.force_logout",
+                          "users.reset_password",
+                          "subscriptions.read",
+                          "subscriptions.write",
+                          "coupons.write",
+                          "plans.write",
+                          "audit.read",
+                          "analytics.read",
+                          "system.read",
+                          "system.write",
+                          "feature_toggles.write",
+                          "config.write"
+                        ]
+                      }
                     }
                   },
                   "required": [
@@ -5568,7 +6775,9 @@
                     "timezone",
                     "referralCode",
                     "createdAt",
-                    "lastLoginAt"
+                    "lastLoginAt",
+                    "adminRole",
+                    "permissions"
                   ],
                   "additionalProperties": false
                 }
@@ -5676,6 +6885,40 @@
                       "type": "string",
                       "format": "date-time",
                       "nullable": true
+                    },
+                    "adminRole": {
+                      "type": "string",
+                      "enum": [
+                        "super_admin",
+                        "support",
+                        "analyst",
+                        "billing"
+                      ],
+                      "nullable": true
+                    },
+                    "permissions": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "users.read",
+                          "users.write",
+                          "users.suspend",
+                          "users.ban",
+                          "users.force_logout",
+                          "users.reset_password",
+                          "subscriptions.read",
+                          "subscriptions.write",
+                          "coupons.write",
+                          "plans.write",
+                          "audit.read",
+                          "analytics.read",
+                          "system.read",
+                          "system.write",
+                          "feature_toggles.write",
+                          "config.write"
+                        ]
+                      }
                     }
                   },
                   "required": [
@@ -5688,7 +6931,9 @@
                     "timezone",
                     "referralCode",
                     "createdAt",
-                    "lastLoginAt"
+                    "lastLoginAt",
+                    "adminRole",
+                    "permissions"
                   ],
                   "additionalProperties": false
                 }
@@ -9217,6 +10462,99 @@
       }
     },
     "/api/v1/filters/stats": {
+      "get": {
+        "tags": [
+          "filters"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "query",
+            "name": "filterId",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "in": "query",
+            "name": "from",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "in": "query",
+            "name": "to",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "filterId": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "windowStart": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "searches": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "attempts": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "successes": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "coinsSpent": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "coinsEarned": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "coinsPerHour": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "filterId",
+                      "windowStart",
+                      "searches",
+                      "attempts",
+                      "successes",
+                      "coinsSpent",
+                      "coinsEarned",
+                      "coinsPerHour"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
       "post": {
         "tags": [
           "filters"
@@ -10418,6 +11756,298 @@
                   },
                   "required": [
                     "accepted"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "risk"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "in": "query",
+            "name": "from",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "in": "query",
+            "name": "to",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "actions_per_hour",
+                "session_length",
+                "buy_search_ratio",
+                "coin_flow",
+                "hard_stop",
+                "kill_switch"
+              ]
+            },
+            "in": "query",
+            "name": "kind",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "in": "query",
+            "name": "cursor",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "deviceId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "nullable": true
+                          },
+                          "sessionId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "nullable": true
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "actions_per_hour",
+                              "session_length",
+                              "buy_search_ratio",
+                              "coin_flow",
+                              "hard_stop",
+                              "kill_switch"
+                            ]
+                          },
+                          "value": {
+                            "type": "number"
+                          },
+                          "threshold": {
+                            "type": "number"
+                          },
+                          "occurredAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "deviceId",
+                          "sessionId",
+                          "kind",
+                          "value",
+                          "threshold",
+                          "occurredAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "nextCursor": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2048,
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/users/{id}/risk-events": {
+      "get": {
+        "summary": "One user's safety-governor event history.",
+        "tags": [
+          "admin"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "in": "query",
+            "name": "from",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "in": "query",
+            "name": "to",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "actions_per_hour",
+                "session_length",
+                "buy_search_ratio",
+                "coin_flow",
+                "hard_stop",
+                "kill_switch"
+              ]
+            },
+            "in": "query",
+            "name": "kind",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "in": "query",
+            "name": "cursor",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "deviceId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "nullable": true
+                          },
+                          "sessionId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "nullable": true
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "actions_per_hour",
+                              "session_length",
+                              "buy_search_ratio",
+                              "coin_flow",
+                              "hard_stop",
+                              "kill_switch"
+                            ]
+                          },
+                          "value": {
+                            "type": "number"
+                          },
+                          "threshold": {
+                            "type": "number"
+                          },
+                          "occurredAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "deviceId",
+                          "sessionId",
+                          "kind",
+                          "value",
+                          "threshold",
+                          "occurredAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "nextCursor": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2048,
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
                   ],
                   "additionalProperties": false
                 }
@@ -12308,6 +13938,40 @@
                       "type": "string",
                       "format": "date-time",
                       "nullable": true
+                    },
+                    "adminRole": {
+                      "type": "string",
+                      "enum": [
+                        "super_admin",
+                        "support",
+                        "analyst",
+                        "billing"
+                      ],
+                      "nullable": true
+                    },
+                    "permissions": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "users.read",
+                          "users.write",
+                          "users.suspend",
+                          "users.ban",
+                          "users.force_logout",
+                          "users.reset_password",
+                          "subscriptions.read",
+                          "subscriptions.write",
+                          "coupons.write",
+                          "plans.write",
+                          "audit.read",
+                          "analytics.read",
+                          "system.read",
+                          "system.write",
+                          "feature_toggles.write",
+                          "config.write"
+                        ]
+                      }
                     }
                   },
                   "required": [
@@ -12320,7 +13984,9 @@
                     "timezone",
                     "referralCode",
                     "createdAt",
-                    "lastLoginAt"
+                    "lastLoginAt",
+                    "adminRole",
+                    "permissions"
                   ],
                   "additionalProperties": false
                 }
@@ -12412,6 +14078,40 @@
                       "type": "string",
                       "format": "date-time",
                       "nullable": true
+                    },
+                    "adminRole": {
+                      "type": "string",
+                      "enum": [
+                        "super_admin",
+                        "support",
+                        "analyst",
+                        "billing"
+                      ],
+                      "nullable": true
+                    },
+                    "permissions": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "users.read",
+                          "users.write",
+                          "users.suspend",
+                          "users.ban",
+                          "users.force_logout",
+                          "users.reset_password",
+                          "subscriptions.read",
+                          "subscriptions.write",
+                          "coupons.write",
+                          "plans.write",
+                          "audit.read",
+                          "analytics.read",
+                          "system.read",
+                          "system.write",
+                          "feature_toggles.write",
+                          "config.write"
+                        ]
+                      }
                     }
                   },
                   "required": [
@@ -12424,7 +14124,9 @@
                     "timezone",
                     "referralCode",
                     "createdAt",
-                    "lastLoginAt"
+                    "lastLoginAt",
+                    "adminRole",
+                    "permissions"
                   ],
                   "additionalProperties": false
                 }

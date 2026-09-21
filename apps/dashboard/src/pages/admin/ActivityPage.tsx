@@ -117,9 +117,17 @@ function useActivity<
   return useQuery({
     queryKey: ['admin', 'activity', path, range],
     queryFn: async () => {
-      const { data, error } = await api.GET(path, { params: { query: { ...toRangeQuery(range), limit: 100 } } });
+      // `path` is generic over a union of route keys here, which defeats
+      // openapi-fetch's per-path `init` overload resolution (each path's
+      // querystring shape is actually identical — `rangeQuery` — but TS
+      // can't see that through the union) — narrowed back with an explicit
+      // cast rather than losing the shared-hook structure across five
+      // otherwise-identical tabs.
+      const { data, error } = await (api.GET as (p: string, init: unknown) => ReturnType<typeof api.GET>)(path, {
+        params: { query: { ...toRangeQuery(range), limit: 100 } },
+      });
       if (error) throw error;
-      return (data as { items: Row[] }).items;
+      return (data as unknown as { items: Row[] }).items;
     },
   });
 }

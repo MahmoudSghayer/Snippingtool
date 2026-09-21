@@ -91,8 +91,27 @@ export function DashboardPage() {
     },
   });
 
+  // docs/07-dashboard.md §11 gap #6: last-24h governor event history
+  // (`GET /risk-events`), rendered alongside the configured budget below.
+  const riskEventsQuery = useQuery({
+    queryKey: ['risk-events', 'last24h'],
+    queryFn: async () => {
+      const { data, error } = await api.GET('/api/v1/risk-events', {
+        params: { query: { from: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(), limit: 200 } },
+      });
+      if (error) throw error;
+      return data.items;
+    },
+  });
+
   const overview = overviewQuery.data;
   const activeDevices = devicesQuery.data?.filter((d) => d.status === 'active').length ?? 0;
+  const riskEvents = riskEventsQuery.data ?? [];
+  const riskCountsByKind = riskEvents.reduce<Record<string, number>>((acc, e) => {
+    acc[e.kind] = (acc[e.kind] ?? 0) + 1;
+    return acc;
+  }, {});
+  const recentHardStops = riskEvents.filter((e) => e.kind === 'hard_stop' || e.kind === 'kill_switch').slice(0, 5);
 
   return (
     <div className="flex flex-col gap-6">
@@ -213,6 +232,34 @@ export function DashboardPage() {
                     <span className="text-ink-2">Coin flow / hour</span>
                     <span className="font-mono tabular-nums">{formatCoins(settingsQuery.data.governor.maxCoinFlowPerHour)}</span>
                   </div>
+
+                  <div className="mt-2 border-t border-line pt-2">
+                    <p className="mb-1.5 text-xs text-ink-2">Last 24h</p>
+                    {riskEventsQuery.isLoading ? (
+                      <p className="text-xs text-ink-2">Loading…</p>
+                    ) : riskEvents.length === 0 ? (
+                      <p className="text-xs text-ink-2">No governor events in the last 24h.</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-1.5">
+                        {Object.entries(riskCountsByKind).map(([kind, count]) => (
+                          <Badge key={kind} tone={kind === 'hard_stop' || kind === 'kill_switch' ? 'negative' : 'neutral'}>
+                            {kind.replace(/_/g, ' ')}: {count}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+                    {recentHardStops.length > 0 && (
+                      <ul className="mt-2 flex flex-col gap-1">
+                        {recentHardStops.map((e) => (
+                          <li key={e.id} className="flex justify-between text-xs text-ink-2">
+                            <span className="text-risk">{e.kind.replace(/_/g, ' ')}</span>
+                            <span>{formatDateTime(e.occurredAt)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+
                   <Link to="/settings">
                     <Button variant="outline" size="sm" className="mt-2 w-full">
                       Adjust budgets

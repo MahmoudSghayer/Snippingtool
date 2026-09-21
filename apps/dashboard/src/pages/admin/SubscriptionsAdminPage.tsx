@@ -1,3 +1,4 @@
+import { SUBSCRIPTION_STATUSES } from '@sl/shared';
 import {
   AreaChart,
   Badge,
@@ -19,7 +20,6 @@ import {
   type ColumnDef,
   type DateRange,
 } from '@sl/ui';
-import { SUBSCRIPTION_STATUSES } from '@sl/shared';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 

@@ -103,6 +103,11 @@ test('extension: loads against the mock EA page, popup login against the real AP
     const sw = context.serviceWorkers()[0] ?? (await context.waitForEvent('serviceworker', { timeout: 15_000 }));
     expect(new URL(sw.url()).hostname).toBe(EXTENSION_ID);
     if (swSightings.length === 0) swSightings.push(Date.now());
+    // logger.ts's warn/error levels go to `console` (see that file) — the
+    // service worker's own console is otherwise invisible from here, and
+    // `void send(...)`'s fire-and-forget calls (reportSearchActivity below)
+    // would only ever surface a rejection this way.
+    sw.on('console', (msg) => console.log(`[sw console:${msg.type()}] ${msg.text()}`));
 
     // Popup login runs *before* visiting the EA page — deliberately, not
     // just plausible real-world ordering: apps/extension/src/lib/telemetry.ts's
@@ -147,6 +152,12 @@ test('extension: loads against the mock EA page, popup login against the real AP
 
     await routeMockEa(context);
     const eaPage = await context.newPage();
+    // content/index.ts's `logger.warn`/`.error` (see the `sw.on('console', ...)`
+    // note above) run in the EA page's own JS realm, not the service
+    // worker's — captured here for the same reason.
+    eaPage.on('console', (msg) => {
+      if (msg.type() === 'warning' || msg.type() === 'error') console.log(`[ea-page console:${msg.type()}] ${msg.text()}`);
+    });
     await eaPage.goto(EA_PAGE_URL, { waitUntil: 'load' });
 
     const host = eaPage.locator('#ledger-root');

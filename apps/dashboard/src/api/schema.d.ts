@@ -155,7 +155,27 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            items: {
+                                /** Format: uuid */
+                                id: string;
+                                /** Format: uuid */
+                                userId: string;
+                                /** Format: uuid */
+                                deviceId: string | null;
+                                /** Format: date-time */
+                                occurredAt: string;
+                                /** @enum {string} */
+                                type: "login";
+                                ip: string | null;
+                                metadata: {
+                                    [key: string]: unknown;
+                                };
+                            }[];
+                            nextCursor: string | null;
+                        };
+                    };
                 };
             };
         };
@@ -193,7 +213,87 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            items: {
+                                /** Format: uuid */
+                                id: string;
+                                /** Format: uuid */
+                                userId: string;
+                                /** Format: uuid */
+                                deviceId: string | null;
+                                /** Format: date-time */
+                                occurredAt: string;
+                                /** @enum {string} */
+                                type: "error";
+                                ip: string | null;
+                                metadata: {
+                                    [key: string]: unknown;
+                                };
+                            }[];
+                            nextCursor: string | null;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/activity/filter-changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    from?: string;
+                    to?: string;
+                    cursor?: string;
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: {
+                                /** Format: uuid */
+                                id: string;
+                                /** Format: uuid */
+                                userId: string;
+                                /** Format: uuid */
+                                deviceId: string | null;
+                                /** Format: date-time */
+                                occurredAt: string;
+                                /** @enum {string} */
+                                type: "filter_change";
+                                metadata: {
+                                    /** Format: uuid */
+                                    filterId?: string;
+                                    /** @enum {string} */
+                                    action: "created" | "updated" | "deleted" | "activated" | "deactivated";
+                                };
+                            }[];
+                            nextCursor: string | null;
+                        };
+                    };
                 };
             };
         };
@@ -231,7 +331,25 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            items: {
+                                /** Format: uuid */
+                                id: string;
+                                /** Format: uuid */
+                                userId: string;
+                                /** Format: uuid */
+                                deviceId: string | null;
+                                /** Format: date-time */
+                                occurredAt: string;
+                                filterHash: string;
+                                resultsCount: number;
+                                resourceId: string | null;
+                                floorPrice: number | null;
+                            }[];
+                            nextCursor: string | null;
+                        };
+                    };
                 };
             };
         };
@@ -269,7 +387,29 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            items: {
+                                /** Format: uuid */
+                                id: string;
+                                /** Format: uuid */
+                                userId: string;
+                                /** Format: uuid */
+                                deviceId: string | null;
+                                /** Format: date-time */
+                                occurredAt: string;
+                                resourceId: string;
+                                tradeId: string | null;
+                                targetPrice: number;
+                                listedPrice: number | null;
+                                /** @enum {string} */
+                                outcome: "attempted" | "success" | "failed" | "too_slow" | "blocked" | "error";
+                                latencyMs: number | null;
+                                errorCode: string | null;
+                            }[];
+                            nextCursor: string | null;
+                        };
+                    };
                 };
             };
         };
@@ -348,7 +488,21 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            ip: string;
+                            /** Format: uuid */
+                            userId: string | null;
+                            country: string | null;
+                            asn: number | null;
+                            /** Format: date-time */
+                            firstSeen: string;
+                            /** Format: date-time */
+                            lastSeen: string;
+                            requestCount: number;
+                            flagged: boolean;
+                        }[];
+                    };
                 };
             };
         };
@@ -1016,6 +1170,46 @@ export interface paths {
                             occurredAt: string;
                         }[];
                     };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/audit/export.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Stream every audit_logs row matching the given filters as CSV. */
+        get: {
+            parameters: {
+                query?: {
+                    actorId?: string;
+                    entityType?: string;
+                    entityId?: string;
+                    from?: string;
+                    to?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
                 };
             };
         };
@@ -1822,6 +2016,177 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/subscriptions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List subscriptions (cursor-paginated), filterable by status/plan/userId/search (owner email). */
+        get: {
+            parameters: {
+                query?: {
+                    status?: "trialing" | "active" | "past_due" | "canceled" | "suspended" | "expired" | "lifetime";
+                    plan?: string;
+                    userId?: string;
+                    search?: string;
+                    cursor?: string;
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: {
+                                /** Format: uuid */
+                                id: string;
+                                plan: {
+                                    /** Format: uuid */
+                                    id: string;
+                                    code: string;
+                                    name: string;
+                                    priceCents: number;
+                                    currency: string;
+                                    /** @enum {string} */
+                                    interval: "day" | "week" | "month" | "year" | "one_time";
+                                    deviceLimit: number;
+                                    features: string[];
+                                    isLifetime: boolean;
+                                };
+                                /** @enum {string} */
+                                status: "trialing" | "active" | "past_due" | "canceled" | "suspended" | "expired" | "lifetime";
+                                /** Format: date-time */
+                                currentPeriodStart: string | null;
+                                /** Format: date-time */
+                                currentPeriodEnd: string | null;
+                                /** Format: date-time */
+                                trialEndsAt: string | null;
+                                cancelAtPeriodEnd: boolean;
+                                autoRenew: boolean;
+                                /** Format: uuid */
+                                userId: string;
+                                /** Format: email */
+                                userEmail: string;
+                            }[];
+                            nextCursor: string | null;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/subscriptions/by-user/{userId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A user's current (live) subscription plus their full subscription history. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    userId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            current: {
+                                /** Format: uuid */
+                                id: string;
+                                plan: {
+                                    /** Format: uuid */
+                                    id: string;
+                                    code: string;
+                                    name: string;
+                                    priceCents: number;
+                                    currency: string;
+                                    /** @enum {string} */
+                                    interval: "day" | "week" | "month" | "year" | "one_time";
+                                    deviceLimit: number;
+                                    features: string[];
+                                    isLifetime: boolean;
+                                };
+                                /** @enum {string} */
+                                status: "trialing" | "active" | "past_due" | "canceled" | "suspended" | "expired" | "lifetime";
+                                /** Format: date-time */
+                                currentPeriodStart: string | null;
+                                /** Format: date-time */
+                                currentPeriodEnd: string | null;
+                                /** Format: date-time */
+                                trialEndsAt: string | null;
+                                cancelAtPeriodEnd: boolean;
+                                autoRenew: boolean;
+                            } | null;
+                            /** Format: uuid */
+                            currentLicenseId: string | null;
+                            history: {
+                                /** Format: uuid */
+                                id: string;
+                                plan: {
+                                    /** Format: uuid */
+                                    id: string;
+                                    code: string;
+                                    name: string;
+                                    priceCents: number;
+                                    currency: string;
+                                    /** @enum {string} */
+                                    interval: "day" | "week" | "month" | "year" | "one_time";
+                                    deviceLimit: number;
+                                    features: string[];
+                                    isLifetime: boolean;
+                                };
+                                /** @enum {string} */
+                                status: "trialing" | "active" | "past_due" | "canceled" | "suspended" | "expired" | "lifetime";
+                                /** Format: date-time */
+                                currentPeriodStart: string | null;
+                                /** Format: date-time */
+                                currentPeriodEnd: string | null;
+                                /** Format: date-time */
+                                trialEndsAt: string | null;
+                                cancelAtPeriodEnd: boolean;
+                                autoRenew: boolean;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/subscriptions/{userId}/activate": {
         parameters: {
             query?: never;
@@ -2496,6 +2861,9 @@ export interface paths {
                                 createdAt: string;
                                 /** Format: date-time */
                                 lastLoginAt: string | null;
+                                /** @enum {string|null} */
+                                adminRole: "super_admin" | "support" | "analyst" | "billing" | null;
+                                permissions: ("users.read" | "users.write" | "users.suspend" | "users.ban" | "users.force_logout" | "users.reset_password" | "subscriptions.read" | "subscriptions.write" | "coupons.write" | "plans.write" | "audit.read" | "analytics.read" | "system.read" | "system.write" | "feature_toggles.write" | "config.write")[];
                             }[];
                             nextCursor: string | null;
                         };
@@ -2553,6 +2921,9 @@ export interface paths {
                             createdAt: string;
                             /** Format: date-time */
                             lastLoginAt: string | null;
+                            /** @enum {string|null} */
+                            adminRole: "super_admin" | "support" | "analyst" | "billing" | null;
+                            permissions: ("users.read" | "users.write" | "users.suspend" | "users.ban" | "users.force_logout" | "users.reset_password" | "subscriptions.read" | "subscriptions.write" | "coupons.write" | "plans.write" | "audit.read" | "analytics.read" | "system.read" | "system.write" | "feature_toggles.write" | "config.write")[];
                         };
                     };
                 };
@@ -2604,6 +2975,9 @@ export interface paths {
                             createdAt: string;
                             /** Format: date-time */
                             lastLoginAt: string | null;
+                            /** @enum {string|null} */
+                            adminRole: "super_admin" | "support" | "analyst" | "billing" | null;
+                            permissions: ("users.read" | "users.write" | "users.suspend" | "users.ban" | "users.force_logout" | "users.reset_password" | "subscriptions.read" | "subscriptions.write" | "coupons.write" | "plans.write" | "audit.read" | "analytics.read" | "system.read" | "system.write" | "feature_toggles.write" | "config.write")[];
                         };
                     };
                 };
@@ -2663,6 +3037,9 @@ export interface paths {
                             createdAt: string;
                             /** Format: date-time */
                             lastLoginAt: string | null;
+                            /** @enum {string|null} */
+                            adminRole: "super_admin" | "support" | "analyst" | "billing" | null;
+                            permissions: ("users.read" | "users.write" | "users.suspend" | "users.ban" | "users.force_logout" | "users.reset_password" | "subscriptions.read" | "subscriptions.write" | "coupons.write" | "plans.write" | "audit.read" | "analytics.read" | "system.read" | "system.write" | "feature_toggles.write" | "config.write")[];
                         };
                     };
                 };
@@ -2724,6 +3101,9 @@ export interface paths {
                             createdAt: string;
                             /** Format: date-time */
                             lastLoginAt: string | null;
+                            /** @enum {string|null} */
+                            adminRole: "super_admin" | "support" | "analyst" | "billing" | null;
+                            permissions: ("users.read" | "users.write" | "users.suspend" | "users.ban" | "users.force_logout" | "users.reset_password" | "subscriptions.read" | "subscriptions.write" | "coupons.write" | "plans.write" | "audit.read" | "analytics.read" | "system.read" | "system.write" | "feature_toggles.write" | "config.write")[];
                         };
                     };
                 };
@@ -4539,7 +4919,41 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        get: {
+            parameters: {
+                query?: {
+                    filterId?: string;
+                    from?: string;
+                    to?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            filterId: string;
+                            /** Format: date-time */
+                            windowStart: string;
+                            searches: number;
+                            attempts: number;
+                            successes: number;
+                            coinsSpent: number;
+                            coinsEarned: number;
+                            coinsPerHour: number;
+                        }[];
+                    };
+                };
+            };
+        };
         put?: never;
         post: {
             parameters: {
@@ -5152,17 +5566,6 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Default Response */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            received: boolean;
-                        };
-                    };
-                };
             };
         };
         delete?: never;
@@ -5280,7 +5683,48 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        get: {
+            parameters: {
+                query?: {
+                    from?: string;
+                    to?: string;
+                    kind?: "actions_per_hour" | "session_length" | "buy_search_ratio" | "coin_flow" | "hard_stop" | "kill_switch";
+                    cursor?: string;
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: {
+                                /** Format: uuid */
+                                id: string;
+                                /** Format: uuid */
+                                deviceId: string | null;
+                                /** Format: uuid */
+                                sessionId: string | null;
+                                /** @enum {string} */
+                                kind: "actions_per_hour" | "session_length" | "buy_search_ratio" | "coin_flow" | "hard_stop" | "kill_switch";
+                                value: number;
+                                threshold: number;
+                                /** Format: date-time */
+                                occurredAt: string;
+                            }[];
+                            nextCursor: string | null;
+                        };
+                    };
+                };
+            };
+        };
         put?: never;
         post: {
             parameters: {
@@ -5321,6 +5765,66 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/users/{id}/risk-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One user's safety-governor event history. */
+        get: {
+            parameters: {
+                query?: {
+                    from?: string;
+                    to?: string;
+                    kind?: "actions_per_hour" | "session_length" | "buy_search_ratio" | "coin_flow" | "hard_stop" | "kill_switch";
+                    cursor?: string;
+                    limit?: number;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: {
+                                /** Format: uuid */
+                                id: string;
+                                /** Format: uuid */
+                                deviceId: string | null;
+                                /** Format: uuid */
+                                sessionId: string | null;
+                                /** @enum {string} */
+                                kind: "actions_per_hour" | "session_length" | "buy_search_ratio" | "coin_flow" | "hard_stop" | "kill_switch";
+                                value: number;
+                                threshold: number;
+                                /** Format: date-time */
+                                occurredAt: string;
+                            }[];
+                            nextCursor: string | null;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -6129,6 +6633,9 @@ export interface paths {
                             createdAt: string;
                             /** Format: date-time */
                             lastLoginAt: string | null;
+                            /** @enum {string|null} */
+                            adminRole: "super_admin" | "support" | "analyst" | "billing" | null;
+                            permissions: ("users.read" | "users.write" | "users.suspend" | "users.ban" | "users.force_logout" | "users.reset_password" | "subscriptions.read" | "subscriptions.write" | "coupons.write" | "plans.write" | "audit.read" | "analytics.read" | "system.read" | "system.write" | "feature_toggles.write" | "config.write")[];
                         };
                     };
                 };
@@ -6206,6 +6713,9 @@ export interface paths {
                             createdAt: string;
                             /** Format: date-time */
                             lastLoginAt: string | null;
+                            /** @enum {string|null} */
+                            adminRole: "super_admin" | "support" | "analyst" | "billing" | null;
+                            permissions: ("users.read" | "users.write" | "users.suspend" | "users.ban" | "users.force_logout" | "users.reset_password" | "subscriptions.read" | "subscriptions.write" | "coupons.write" | "plans.write" | "audit.read" | "analytics.read" | "system.read" | "system.write" | "feature_toggles.write" | "config.write")[];
                         };
                     };
                 };
