@@ -36,9 +36,9 @@ phase lands on this branch.
 | 6 Extension | TypeScript port, ranker, governor, assist, gated autobuyer, popup, options | Done | `apps/extension`, `docs/06-extension.md` |
 | 7 Dashboard | React user + admin dashboard, design system, e2e against the real API | Done | `apps/dashboard`, `packages/ui`, `docs/07-dashboard.md` |
 | 8 Analytics | KPI engine, profit analytics, reports, CSV exports, materialisation jobs | Done | `apps/api/src/modules/{analytics,admin-analytics}`, `docs/08-analytics.md` |
-| 9 Security | Hardening pass, threat model | Planned | `docs/09-security.md`, `docs/threat-model.md` |
-| 10 UI/UX | Design system polish across dashboard, popup, panel | Planned | `packages/ui`, `docs/10-design-system.md` |
-| 11 Testing | Unit, integration, e2e, load, security suites | Planned | `tests/`, `docs/12-testing.md` |
+| 9 Security | Hardening pass, 167 security tests, threat model, controls inventory | Done | `docs/09-security.md`, `docs/threat-model.md` |
+| 10 UI/UX | Design system and dashboard polish done; extension surfaces in progress | In progress | `packages/ui`, `docs/10-design-system.md` |
+| 11 Testing | Unit, integration, e2e, load, security suites | In progress | `tests/`, `docs/12-testing.md` |
 | DevOps | Docker, Compose, Caddy, CI/CD, monitoring, backups, deploy guides | Done | `infra/`, `.github/`, `docs/11-devops.md` |
 
 Follow-ups from the phase reports have been closed: users carry a
@@ -144,11 +144,13 @@ the step-by-step deployment guide live under `infra/`, `.github/` and
 | `docs/06-extension.md` | Worlds, message flows, governor math, telemetry itemisation, day-one checklist |
 | `docs/07-dashboard.md` | Routes and permissions, auth/CSRF/WS handling, tokens, components, Vercel deployment |
 | `docs/08-analytics.md` | Every metric formula, source tables, materialisation schedule, export formats |
+| `docs/09-security.md` | Controls inventory with file and test references, key rotation, open findings |
+| `docs/threat-model.md` | STRIDE per component, attack vectors with mitigations, residual risks, non-goals |
+| `docs/10-design-system.md` | Tokens, typography, components, chart rules, page specs, accessibility |
 | `docs/11-devops.md` | Local dev, environments, deployment guide, monitoring runbook, backups, readiness checklist |
 | `docs/13-roadmap.md` | Remaining phases, exit criteria, go-live checklist |
 
-Documents for security, the design system and testing are added by their
-phases.
+The testing strategy document is added by its phase.
 
 ## What this product will and will not do
 

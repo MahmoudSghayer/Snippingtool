@@ -64,16 +64,35 @@ export async function promoteToAdmin(
 /** Cleans up every fixture this suite's specs create, by email prefix, so
  * repeated local runs against the same dev database start from a known
  * state without needing a full db:reset every time (globalSetup still does
- * a full reset+seed once per run — see global-setup.ts — this is extra
+ * a full reset+seed once per run — see prepare.mjs — this is extra
  * belt-and-braces for anyone re-running a single spec file directly). */
 export async function deleteUsersByEmailPrefix(db: ReturnType<typeof connect>, prefix: string): Promise<void> {
   const rows = await db<{ id: string }[]>`select id from users where email like ${prefix + '%'}`;
   for (const { id } of rows) {
+    // admin_actions.admin_user_id -> admin_users.id (no cascade) — a fixture
+    // admin that actually performed an action during the spec (suspend,
+    // force-logout, a toggle flip, ...) leaves a real admin_actions row
+    // that must go first (reproduced while authoring journey (c)'s spec).
+    await db`delete from admin_actions where admin_user_id in (select id from admin_users where user_id = ${id})`;
     await db`delete from admin_users where user_id = ${id}`;
     await db`delete from sessions where user_id = ${id}`;
     await db`delete from devices where user_id = ${id}`;
     await db`delete from licenses where user_id = ${id}`;
+    // payments before subscriptions (payments.subscription_id FK, no
+    // cascade — deleting a subscription first is a hard FK error).
+    await db`delete from payments where user_id = ${id}`;
     await db`delete from subscriptions where user_id = ${id}`;
+    // Deliberately explicit, not left to `ip_activity.user_id`'s own
+    // `ON DELETE SET NULL`: every fixture user in one spec file shares the
+    // same loopback IP, and `ip_activity_ip_user_unique` is a `NULLS NOT
+    // DISTINCT` unique index (packages/db/migrations/0022_ip_installs.sql)
+    // — deleting a second same-IP user would SET NULL its row and collide
+    // with the first deleted user's row (also now NULL for the same ip),
+    // raising a real `duplicate key value violates unique constraint
+    // "ip_activity_ip_user_unique"` (reproduced while authoring this
+    // suite). Deleting these rows outright, before the user, sidesteps the
+    // cascade entirely rather than relying on it.
+    await db`delete from ip_activity where user_id = ${id}`;
     await db`delete from users where id = ${id}`;
   }
 }

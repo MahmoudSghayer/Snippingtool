@@ -10,54 +10,87 @@
  * a tiny price-history sparkline, session P&L, a risk budget meter, and the
  * ranker's current top candidates.
  */
+import tokensCss from '../styles/tokens.css?raw';
+
 import type { SessionPnl } from '../engine/assist.js';
 import type { RiskSnapshot } from '../engine/governor.js';
 import type { ScoredOpportunity } from '../engine/ranker.js';
 import type { PriceSummary } from '../model/prices.js';
 
+/* `tokensCss` is `styles/tokens.css`'s *text*, inlined at build time
+ * (Vite's `?raw` import) — this IS "packages/ui/src/tokens.css copied into
+ * the extension build" (PHASE 10), just one hop further than
+ * popup/options's plain `<link>`: this panel renders inside a shadow root
+ * injected into EA's own page, so it needs its custom properties declared
+ * on `:host` rather than relying on inheriting a page-level `:root` EA
+ * never defines. `:root` -> `:host` is the only transform — every value
+ * stays byte-identical to the shared file, so this palette can never drift
+ * from popup/options/dashboard by hand-edit. `/g` — the file declares
+ * `:root` twice (the main token block and again inside its
+ * `prefers-reduced-motion` query), and a shadow tree's reduced-motion
+ * override needs the same swap or it silently never applies in here. */
+const tokens = tokensCss.replace(/:root/g, ':host');
+
 const css = `
+  ${tokens}
   :host { all: initial; }
   .panel {
     position: fixed; right: 16px; bottom: 16px; z-index: 2147483000;
     width: 288px; font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-    font-size: 12px; line-height: 1.45; color: #e9eeec;
-    background: #121a17; border: 1px solid #2b3a34; border-radius: 10px;
+    font-size: 12px; line-height: 1.45; color: var(--sl-fg);
+    background: var(--sl-surface-2); border: 1px solid var(--sl-border); border-radius: var(--sl-radius-md);
     box-shadow: 0 12px 32px -12px rgba(0,0,0,.7);
     overflow: hidden;
   }
   .head {
     display: flex; align-items: center; gap: 8px;
-    padding: 9px 12px; background: #182320; border-bottom: 1px solid #2b3a34;
+    padding: 9px 12px; background: var(--sl-card); border-bottom: 1px solid var(--sl-border);
     cursor: pointer; user-select: none;
   }
-  .dot { width: 7px; height: 7px; border-radius: 50%; background: #4a5c55; flex: none; }
-  .dot.live { background: #55c08e; box-shadow: 0 0 0 3px rgba(85,192,142,.16); }
-  .dot.warn { background: #d9a03c; box-shadow: 0 0 0 3px rgba(217,160,60,.16); }
-  .dot.risk { background: #e08678; box-shadow: 0 0 0 3px rgba(224,134,120,.16); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: #4a5c55; flex: none; transition: background-color var(--sl-motion-fast) var(--sl-ease); }
+  .dot.live { background: var(--sl-positive); box-shadow: 0 0 0 3px rgba(111,191,155,.16); }
+  .dot.warn { background: var(--sl-warning); box-shadow: 0 0 0 3px rgba(214,169,78,.16); }
+  .dot.risk { background: var(--sl-negative); box-shadow: 0 0 0 3px rgba(224,134,120,.16); }
   .name { font-weight: 600; letter-spacing: .02em; flex: 1; }
-  .chev { color: #7d8f89; font-size: 11px; }
+  .chev { color: var(--sl-fg-muted); font-size: 11px; }
   .body { padding: 10px 12px 12px; max-height: 70vh; overflow-y: auto; }
   .panel.collapsed .body { display: none; }
-  .status { color: #8ea39c; margin-bottom: 10px; }
-  .status.warn { color: #e0b568; }
+  .status { color: var(--sl-fg-muted); margin-bottom: 10px; transition: color var(--sl-motion-fast) var(--sl-ease); }
+  .status.warn { color: var(--sl-warning); }
   .row { display: flex; justify-content: space-between; gap: 10px; padding: 2px 0; }
-  .row .k { color: #8ea39c; }
+  .row .k { color: var(--sl-fg-muted); }
   .row .v { font-variant-numeric: tabular-nums; font-weight: 600; }
-  .row .v.pos { color: #6fbf9b; }
-  .row .v.neg { color: #e08678; }
-  .sec { margin-top: 10px; padding-top: 9px; border-top: 1px solid #243029; }
+  .row .v.pos { color: var(--sl-positive); }
+  .row .v.neg { color: var(--sl-negative); }
+  .sec { margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--sl-border); }
   .sec h4 {
     margin: 0 0 6px; font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
-    color: #6f827b; font-weight: 600;
+    color: var(--sl-fg-muted); font-weight: 600;
   }
-  .hint { color: #6f827b; font-style: italic; }
-  .big { color: #e8c07a; }
+  .hint { color: var(--sl-fg-muted); font-style: italic; }
+  .big { color: var(--sl-gold); }
   .spark { display: flex; align-items: flex-end; gap: 1px; height: 24px; margin-top: 4px; }
   .spark i { flex: 1; background: #3a5348; border-radius: 1px; min-height: 2px; }
-  .meter { height: 5px; border-radius: 3px; background: #223028; overflow: hidden; margin-top: 3px; }
-  .meter i { display: block; height: 100%; background: #55c08e; }
-  .meter.high i { background: #d9a03c; }
-  .meter.over i { background: #e08678; }
+
+  /* Risk meter — a *segmented* gauge (PHASE 10: "segmented risk gauge"),
+     not a plain continuous bar: two always-visible tick marks (at the 80%
+     "approaching limit" and 100% "at limit" thresholds — the same two
+     bands `meterClass()` below switches color on) divide the track into
+     three zones, so the fill's proximity to a boundary reads at a glance
+     even before its color changes, not only after. `::after`'s gradient
+     ticks are purely decorative — the row above already states the
+     number, and the color change plus label below never make the zone
+     color-only. */
+  .meter { position: relative; height: 6px; border-radius: 3px; background: var(--sl-card-2); overflow: hidden; margin-top: 3px; }
+  .meter i { display: block; height: 100%; background: var(--sl-positive); transition: width var(--sl-motion-base) var(--sl-ease), background-color var(--sl-motion-base) var(--sl-ease); }
+  .meter.high i { background: var(--sl-warning); }
+  .meter.over i { background: var(--sl-negative); }
+  .meter::after {
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    background: linear-gradient(to right,
+      transparent calc(80% - 1px), var(--sl-surface-2) calc(80% - 1px), var(--sl-surface-2) 80%, transparent 80%,
+      transparent calc(100% - 1px), var(--sl-surface-2) calc(100% - 1px));
+  }
   .ranklist { display: flex; flex-direction: column; gap: 4px; }
   .rankrow { display: flex; justify-content: space-between; font-size: 11px; }
   .rankrow .ev { font-variant-numeric: tabular-nums; }

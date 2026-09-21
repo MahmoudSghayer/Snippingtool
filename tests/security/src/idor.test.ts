@@ -78,7 +78,7 @@ describe('IDOR: user A cannot read or mutate user B\'s own-scoped resources', ()
       method: 'POST',
       url: '/api/v1/filters',
       headers: bearer(userA.accessToken),
-      payload: { name: "A's secret filter", filter: { minRating: 83 }, isActive: true },
+      payload: { name: "A's secret filter", filter: { minRating: 83 } },
     });
     expect(createRes.statusCode).toBe(201);
     const filterA = createRes.json() as { id: string };
@@ -112,8 +112,10 @@ describe('IDOR: user A cannot read or mutate user B\'s own-scoped resources', ()
       payload: {
         trades: [
           {
+            id: '01900000-0000-7000-8000-000000000001',
             tradeId: 'idor-trade-1',
             resourceId: 111,
+            assetId: null,
             rating: 83,
             buyPrice: 1000,
             sellPrice: 1400,

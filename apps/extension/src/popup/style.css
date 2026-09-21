@@ -1,14 +1,11 @@
-:root {
-  --ground: #0d1311;
-  --surface: #151d1a;
-  --border: #2b3a34;
-  --text: #e9eeec;
-  --muted: #8ea39c;
-  --gold: #ddb35c;
-  --green: #55c08e;
-  --red: #e08678;
-  color-scheme: dark;
-}
+/* popup/style.css — consumes the shared tokens from ../styles/tokens.css
+ * (linked before this file in index.html), not its own hand-rolled palette,
+ * so the popup, options page, in-page panel and dashboard stay one visual
+ * system (docs/10-design-system.md). 360×600 is the target popup size (the
+ * brief's own number, and comfortably inside Chrome's ~800px popup ceiling)
+ * — width is fixed, height grows with content up to 600px and then scrolls,
+ * so a long device/filter list never gets clipped without a way to reach
+ * the rest of it. */
 
 * {
   box-sizing: border-box;
@@ -16,10 +13,13 @@
 
 body {
   margin: 0;
-  width: 320px;
-  background: var(--ground);
-  color: var(--text);
+  width: 360px;
+  max-height: 600px;
+  overflow-y: auto;
+  background: var(--sl-bg);
+  color: var(--sl-fg);
   font-family:
+    Inter,
     system-ui,
     -apple-system,
     'Segoe UI',
@@ -33,6 +33,7 @@ body {
 
 h1 {
   font-size: 14px;
+  font-weight: 600;
   margin: 0 0 10px;
   display: flex;
   align-items: center;
@@ -44,21 +45,26 @@ h1 {
   height: 8px;
   border-radius: 50%;
   background: #4a5c55;
+  flex: none;
+  transition: background-color var(--sl-motion-fast) var(--sl-ease);
 }
 .dot.live {
-  background: var(--green);
+  background: var(--sl-positive);
+  box-shadow: 0 0 0 3px rgb(111 191 155 / 16%);
 }
 .dot.warn {
-  background: var(--gold);
+  background: var(--sl-warning);
+  box-shadow: 0 0 0 3px rgb(214 169 78 / 16%);
 }
 .dot.risk {
-  background: var(--red);
+  background: var(--sl-negative);
+  box-shadow: 0 0 0 3px rgb(224 134 120 / 16%);
 }
 
 .card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  background: var(--sl-card);
+  border: 1px solid var(--sl-border);
+  border-radius: var(--sl-radius-md);
   padding: 10px 12px;
   margin-bottom: 10px;
 }
@@ -66,59 +72,124 @@ h1 {
 .row {
   display: flex;
   justify-content: space-between;
+  gap: 10px;
   padding: 3px 0;
 }
 .row .k {
-  color: var(--muted);
+  color: var(--sl-fg-muted);
 }
 .row .v {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-variant-numeric: tabular-nums;
   font-weight: 600;
+}
+.row .v.pos {
+  color: var(--sl-positive);
+}
+.row .v.neg {
+  color: var(--sl-negative);
+}
+
+.hint {
+  color: var(--sl-fg-muted);
+  font-size: 12px;
+  margin: 0 0 10px;
+}
+
+label {
+  display: block;
+  font-size: 11px;
+  color: var(--sl-fg-muted);
+  margin-bottom: 4px;
 }
 
 input {
   width: 100%;
   padding: 7px 9px;
   margin-bottom: 8px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--ground);
-  color: var(--text);
+  border-radius: var(--sl-radius-sm);
+  border: 1px solid var(--sl-border);
+  background: var(--sl-bg);
+  color: var(--sl-fg);
+  font: inherit;
+}
+input:focus-visible {
+  outline: 2px solid var(--sl-accent);
+  outline-offset: 1px;
 }
 
 button {
   width: 100%;
   padding: 8px 10px;
-  border-radius: 6px;
+  border-radius: var(--sl-radius-sm);
   border: none;
-  background: var(--gold);
-  color: #221a0b;
+  background: var(--sl-accent);
+  color: var(--sl-accent-ink);
+  font: inherit;
   font-weight: 600;
   cursor: pointer;
+  transition:
+    filter var(--sl-motion-fast) var(--sl-ease),
+    opacity var(--sl-motion-fast) var(--sl-ease);
+}
+button:hover {
+  filter: brightness(1.08);
+}
+button:active {
+  filter: brightness(0.95);
+}
+button:focus-visible {
+  outline: 2px solid var(--sl-accent);
+  outline-offset: 2px;
 }
 button.secondary {
   background: transparent;
-  color: var(--text);
-  border: 1px solid var(--border);
+  color: var(--sl-fg);
+  border: 1px solid var(--sl-border);
+}
+button.secondary:hover {
+  background: var(--sl-card-2);
 }
 
 .error {
-  color: var(--red);
+  color: var(--sl-negative);
   font-size: 12px;
   margin: -4px 0 8px;
 }
 
 .meter {
-  height: 5px;
+  position: relative;
+  height: 6px;
   border-radius: 3px;
-  background: #223028;
+  background: var(--sl-card-2);
   overflow: hidden;
   margin-top: 3px;
 }
 .meter i {
   display: block;
   height: 100%;
-  background: var(--green);
+  background: var(--sl-positive);
+  transition: width var(--sl-motion-base) var(--sl-ease);
+}
+/* Segment ticks at the 80% ("high") and 100% ("over") thresholds — the same
+ * two bands ui/panel.ts's risk meters use, so a glance at either surface
+ * reads the same way. Purely decorative (the color change + the numeric
+ * row above it already carry the status without color alone), so
+ * `aria-hidden` isn't needed on a background pseudo-element. */
+.meter::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to right,
+    transparent calc(80% - 1px),
+    var(--sl-bg) calc(80% - 1px),
+    var(--sl-bg) 80%,
+    transparent 80%,
+    transparent calc(100% - 1px),
+    var(--sl-bg) calc(100% - 1px)
+  );
+  pointer-events: none;
 }
 
 .toggle-row {
@@ -128,11 +199,15 @@ button.secondary {
 }
 
 .link {
-  color: var(--muted);
+  color: var(--sl-fg-muted);
   text-decoration: underline;
   cursor: pointer;
   background: none;
   border: none;
   padding: 0;
   font: inherit;
+}
+.link:focus-visible {
+  outline: 2px solid var(--sl-accent);
+  outline-offset: 2px;
 }

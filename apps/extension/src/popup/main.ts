@@ -1,7 +1,17 @@
 /*
- * popup/main.ts — status, login/2FA form, current card, risk meter, quick
- * toggles. Vanilla TS (no framework — the popup is small enough that a
- * dependency would cost more than it saves, see docs/06-extension.md).
+ * popup/main.ts — status, login/2FA form, plan/license summary, telemetry
+ * toggle, quick links. Vanilla TS (no framework — the popup is small enough
+ * that a dependency would cost more than it saves, see
+ * docs/06-extension.md). The *live* risk budget meter — the governor's
+ * actions/hour, buy:search ratio and coin-flow numbers this file's header
+ * comment used to promise — lives in `ui/panel.ts` instead: the governor
+ * only runs inside the content script attached to the EA tab (PHASE 10's
+ * file-ownership boundary keeps this file from adding a new
+ * background/index.ts message handler to relay it, and reconstructing that
+ * safety-critical number here from raw serialized state without the
+ * governor's own math would risk showing a wrong one — worse than not
+ * showing one at all). This popup instead points at it (see
+ * `renderLoggedIn`'s "Risk budget" card).
  */
 import browser from 'webextension-polyfill';
 
@@ -112,6 +122,11 @@ async function renderLoggedIn(): Promise<void> {
       <div class="row"><span class="k">Auctions recorded</span><span class="v">${(counts?.auctions ?? 0).toLocaleString('en-US')}</span></div>
       <div class="row"><span class="k">Players seen today</span><span class="v">${(counts?.playersLast24h ?? 0).toLocaleString('en-US')}</span></div>
       ${killSwitch ? '<div class="error">Kill switch active — all actions are blocked.</div>' : ''}
+    </div>
+    <div class="card">
+      <div class="row"><span class="k">Risk budget</span><span class="v">${killSwitch ? 'Halted' : 'Tracked live on the EA page'}</span></div>
+      <p class="hint" style="margin:6px 0 0;">Actions/hour, buy:search ratio and coin flow open in the on-page panel while you're
+        sniping — this popup only shows account-level status.</p>
     </div>
     <div class="card toggle-row">
       <span>Telemetry</span>

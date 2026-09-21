@@ -10124,25 +10124,6 @@
                 }
               }
             }
-          },
-          "400": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "received": {
-                      "type": "boolean"
-                    }
-                  },
-                  "required": [
-                    "received"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
           }
         }
       }

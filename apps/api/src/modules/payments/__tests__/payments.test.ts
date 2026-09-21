@@ -126,10 +126,16 @@ describe('payments module', () => {
       payload,
       headers: { 'content-type': 'application/json', 'stripe-signature': wrongSecretHeader },
     });
-    // STRIPE_WEBHOOK_SECRET is unset in this test env, so getStripeConfig()
-    // itself throws INTERNAL before signature verification is even reached
-    // — either way, a mismatched/misconfigured webhook never returns 200.
-    expect(res.statusCode).not.toBe(200);
+    // STRIPE_WEBHOOK_SECRET is unset in this test env, so `getStripeConfig`
+    // itself throws before `constructEvent` is ever reached — the route
+    // handler catches that alongside a genuine signature mismatch and
+    // throws the same `AppErrors.validation` 400 either way (rendered as
+    // the app-wide `{code, message, requestId}` envelope, never a raw 500
+    // to an unauthenticated, internet-facing endpoint) — see
+    // tests/security/src/webhook-signature.test.ts for the dedicated
+    // missing-header / forged-signature coverage.
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe('VALIDATION_FAILED');
   });
 
   it('receiveWebhookEvent is idempotent: the same event.id delivered twice only processes once', async () => {

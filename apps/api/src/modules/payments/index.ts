@@ -159,24 +159,50 @@ export default fp(
           schema: {
             tags: ['payments'],
             summary: 'Stripe webhook receiver — signature-verified, idempotent.',
-            response: { 200: z.object({ received: z.boolean() }), 400: z.object({ received: z.boolean() }) },
+            // Only the success shape is declared (docs/09-security.md
+            // "Stripe webhook"): every failure below is a `throw
+            // AppErrors...`, rendered by the app-wide error handler
+            // (plugins/error-handler.ts) as the standard `{code, message,
+            // requestId}` envelope every other route's errors use. A
+            // previous version of this route declared its own `400:
+            // {received: boolean}` shape and manually `reply.status(400)
+            // .send({received: false})`-ed on a bad signature instead of
+            // throwing — that meant a *different* failure on this same
+            // route (e.g. the missing-header check above, which does
+            // throw) rendered the standard envelope against a response
+            // schema that only allows `{received: boolean}`, which fails
+            // zod response serialization and turns a clean 400 into a 500.
+            // Stripe only acts on the HTTP status code for webhooks, never
+            // the response body, so there is no contract reason to keep a
+            // bespoke error body here.
+            response: { 200: z.object({ received: z.boolean() }) },
           },
         },
-        async (request, reply) => {
+        async (request) => {
           const signature = request.headers['stripe-signature'];
           if (!signature || typeof signature !== 'string') {
             throw AppErrors.validation('Missing stripe-signature header.');
           }
 
-          const stripe = getStripeClient(fastify.config);
-          const config = getStripeConfig(fastify.config);
-
+          // `getStripeConfig`/`constructEvent` are both inside this one try:
+          // this endpoint is unauthenticated and internet-facing by
+          // necessity (Stripe itself calls it), so a server-side
+          // misconfiguration (Stripe env vars unset/misspelled) must fail
+          // exactly the same way a forged signature does — a plain 400 —
+          // rather than leaking a 500 to an anonymous caller. Ops still
+          // sees the real cause in the log line below (`err.message`
+          // distinguishes "missing config" from a genuine signature
+          // mismatch); Stripe's own retry/alerting on repeated failures
+          // covers the "nobody noticed the deploy is misconfigured" case.
           let event;
+          let stripe;
           try {
+            stripe = getStripeClient(fastify.config);
+            const config = getStripeConfig(fastify.config);
             event = stripe.webhooks.constructEvent(request.body as Buffer, signature, config.webhookSecret);
           } catch (err) {
-            fastify.log.warn({ err }, 'stripe webhook signature verification failed');
-            return reply.status(400).send({ received: false });
+            fastify.log.warn({ err }, 'stripe webhook signature verification failed (or Stripe is not configured)');
+            throw AppErrors.validation('Stripe signature verification failed.');
           }
 
           await receiveWebhookEvent(fastify.db, fastify.redis, stripe, event);

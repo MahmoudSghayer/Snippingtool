@@ -26,6 +26,25 @@ async function postJson(baseURL: string, path: string, body: unknown): Promise<{
   return { status: res.status, json };
 }
 
+/** Registers + verifies (direct DB) a fresh user WITHOUT logging in or
+ * registering any device — for a caller (journey (b)) that wants the
+ * extension itself to be the one that logs in and registers the first
+ * device, so it doesn't pre-consume the account's one-device trial-floor
+ * limit (docs/05-subscriptions.md §1) with a fixture device that isn't the
+ * one under test. */
+export async function registerAndVerifyOnly(baseURL: string, email: string): Promise<{ userId: string }> {
+  const register = await postJson(baseURL, '/api/v1/auth/register', { email, password: TEST_PASSWORD, device: deviceFingerprint('register-only') });
+  if (register.status !== 201) throw new Error(`registerAndVerifyOnly: register failed (${register.status}): ${JSON.stringify(register.json)}`);
+  const { userId } = register.json as { userId: string };
+  const db = connect();
+  try {
+    await markEmailVerified(db, email);
+  } finally {
+    await db.end({ timeout: 5 });
+  }
+  return { userId };
+}
+
 /** Registers a fresh user, verifies it (direct DB — see helpers/db.ts) and
  * logs in. Returns tokens plus the device fingerprint used, so a caller
  * that also needs to hit `GET /devices` can match on it. */

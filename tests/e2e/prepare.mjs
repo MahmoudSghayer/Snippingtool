@@ -1,19 +1,19 @@
-// Runs once before the whole tests/e2e run: resets + migrates + seeds the
-// target database (DATABASE_URL — the dev DB, sniper_ledger, by default; see
-// docs/12-testing.md "tests/e2e" for why a *fresh* reset+seed and not the
-// dev DB's current live state — this suite's journeys assert on rows that
-// must not already exist, e.g. "the seeded admin's audit log has exactly
-// this one new entry"), then builds the `ledger` extension target pointed
-// at this run's API origin (tests/e2e's own build, not
-// apps/extension/dist/ledger — see build-extension.mjs's header for why a
-// separate build is needed).
+#!/usr/bin/env node
+// Resets + migrates + seeds the target database, then builds the `ledger`
+// extension target for this run — and does it *before* apps/api's own
+// process starts (see playwright.config.ts's first `webServer` entry, which
+// chains this script ahead of `tsx src/server.ts` with `&&`).
 //
-// apps/api, apps/api's worker and apps/dashboard are started by
-// playwright.config.ts's `webServer` array (like apps/dashboard/e2e's own
-// config does for api+dashboard) rather than hand-rolled here — Playwright
-// already health-checks, retries and tears each one down for us; this file
-// is only what needs to run strictly *before* any of them start (the reset)
-// or that they don't cover (the extension build).
+// This was originally Playwright's own `globalSetup` hook instead — moved
+// here after confirming empirically (while authoring this suite) that
+// Playwright starts every `webServer` entry *before* running `globalSetup`,
+// not after: with `globalSetup` doing the DB reset, `apps/api`'s process was
+// already up, connected, and answering `/health/ready` by the time the
+// reset (`DROP SCHEMA public CASCADE`, packages/db/src/reset.ts) ran against
+// the same database — corrupting that already-open connection pool's cached
+// relation state for the rest of the run. Chaining this script as a prefix
+// to the API's own start command guarantees the reset finishes, and the
+// extension is built, before `tsx src/server.ts` ever binds a connection.
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -36,17 +36,20 @@ const SEED_ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? 'Admin-Passw0rd!'
 // else attached to it) and never sets this.
 const SKIP_RESET = process.env.E2E_SKIP_DB_RESET === '1';
 
-export default async function globalSetup(): Promise<void> {
+async function main() {
   const env = { ...process.env, DATABASE_URL, SEED_ADMIN_EMAIL, SEED_ADMIN_PASSWORD };
 
   if (!SKIP_RESET) {
-    console.log(`[tests/e2e globalSetup] db:reset + seed against ${DATABASE_URL.replace(/:[^:@]*@/, ':***@')} ...`);
+    console.warn(`[tests/e2e prepare] db:reset + seed against ${DATABASE_URL.replace(/:[^:@]*@/, ':***@')} ...`);
     execFileSync('pnpm', ['--filter', '@sl/db', 'db:reset'], { cwd: repoRoot, stdio: 'inherit', env });
     execFileSync('pnpm', ['--filter', '@sl/db', 'seed'], { cwd: repoRoot, stdio: 'inherit', env });
   } else {
-    console.log('[tests/e2e globalSetup] E2E_SKIP_DB_RESET=1 — reusing the database as-is.');
+    console.warn('[tests/e2e prepare] E2E_SKIP_DB_RESET=1 — reusing the database as-is.');
   }
 
-  console.log('[tests/e2e globalSetup] building the ledger extension target for this run...');
+  console.warn('[tests/e2e prepare] building the ledger extension target for this run...');
   await buildExtension();
+  console.warn('[tests/e2e prepare] done.');
 }
+
+await main();

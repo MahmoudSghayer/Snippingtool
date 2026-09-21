@@ -4,7 +4,16 @@
   "compilerOptions": {
     "outDir": "dist",
     "rootDir": ".",
-    "noEmit": true
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": false,
+    // "DOM" + @types/chrome: this package's specs mix ordinary Node-side
+    // Playwright test code with `page.evaluate()` callbacks that run
+    // *inside* the browser (including, in tests/e2e/specs/b-extension-…,
+    // inside an extension page with the `chrome.*` APIs available) —
+    // mirrors apps/extension's own tsconfig needing both worlds typed.
+    "lib": ["ES2023", "DOM"],
+    "types": ["node", "chrome"]
   },
   "include": ["e2e/**/*.ts"],
   "exclude": ["load/**", "node_modules", "dist", ".artifacts"]

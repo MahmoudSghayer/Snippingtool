@@ -138,6 +138,18 @@ const envSchema = z.object({
   // --- Misc ---
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional(),
   SEED_ADMIN_EMAIL: z.string().optional(),
+
+  // --- IP monitoring / geo enrichment (docs/09-security.md "IP monitoring") ---
+  // Declared here (rather than left as an ad hoc `process.env` read) so
+  // they're validated and documented like every other env var; `lib/geoip.ts`
+  // still reads `process.env` directly (its `getGeoIpProvider()` is called
+  // outside request context, before `fastify.config` exists in some call
+  // sites), but an operator setting `GEOIP_PROVIDER` to anything other than
+  // the three supported values now fails fast at boot instead of silently
+  // falling back to the no-op provider.
+  GEOIP_PROVIDER: z.enum(['noop', 'maxmind', 'ipinfo']).default('noop'),
+  GEOIP_MAXMIND_DB_PATH: z.string().optional(),
+  IPINFO_TOKEN: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

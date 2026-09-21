@@ -1,0 +1,91 @@
+/**
+ * The Sniper's Ledger — design tokens, synced from `packages/ui/src/tokens.css`
+ * (PHASE 10, "shared tokens: copy packages/ui/src/tokens.css into the
+ * extension build, no React"). This IS a copy, not an import — the
+ * extension has no dependency on `@sl/ui` (a React component library) and
+ * ships as a plain MV3 build, so the values are duplicated here rather than
+ * pulled in at build time. Keep this file's `:root` block byte-for-byte
+ * identical to `packages/ui/src/tokens.css`'s (minus the chart-series ramp,
+ * which nothing in the extension renders) whenever that file's palette
+ * changes, so the dashboard, popup, options page and in-page panel read as
+ * one product (docs/10-design-system.md §1 "Color carries meaning,
+ * consistently").
+ *
+ * Consumed two ways:
+ *  - `popup/index.html` and `options/index.html` `<link>` this file
+ *    directly — both run in the extension's own `chrome-extension://`
+ *    origin, an ordinary document `<head>`, no different from any other
+ *    page.
+ *  - `ui/panel.ts` imports this file's text at build time
+ *    (`?raw`) and swaps `:root` for `:host`, because it renders inside a
+ *    shadow root injected into EA's page — custom properties are inherited
+ *    properties, but nothing on EA's own page defines `--sl-*`, so the
+ *    shadow tree needs its own top-level declaration rather than relying on
+ *    inheritance from a `:root` it isn't part of.
+ */
+
+:root {
+  /* Surfaces */
+  --sl-ground: #0d1311;
+  --sl-surface: #151d1a;
+  --sl-surface-2: #1b2522;
+  --sl-line: #242f2b;
+
+  /* Ink */
+  --sl-ink: #e7edea;
+  --sl-ink-2: #94a49e;
+
+  /* Accents */
+  --sl-gold: #ddb35c;
+  --sl-gold-ink: #221a0b;
+  --sl-green: #6fbf9b;
+  --sl-red: #e08678;
+  --sl-mid: #d6a94e;
+
+  /* Semantic aliases */
+  --sl-bg: var(--sl-ground);
+  --sl-card: var(--sl-surface);
+  --sl-card-2: var(--sl-surface-2);
+  --sl-border: var(--sl-line);
+  --sl-fg: var(--sl-ink);
+  --sl-fg-muted: var(--sl-ink-2);
+  --sl-accent: var(--sl-gold);
+  --sl-accent-ink: var(--sl-gold-ink);
+  --sl-positive: var(--sl-green);
+  --sl-negative: var(--sl-red);
+  --sl-warning: var(--sl-mid);
+
+  /* Radii */
+  --sl-radius-sm: 6px;
+  --sl-radius-md: 10px;
+  --sl-radius-lg: 14px;
+
+  /* Motion */
+  --sl-motion-fast: 150ms;
+  --sl-motion-base: 200ms;
+  --sl-motion-slow: 250ms;
+  --sl-ease: cubic-bezier(0.4, 0, 0.2, 1);
+
+  color-scheme: dark;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --sl-motion-fast: 0ms;
+    --sl-motion-base: 0ms;
+    --sl-motion-slow: 0ms;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+body {
+  background-color: var(--sl-bg);
+  color: var(--sl-fg);
+}

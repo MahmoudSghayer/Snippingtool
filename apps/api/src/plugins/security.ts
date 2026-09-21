@@ -28,6 +28,12 @@ export default fp(
         },
       },
       crossOriginResourcePolicy: { policy: 'same-site' },
+      // X-Frame-Options: DENY (helmet's own default is SAMEORIGIN) — this
+      // JSON API has no "same origin" that should ever frame it either;
+      // `contentSecurityPolicy.frameAncestors: 'none'` above is the modern
+      // equivalent and takes precedence in any browser that honours CSP,
+      // this is the legacy fallback for the (now rare) ones that don't.
+      frameguard: { action: 'deny' },
       // `no-referrer` (helmet's own default, restated here so it's an
       // explicit decision, not an implicit one a future helmet major could
       // silently change) — this API never wants the caller's prior URL,

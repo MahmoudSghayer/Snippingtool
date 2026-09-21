@@ -9,9 +9,9 @@
 // `:id` (NIL_LIKE_UUID) still hits the permission gate first, exactly the
 // same as a real one would.
 
-import { ADMIN_ROLES, PERMISSION_MATRIX, hasPermission, type AdminRole, type Permission } from '@sl/shared';
 import { resetDatabase } from '@sl/db/test-utils';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { ADMIN_ROLES, PERMISSION_MATRIX, hasPermission, type AdminRole, type Permission } from '@sl/shared';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { NIL_LIKE_UUID, bearer, createAdminSession, buildTestApp, type TestApp } from './helpers.js';
 

@@ -179,10 +179,24 @@ export const NIL_LIKE_UUID = '00000000-0000-0000-0000-000000000000';
 
 /** Builds the real app (via `@sl/api/app`'s `buildApp()`) and asserts it's
  * ready. One call per test file's `beforeAll`, matching @sl/api's own
- * convention. */
+ * convention.
+ *
+ * `logger: { level: 'error' }`, not `false`: `plugins/error-handler.ts`
+ * only logs at `.error` for a genuinely unexpected failure (an `AppError`
+ * with `status >= 500`, or anything that isn't an `AppError`/zod validation
+ * error at all) — every ordinary 4xx (expected in most of this package's
+ * own assertions) logs at `.info` and stays silent here. So this prints
+ * nothing for the expected-rejection tests that make up most of this
+ * package, and a full stack trace the moment a test's "expected 4xx" comes
+ * back a 500 instead — which is exactly the failure mode this package's
+ * own tests exist to catch, and stack-trace-free `expect(...).toBe(...)`
+ * diffs alone made two real bugs (an `isAppError` cross-realm `instanceof`
+ * gap — see lib/errors.ts — and a route's `400` response schema colliding
+ * with the app-wide error envelope) much harder to find than they needed
+ * to be. */
 export async function buildTestApp(): Promise<TestApp> {
   const { buildApp } = await import('@sl/api/app');
-  const app = (await buildApp({ logger: false })) as TestApp;
+  const app = (await buildApp({ logger: { level: 'error' } })) as TestApp;
   await app.ready();
   return app;
 }

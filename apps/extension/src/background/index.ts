@@ -10,6 +10,7 @@
  * origin survives a clear of ea.com's site data — that part of milestone 1
  * is unchanged, just typed and merged into this larger message router.
  */
+import { backgroundMessageEnvelopeSchema, updateUserSettingsRequestSchema } from '@sl/shared';
 import browser from 'webextension-polyfill';
 
 import { logger } from '../lib/logger.js';
@@ -30,7 +31,9 @@ import {
 import { ensureFlushAlarm, handleTelemetryEnqueue, handleTelemetryFlush, onFlushAlarm } from './telemetry.js';
 import { installUpdateHandler } from './update.js';
 
-import type { BackgroundMessageEnvelope, BackgroundResponse } from '@sl/shared';
+
+import type { BackgroundResponse } from '@sl/shared';
+import type { Runtime } from 'webextension-polyfill';
 
 const WINDOW_MS = 7 * 24 * 60 * 60 * 1000; // a week of history per card
 
@@ -87,17 +90,46 @@ const handlers: Record<string, Handler> = {
   },
 };
 
+// Per-type payload validation (docs/09-security.md "Extension"): reuses the
+// exact same zod schema the *server* validates this payload against where
+// one already exists in `@sl/shared`, so the two never drift. Deliberately
+// small — only the handlers whose payload shape already has a ready-made,
+// exactly-matching shared schema are listed; every other handler still
+// gets the envelope-level check below plus the try/catch's crash safety
+// net (an `async` handler's thrown `TypeError` from a malformed payload
+// always becomes a rejected promise, never an uncaught exception in the
+// service worker). See docs/09-security.md "Open findings" for the exact
+// diff to extend this to the remaining handlers.
+const payloadSchemas: Partial<Record<string, { safeParse: (v: unknown) => { success: boolean } }>> = {
+  'settings.set': updateUserSettingsRequestSchema,
+};
+
 // webextension-polyfill's promise-based `onMessage` API: a listener that
 // returns a `Promise<unknown>` (rather than the raw MV3 callback +
 // `return true` dance) resolves as the response. Any message type this
 // router doesn't recognise is left for another listener by returning
 // `undefined` synchronously.
-browser.runtime.onMessage.addListener((message: unknown, _sender: unknown): Promise<BackgroundResponse> | undefined => {
-  const envelope = message as BackgroundMessageEnvelope | null;
-  if (!envelope || typeof envelope.type !== 'string') return undefined;
+browser.runtime.onMessage.addListener((message: unknown, sender: Runtime.MessageSender): Promise<BackgroundResponse> | undefined => {
+  // Origin check (docs/09-security.md "Extension"): only ever act on a
+  // message this exact extension install sent itself — `sender.id` is set
+  // by the browser, not by the sender, so a content script cannot spoof it.
+  // `externally_connectable` is never declared in the manifest, so in
+  // practice no other extension/page can reach this listener at all; this
+  // is defense in depth against that assumption ever quietly changing.
+  if (sender.id !== browser.runtime.id) return undefined;
+
+  const parsed = backgroundMessageEnvelopeSchema.safeParse(message);
+  if (!parsed.success) return undefined;
+  const envelope = parsed.data;
   const handler = handlers[envelope.type];
   if (!handler) return undefined;
   const type = envelope.type;
+
+  const payloadSchema = payloadSchemas[type];
+  if (payloadSchema && !payloadSchema.safeParse(envelope.payload).success) {
+    logger.warn(`rejected '${type}': payload failed schema validation`, 'background');
+    return Promise.resolve({ ok: false, error: 'Invalid message payload.' });
+  }
 
   return handler(envelope.payload)
     .then((data): BackgroundResponse => ({ ok: true, data }))

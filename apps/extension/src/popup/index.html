@@ -3,7 +3,20 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
     <title>Sniper's Ledger</title>
+    <!-- The popup runs in the extension's own chrome-extension:// origin
+         (not injected into EA's page like ui/panel.ts), so loading Google
+         Fonts here has no page-CSP or host_permissions implication —
+         see docs/10-design-system.md's extension section for why the
+         in-page panel deliberately does NOT do this. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="../styles/tokens.css" />
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>

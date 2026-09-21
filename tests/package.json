@@ -7,7 +7,7 @@
   "scripts": {
     "test:e2e": "playwright test -c e2e/playwright.config.ts",
     "test:e2e:headed": "PWDEBUG=0 playwright test -c e2e/playwright.config.ts --headed",
-    "lint": "eslint . --max-warnings=0",
+    "lint": "eslint e2e load/setup load/run.mjs load/autocannon-fallback.mjs --max-warnings=0",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "load:provision": "tsx load/setup/provision.mjs",
     "load:smoke": "node load/run.mjs smoke",
@@ -20,8 +20,10 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.49.1",
+    "autocannon": "^7.15.0",
     "@sl/api": "workspace:*",
     "@sl/config": "workspace:*",
+    "@types/chrome": "^0.0.287",
     "@types/node": "^22.10.5",
     "@types/ws": "^8.5.13",
     "dotenv": "^16.4.7",

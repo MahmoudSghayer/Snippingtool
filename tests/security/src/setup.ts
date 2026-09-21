@@ -3,9 +3,10 @@
 // tests do, without duplicating a second copy of those dev secrets. See
 // README.md for the env vars to set before running this package standalone
 // (TEST_DATABASE_URL, REDIS_TEST_DB).
+import { fileURLToPath } from 'node:url';
+
 import { config } from 'dotenv';
 
-import { fileURLToPath } from 'node:url';
 
 config({ path: fileURLToPath(new URL('../../../apps/api/.env', import.meta.url)) });
 

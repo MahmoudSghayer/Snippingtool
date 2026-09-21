@@ -49,6 +49,28 @@ export const AppErrors = {
   killSwitchActive: () => new AppError('KILL_SWITCH_ACTIVE', 'The kill switch is active.'),
 };
 
+/**
+ * `instanceof AppError` alone is not reliable across every module-loading
+ * setup this repo runs under: a test runner that transforms/re-evaluates
+ * part of a dependency graph (observed with `tests/security`, which loads
+ * the built `@sl/api/app` through Vitest's own module runner) can end up
+ * with two distinct `AppError` class objects — one this file's own
+ * `throw new AppError(...)` call sites construct against, another
+ * `error-handler.ts`'s `instanceof` check compares against — even though
+ * both come from the same compiled file. When that happens `instanceof`
+ * silently returns `false` and a clean 4xx AppError falls through to the
+ * generic "Unhandled error" 500 branch, which is worse than a merely
+ * cosmetic test failure: it turns an intentional 400/403/404 into a 500 in
+ * whatever environment triggers the double-instantiation. This is
+ * therefore duck-typed as a fallback: an object is treated as an AppError
+ * if `instanceof` doesn't already confirm it AND it has the exact shape
+ * this class always produces (`name === 'AppError'` plus a numeric
+ * `status` and string `code`, both of which only this class's constructor
+ * ever sets together).
+ */
 export function isAppError(error: unknown): error is AppError {
-  return error instanceof AppError;
+  if (error instanceof AppError) return true;
+  if (!(error instanceof Error) || error.name !== 'AppError') return false;
+  const candidate = error as AppError;
+  return typeof candidate.status === 'number' && typeof candidate.code === 'string';
 }

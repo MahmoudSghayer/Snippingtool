@@ -37,7 +37,9 @@ pnpm-debug.log*
 
 # tests/load & tests/e2e generated artifacts: provisioned test-user
 # credentials/secrets (never committed), k6 JSON result summaries, and the
-# extension build tests/e2e produces for itself (see tests/e2e/build-extension.mjs)
+# extension build tests/e2e produces for itself (see tests/e2e/build-extension.mjs).
+# (tests/test-results/ — where Playwright's default outputDir actually lands,
+# since `@sl/tests`'s scripts run with cwd=tests/ — is already covered by the
+# blanket `test-results/` pattern above.)
 tests/load/.artifacts/
 tests/e2e/.artifacts/
-tests/e2e/test-results/

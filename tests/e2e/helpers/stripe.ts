@@ -4,7 +4,7 @@
 // apps/api/src/modules/payments/__tests__/payments.test.ts's own approach
 // and comment ("never a real network call... this file's local crypto
 // helpers only"). The API process this suite drives is started
-// (global-setup.ts) with a known STRIPE_WEBHOOK_SECRET specifically so this
+// (prepare.mjs) with a known STRIPE_WEBHOOK_SECRET specifically so this
 // helper can sign against it.
 import Stripe from 'stripe';
 

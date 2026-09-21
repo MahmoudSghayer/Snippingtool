@@ -11,12 +11,13 @@
 // feature is built to tolerate (see `recordSuspiciousIpIfAny`: a null
 // country never raises a flag, it just skips the check).
 //
-// NOTE for docs/09-security.md "Open findings": these three env vars
-// (`GEOIP_PROVIDER`, `GEOIP_MAXMIND_DB_PATH`, `IPINFO_TOKEN`) are read
-// directly from `process.env` here rather than through `config/env.ts`'s
-// zod schema, because that file is owned by another in-flight agent this
-// pass must not edit. They are optional and additive; the exact schema
-// fields to add there are written up in docs/09-security.md.
+// These three env vars are also declared in `config/env.ts`'s zod schema
+// (validated + documented there, and `GEOIP_PROVIDER` fails fast at boot if
+// set to anything other than `noop`/`maxmind`/`ipinfo`) — this file still
+// reads `process.env` directly rather than `fastify.config` because
+// `getGeoIpProvider()` is called from a default parameter value
+// (`upsertIpActivity`'s `provider = getGeoIpProvider()`), outside any
+// request/Fastify-instance context.
 
 export interface GeoIpLookupResult {
   country: string | null;
