@@ -1,11 +1,8 @@
 import {
   AreaChart,
   BarChart,
-  Button,
   Card,
   CardContent,
-  CardHeader,
-  CardTitle,
   ChartCard,
   ChartLegend,
   DataTable,
@@ -13,7 +10,9 @@ import {
   defaultDateRange,
   EmptyState,
   formatCoins,
+  FormField,
   PageHeader,
+  Select,
   seriesLegendItems,
   Tabs,
   TabsContent,
@@ -27,7 +26,7 @@ import { useState } from 'react';
 
 import { api } from '@/api/client.js';
 
-import type { ActivityAnalyticsPoint } from '@sl/shared';
+import type { ActivityAnalyticsPoint, FilterStats } from '@sl/shared';
 
 
 const snipeOutcomeSeries = [
