@@ -37,6 +37,7 @@ export default fp(
       '/api/v1/activity/batch',
       {
         onRequest: [fastify.authenticate],
+        preHandler: [fastify.verifyCsrf],
         config: { rateLimit: INGEST_RATE_LIMIT },
         schema: { tags: ['activity'], body: activityIngestBatchSchema, response: { 200: z.object({ accepted: z.number(), deduped: z.number() }) } },
       },

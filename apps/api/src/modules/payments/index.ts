@@ -24,6 +24,24 @@ import { receiveWebhookEvent } from './webhooks.js';
 
 import type { FastifyInstance } from 'fastify';
 
+// Open-redirect guard (docs/09-security.md "Open redirect"): `successUrl`/
+// `cancelUrl`/`returnUrl` are caller-supplied (Stripe Checkout/Portal's own
+// API contract requires the caller to pass them), so without this check a
+// forged request could hand back an attacker-controlled `checkoutUrl` for
+// the dashboard's own JS to `window.location`-redirect to (the free-coupon
+// path in particular echoes `successUrl` straight back — see below). Every
+// redirect target this module accepts must therefore start with the
+// configured dashboard origin; nothing here ever needs to redirect anywhere
+// else. `preHandler: [fastify.verifyCsrf]` (added to both routes below)
+// closes the CSRF half of this same risk; this closes the "even a same-site
+// same-user call" half.
+function assertDashboardOrigin(fastify: FastifyInstance, url: string, field: string): void {
+  const dashboardOrigin = fastify.config.DASHBOARD_ORIGIN;
+  if (!url.startsWith(dashboardOrigin)) {
+    throw AppErrors.validation(`${field} must start with the configured dashboard origin.`, { field, dashboardOrigin });
+  }
+}
+
 function toPaymentDto(row: PaymentRow) {
   return {
     id: row.id,
@@ -44,6 +62,7 @@ export default fp(
       '/api/v1/payments/checkout',
       {
         onRequest: [fastify.authenticate],
+        preHandler: [fastify.verifyCsrf],
         schema: {
           tags: ['payments'],
           summary: 'Create a Stripe Checkout session for a plan (coupon code optional).',
@@ -52,6 +71,9 @@ export default fp(
         },
       },
       async (request) => {
+        assertDashboardOrigin(fastify, request.body.successUrl, 'successUrl');
+        assertDashboardOrigin(fastify, request.body.cancelUrl, 'cancelUrl');
+
         const user = await fastify.db.query.users.findFirst({ where: eq(users.id, request.authUser!.id) });
         if (!user) throw AppErrors.notFound('user');
 
@@ -79,6 +101,7 @@ export default fp(
       '/api/v1/payments/portal',
       {
         onRequest: [fastify.authenticate],
+        preHandler: [fastify.verifyCsrf],
         schema: {
           tags: ['payments'],
           summary: 'Create a Stripe Customer Portal session.',
@@ -87,6 +110,8 @@ export default fp(
         },
       },
       async (request) => {
+        assertDashboardOrigin(fastify, request.body.returnUrl, 'returnUrl');
+
         const user = await fastify.db.query.users.findFirst({ where: eq(users.id, request.authUser!.id) });
         if (!user) throw AppErrors.notFound('user');
 

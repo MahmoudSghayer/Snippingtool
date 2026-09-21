@@ -46,6 +46,7 @@ export default fp(
       '/api/v1/admin/toggles/:key',
       {
         onRequest: [fastify.requirePermission('feature_toggles.write')],
+        preHandler: [fastify.verifyCsrf],
         schema: { tags: ['admin'], params: z.object({ key: z.string().min(1) }), body: updateFeatureToggleRequestSchema, response: { 200: featureToggleDtoSchema } },
       },
       async (request) => {

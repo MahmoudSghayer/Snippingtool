@@ -23,6 +23,7 @@ export default fp(
       '/api/v1/trades/batch',
       {
         onRequest: [fastify.authenticate],
+        preHandler: [fastify.verifyCsrf],
         config: { rateLimit: INGEST_RATE_LIMIT },
         schema: { tags: ['trades'], body: reportTradesRequestSchema, response: { 200: z.object({ upserted: z.number() }) } },
       },

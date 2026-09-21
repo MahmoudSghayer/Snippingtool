@@ -54,6 +54,7 @@ export default fp(
       '/api/v1/admin/bans',
       {
         onRequest: [fastify.requirePermission('users.ban')],
+        preHandler: [fastify.verifyCsrf],
         schema: {
           tags: ['admin-bans'],
           summary: 'Create a ban (account/ip/device/hwid), with an optional expiry.',
@@ -102,6 +103,7 @@ export default fp(
       '/api/v1/admin/bans/:id/lift',
       {
         onRequest: [fastify.requirePermission('users.ban')],
+        preHandler: [fastify.verifyCsrf],
         schema: {
           tags: ['admin-bans'],
           summary: 'Lift a ban.',

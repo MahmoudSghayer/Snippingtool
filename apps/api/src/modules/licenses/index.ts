@@ -51,6 +51,7 @@ export default fp(
       '/api/v1/licenses/regenerate',
       {
         onRequest: [fastify.authenticate],
+        preHandler: [fastify.verifyCsrf],
         schema: {
           tags: ['licenses'],
           summary: 'Revoke the current license and issue a new one. Returns the full key exactly once.',

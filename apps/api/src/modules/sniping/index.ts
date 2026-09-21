@@ -20,6 +20,7 @@ export default fp(
       '/api/v1/sniping/attempts',
       {
         onRequest: [fastify.authenticate],
+        preHandler: [fastify.verifyCsrf],
         config: { rateLimit: INGEST_RATE_LIMIT },
         schema: { tags: ['sniping'], body: reportSnipingAttemptsRequestSchema, response: { 200: z.object({ accepted: z.number() }) } },
       },

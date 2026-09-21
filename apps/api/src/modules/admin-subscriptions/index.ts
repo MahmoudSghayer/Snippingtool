@@ -57,6 +57,7 @@ export default fp(
       '/api/v1/admin/subscriptions/:userId/activate',
       {
         onRequest: [fastify.requirePermission('subscriptions.write')],
+        preHandler: [fastify.verifyCsrf],
         schema: {
           tags: ['admin-subscriptions'],
           summary: 'Manually activate a subscription for a user (plan + period).',
@@ -104,6 +105,7 @@ export default fp(
       '/api/v1/admin/subscriptions/:userId/grant-lifetime',
       {
         onRequest: [fastify.requirePermission('subscriptions.write')],
+        preHandler: [fastify.verifyCsrf],
         schema: {
           tags: ['admin-subscriptions'],
           summary: 'Grant lifetime access on a plan.',
@@ -150,6 +152,7 @@ export default fp(
       '/api/v1/admin/subscriptions/:id/extend',
       {
         onRequest: [fastify.requirePermission('subscriptions.write')],
+        preHandler: [fastify.verifyCsrf],
         schema: {
           tags: ['admin-subscriptions'],
           summary: 'Extend a subscription by N days.',
@@ -194,6 +197,7 @@ export default fp(
       '/api/v1/admin/subscriptions/:id/suspend',
       {
         onRequest: [fastify.requirePermission('subscriptions.write')],
+        preHandler: [fastify.verifyCsrf],
         schema: {
           tags: ['admin-subscriptions'],
           summary: 'Suspend a subscription.',
@@ -240,6 +244,7 @@ export default fp(
       '/api/v1/admin/subscriptions/:id/unsuspend',
       {
         onRequest: [fastify.requirePermission('subscriptions.write')],
+        preHandler: [fastify.verifyCsrf],
         schema: {
           tags: ['admin-subscriptions'],
           summary: 'Unsuspend a subscription, reverting to its pre-suspend status.',
@@ -294,6 +299,7 @@ export default fp(
       '/api/v1/admin/subscriptions/:id/cancel',
       {
         onRequest: [fastify.requirePermission('subscriptions.write')],
+        preHandler: [fastify.verifyCsrf],
         schema: {
           tags: ['admin-subscriptions'],
           summary: 'Cancel a subscription (at period end, or immediately).',
@@ -338,6 +344,7 @@ export default fp(
       '/api/v1/admin/licenses/:id/device-limit',
       {
         onRequest: [fastify.requirePermission('subscriptions.write')],
+        preHandler: [fastify.verifyCsrf],
         schema: {
           tags: ['admin-subscriptions'],
           summary: "Override one license's device limit (does not touch its plan/subscription).",

@@ -93,6 +93,7 @@ export default fp(
       '/api/v1/extension/bootstrap',
       {
         onRequest: [fastify.authenticate],
+        preHandler: [fastify.verifyCsrf],
         schema: { tags: ['extension'], body: bootstrapRequestSchema, response: { 200: bootstrapResponseSchema } },
       },
       async (request): Promise<BootstrapResponse> => {
@@ -131,6 +132,7 @@ export default fp(
       '/api/v1/extension/heartbeat',
       {
         onRequest: [fastify.authenticate],
+        preHandler: [fastify.verifyCsrf],
         schema: { tags: ['extension'], body: heartbeatRequestSchema, response: { 200: heartbeatResponseSchema } },
       },
       async (request) => {
@@ -177,6 +179,7 @@ export default fp(
       '/api/v1/extension/telemetry',
       {
         onRequest: [fastify.authenticate],
+        preHandler: [fastify.verifyCsrf],
         config: { rateLimit: INGEST_RATE_LIMIT },
         schema: { tags: ['extension'], body: telemetryFlushRequestSchema, response: { 200: z.object({ accepted: z.number() }) } },
       },
@@ -199,6 +202,7 @@ export default fp(
       '/api/v1/extension/errors',
       {
         onRequest: [fastify.authenticate],
+        preHandler: [fastify.verifyCsrf],
         config: { rateLimit: INGEST_RATE_LIMIT },
         schema: { tags: ['extension'], body: extensionErrorReportSchema, response: { 200: z.object({ accepted: z.number() }) } },
       },

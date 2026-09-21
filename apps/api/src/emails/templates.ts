@@ -4,6 +4,22 @@
 
 const BRAND = "The Sniper's Ledger";
 
+// XSS hardening (docs/09-security.md "Escaped email templates"): every
+// value interpolated into an HTML email body below that did not originate
+// from this server's own static strings or `encodeURIComponent`'d URL
+// params — an admin-supplied `reason`, a device `name` from a fingerprint
+// the extension/attacker controls — goes through this first. Without it, a
+// `reason`/`deviceName` value like `<img src=x onerror=...>` would land
+// verbatim in an HTML email body some other person's mail client renders.
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function wrapHtml(title: string, bodyHtml: string): string {
   return `<!doctype html>
 <html>
@@ -57,7 +73,7 @@ export function resetPasswordText(token: string): string {
 export function deviceLimitWarningHtml(deviceName: string | null): string {
   return wrapHtml(
     'Device limit reached',
-    `<p>A sign-in attempt from a new device (${deviceName ?? 'unknown device'}) was blocked because your plan's device limit has been reached.</p>
+    `<p>A sign-in attempt from a new device (${escapeHtml(deviceName ?? 'unknown device')}) was blocked because your plan's device limit has been reached.</p>
      <p>Open the dashboard's Devices page to revoke an old device if this was you.</p>`,
   );
 }
@@ -70,7 +86,7 @@ export function forceLogoutNoticeHtml(reason: string): string {
   return wrapHtml(
     'You were signed out',
     `<p>An administrator signed you out of every device.</p>
-     <p style="font-size:12px;color:#8a938f;">Reason: ${reason}</p>
+     <p style="font-size:12px;color:#8a938f;">Reason: ${escapeHtml(reason)}</p>
      <p>If this wasn't expected, please contact support.</p>`,
   );
 }

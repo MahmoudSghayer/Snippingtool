@@ -98,6 +98,7 @@ export default fp(
       '/api/v1/subscriptions/trial',
       {
         onRequest: [fastify.authenticate],
+        preHandler: [fastify.verifyCsrf],
         schema: {
           tags: ['subscriptions'],
           summary: 'Start a 7-day trial. Denied with TRIAL_ABUSE_DETECTED on abuse signals.',
@@ -154,6 +155,7 @@ export default fp(
       '/api/v1/subscriptions/cancel',
       {
         onRequest: [fastify.authenticate],
+        preHandler: [fastify.verifyCsrf],
         schema: {
           tags: ['subscriptions'],
           summary: 'Cancel at period end (stays active until current_period_end).',
@@ -172,6 +174,7 @@ export default fp(
       '/api/v1/subscriptions/resume',
       {
         onRequest: [fastify.authenticate],
+        preHandler: [fastify.verifyCsrf],
         schema: {
           tags: ['subscriptions'],
           summary: 'Undo a pending cancel-at-period-end, while still before the period end.',

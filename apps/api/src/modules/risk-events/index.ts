@@ -21,6 +21,7 @@ export default fp(
       '/api/v1/risk-events',
       {
         onRequest: [fastify.authenticate],
+        preHandler: [fastify.verifyCsrf],
         config: { rateLimit: INGEST_RATE_LIMIT },
         schema: { tags: ['risk'], body: reportRiskBudgetEventsRequestSchema, response: { 200: z.object({ accepted: z.number() }) } },
       },

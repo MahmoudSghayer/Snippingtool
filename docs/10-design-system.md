@@ -558,10 +558,23 @@ bespoke layout.
   at the same row height as real ones; `StatTile`/`KpiGrid` render a
   fixed-height tile regardless of loading state (`'…'`/`'—'` placeholder
   text, not a collapsed tile).
-- **Web Vitals** (measured via a one-off `web-vitals` injection over
-  Playwright/Chromium against the production build, `vite preview`, see
-  the verification run in §13 for the exact numbers recorded for
-  `/login` and `/dashboard`).
+- **Web Vitals** — measured with a `PerformanceObserver`-based capture
+  (`apps/dashboard/e2e/visual-smoke.spec.ts#captureVitals`, no external
+  `web-vitals` package needed) against the **Vite dev server** (not a
+  production build — Playwright's `webServer` runs `vite`, per
+  `playwright.config.ts`; these numbers are directional, not a
+  Lighthouse-grade production budget):
+
+  | Page | TTFB | FCP | LCP | CLS |
+  |---|---|---|---|---|
+  | `/dashboard` (1440px, authenticated) | 5ms | 412ms | 544ms | 0.00004 |
+  | `/login` (1440px) | 5ms | 408ms | 460ms | 0 |
+
+  CLS ≈ 0 on both confirms the "no layout shift" claims above in practice,
+  not just by construction. FCP/LCP under 550ms on an unminified dev
+  bundle is a reasonable floor; expect both lower still against the
+  minified production build (`vite preview`) given the code-splitting in
+  §12's chunk listing.
 - **Known cost**: the entry chunk (`index-*.js`) is 624KB / 192KB gzip —
   above the 500KB warning threshold `vite build` prints. This is
   React 19 + TanStack Router/Query + Zustand + the design system's Radix
@@ -610,7 +623,58 @@ implementations — this pass is polish, not a rebuild):
    scope-reticle, green center dot, in-palette) + `<link rel="icon">`/
    `<link rel="mask-icon">` in `index.html` (`meta[name=theme-color]` was
    already present and correct).
-10. **This document.**
+10. **`EmptyState` gains `titleAs`** (default `"p"`, unchanged for every
+    inline usage) — `NotFoundPage`/`ErrorPage` now pass `titleAs="h1"` so
+    a full-page 404/error actually has a heading a screen reader
+    announces, instead of a bare unstyled `<p>` with no landmark.
+11. **Two real accessibility bugs found and fixed** by the new
+    `axe-core` e2e suite (§13's "Testing" additions below) — not
+    theoretical, both reproduced against the running app:
+    - **`link-in-text-block` (serious)**: every "Sign in"/"Create one"/
+      "Back to sign in"/"Request a new link"/"View analytics" link that
+      sits inline in a sentence relied on `hover:underline` only — no
+      visible distinction at rest beyond color. Fixed to a permanent
+      `underline` (Login, Register, Forgot/Reset Password, Dashboard).
+    - **`aria-allowed-attr` (critical)**: `NotificationsBell`'s
+      `DropdownMenuTrigger asChild` wrapped a plain `<div>` (holding the
+      bell button + unread-count badge), so Radix's
+      `aria-haspopup`/`aria-expanded`/`aria-controls` landed on an
+      element whose implicit ARIA role doesn't permit them. Fixed by
+      moving the trigger to wrap the real `<button>` (`IconButton`)
+      directly and making the positioning `<div>` + badge siblings of the
+      trigger instead of its child.
+12. **This document.**
+
+### Testing additions
+
+- `apps/dashboard/e2e/accessibility.spec.ts` — `@axe-core/playwright`
+  against Login (pre-auth), Dashboard and Admin Overview (post-auth);
+  fails on any `serious`/`critical` violation with a readable per-rule
+  dump (rule id, impact, offending selector), not just a bare count.
+- `apps/dashboard/e2e/visual-smoke.spec.ts` — every named page at
+  390/768/1440px: screenshots to `screenshots/`, zero console/page errors
+  (filtering exactly one documented sandbox-network artifact — see the
+  spec's own comment — never an app-level error), plus the Web Vitals
+  capture (§12).
+- `apps/dashboard/e2e/helpers/adminAuth.ts` — a shared `loginAsAdmin()`
+  used by all three e2e spec files now (this pass refactored
+  `dashboard.spec.ts` onto it too, replacing its own duplicated inline
+  TOTP-enrollment code). Necessary because `global-setup.ts` only resets
+  the seeded admin's TOTP state **once per whole run**, so only whichever
+  spec file logs in first actually sees the enrollment screen — every
+  login after that in the same run is a step-up **verify**, and the
+  secret has to survive across spec files to generate that code. The
+  helper detects which screen it got and persists the secret to
+  `os.tmpdir()` on enrollment for later specs to read. It also forces a
+  **fixed device fingerprint** via `page.addInitScript` (overriding
+  `src/lib/device.ts`'s normal random-per-browser-profile one) — without
+  that, three spec files' three separately-isolated Playwright contexts
+  would each register a *different* device, and the seeded admin's
+  plan-less device limit is 1.
+- `playwright.config.ts` now sets `workers: 1` — a correctness
+  requirement, not a performance choice, once multiple spec files share
+  one seeded admin's login state as above; `fullyParallel: false` alone
+  only serialises tests *within* a file, not across files.
 
 ### Verification run
 
@@ -626,17 +690,27 @@ pnpm --filter @sl/dashboard test        # 3 files, 11 tests, pass
 pnpm --filter @sl/dashboard build       # pass — see §12 chunk listing
 
 pnpm --filter @sl/dashboard test:e2e    # xvfb-run -a, against the real API
-                                         # + seeded Postgres/Redis — see
-                                         # e2e/accessibility.spec.ts,
-                                         # e2e/visual-smoke.spec.ts
+                                         # + seeded Postgres/Redis
+                                         # 4 passed (accessibility.spec.ts ×2,
+                                         # dashboard.spec.ts, visual-smoke.spec.ts)
 ```
 
-Screenshots (`apps/dashboard/screenshots/`, PNG, at 390/768/1440px, every
-route) and Web Vitals numbers: recorded by
-`apps/dashboard/e2e/visual-smoke.spec.ts` and the ad-hoc Web Vitals capture
-— see that spec and its output for the current numbers at the time of this
-pass; re-run it after any further visual change rather than trusting a
-stale number pasted here.
+### Screenshot inventory
+
+`apps/dashboard/screenshots/` (27 PNGs, 1.4MB total — well under the 15MB
+budget), `<page>-<width>.png`, captured by
+`apps/dashboard/e2e/visual-smoke.spec.ts` at 390/768/1440px for every named
+page: `login`, `register`, `dashboard`, `analytics`, `subscriptions`,
+`settings`, `admin-overview` (Admin Panel), `admin-audit` (Audit Logs), plus
+`404`. Confirmed by eye during this pass (not just "the test passed"):
+sidebar correctly collapses to a hamburger-triggered drawer at 390/768px,
+the topbar's connection dot/Admin badge/search-text hide progressively as
+the viewport narrows, the "View analytics" and "Create one"/"Sign in"
+links are now visibly underlined (the axe fix in the list below), the
+Retention chart's new legend renders (green "D7 retention %" / purple "D30
+retention %" dots), and the 404 page is calm and on-brand. Re-run
+`test:e2e` after any further visual change rather than trusting these as
+permanently current.
 
 ## 14. Known gaps / follow-ups
 

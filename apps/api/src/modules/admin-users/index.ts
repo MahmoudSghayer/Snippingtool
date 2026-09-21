@@ -146,6 +146,7 @@ export default fp(
       '/api/v1/admin/users/:id',
       {
         onRequest: [fastify.requirePermission('users.write')],
+        preHandler: [fastify.verifyCsrf],
         config: { rateLimit: ADMIN_RATE_LIMIT },
         schema: { tags: ['admin'], params: z.object({ id: z.string().uuid() }), body: updateProfileRequestSchema, response: { 200: userDtoSchema } },
       },
@@ -170,6 +171,7 @@ export default fp(
       '/api/v1/admin/users/:id/suspend',
       {
         onRequest: [fastify.requirePermission('users.suspend')],
+        preHandler: [fastify.verifyCsrf],
         config: { rateLimit: ADMIN_RATE_LIMIT },
         schema: { tags: ['admin'], params: z.object({ id: z.string().uuid() }), body: adminSuspendUserRequestSchema, response: { 200: userDtoSchema } },
       },
@@ -192,6 +194,7 @@ export default fp(
       '/api/v1/admin/users/:id/unsuspend',
       {
         onRequest: [fastify.requirePermission('users.suspend')],
+        preHandler: [fastify.verifyCsrf],
         config: { rateLimit: ADMIN_RATE_LIMIT },
         schema: { tags: ['admin'], params: z.object({ id: z.string().uuid() }), body: z.object({ reason: z.string().min(1).max(1000) }), response: { 200: userDtoSchema } },
       },
@@ -212,6 +215,7 @@ export default fp(
       '/api/v1/admin/users/:id/reset-password',
       {
         onRequest: [fastify.requirePermission('users.reset_password')],
+        preHandler: [fastify.verifyCsrf],
         config: { rateLimit: ADMIN_RATE_LIMIT },
         schema: { tags: ['admin'], params: z.object({ id: z.string().uuid() }), body: z.object({ reason: z.string().min(1).max(1000) }), response: { 200: z.object({ sent: z.literal(true) }) } },
       },
@@ -244,6 +248,7 @@ export default fp(
       '/api/v1/admin/users/:id/force-logout',
       {
         onRequest: [fastify.requirePermission('users.force_logout')],
+        preHandler: [fastify.verifyCsrf],
         config: { rateLimit: ADMIN_RATE_LIMIT },
         schema: { tags: ['admin'], params: z.object({ id: z.string().uuid() }), body: z.object({ reason: z.string().min(1).max(1000) }), response: { 200: z.object({ ok: z.literal(true) }) } },
       },

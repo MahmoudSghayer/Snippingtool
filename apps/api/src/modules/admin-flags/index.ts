@@ -54,6 +54,7 @@ export default fp(
       '/api/v1/admin/flags/:id/review',
       {
         onRequest: [fastify.requirePermission('users.suspend')],
+        preHandler: [fastify.verifyCsrf],
         schema: {
           tags: ['admin-flags'],
           summary: 'Mark a flag reviewed or dismissed.',

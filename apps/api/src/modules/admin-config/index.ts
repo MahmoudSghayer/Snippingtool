@@ -42,6 +42,7 @@ export default fp(
       '/api/v1/admin/config/:key',
       {
         onRequest: [fastify.requirePermission('config.write')],
+        preHandler: [fastify.verifyCsrf],
         schema: {
           tags: ['admin'],
           params: z.object({ key: z.string().min(1) }),

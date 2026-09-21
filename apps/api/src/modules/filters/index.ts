@@ -58,6 +58,7 @@ export default fp(
       '/api/v1/filters',
       {
         onRequest: [fastify.authenticate],
+        preHandler: [fastify.verifyCsrf],
         schema: { tags: ['filters'], body: createSavedFilterRequestSchema, response: { 201: savedFilterSchema } },
       },
       async (request, reply) => {
@@ -80,6 +81,7 @@ export default fp(
       '/api/v1/filters/:id',
       {
         onRequest: [fastify.authenticate],
+        preHandler: [fastify.verifyCsrf],
         schema: { tags: ['filters'], params: z.object({ id: z.string().uuid() }), body: updateSavedFilterRequestSchema, response: { 200: savedFilterSchema } },
       },
       async (request) => {
@@ -108,6 +110,7 @@ export default fp(
       '/api/v1/filters/:id',
       {
         onRequest: [fastify.authenticate],
+        preHandler: [fastify.verifyCsrf],
         schema: { tags: ['filters'], params: z.object({ id: z.string().uuid() }), response: { 200: z.object({ deleted: z.literal(true) }) } },
       },
       async (request) => {
@@ -124,6 +127,7 @@ export default fp(
       '/api/v1/filters/stats',
       {
         onRequest: [fastify.authenticate],
+        preHandler: [fastify.verifyCsrf],
         config: { rateLimit: INGEST_RATE_LIMIT },
         schema: { tags: ['filters'], body: reportFilterStatsRequestSchema, response: { 200: z.object({ upserted: z.number() }) } },
       },

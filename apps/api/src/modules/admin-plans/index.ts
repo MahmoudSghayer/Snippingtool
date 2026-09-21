@@ -82,6 +82,7 @@ export default fp(
       '/api/v1/admin/plans',
       {
         onRequest: [fastify.requirePermission('plans.write')],
+        preHandler: [fastify.verifyCsrf],
         schema: {
           tags: ['admin-plans'],
           summary: 'Create a plan (including a one-off lifetime plan).',
@@ -123,6 +124,7 @@ export default fp(
       '/api/v1/admin/plans/:id',
       {
         onRequest: [fastify.requirePermission('plans.write')],
+        preHandler: [fastify.verifyCsrf],
         schema: {
           tags: ['admin-plans'],
           summary: 'Update a plan.',
@@ -164,6 +166,7 @@ export default fp(
       '/api/v1/admin/plans/:id/archive',
       {
         onRequest: [fastify.requirePermission('plans.write')],
+        preHandler: [fastify.verifyCsrf],
         schema: {
           tags: ['admin-plans'],
           summary: 'Archive a plan (is_active = false). Never a hard delete.',

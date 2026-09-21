@@ -69,6 +69,7 @@ export default fp(
       '/api/v1/notifications/:id/read',
       {
         onRequest: [fastify.authenticate],
+        preHandler: [fastify.verifyCsrf],
         schema: { tags: ['notifications'], params: z.object({ id: z.string().uuid() }), response: { 200: z.object({ ok: z.literal(true) }) } },
       },
       async (request) => {
@@ -83,7 +84,11 @@ export default fp(
 
     app.post(
       '/api/v1/notifications/read-all',
-      { onRequest: [fastify.authenticate], schema: { tags: ['notifications'], response: { 200: z.object({ ok: z.literal(true) }) } } },
+      {
+        onRequest: [fastify.authenticate],
+        preHandler: [fastify.verifyCsrf],
+        schema: { tags: ['notifications'], response: { 200: z.object({ ok: z.literal(true) }) } },
+      },
       async (request) => {
         await fastify.db
           .update(notifications)

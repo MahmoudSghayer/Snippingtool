@@ -55,6 +55,7 @@ export default fp(
       '/api/v1/admin/coupons',
       {
         onRequest: [fastify.requirePermission('coupons.write')],
+        preHandler: [fastify.verifyCsrf],
         schema: {
           tags: ['admin-coupons'],
           summary: 'Create a coupon (percent/fixed/free_days/lifetime).',
@@ -104,6 +105,7 @@ export default fp(
       '/api/v1/admin/coupons/:id',
       {
         onRequest: [fastify.requirePermission('coupons.write')],
+        preHandler: [fastify.verifyCsrf],
         schema: {
           tags: ['admin-coupons'],
           summary: 'Update a coupon (activate/deactivate, extend, change max redemptions).',

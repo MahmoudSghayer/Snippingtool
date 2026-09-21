@@ -182,7 +182,11 @@ export default fp(
 
     app.post(
       '/api/v1/auth/logout-all',
-      { onRequest: [fastify.authenticate], schema: { tags: ['auth'], response: { 200: z.object({ ok: z.literal(true) }) } } },
+      {
+        onRequest: [fastify.authenticate],
+        preHandler: [fastify.verifyCsrf],
+        schema: { tags: ['auth'], response: { 200: z.object({ ok: z.literal(true) }) } },
+      },
       async (request, reply) => {
         await service.logoutAll(ctx(fastify), request.authUser!.id);
         clearSessionCookies(reply);
@@ -295,6 +299,7 @@ export default fp(
       '/api/v1/auth/device/register',
       {
         onRequest: [fastify.authenticate],
+        preHandler: [fastify.verifyCsrf],
         schema: { tags: ['auth'], body: deviceFingerprintSchema, response: { 200: z.object({ deviceId: z.string().uuid() }) } },
       },
       async (request) => {
