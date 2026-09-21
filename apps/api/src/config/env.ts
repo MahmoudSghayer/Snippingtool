@@ -12,6 +12,63 @@ const boolFromString = z
   .transform((v) => (typeof v === 'boolean' ? v : v === 'true' || v === '1'))
   .default(false);
 
+// Startup refusal of dev defaults in production (docs/09-security.md
+// "Encryption in transit" / "Secrets hygiene"): every value below has a
+// convenient default so `pnpm dev` works with zero setup, but that same
+// default reaching a real production deploy (a forgotten env var, a copy-
+// pasted `.env`) would silently ship with a guessable cookie-signing secret,
+// no JWT keys (a 500 on the first login, not caught until then), or a
+// database/Redis connection with no transport encryption. `refineForProduction`
+// runs after the base schema parses and only throws under
+// `NODE_ENV=production`, so dev/test are completely unaffected.
+const DEV_COOKIE_SECRET_DEFAULT = 'dev-cookie-secret-change-me-32-bytes-min';
+
+function refineForProduction(env: z.infer<typeof envSchema>, ctx: z.RefinementCtx): void {
+  if (env.NODE_ENV !== 'production') return;
+
+  if (env.COOKIE_SECRET === DEV_COOKIE_SECRET_DEFAULT) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['COOKIE_SECRET'],
+      message: 'refusing to start in production with the default dev COOKIE_SECRET — set a real 32+ byte secret.',
+    });
+  }
+  if (!env.JWT_PRIVATE_KEY || !env.JWT_PUBLIC_KEY) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['JWT_PRIVATE_KEY'],
+      message: 'JWT_PRIVATE_KEY/JWT_PUBLIC_KEY are required in production (generate with `pnpm --filter @sl/api keys:generate`).',
+    });
+  }
+  if (!env.ENTITLEMENT_SIGNING_KEY || !env.ENTITLEMENT_PUBLIC_KEY) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['ENTITLEMENT_SIGNING_KEY'],
+      message: 'ENTITLEMENT_SIGNING_KEY/ENTITLEMENT_PUBLIC_KEY are required in production.',
+    });
+  }
+  // postgres.js honours `sslmode=` as a connection-string query param — this
+  // only checks the string carries it, the actual TLS handshake is the
+  // driver's job (plugins/db.ts).
+  if (!/[?&]sslmode=(require|verify-ca|verify-full)\b/.test(env.DATABASE_URL)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['DATABASE_URL'],
+      message: 'DATABASE_URL must set sslmode=require (or stronger) in production.',
+    });
+  }
+  // ioredis enables TLS from the `rediss://` scheme alone (plugins/redis.ts
+  // passes the URL straight through) — a plain `redis://` in production
+  // would carry auth + every cached/queued payload unencrypted.
+  if (!env.REDIS_URL.startsWith('rediss://')) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['REDIS_URL'],
+      message: 'REDIS_URL must use the rediss:// (TLS) scheme in production.',
+    });
+  }
+}
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
@@ -85,6 +142,12 @@ const envSchema = z.object({
 
 export type Env = z.infer<typeof envSchema>;
 
+// See `refineForProduction` above — applied as a schema-level superRefine so
+// every `loadEnv` caller (server.ts, worker.ts, every test's buildApp())
+// gets it uniformly, with no separate "did you remember to call the
+// production check" step to forget.
+const validatedEnvSchema = envSchema.superRefine(refineForProduction);
+
 let cached: Env | undefined;
 
 /** Mirrors @sl/db's test-utils `getTestDatabaseUrl`: prefer an explicit
@@ -104,7 +167,7 @@ function testDatabaseUrl(env: Env): string {
  * error (via zod's message) if a required var is missing/malformed. */
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
   if (cached) return cached;
-  const parsed = envSchema.safeParse(source);
+  const parsed = validatedEnvSchema.safeParse(source);
   if (!parsed.success) {
     const message = parsed.error.issues.map((i) => `  - ${i.path.join('.')}: ${i.message}`).join('\n');
     throw new Error(`Invalid environment configuration:\n${message}`);

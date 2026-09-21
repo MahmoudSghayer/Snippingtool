@@ -20,9 +20,9 @@ import { newId } from '../../lib/ids.js';
 import { recordSuspiciousIpIfAny, upsertIpActivity } from '../../lib/ip-activity.js';
 import { assertNotLocked, checkSlidingWindowRateLimit, recordFailedLogin, resetLoginFailures } from '../../lib/lockout.js';
 import {
-  ACCESS_TOKEN_TTL_SECONDS,
   MFA_TICKET_TTL_SECONDS,
   REFRESH_TOKEN_TTL_MS,
+  accessTokenTtlSeconds,
   generateFamilyId,
   generateMfaTicket,
   generateRefreshToken,
@@ -197,7 +197,7 @@ export async function completeLogin(
       .catch((err) => ctx.log?.warn({ err }, 'ip-activity monitoring failed (non-fatal)'));
   }
 
-  return { status: 'ok', accessToken, refreshToken: refresh.token, expiresIn: ACCESS_TOKEN_TTL_SECONDS };
+  return { status: 'ok', accessToken, refreshToken: refresh.token, expiresIn: accessTokenTtlSeconds(user.role) };
 }
 
 export async function login(
@@ -387,7 +387,7 @@ export async function refresh(
     ctx.jwtPrivateKey,
   );
 
-  return { accessToken, refreshToken: newRefresh.token, expiresIn: ACCESS_TOKEN_TTL_SECONDS };
+  return { accessToken, refreshToken: newRefresh.token, expiresIn: accessTokenTtlSeconds(user.role) };
 }
 
 export async function logout(ctx: AuthContext, refreshToken: string | undefined): Promise<void> {

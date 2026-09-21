@@ -29,10 +29,28 @@ export interface AccessTokenClaims {
   ver: number;
 }
 
-const ACCESS_TOKEN_TTL = '15m';
+const ACCESS_TOKEN_TTL_USER = '15m';
 export const ACCESS_TOKEN_TTL_SECONDS = 15 * 60;
+// Shorter admin TTL (docs/09-security.md "Session security"): an admin
+// access token is worth more than a plain user's (it can reach every
+// `requirePermission`-gated route), so it re-verifies against the DB
+// (role/row_version, via `authenticate`) more often. 5 minutes still comes
+// back automatically via the same silent-refresh flow the dashboard already
+// uses for user sessions — this only shrinks the compromised-token window,
+// it does not change how often an admin has to re-enter a password or TOTP
+// code (that stays governed by the refresh token's own 30-day TTL).
+const ACCESS_TOKEN_TTL_ADMIN = '5m';
+export const ADMIN_ACCESS_TOKEN_TTL_SECONDS = 5 * 60;
 export const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 export const MFA_TICKET_TTL_SECONDS = 5 * 60;
+
+/** The access-token lifetime for a given role — `signAccessToken` uses this
+ * internally (keyed off `claims.role`); callers that need to report
+ * `expiresIn` in a login/refresh response use this directly so the number
+ * they return always matches what was actually signed. */
+export function accessTokenTtlSeconds(role: AccessTokenClaims['role']): number {
+  return role === 'admin' ? ADMIN_ACCESS_TOKEN_TTL_SECONDS : ACCESS_TOKEN_TTL_SECONDS;
+}
 
 type JoseKey = Awaited<ReturnType<typeof importPKCS8>>;
 
@@ -69,7 +87,7 @@ export async function signAccessToken(claims: AccessTokenClaims, privateKeyPem: 
     .setProtectedHeader({ alg: 'EdDSA' })
     .setSubject(claims.sub)
     .setIssuedAt()
-    .setExpirationTime(ACCESS_TOKEN_TTL)
+    .setExpirationTime(claims.role === 'admin' ? ACCESS_TOKEN_TTL_ADMIN : ACCESS_TOKEN_TTL_USER)
     .sign(key);
 }
 

@@ -1,6 +1,7 @@
 packages:
   - 'apps/*'
   - 'packages/*'
+  - 'tests'
   - 'tests/security'
 
 # All transitive build-time deps (esbuild via vitest, unrs-resolver via

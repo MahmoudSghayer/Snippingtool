@@ -32,5 +32,12 @@ pnpm-debug.log*
 !.vscode/extensions.json
 .idea/
 
-# locally downloaded CLI tools (actionlint, hadolint)
+# locally downloaded CLI tools (actionlint, hadolint, k6)
 .tools/
+
+# tests/load & tests/e2e generated artifacts: provisioned test-user
+# credentials/secrets (never committed), k6 JSON result summaries, and the
+# extension build tests/e2e produces for itself (see tests/e2e/build-extension.mjs)
+tests/load/.artifacts/
+tests/e2e/.artifacts/
+tests/e2e/test-results/

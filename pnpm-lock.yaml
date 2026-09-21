@@ -583,6 +583,55 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.20.4)(jsdom@25.0.1(supports-color@7.2.0))(lightningcss@1.32.0)(supports-color@7.2.0)
 
+  tests:
+    dependencies:
+      '@sl/db':
+        specifier: workspace:*
+        version: link:../packages/db
+      '@sl/shared':
+        specifier: workspace:*
+        version: link:../packages/shared
+    devDependencies:
+      '@playwright/test':
+        specifier: ^1.49.1
+        version: 1.63.0
+      '@sl/api':
+        specifier: workspace:*
+        version: link:../apps/api
+      '@sl/config':
+        specifier: workspace:*
+        version: link:../packages/config
+      '@types/node':
+        specifier: ^22.10.5
+        version: 22.20.4
+      '@types/ws':
+        specifier: ^8.5.13
+        version: 8.18.1
+      dotenv:
+        specifier: ^16.4.7
+        version: 16.6.1
+      otplib:
+        specifier: ^12.0.1
+        version: 12.0.1
+      postgres:
+        specifier: ^3.4.5
+        version: 3.4.9
+      stripe:
+        specifier: ^17.5.0
+        version: 17.7.0
+      tsx:
+        specifier: ^4.19.2
+        version: 4.23.13
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+      vite:
+        specifier: ^6.0.7
+        version: 6.4.3(@types/node@22.20.4)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13)(yaml@2.9.1)
+      ws:
+        specifier: ^8.18.0
+        version: 8.21.3
+
   tests/security:
     dependencies:
       '@sl/db':
@@ -4142,6 +4191,10 @@ packages:
     engines: {node: '>=10.13.0'}
     hasBin: true
 
+  qs@6.16.0:
+    resolution: {integrity: sha512-h6fhOIaRrID2CbEY2fqs+7t+UXZo+MLAnU5gRIq85uFtdiUPCdsApMlHhXogKVM4HM2DVbIjGNTTYH2OcmP1vA==}
+    engines: {node: '>=0.6'}
+
   quick-format-unescaped@4.0.4:
     resolution: {integrity: sha512-tYC1Q1hgyRuHgloV/YXs2w15unPVh8qfu/qCTfhTYamaw7fyhumKa2yGpdSo87vY32rIclj+4fWYQXUMs9EHvg==}
 
@@ -4501,6 +4554,10 @@ packages:
   strip-json-comments@3.1.1:
     resolution: {integrity: sha512-6fPc+R4ihwqP6N/aIv2f1gMH8lOVtWQHoqC4yK6oSDVVocumAsfCqjkXnqiYMhmMwS/mEHLp7Vehlt3ql6lEig==}
     engines: {node: '>=8'}
+
+  stripe@17.7.0:
+    resolution: {integrity: sha512-aT2BU9KkizY9SATf14WhhYVv2uOapBWX0OFWF4xvcj1mPaNotlSc2CsxpS4DS46ZueSppmCF5BX1sNYBtwBvfw==}
+    engines: {node: '>=12.*'}
 
   stripe@22.6.2:
     resolution: {integrity: sha512-PwRE2scocvXqDKPiskMa5vRJEAEkq46W69XyUYmAwrNSLr675lQnfqLwnsndAWizwgihOWw/irLmoFRo3ez7ew==}
@@ -8344,6 +8401,11 @@ snapshots:
       pngjs: 5.0.0
       yargs: 15.4.1
 
+  qs@6.16.0:
+    dependencies:
+      es-define-property: 1.0.1
+      side-channel: 1.1.1
+
   quick-format-unescaped@4.0.4: {}
 
   react-dom@19.3.0(react@19.3.0):
@@ -8738,6 +8800,11 @@ snapshots:
       min-indent: 1.0.1
 
   strip-json-comments@3.1.1: {}
+
+  stripe@17.7.0:
+    dependencies:
+      '@types/node': 22.20.4
+      qs: 6.16.0
 
   stripe@22.6.2(@types/node@22.20.4):
     optionalDependencies:

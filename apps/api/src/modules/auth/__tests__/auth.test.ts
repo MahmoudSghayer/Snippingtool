@@ -8,7 +8,10 @@
 // prefix). Each test gets its own `remoteAddress` so per-IP rate limiting
 // in one test never leaks into another.
 
+import { adminUsers, users } from '@sl/db';
 import { resetDatabase } from '@sl/db/test-utils';
+import { eq } from 'drizzle-orm';
+import { decodeJwt } from 'jose';
 import { authenticator } from 'otplib';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -191,6 +194,49 @@ describe('auth module', () => {
     });
     expect(verifyRes.statusCode).toBe(200);
     expect(verifyRes.json().accessToken).toBeTruthy();
+  });
+
+  it('shorter admin TTL (docs/09-security.md "Session security"): an admin access token expires in 5 minutes, a plain user\'s in 15', async () => {
+    const ip = nextIp();
+
+    const userEmail = 'ttl-user@example.com';
+    await registerAndVerify(userEmail, ip);
+    const userLogin = await app.inject({ method: 'POST', url: '/api/v1/auth/login', remoteAddress: ip, payload: { email: userEmail, password: 'correcthorsebattery12', device } });
+    expect(userLogin.statusCode).toBe(200);
+    const userBody = userLogin.json();
+    expect(userBody.expiresIn).toBe(15 * 60);
+    const userClaims = decodeJwt(userBody.accessToken as string);
+    expect((userClaims.exp as number) - (userClaims.iat as number)).toBe(15 * 60);
+    // The cookie the dashboard relies on must not outlive the token it carries.
+    const userAtCookie = userLogin.cookies.find((c) => c.name === 'sl_at');
+    expect(userAtCookie?.maxAge).toBe(15 * 60);
+
+    const adminEmail = 'ttl-admin@example.com';
+    const adminUserId = await registerAndVerify(adminEmail, ip);
+    await app.db.update(users).set({ role: 'admin' }).where(eq(users.id, adminUserId));
+    await app.db.insert(adminUsers).values({ id: crypto.randomUUID(), userId: adminUserId, adminRole: 'super_admin', permissions: {} });
+
+    const adminLogin = await app.inject({ method: 'POST', url: '/api/v1/auth/login', remoteAddress: ip, payload: { email: adminEmail, password: 'correcthorsebattery12', device } });
+    expect(adminLogin.statusCode).toBe(200);
+    const adminPending = adminLogin.json();
+    expect(adminPending.status).toBe('mfa_required'); // admin accounts must enrol 2FA (docs/04-auth.md §6)
+
+    const enrollRes = await app.inject({ method: 'POST', url: '/api/v1/auth/totp/enroll', remoteAddress: ip, payload: { mfaTicket: adminPending.mfaTicket } });
+    const { secret } = enrollRes.json();
+    const confirmRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/totp/enroll/confirm',
+      remoteAddress: ip,
+      payload: { mfaTicket: adminPending.mfaTicket, code: authenticator.generate(secret) },
+    });
+    expect(confirmRes.statusCode).toBe(200);
+    const adminTokens = confirmRes.json().tokens;
+    expect(adminTokens.expiresIn).toBe(5 * 60);
+    const adminClaims = decodeJwt(adminTokens.accessToken as string);
+    expect((adminClaims.exp as number) - (adminClaims.iat as number)).toBe(5 * 60);
+    expect(adminClaims.role).toBe('admin');
+    const adminAtCookie = confirmRes.cookies.find((c) => c.name === 'sl_at');
+    expect(adminAtCookie?.maxAge).toBe(5 * 60);
   });
 
   it('enforces the device limit and reports the device list', async () => {

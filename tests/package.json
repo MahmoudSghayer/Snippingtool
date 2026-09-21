@@ -1,0 +1,36 @@
+{
+  "name": "@sl/tests",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cross-app end-to-end journeys (Playwright, tests/e2e) and load tests (k6, tests/load) for The Sniper's Ledger — the tests that exercise more than one app at once (extension <-> API, admin <-> WS <-> another user's session, Stripe webhook <-> dashboard). Single-app suites live with their own app (apps/dashboard/e2e, apps/extension/test/e2e) or as their own workspace package (tests/security). See README.md and docs/12-testing.md.",
+  "scripts": {
+    "test:e2e": "playwright test -c e2e/playwright.config.ts",
+    "test:e2e:headed": "PWDEBUG=0 playwright test -c e2e/playwright.config.ts --headed",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "load:provision": "tsx load/setup/provision.mjs",
+    "load:smoke": "node load/run.mjs smoke",
+    "load:soak": "node load/run.mjs soak",
+    "load:stress": "node load/run.mjs stress"
+  },
+  "dependencies": {
+    "@sl/db": "workspace:*",
+    "@sl/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.1",
+    "@sl/api": "workspace:*",
+    "@sl/config": "workspace:*",
+    "@types/node": "^22.10.5",
+    "@types/ws": "^8.5.13",
+    "dotenv": "^16.4.7",
+    "otplib": "^12.0.1",
+    "postgres": "^3.4.5",
+    "stripe": "^17.5.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.7",
+    "ws": "^8.18.0"
+  }
+}
