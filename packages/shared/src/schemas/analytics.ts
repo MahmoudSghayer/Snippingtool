@@ -9,6 +9,32 @@ import { z } from 'zod';
 // Common range / granularity inputs
 // ---------------------------------------------------------------------------
 
+const GRANULARITY_LEGACY_ALIASES: Record<string, 'day' | 'week' | 'month'> = {
+  daily: 'day',
+  weekly: 'week',
+  monthly: 'month',
+};
+
+/** The one granularity vocabulary the whole API uses: `'day'|'week'|
+ * 'month'|'lifetime'`. Defect #6 (docs/12-testing.md "Defects found"):
+ * `/admin/analytics/*` and `/analytics/me/*` always used this vocabulary,
+ * but `/profits` used `'daily'|'weekly'|'monthly'|'lifetime'` — a confused
+ * first 400 for any integrator who guessed the other route's shape.
+ * `/profits` (packages/shared/src/schemas/trades.ts's `profitQuerySchema`)
+ * now uses this same schema. The legacy `'daily'/'weekly'/'monthly'`
+ * strings are still accepted on input — normalised to the canonical value
+ * before validation — for backwards compatibility with any existing
+ * `/profits` caller; this is a **deprecated** input alias only, never
+ * returned in a response or used internally past parse time, and should be
+ * removed once nothing depends on it (docs/08-analytics.md). */
+export const granularitySchema = z.preprocess((value) => {
+  if (typeof value === 'string' && Object.prototype.hasOwnProperty.call(GRANULARITY_LEGACY_ALIASES, value)) {
+    return GRANULARITY_LEGACY_ALIASES[value];
+  }
+  return value;
+}, z.enum(['day', 'week', 'month', 'lifetime']));
+export type Granularity = z.infer<typeof granularitySchema>;
+
 /** `from`/`to` are calendar-day strings (UTC), inclusive on both ends.
  * `granularity` controls series bucketing; `tz` is accepted for forward
  * compatibility (bucket-boundary math is UTC-only today — see
@@ -16,7 +42,7 @@ import { z } from 'zod';
 export const analyticsRangeQuerySchema = z.object({
   from: z.string().date(),
   to: z.string().date(),
-  granularity: z.enum(['day', 'week', 'month', 'lifetime']).default('day'),
+  granularity: granularitySchema.default('day'),
   tz: z.string().min(1).max(64).default('UTC'),
 });
 export type AnalyticsRangeQuery = z.infer<typeof analyticsRangeQuerySchema>;
@@ -92,7 +118,7 @@ export const profitAnalyticsPointSchema = z.object({
 export type ProfitAnalyticsPoint = z.infer<typeof profitAnalyticsPointSchema>;
 
 export const profitAnalyticsResponseSchema = z.object({
-  granularity: z.enum(['day', 'week', 'month', 'lifetime']),
+  granularity: granularitySchema,
   items: z.array(profitAnalyticsPointSchema),
   lifetime: z.object({
     netProfit: z.number().int(),
@@ -146,7 +172,7 @@ export const activityAnalyticsPointSchema = z.object({
 export type ActivityAnalyticsPoint = z.infer<typeof activityAnalyticsPointSchema>;
 
 export const activityAnalyticsResponseSchema = z.object({
-  granularity: z.enum(['day', 'week', 'month', 'lifetime']),
+  granularity: granularitySchema,
   items: z.array(activityAnalyticsPointSchema),
 });
 export type ActivityAnalyticsResponse = z.infer<typeof activityAnalyticsResponseSchema>;
@@ -166,7 +192,7 @@ export const subscriptionMetricsPointSchema = z.object({
 export type SubscriptionMetricsPoint = z.infer<typeof subscriptionMetricsPointSchema>;
 
 export const subscriptionMetricsResponseSchema = z.object({
-  granularity: z.enum(['day', 'week', 'month', 'lifetime']),
+  granularity: granularitySchema,
   items: z.array(subscriptionMetricsPointSchema),
   planMix: z.record(z.number().int().min(0)),
   pastDueCount: z.number().int().min(0),
@@ -229,7 +255,7 @@ export type MeOverviewResponse = z.infer<typeof meOverviewResponseSchema>;
 export const meProfitsQuerySchema = z.object({
   from: z.string().date(),
   to: z.string().date(),
-  granularity: z.enum(['day', 'week', 'month', 'lifetime']).default('day'),
+  granularity: granularitySchema.default('day'),
 });
 export type MeProfitsQuery = z.infer<typeof meProfitsQuerySchema>;
 

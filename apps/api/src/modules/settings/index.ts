@@ -77,14 +77,37 @@ export default fp(
         const validated = userSettingsSchema.parse(merged);
         await assertWithinGovernorCeilings(fastify.db, validated.governor);
 
-        await fastify.db.update(userSettings).set({ settings: validated, version: validated.version }).where(eq(userSettings.id, current.id));
-        await fastify.db.insert(settingsHistory).values({
-          id: newId(),
-          userId: request.authUser!.id,
-          settings: validated,
-          version: validated.version,
-          changedBy: request.authUser!.id,
-        });
+        try {
+          await fastify.db.update(userSettings).set({ settings: validated, version: validated.version }).where(eq(userSettings.id, current.id));
+          await fastify.db.insert(settingsHistory).values({
+            id: newId(),
+            userId: request.authUser!.id,
+            settings: validated,
+            version: validated.version,
+            changedBy: request.authUser!.id,
+          });
+        } catch (err) {
+          // Two concurrent PUTs can both read the same `current.version` and
+          // both compute the same next version — the second one's insert
+          // into settings_history then hits the unique (user_id, version)
+          // index. Rather than let that raw Postgres unique-violation
+          // surface as an unhandled 500 INTERNAL, report it as a documented
+          // 409 CONFLICT so a client (or the extension's "server version
+          // wins" sync policy, docs/06-extension.md) knows to re-fetch
+          // /api/v1/settings and retry against the now-current version.
+          // drizzle-orm 0.45 wraps the driver error in a
+          // `DrizzleQueryError` — the Postgres error code can be on `.code`
+          // or on `.cause.code` depending on the wrapping (see the same
+          // pattern in modules/payments/webhooks.ts's
+          // receiveWebhookEvent()).
+          const code = (err as { code?: string; cause?: { code?: string } } | null)?.code ?? (err as { cause?: { code?: string } } | null)?.cause?.code;
+          if (code === '23505') {
+            throw AppErrors.conflict('Settings were updated concurrently; refetch the latest version and retry.', {
+              attemptedVersion: validated.version,
+            });
+          }
+          throw err;
+        }
 
         return validated;
       },

@@ -58,3 +58,26 @@ export async function onFlushAlarm(): Promise<void> {
   const result = await telemetry.flush();
   if (!result.ok) logger.debug('scheduled telemetry flush failed, will retry next tick', 'telemetry');
 }
+
+// Defect #9 (docs/12-testing.md "Defects found"): best-effort extra flush
+// attempt when the browser is about to unload this extension's background
+// context — `chrome.runtime.onSuspend` is the MV3/event-page analogue of a
+// page's `beforeunload` (there is no DOM/window in a service worker, so
+// that event itself doesn't exist here; webextension-polyfill's own type
+// definitions don't model this event at all, so it's read off the raw
+// `chrome` global rather than `browser`). This is *not* the safety net —
+// `lib/telemetry.ts`'s persistence to `storage.session`/`.local` on every
+// enqueue is (registered at that module's own import time, unconditionally,
+// so it depends on nothing here) — it just means a suspend that arrives
+// with an idle queue and network available gets it sent immediately rather
+// than waiting for the next alarm tick or the next SW wake's hydration.
+// `onSuspend` is not guaranteed to fire before an MV3 SW is evicted for
+// idle timeout (Chrome's own documented caveat), and there is no reliable
+// way to await async work once it does fire — this is fire-and-forget by
+// necessity, guarded so a browser/test environment without this global at
+// all never throws on import.
+if (typeof chrome !== 'undefined' && chrome.runtime?.onSuspend) {
+  chrome.runtime.onSuspend.addListener(() => {
+    void telemetry.flush().catch(() => undefined);
+  });
+}

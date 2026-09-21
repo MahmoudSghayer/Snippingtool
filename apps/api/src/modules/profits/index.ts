@@ -1,8 +1,13 @@
-// GET /api/v1/profits — daily/weekly/monthly/lifetime P&L summary, read from
+// GET /api/v1/profits — day/week/month/lifetime P&L summary, read from
 // the `profits` daily-rollup table (populated by the profits.rollup job).
+// `granularity` uses the same canonical vocabulary as /admin/analytics/*
+// and /analytics/me/* (packages/shared's granularitySchema) — see defect #6
+// in docs/12-testing.md "Defects found". Legacy 'daily'/'weekly'/'monthly'
+// values are still accepted on input (deprecated) for backwards
+// compatibility.
 
 import { profits } from '@sl/db';
-import { dailyProfitSchema, profitQuerySchema, type DailyProfit } from '@sl/shared';
+import { dailyProfitSchema, granularitySchema, profitQuerySchema, type DailyProfit } from '@sl/shared';
 import { and, asc, eq, gte, lte } from 'drizzle-orm';
 import fp from 'fastify-plugin';
 import { z } from 'zod';
@@ -10,9 +15,9 @@ import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 
-function bucketKey(day: string, granularity: 'weekly' | 'monthly'): string {
+function bucketKey(day: string, granularity: 'week' | 'month'): string {
   const date = new Date(`${day}T00:00:00Z`);
-  if (granularity === 'monthly') {
+  if (granularity === 'month') {
     return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-01`;
   }
   // ISO week bucket: Monday of that week.
@@ -49,7 +54,7 @@ export default fp(
         schema: {
           tags: ['profits'],
           querystring: profitQuerySchema,
-          response: { 200: z.object({ granularity: z.enum(['daily', 'weekly', 'monthly', 'lifetime']), items: z.array(dailyProfitSchema) }) },
+          response: { 200: z.object({ granularity: granularitySchema, items: z.array(dailyProfitSchema) }) },
         },
       },
       async (request) => {
@@ -71,9 +76,9 @@ export default fp(
           tradesClosed: r.tradesClosed,
         }));
 
-        if (granularity === 'daily') return { granularity, items: daily };
-        if (granularity === 'weekly') return { granularity, items: aggregate(daily, (r) => bucketKey(r.day, 'weekly')) };
-        if (granularity === 'monthly') return { granularity, items: aggregate(daily, (r) => bucketKey(r.day, 'monthly')) };
+        if (granularity === 'day') return { granularity, items: daily };
+        if (granularity === 'week') return { granularity, items: aggregate(daily, (r) => bucketKey(r.day, 'week')) };
+        if (granularity === 'month') return { granularity, items: aggregate(daily, (r) => bucketKey(r.day, 'month')) };
 
         // lifetime: one bucket covering the whole requested range.
         const lifetime = aggregate(daily, () => 'lifetime');

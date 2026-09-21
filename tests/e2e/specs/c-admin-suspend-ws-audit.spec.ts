@@ -1,23 +1,25 @@
-// Journey (c): admin TOTP login -> force-logout a user (its live WS
-// connection receives `session.revoked`) -> suspend the same user (audit
-// row with a real before/after diff) -> both actions show up in the audit
-// log.
+// Journey (c): admin TOTP login -> suspend a user (audit row with a real
+// before/after diff, revokes sessions in the DB) -> force-logout the same,
+// already-suspended user (its live WS connection still receives
+// `session.revoked`) -> both actions show up in the audit log.
 //
-// Note on scope and ordering: `POST /admin/users/:id/suspend` itself only
-// revokes sessions in the database (docs/03-api.md's route table does not
-// claim it pushes anything over WS, and apps/api/src/modules/admin-users/
-// index.ts's suspend handler calls `revokeAllUserSessions` — a plain DB
-// update, no `publishToUser` call at all) — only `force-logout` actually
-// pushes `session.revoked` (see that same file). Both routes' own
-// `revokeAllUserSessions` call only WS-pushes for sessions it finds still
-// active (`WHERE revoked_at IS NULL`); calling suspend *then* force-logout
-// on the same target — this suite's original order — leaves force-logout's
-// own call with nothing left to revoke (suspend already did), so its WS
-// push silently never fires: 200 OK, zero sessions revoked, zero pushes,
-// no error anywhere (reproduced while authoring this spec). Force-logout
-// runs first here so its own revoke has a genuinely active session to work
-// on; suspend runs second, still against the real, already-force-logged-out
-// account, for the audited before/after half.
+// Note on scope and ordering — defect #7 (docs/12-testing.md "Defects
+// found"), FIXED: `POST /admin/users/:id/suspend` itself only revokes
+// sessions in the database (docs/03-api.md's route table does not claim it
+// pushes anything over WS, and apps/api/src/modules/admin-users/index.ts's
+// suspend handler calls `revokeAllUserSessions` — a plain DB update, no
+// `publishToUser` call at all) — only `force-logout` pushes
+// `session.revoked`. Calling suspend *then* force-logout on the same
+// target — this suite's order, and the natural admin workflow order ("shut
+// the account down completely, then make sure they're actually kicked
+// off") — used to leave force-logout's own `revokeAllUserSessions` call
+// with nothing left to revoke (suspend already did), so its WS push
+// silently never fired: 200 OK, zero sessions revoked, zero pushes, no
+// error anywhere. Fixed by having force-logout report `sessionsRevoked`
+// explicitly (now legitimately 0 in this exact scenario — asserted below,
+// not hidden) and push `session.revoked` for every session id the target
+// has ever had regardless of that count, so the live WS connection this
+// spec opens *before* either admin action still gets notified.
 import { expect, test } from '@playwright/test';
 import WebSocket from 'ws';
 
@@ -41,7 +43,7 @@ function wsUrl(ticket: string): string {
   return `${API_ORIGIN.replace(/^http/, 'ws')}/ws?ticket=${encodeURIComponent(ticket)}`;
 }
 
-test('admin TOTP login -> suspend (audited, before/after) -> force-logout (WS session.revoked) -> audit trail has both', async ({ request }) => {
+test('admin TOTP login -> suspend (audited, before/after) -> force-logout on the already-suspended account (WS session.revoked) -> audit trail has both', async ({ request }) => {
   const admin = await test.step('admin TOTP login (register + promote + real enrollment flow)', () => createAdminSession(API_ORIGIN, ADMIN_EMAIL, 'journey-c-admin'));
   const target = await test.step('target user registers, verifies, logs in', () => registerAndLogin(API_ORIGIN, TARGET_EMAIL, 'journey-c-target'));
 
@@ -80,36 +82,7 @@ test('admin TOTP login -> suspend (audited, before/after) -> force-logout (WS se
     socket.once('error', reject);
   });
 
-  // Force-logout runs *before* suspend, deliberately: `revokeAllUserSessions`
-  // (both routes call it) only WS-pushes for the sessions it actually finds
-  // still active (`WHERE revoked_at IS NULL`) — revoking twice in a row
-  // means the second call finds nothing left to revoke, so the WS push
-  // it's supposed to trigger silently never fires (reproduced while
-  // authoring this spec: chaining suspend-then-force-logout on the same
-  // target left the WS side hanging with no error at all — 200 OK, zero
-  // sessions revoked, zero pushes). Force-logout first means its own
-  // `revokeAllUserSessions` call has a genuinely still-active session to
-  // revoke and push for.
-  await test.step('admin force-logs-out the target (still an active session) -> the live WS connection gets session.revoked', async () => {
-    const res = await request.post(`${API_ORIGIN}/api/v1/admin/users/${target.userId}/force-logout`, {
-      headers: bearer(admin.accessToken),
-      data: { reason: 'e2e journey (c): force-logout half' },
-    });
-    expect(res.status(), await res.text()).toBe(200);
-
-    const event = await revokedEvent;
-    expect(event.reason).toBe('admin_force_logout');
-    expect(event.sessionId).toMatch(/^[0-9a-f-]{36}$/);
-    socket.close();
-  });
-
-  await test.step("the target's own (force-logged-out) session is now unusable — 401, not suspended yet", async () => {
-    const res = await request.get(`${API_ORIGIN}/api/v1/users/me`, { headers: bearer(target.accessToken) });
-    expect(res.status()).toBe(401);
-    expect((await res.json()) as { code: string }).toMatchObject({ code: 'AUTH_SESSION_REVOKED' });
-  });
-
-  await test.step('admin suspends the target (audited with a real before/after diff)', async () => {
+  await test.step('admin suspends the target (audited with a real before/after diff) — revokes the session in the DB, pushes nothing over WS itself', async () => {
     const res = await request.post(`${API_ORIGIN}/api/v1/admin/users/${target.userId}/suspend`, {
       headers: bearer(admin.accessToken),
       data: { reason: 'e2e journey (c): suspend half' },
@@ -119,15 +92,35 @@ test('admin TOTP login -> suspend (audited, before/after) -> force-logout (WS se
     expect(body.status).toBe('suspended');
   });
 
-  await test.step("the target's account is now suspended — 403, a more specific reason than the stale token alone", async () => {
+  await test.step("the target's account is now suspended — 403, not the stale-token 401", async () => {
     // `plugins/auth.ts`'s `resolveAuthUser` checks `user.status ===
     // 'suspended'` *before* the row_version-staleness check, so a suspended
-    // account's already-stale token now gets the more specific `FORBIDDEN`
-    // (403) instead of `AUTH_SESSION_REVOKED` (401) — confirmed against the
-    // real route while authoring this spec.
+    // account's already-stale token gets the more specific `FORBIDDEN`
+    // (403) instead of `AUTH_SESSION_REVOKED` (401).
     const res = await request.get(`${API_ORIGIN}/api/v1/users/me`, { headers: bearer(target.accessToken) });
     expect(res.status()).toBe(403);
     expect((await res.json()) as { code: string }).toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  // The actual defect #7 regression check: force-logout on an account
+  // suspend already fully revoked in the DB. Before the fix this was a
+  // silent no-op (200, zero sessions revoked, zero WS pushes, nothing to
+  // catch it); now it explicitly reports 0 revoked while still notifying
+  // the still-open WS connection.
+  await test.step('admin force-logs-out the already-suspended target -> sessionsRevoked is 0, but the live WS connection still gets session.revoked', async () => {
+    const res = await request.post(`${API_ORIGIN}/api/v1/admin/users/${target.userId}/force-logout`, {
+      headers: bearer(admin.accessToken),
+      data: { reason: 'e2e journey (c): force-logout half' },
+    });
+    expect(res.status(), await res.text()).toBe(200);
+    const body = (await res.json()) as { ok: true; sessionsRevoked: number; sessionsNotified: number };
+    expect(body.sessionsRevoked).toBe(0); // suspend already revoked the only session
+    expect(body.sessionsNotified).toBeGreaterThanOrEqual(1); // still notified regardless
+
+    const event = await revokedEvent;
+    expect(event.reason).toBe('admin_force_logout');
+    expect(event.sessionId).toMatch(/^[0-9a-f-]{36}$/);
+    socket.close();
   });
 
   await test.step('the audit log has both actions, each with the admin as actor and a request id', async () => {
@@ -145,6 +138,11 @@ test('admin TOTP login -> suspend (audited, before/after) -> force-logout (WS se
     const forceLoggedOut = entries.find((e) => e.action === 'user.force_logout');
     expect(forceLoggedOut, JSON.stringify(entries)).toBeTruthy();
     expect(forceLoggedOut!.actorId).toBe(admin.userId);
-    expect((forceLoggedOut!.after as { sessionsRevoked: number }).sessionsRevoked).toBeGreaterThanOrEqual(1);
+    // Defect #7: this used to be asserted >= 1 (from the reordered,
+    // defect-avoiding version of this spec) — now explicitly 0, and that's
+    // exactly the point: the response is meaningful either way, and
+    // sessionsNotified (checked above, over the real WS socket) is what
+    // proves the user still got told.
+    expect((forceLoggedOut!.after as { sessionsRevoked: number }).sessionsRevoked).toBe(0);
   });
 });

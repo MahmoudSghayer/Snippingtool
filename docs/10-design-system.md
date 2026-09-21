@@ -760,6 +760,16 @@ disk. This resume:
   real and independently verified; **`/admin/{users,profits,activity,
   system,subscriptions,coupons,plans,flags,bans,feature-toggles,config}`
   still have no dedicated screenshots** — flagged in §14.
+
+  **Update, docs/12-testing.md "Defects found" #10**: closed. The rate
+  limit this note hit is the same knob defect #5 made properly
+  env-configurable (`RATE_LIMIT_LOGIN_MAX`/`_WINDOW_MS` via
+  `AuthContext.loginRateLimit`) — `RATE_LIMIT_GLOBAL_MAX`/`_WINDOW_MS` was
+  already configurable, just never set generously for this e2e run. Setting
+  both pairs in `playwright.config.ts`'s `webServer` env (not touching
+  `apps/api`'s own defaults) let the full ~19-page × 3-breakpoint session
+  run without a 429, so the expansion this note describes reverting is now
+  back in, in `visual-smoke.spec.ts` — see §14.
 - Extension work (`apps/extension/src/{popup,options,ui}`, shared tokens,
   segmented risk gauge, panel sparkline/P&L styling, "What it sends" page,
   `apps/extension/screenshots/`) was gated on `docs/09-security.md`
@@ -793,14 +803,18 @@ disk. This resume:
   from PHASE 7 (`07-dashboard.md`), not touched by this pass; the
   Analytics page's "Filter performance" tab still shows the honest
   `EmptyState` explaining why.
-- **Screenshots for the 11 admin CRUD sub-pages** (Users, Profits, Activity,
-  System, Subscriptions, Coupons, Plans, Flags, Bans, Feature toggles,
-  Config) — not captured; see §13a for why (a real API global-rate-limit
-  trip, not a design-system issue) and the cost/benefit reasoning. Doable in
-  a follow-up by either raising `apps/api`'s `RATE_LIMIT_GLOBAL_MAX`/
-  `RATE_LIMIT_GLOBAL_WINDOW_MS` for the e2e environment (an `apps/api`-owned
-  change) or splitting the extra pages into their own lower-frequency e2e
-  spec (fewer requests per wall-clock second).
+- ~~**Screenshots for the 11 admin CRUD sub-pages**~~ — **closed**
+  (docs/12-testing.md "Defects found" #10). `visual-smoke.spec.ts` now
+  visits and screenshots `/admin/{users,profits,activity,system,
+  subscriptions,coupons,plans,flags,bans,feature-toggles,config}` at all
+  three breakpoints, on top of the original 8 named pages. §13a's real
+  global-rate-limit trip (`RATE_LIMIT_GLOBAL_MAX=300 req/60s` against one
+  continuous ~19-page × 3-breakpoint admin session) is fixed the way that
+  note's own follow-up suggested: `apps/dashboard/playwright.config.ts`'s
+  `webServer` env for `apps/api` now sets `RATE_LIMIT_GLOBAL_MAX`/
+  `RATE_LIMIT_GLOBAL_WINDOW_MS` and `RATE_LIMIT_LOGIN_MAX`/
+  `RATE_LIMIT_LOGIN_WINDOW_MS` generously for this e2e run only — the
+  production defaults (`apps/api/.env.example`) are untouched.
 - **Extension surfaces** — done this pass once `docs/09-security.md`
   landed; see §15, including a correction sub-pass that added the missing
   `test/e2e/ui-pages.spec.ts` (console-error + key-element + axe-core
@@ -808,9 +822,9 @@ disk. This resume:
   spec to find and fix two real bugs (a Google Fonts `<link>` that failed
   outright on a network with no route to `fonts.googleapis.com`, and two
   unlabeled "Add filter" inputs — a critical axe violation). Follow-ups
-  from that work specifically: the popup has no *live* risk gauge (only the
-  in-page panel does — §15 explains why, a file-ownership boundary, not an
-  oversight); the panel's font stays system-ui rather than Inter/JetBrains
+  from that work specifically: the popup previously had no *live* risk
+  gauge (only the in-page panel did) — closed, see §15's "Segmented risk
+  gauge"; the panel's font stays system-ui rather than Inter/JetBrains
   Mono (a deliberate CSP/host-page call, also explained in §15);
   `ledger-auto`'s popup/options are byte-identical to `ledger`'s (the M3
   automation build adds no UI surface of its own yet); and the
@@ -914,19 +928,24 @@ carries the identical tick-mark treatment on its own `.meter` (for visual
 consistency), even though — see "known gap" below — nothing currently
 feeds it live numbers.
 
-**Known gap, by design, not oversight**: the popup does not show a *live*
-risk gauge. The governor only runs inside the content script attached to
-the active EA tab (`engine/governor.ts`, outside this pass's file
-ownership); reaching its live snapshot from the popup would need a new
-`background/index.ts` message handler relaying it, which is out of scope
-here, and reconstructing a safety-critical number from the governor's
-serialized crash-recovery state without its own computation logic would
-risk showing a *wrong* one — worse than not showing one. The popup instead
-shows an honest static card pointing at the panel (`popup/main.ts`'s
-`renderLoggedIn`, "Risk budget" card) rather than fabricate a number. A
-`risk.snapshot` background handler forwarding `governor.snapshot()` to the
-popup is the concrete follow-up, for whoever owns `background/index.ts` and
-`content/index.ts` next.
+**Former gap, now closed** (docs/12-testing.md "Defects found"): the popup
+now shows the same live, segmented risk gauge the in-page panel does. The
+governor still only ever runs inside the content script attached to the
+active EA tab (`engine/governor.ts`) — nothing was moved or duplicated —
+but `content/index.ts`'s existing risk-meter UI tick (the same one that
+already calls `panel.setRiskSnapshot()`) now also pushes that exact
+snapshot to `background/governor.ts` (`governor.snapshotPush`), which
+caches the latest one in `storage.session` with a short staleness window
+(stale after ~3 missed ticks). The popup asks for it on open
+(`governor.snapshotGet`) and renders it with `ui/panel.ts`'s own
+`meterClass`/`setMeter` logic mirrored (`popup/main.ts`'s
+`riskGaugeHtml`/`meterHtml`) — same 80%/100% color bands, same tick-mark
+track (popup/style.css's `.meter::after`, unchanged from this section's
+earlier pass). When no EA tab has pushed a snapshot recently (none open,
+or the content script was torn down), the popup shows an honest "No live
+EA tab" message instead of a stale or fabricated number — it never
+reconstructs the governor's math from anything other than what the
+governor itself most recently computed.
 
 ### Panel sparkline + P&L styling
 

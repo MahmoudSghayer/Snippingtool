@@ -239,6 +239,20 @@ scoped, `/api/v1/analytics/me/activity`), sourced from three tables:
 `lib/analytics/dates.ts` is the one bucketing implementation every series
 function shares.
 
+**One vocabulary, everywhere**: `granularity` is `'day'|'week'|'month'|
+'lifetime'` on every endpoint in this document *and* on `GET /api/v1/profits`
+(`apps/api/src/modules/profits`) — `packages/shared/src/schemas/trades.ts`'s
+`profitQuerySchema` shares `schemas/analytics.ts`'s `granularitySchema` for
+this field. This was previously a defect (docs/12-testing.md "Defects
+found" #6): `/profits` used its own `'daily'|'weekly'|'monthly'|'lifetime'`
+enum, out of step with every other granularity-taking route. `/profits`
+still *accepts* the legacy `'daily'/'weekly'/'monthly'` strings on input —
+normalised to the canonical value before validation — for backwards
+compatibility with any existing caller; this is a **deprecated** input
+alias only, never returned in a response (every response always echoes the
+canonical value) and should eventually be removed once nothing depends on
+it.
+
 - **`day`**: one bucket per UTC calendar day.
 - **`week`**: Monday (UTC)-anchored ISO week — a day's bucket key is the
   Monday of its week.

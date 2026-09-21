@@ -66,9 +66,14 @@ behind every `auth` row in the tables below (token lifetimes, device model,
   (`users.failed_login_count`/`locked_until`), which is the primary
   brute-force defence per account (see `04-auth.md`); this per-route limit
   is a coarser guard against one IP hammering the route regardless of which
-  account. `login`/`register` additionally apply a **Redis sliding-window**
-  check per-IP and per-account (also 20/15min by default, same reasoning).
-  A 429 body is `{ code: 'RATE_LIMITED', message, details: {
+  account. `login` additionally applies a **Redis sliding-window** check
+  per-IP and per-account, driven by the *same*
+  `RATE_LIMIT_LOGIN_MAX`/`RATE_LIMIT_LOGIN_WINDOW_MS` env vars as the
+  per-route HTTP limiter above (previously a defect — docs/12-testing.md
+  "Defects found" #5 — hardcoded these independently at 20/15min; fixed by
+  reading `AuthContext.loginRateLimit` from `fastify.config` instead of a
+  module constant, so tuning one env var now tunes both limiters
+  consistently). A 429 body is `{ code: 'RATE_LIMITED', message, details: {
   retryAfterSeconds }, requestId }`.
 - **Idempotency**: batch-ingest endpoints (`activity/batch`) dedupe by a
   content hash of each event (§ below) so a retried batch after a dropped

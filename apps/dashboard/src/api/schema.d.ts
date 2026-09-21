@@ -3196,6 +3196,8 @@ export interface paths {
                         "application/json": {
                             /** @enum {boolean} */
                             ok: true;
+                            sessionsRevoked: number;
+                            sessionsNotified: number;
                         };
                     };
                 };
@@ -5636,7 +5638,7 @@ export interface paths {
                 query: {
                     from: string;
                     to: string;
-                    granularity?: "daily" | "weekly" | "monthly" | "lifetime";
+                    granularity?: "day" | "week" | "month" | "lifetime";
                 };
                 header?: never;
                 path?: never;
@@ -5652,7 +5654,7 @@ export interface paths {
                     content: {
                         "application/json": {
                             /** @enum {string} */
-                            granularity: "daily" | "weekly" | "monthly" | "lifetime";
+                            granularity: "day" | "week" | "month" | "lifetime";
                             items: {
                                 /** Format: date */
                                 day: string;

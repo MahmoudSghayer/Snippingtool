@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { granularitySchema } from './analytics.js';
+
 export const TRADE_STATUSES = ['bought', 'listed', 'sold', 'expired', 'unsold'] as const;
 export type TradeStatus = (typeof TRADE_STATUSES)[number];
 
@@ -45,11 +47,18 @@ export const dailyProfitSchema = z.object({
 });
 export type DailyProfit = z.infer<typeof dailyProfitSchema>;
 
+/** Defect #6 fix (docs/12-testing.md "Defects found"): this used to be its
+ * own `'daily'|'weekly'|'monthly'|'lifetime'` enum, out of step with
+ * `/admin/analytics/*` and `/analytics/me/*`'s `'day'|'week'|'month'|
+ * 'lifetime'`. Now shares `granularitySchema` (schemas/analytics.ts), which
+ * still accepts the legacy `'daily'/'weekly'/'monthly'` strings on input
+ * (deprecated, normalised at parse time) so an existing `/profits` caller
+ * using the old vocabulary keeps working. */
 export const profitQuerySchema = z
   .object({
     from: z.string().date(),
     to: z.string().date(),
-    granularity: z.enum(['daily', 'weekly', 'monthly', 'lifetime']).default('daily'),
+    granularity: granularitySchema.default('day'),
   })
   .strict();
 export type ProfitQuery = z.infer<typeof profitQuerySchema>;

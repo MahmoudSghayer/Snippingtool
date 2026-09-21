@@ -38,6 +38,25 @@ export const registerRequestSchema = z
   .strict();
 export type RegisterRequest = z.infer<typeof registerRequestSchema>;
 
+/** `POST /auth/register`'s actual response (`apps/api/src/modules/auth/
+ * index.ts`): 201 `{ userId }`, never tokens — email verification is
+ * required before login works (docs/03-api.md §"auth"). Deliberately not
+ * shaped like `loginResponseSchema` (no `status` discriminant); callers
+ * must not treat a successful register as an implicit login. */
+export const registerResponseSchema = z
+  .object({
+    userId: z.string().uuid(),
+  })
+  .strict();
+export type RegisterResponse = z.infer<typeof registerResponseSchema>;
+
+export const resendVerificationRequestSchema = z
+  .object({
+    email: emailSchema,
+  })
+  .strict();
+export type ResendVerificationRequest = z.infer<typeof resendVerificationRequestSchema>;
+
 export const loginRequestSchema = z
   .object({
     email: emailSchema,

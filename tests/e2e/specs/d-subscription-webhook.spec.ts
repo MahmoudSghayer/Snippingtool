@@ -41,49 +41,26 @@ test('checkout.session.completed webhook activates a plan -> dashboard shows it'
     expect((await res.json()) as { received: boolean }).toEqual({ received: true });
   });
 
-  // --- Defect found: completing checkout invalidates the buyer's own
-  // already-open session ---
+  // --- Defect #8 (docs/12-testing.md "Defects found") — FIXED ---
   //
   // apps/api/src/modules/payments/webhooks.ts's handleCheckoutCompleted()
   // backfills `users.stripe_customer_id` in the same transaction that
-  // activates the subscription (`if (stripeCustomerId) { await
-  // tx.update(users).set({ stripeCustomerId })... }`, its own comment: "the
-  // first point a Stripe Customer exists ... persist it"). Every UPDATE to
-  // `users` fires the blanket `bump_row_version` trigger — including this
-  // one, which has nothing to do with the *caller's own* session — so the
-  // access token this same user was holding before checkout (issued with
-  // `ver` = the row_version at login time) goes stale the instant the
-  // webhook lands, and their very next authenticated request 401s with
-  // AUTH_SESSION_REVOKED. Reproduced directly (register -> login -> hold
-  // the access token -> checkout webhook -> same token immediately 401s)
-  // while authoring this journey. This is the same root cause pattern as
-  // `apps/api/src/test/qa/__tests__/settings-versioning.test.ts`'s
-  // documented defect: a benign, unrelated `users` UPDATE incidentally
-  // invalidating a live session via the blanket per-row trigger. Proposed
-  // fix: don't route the `stripe_customer_id` backfill through a plain
-  // `users` UPDATE inside this transaction — either bump `row_version`
-  // explicitly to the *pre-checkout* value afterwards (defeats the
-  // trigger's purpose elsewhere), or move `stripe_customer_id` off `users`
-  // onto a column/table the row-version-invalidation trigger doesn't cover
-  // — not applied here, this suite never edits application source. In
-  // practice a real client's access token is short-lived (15 min) and its
-  // `lib/api.ts`/dashboard API client both auto-refresh on a 401, so the
-  // user experience is "one extra silent network round trip", not a
-  // visible break — but it is real, and worth knowing about before
-  // assuming a 401 right after checkout is a caller bug.
-  await test.step("DEFECT: the buyer's own pre-checkout access token is immediately invalidated by the webhook's stripe_customer_id backfill", async () => {
+  // activates the subscription. That used to fire the blanket
+  // `bump_row_version` trigger on `users` — including for this write,
+  // which has nothing to do with the caller's own session — so the access
+  // token the buyer was already holding (issued with `ver` = the
+  // row_version at login time) went stale the instant the webhook landed,
+  // and their very next authenticated request 401'd with
+  // AUTH_SESSION_REVOKED. Fixed by migrations/0026_users_row_version_
+  // exclude_billing.sql: `users` now has its own trigger,
+  // `bump_users_row_version()`, which skips the bump when the only column
+  // that changed is `stripe_customer_id` — this is the regression test for
+  // that fix, over real HTTP against the real trigger.
+  await test.step("the buyer's own pre-checkout access token still works after the webhook's stripe_customer_id backfill", async () => {
     const res = await request.get(`${API_ORIGIN}/api/v1/subscriptions/me`, { headers: { authorization: `Bearer ${user.accessToken}` } });
-    expect(res.status()).toBe(401);
-    expect((await res.json()) as { code: string }).toMatchObject({ code: 'AUTH_SESSION_REVOKED' });
-
-    // A real client recovers via its normal 401 -> refresh flow — confirm
-    // that recovery actually works, so this defect is "an extra round
-    // trip", not "the user is locked out".
-    const refreshed = await request.post(`${API_ORIGIN}/api/v1/auth/refresh`, { data: { refreshToken: user.refreshToken } });
-    expect(refreshed.status(), await refreshed.text()).toBe(200);
-    const refreshedBody = (await refreshed.json()) as { accessToken: string; refreshToken: string };
-    user.accessToken = refreshedBody.accessToken;
-    user.refreshToken = refreshedBody.refreshToken;
+    expect(res.status(), await res.text()).toBe(200);
+    const body = (await res.json()) as { subscription: { status: string } };
+    expect(body.subscription.status).toBe('active');
   });
 
   await test.step('a replayed copy of the same event (same event id + signature) is a safe no-op (idempotency)', async () => {

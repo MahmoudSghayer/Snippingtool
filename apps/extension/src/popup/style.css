@@ -169,7 +169,16 @@ button.secondary:hover {
   display: block;
   height: 100%;
   background: var(--sl-positive);
-  transition: width var(--sl-motion-base) var(--sl-ease);
+  transition: width var(--sl-motion-base) var(--sl-ease), background-color var(--sl-motion-base) var(--sl-ease);
+}
+/* Same two bands ui/panel.ts's risk meters use (80% "high", 100% "over") —
+ * the popup's live risk gauge (defect: docs/10-design-system.md §15
+ * "Known gap") reads the same way as the in-page panel's. */
+.meter.high i {
+  background: var(--sl-warning);
+}
+.meter.over i {
+  background: var(--sl-negative);
 }
 /* Segment ticks at the 80% ("high") and 100% ("over") thresholds — the same
  * two bands ui/panel.ts's risk meters use, so a glance at either surface

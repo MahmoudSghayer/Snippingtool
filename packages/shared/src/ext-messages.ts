@@ -164,6 +164,13 @@ export const backgroundMessageTypeSchema = z.enum([
    * alarm (and this message) both use. */
   'telemetry.enqueue',
   'errors.report',
+  /** Added additively alongside the popup live risk gauge (docs/10-design-
+   * system.md §15, docs/12-testing.md "Defects found"): `content/index.ts`
+   * pushes its live governor snapshot on every risk-meter UI tick
+   * (`governor.snapshotPush`); the popup asks for the latest cached one on
+   * open (`governor.snapshotGet`). */
+  'governor.snapshotPush',
+  'governor.snapshotGet',
   'engine.state',
   /** Locally-persisted saved filters (`SavedFilter[]`, `storage.local`) —
    * server sync against `/api/v1/filters` lands once `apps/api` ships (see
@@ -260,6 +267,14 @@ export const extBackgroundRegisterPayloadSchema = z
   })
   .strict();
 
+/** `auth.resendVerification` — re-send the verification email (popup's
+ * "check your email" state, defect #3 in docs/12-testing.md). */
+export const extBackgroundResendVerificationPayloadSchema = z
+  .object({
+    email: emailSchema,
+  })
+  .strict();
+
 /** `.optional()` at the top level (not just its one field): `background/
  * auth.ts`'s `handleAuthLogout` defaults its whole argument to `{}`, and the
  * envelope's `payload` itself is optional — a caller that omits it entirely
@@ -319,3 +334,34 @@ export const extBackgroundTelemetryEnqueuePayloadSchema = z.discriminatedUnion('
   z.object({ kind: z.literal('riskEvents'), items: z.array(riskBudgetEventSchema).max(200) }).strict(),
   z.object({ kind: z.literal('event'), items: z.array(extTelemetryPlainEventSchema).max(500) }).strict(),
 ]);
+
+/** `governor.snapshotPush` — mirrors `engine/governor.ts`'s `RiskSnapshot`
+ * exactly (a structural mirror, not an import: `engine/governor.ts` is
+ * automation-surface code, and importing anything from it into this
+ * package — which the *listable* build's background service worker also
+ * imports — would risk pulling automation-only code into that bundle the
+ * same way `extTelemetryPlainEventSchema` above works around for
+ * telemetry; a 12-line duplicate here is cheaper than auditing the whole
+ * `engine/` module graph for tree-shakeability). `content/index.ts`
+ * pushes its live governor snapshot on the same tick that updates the
+ * in-page panel's meter (defect: docs/12-testing.md "Defects found",
+ * docs/10-design-system.md §15 "Known gap" — the popup previously showed
+ * no live numbers at all) so `background/governor.ts` can cache the
+ * latest one and hand it to the popup on request
+ * (`governor.snapshotGet`). */
+export const extBackgroundGovernorSnapshotPushPayloadSchema = z
+  .object({
+    actionsLastHour: z.number().int().min(0),
+    actionsPerHourLimit: z.number().min(0),
+    sessionElapsedMinutes: z.number().min(0),
+    sessionLengthLimitMinutes: z.number().min(0),
+    buyToSearchRatio: z.number().min(0),
+    buyToSearchRatioLimit: z.number().min(0),
+    coinFlowLastHour: z.number().min(0),
+    coinFlowLimit: z.number().min(0),
+    inCooldown: z.boolean(),
+    cooldownRemainingMs: z.number().min(0),
+    killSwitchActive: z.boolean(),
+  })
+  .strict();
+export type ExtGovernorSnapshotPushPayload = z.infer<typeof extBackgroundGovernorSnapshotPushPayloadSchema>;

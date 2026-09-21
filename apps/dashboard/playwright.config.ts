@@ -62,7 +62,29 @@ export default defineConfig({
       url: `http://127.0.0.1:${API_PORT}/health/ready`,
       reuseExistingServer: true,
       timeout: 60_000,
-      env: { DATABASE_URL, REDIS_URL, DASHBOARD_ORIGIN },
+      env: {
+        DATABASE_URL,
+        REDIS_URL,
+        DASHBOARD_ORIGIN,
+        // Defect #10 follow-up (docs/12-testing.md "Defects found" — the
+        // screenshot-inventory gap docs/10-design-system.md §14 used to
+        // note as "blocked by rate limit"): this whole spec re-uses one
+        // browser context/device across every route, every breakpoint —
+        // `visual-smoke.spec.ts` alone makes dozens of requests well inside
+        // apps/api's default RATE_LIMIT_GLOBAL_MAX (300/60s), and
+        // `dashboard.spec.ts`/`accessibility.spec.ts` each re-authenticate
+        // the same seeded admin on top of that within the same run
+        // (`workers: 1`, so they don't overlap, but the requests still
+        // accumulate against the same per-IP window). Both knobs are
+        // already env-configurable (config/env.ts) — this just sets them
+        // generously for this run instead of leaving the (correct,
+        // production-appropriate) defaults to occasionally 429 a long e2e
+        // session.
+        RATE_LIMIT_GLOBAL_MAX: '100000',
+        RATE_LIMIT_GLOBAL_WINDOW_MS: '60000',
+        RATE_LIMIT_LOGIN_MAX: '100000',
+        RATE_LIMIT_LOGIN_WINDOW_MS: '60000',
+      },
     },
     {
       command: 'pnpm --filter @sl/dashboard dev',

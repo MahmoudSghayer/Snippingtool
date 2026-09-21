@@ -395,8 +395,16 @@ async function main(): Promise<void> {
 
   setInterval(() => {
     if (!governor) return;
-    panel.setRiskSnapshot(governor.snapshot());
+    const snapshot = governor.snapshot();
+    panel.setRiskSnapshot(snapshot);
     if (assist) panel.setSessionPnl(assist.sessionPnl);
+    // Defect (docs/10-design-system.md §15 "Known gap"): the popup showed
+    // no live risk gauge at all — only this in-page panel did. Pushing the
+    // same snapshot the panel just rendered to background (cached in
+    // `storage.session`, `background/governor.ts`) lets the popup show the
+    // real segmented gauge too, without ever reconstructing/recomputing a
+    // safety-critical number outside the governor's own math.
+    void send('governor.snapshotPush', snapshot);
   }, RISK_UI_TICK_MS);
 
   // ---- crash recovery: persist governor state to storage.session ----------

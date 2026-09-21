@@ -70,6 +70,17 @@ const apiEnv = {
   STRIPE_PRICE_PRO: 'price_e2e_pro',
   STRIPE_PRICE_ULTIMATE: 'price_e2e_ultimate',
   STRIPE_PRICE_LIFETIME: 'price_e2e_lifetime',
+  // Same reasoning as apps/dashboard/playwright.config.ts's identical block
+  // (docs/12-testing.md "Defects found" #10): this suite's journeys
+  // register/log in several fresh users and an admin per run, and a
+  // repeated local run (or a CI retry) against the same Redis-backed
+  // sliding window can otherwise trip the production-appropriate default
+  // login rate limit — reproduced directly while re-verifying this suite.
+  // Generous here only; apps/api/.env.example's defaults are untouched.
+  RATE_LIMIT_GLOBAL_MAX: '100000',
+  RATE_LIMIT_GLOBAL_WINDOW_MS: '60000',
+  RATE_LIMIT_LOGIN_MAX: '100000',
+  RATE_LIMIT_LOGIN_WINDOW_MS: '60000',
 };
 
 export default defineConfig({

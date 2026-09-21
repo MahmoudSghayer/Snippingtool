@@ -7056,10 +7056,20 @@
                       "enum": [
                         true
                       ]
+                    },
+                    "sessionsRevoked": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "sessionsNotified": {
+                      "type": "integer",
+                      "minimum": 0
                     }
                   },
                   "required": [
-                    "ok"
+                    "ok",
+                    "sessionsRevoked",
+                    "sessionsNotified"
                   ],
                   "additionalProperties": false
                 }
@@ -7609,7 +7619,8 @@
                 "properties": {
                   "email": {
                     "type": "string",
-                    "format": "email"
+                    "format": "email",
+                    "maxLength": 320
                   }
                 },
                 "required": [
@@ -11586,12 +11597,12 @@
             "schema": {
               "type": "string",
               "enum": [
-                "daily",
-                "weekly",
-                "monthly",
+                "day",
+                "week",
+                "month",
                 "lifetime"
               ],
-              "default": "daily"
+              "default": "day"
             },
             "in": "query",
             "name": "granularity",
@@ -11609,9 +11620,9 @@
                     "granularity": {
                       "type": "string",
                       "enum": [
-                        "daily",
-                        "weekly",
-                        "monthly",
+                        "day",
+                        "week",
+                        "month",
                         "lifetime"
                       ]
                     },

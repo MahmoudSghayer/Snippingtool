@@ -23,7 +23,7 @@ import { newId } from '../../lib/ids.js';
 import { decodeCursor, encodeCursor } from '../../lib/pagination.js';
 import { ADMIN_RATE_LIMIT } from '../../lib/rate-limit-tiers.js';
 import { publishToUser } from '../../ws/publish.js';
-import { revokeAllUserSessions, bumpUserVersion } from '../auth/repo.js';
+import { revokeAllUserSessions, listAllUserSessionIds, bumpUserVersion } from '../auth/repo.js';
 
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
@@ -258,7 +258,12 @@ export default fp(
         onRequest: [fastify.requirePermission('users.force_logout')],
         preHandler: [fastify.verifyCsrf],
         config: { rateLimit: ADMIN_RATE_LIMIT },
-        schema: { tags: ['admin'], params: z.object({ id: z.string().uuid() }), body: z.object({ reason: z.string().min(1).max(1000) }), response: { 200: z.object({ ok: z.literal(true) }) } },
+        schema: {
+          tags: ['admin'],
+          params: z.object({ id: z.string().uuid() }),
+          body: z.object({ reason: z.string().min(1).max(1000) }),
+          response: { 200: z.object({ ok: z.literal(true), sessionsRevoked: z.number().int().min(0), sessionsNotified: z.number().int().min(0) }) },
+        },
       },
       async (request) => {
         const user = await fastify.db.query.users.findFirst({ where: eq(users.id, request.params.id) });
@@ -267,7 +272,21 @@ export default fp(
         const revokedSessionIds = await revokeAllUserSessions(fastify.db, user.id, 'admin_force_logout');
         await bumpUserVersion(fastify.db, user.id);
 
-        for (const sessionId of revokedSessionIds) {
+        // Defect #7 fix (docs/12-testing.md "Defects found"): an admin who
+        // already `suspend`ed this account has already revoked every
+        // session row, so `revokedSessionIds` above can legitimately be
+        // empty here — that must not mean "force-logout silently did
+        // nothing". The response says explicitly how many *DB rows* this
+        // call itself revoked (`sessionsRevoked`, possibly 0 — genuinely
+        // useful information, not hidden), and — regardless of that number
+        // — every live WS connection for this user still gets a
+        // `session.revoked` push (`sessionsNotified`, targeting every
+        // session id this user has ever had, since the dashboard's WS
+        // client (`useWsGateway.ts`) treats *any* `session.revoked` event
+        // on its channel as "you are logged out", not just one matching
+        // its own current session id).
+        const notifyTargets = await listAllUserSessionIds(fastify.db, user.id);
+        for (const sessionId of notifyTargets) {
           await publishToUser(fastify.redis, user.id, { type: 'session.revoked', sessionId, reason: 'admin_force_logout' });
         }
 
@@ -281,9 +300,19 @@ export default fp(
           .catch((err) => fastify.log.warn({ err }, 'force-logout notice email failed'));
 
         const adminRowId = await getAdminUserRowId(fastify, request.authUser!.id);
-        await logAdminAction(fastify, adminRowId, request.authUser!.id, 'user.force_logout', user.id, request.body.reason, null, { sessionsRevoked: revokedSessionIds.length }, request);
+        await logAdminAction(
+          fastify,
+          adminRowId,
+          request.authUser!.id,
+          'user.force_logout',
+          user.id,
+          request.body.reason,
+          null,
+          { sessionsRevoked: revokedSessionIds.length, sessionsNotified: notifyTargets.length },
+          request,
+        );
 
-        return { ok: true as const };
+        return { ok: true as const, sessionsRevoked: revokedSessionIds.length, sessionsNotified: notifyTargets.length };
       },
     );
   },

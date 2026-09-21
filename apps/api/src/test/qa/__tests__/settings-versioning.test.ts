@@ -68,41 +68,30 @@ describe('settings versioning and sync-conflict policy', () => {
     expect(historyBody.map((h) => h.version).sort((a, b) => a - b)).toEqual([2, 3]);
   });
 
-  // --- Defect found: PUT /settings is not safe under concurrent writes ---
+  // --- Defect #1 (docs/12-testing.md "Defects found") — FIXED ---
   //
   // apps/extension/src/lib/settings.ts documents the sync-conflict policy as
-  // "server version wins" with no client-side merge, implying every PUT
-  // should simply be accepted and bump `version` again. The *intended*
-  // behaviour asserted here originally was "both concurrent PUTs from the
-  // same version apply, in server-received order, version ends at 3" — that
-  // is not what modules/settings/index.ts actually does. Its handler reads
-  // `current` (version N), computes `merged.version = current.version + 1`
-  // in application code, then inserts a settings_history row with that same
-  // computed version. `settings_history_user_version_unique` is a unique
-  // index on `(user_id, version)` (packages/db/src/schema/settings.ts) —
-  // when two PUTs race, both read the same `current.version` and both
-  // compute the same next version, so the second settings_history insert
-  // hits the unique constraint and the request 500s (`INTERNAL`) instead of
-  // retrying, serialising via a row lock, or returning a documented conflict
-  // code. Reproduced deterministically (3/3 runs) via
-  // `TEST_DATABASE_URL=... REDIS_TEST_DB=12 pnpm --filter @sl/api exec
-  // vitest run src/test/qa/__tests__/settings-versioning.test.ts -t "last
-  // write wins"` before this test was corrected to assert the real
-  // behaviour. See docs/12-testing.md "Defects found" for the proposed fix
-  // (`SELECT ... FOR UPDATE` on the user_settings row, or an
-  // `INSERT ... ON CONFLICT DO NOTHING` + retry loop, inside a transaction
-  // wrapping the read-merge-write) — not applied here, this suite never
-  // edits application source.
-  it('DEFECT: concurrent PUTs race on settings_history\'s unique (user_id, version) index — this can 500 instead of serialising or reporting a conflict', async () => {
-    // The race is timing-dependent (confirmed both ways: isolated runs of
-    // just this test hit it 3/3, full-suite runs sometimes don't — Postgres
-    // connection-pool/scheduler timing shifts which SELECTs interleave with
-    // which INSERTs). So this loops several racing pairs on fresh users to
-    // reliably surface it at least once per run without asserting an exact
-    // 200/500 split that would itself be flaky. The invariant that always
-    // holds, buggy or not, is: every response is 200 or a well-formed 500
-    // (never an unhandled crash/timeout, never silent data loss), and the
-    // settings row is always left readable afterward.
+  // "server version wins" with no client-side merge. modules/settings/
+  // index.ts's PUT handler reads `current` (version N), computes
+  // `merged.version = current.version + 1` in application code, then
+  // inserts a settings_history row with that same computed version.
+  // `settings_history_user_version_unique` is a unique index on
+  // `(user_id, version)` (packages/db/src/schema/settings.ts) — when two
+  // PUTs race, both read the same `current.version` and both compute the
+  // same next version, so the second settings_history insert hits the
+  // unique constraint. This used to surface as an unhandled 500 INTERNAL;
+  // the handler now catches the Postgres unique-violation (23505) around
+  // the update+insert and throws AppErrors.conflict(), so the loser gets a
+  // clean, documented `409 CONFLICT` instead of a raw crash.
+  it('concurrent PUTs race on settings_history\'s unique (user_id, version) index — the loser gets a clean 409 CONFLICT, never a raw 500', async () => {
+    // The race is timing-dependent (Postgres connection-pool/scheduler
+    // timing shifts which SELECTs interleave with which INSERTs), so this
+    // loops several racing pairs on fresh users to reliably surface it at
+    // least once per run without asserting an exact split that would
+    // itself be flaky. The invariant that must always hold: every response
+    // is 200 or a well-formed 409 CONFLICT (never a 500, never an
+    // unhandled crash/timeout, never silent data loss), and the settings
+    // row is always left readable afterward.
     let sawTheRace = false;
 
     for (let i = 0; i < 8; i += 1) {
@@ -112,10 +101,12 @@ describe('settings versioning and sync-conflict policy', () => {
       const [resA, resB] = await Promise.all([patchA, patchB]);
 
       for (const res of [resA, resB]) {
-        expect([200, 500]).toContain(res.statusCode);
-        if (res.statusCode === 500) {
+        expect([200, 409]).toContain(res.statusCode);
+        if (res.statusCode === 409) {
           sawTheRace = true;
-          expect(res.json()).toMatchObject({ code: 'INTERNAL' });
+          expect(res.json()).toMatchObject({ code: 'CONFLICT' });
+        } else {
+          expect(res.statusCode).not.toBe(500);
         }
       }
 
@@ -123,11 +114,11 @@ describe('settings versioning and sync-conflict policy', () => {
       expect(final.statusCode).toBe(200);
     }
 
-    // If this ever stops firing across 8 racing pairs, either the module
-    // was fixed (great — tighten this test to assert [200, 200] and update
-    // the comment above) or the race window closed for an unrelated reason
-    // worth re-investigating; either way this assertion should not be
-    // silently deleted.
+    // If this ever stops firing across 8 racing pairs, either the race
+    // window closed for an unrelated reason (worth re-investigating) or the
+    // handler was changed to serialise instead of conflict (fine — update
+    // this comment); either way this assertion should not be silently
+    // deleted, since it's what pins defect #1 as fixed.
     expect(sawTheRace).toBe(true);
   });
 
@@ -146,29 +137,39 @@ describe('settings versioning and sync-conflict policy', () => {
     expect(body.message).toMatch(/exceeds the plan's configured ceiling/);
   });
 
-  // --- Defect found: extension/server HTTP-verb mismatch on this exact route ---
+  // --- Defect #4 (docs/12-testing.md "Defects found") — FIXED ---
   //
-  // apps/extension/src/lib/settings.ts's updateSettings() sends
+  // apps/extension/src/lib/settings.ts's updateSettings() used to send
   // `{ method: 'PATCH' }` to '/api/v1/settings', but this module only ever
-  // registers `app.put('/api/v1/settings', ...)` — there is no PATCH route.
-  // The dashboard (apps/dashboard/src/pages/user/SettingsPage.tsx) calls
-  // `api.PUT('/api/v1/settings', ...)`, which is correct — this is
-  // extension-only. Documented in docs/12-testing.md "Defects found";
-  // proposed fix: change apps/extension/src/lib/settings.ts's
-  // `updateSettings()` to send `method: 'PUT'` (this repo never edits
-  // application source from the QA suite, so the fix isn't applied here).
-  it('DEFECT: the route the extension patches (PATCH) is not the route the server exposes (PUT)', async () => {
+  // registers `app.put('/api/v1/settings', ...)` — there was no PATCH
+  // route, so every real settings sync from the extension 404d. The
+  // dashboard (apps/dashboard/src/pages/user/SettingsPage.tsx) already
+  // called `api.PUT('/api/v1/settings', ...)`, which was always correct —
+  // this was extension-only. Fixed by changing
+  // apps/extension/src/lib/settings.ts's `updateSettings()` to send
+  // `method: 'PUT'` (see apps/extension/test/unit/settings-conflict.test.ts
+  // for the extension-side regression test, and
+  // apps/api/src/test/contract/openapi-client-methods.test.ts for a
+  // standing contract test that every method the extension's api client
+  // uses is a route the API actually registers). This route still has no
+  // PATCH handler by design — asserted below so a future regression (the
+  // extension reverting to PATCH) is caught here too.
+  it('the server still has no PATCH handler for this route — the extension must use PUT', async () => {
     const user = await createUserSession(app, 'settings-defect@example.com', 'fp-settings-defect-0001');
-    const res = await app.inject({
+    const patchRes = await app.inject({
       method: 'PATCH',
       url: '/api/v1/settings',
       headers: bearer(user.accessToken),
       payload: { targets: { minProfitPerSnipe: 999 } },
     });
-    // Fastify has no PATCH handler registered for this path -> 404, not 200.
-    // If this ever starts returning 200, the mismatch has been fixed
-    // (either the extension now sends PUT, or the server now also accepts
-    // PATCH) and this assertion — and the note above — should be updated.
-    expect(res.statusCode).toBe(404);
+    expect(patchRes.statusCode).toBe(404);
+
+    const putRes = await app.inject({
+      method: 'PUT',
+      url: '/api/v1/settings',
+      headers: bearer(user.accessToken),
+      payload: { targets: { minProfitPerSnipe: 999 } },
+    });
+    expect(putRes.statusCode).toBe(200);
   });
 });

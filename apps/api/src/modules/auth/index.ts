@@ -17,6 +17,8 @@ import {
   refreshRequestSchema,
   refreshResponseSchema,
   registerRequestSchema,
+  registerResponseSchema,
+  resendVerificationRequestSchema,
 } from '@sl/shared';
 import fp from 'fastify-plugin';
 import { z } from 'zod';
@@ -40,6 +42,11 @@ function ctx(fastify: FastifyInstance): AuthContext {
     jwtPrivateKey: fastify.config.JWT_PRIVATE_KEY,
     cookieSecret: fastify.config.COOKIE_SECRET,
     log: fastify.log,
+    // Defect #5 fix (docs/12-testing.md "Defects found"): same two env vars
+    // `plugins/rate-limit.ts` already reads for this route's HTTP-level
+    // limiter (`loginRateLimit` below, `config: { rateLimit: ... }`) — one
+    // vocabulary for "how many login attempts per window", not two.
+    loginRateLimit: { max: fastify.config.RATE_LIMIT_LOGIN_MAX, windowMs: fastify.config.RATE_LIMIT_LOGIN_WINDOW_MS },
   };
 }
 
@@ -96,7 +103,7 @@ export default fp(
         schema: {
           tags: ['auth'],
           body: registerRequestSchema,
-          response: { 201: z.object({ userId: z.string().uuid() }) },
+          response: { 201: registerResponseSchema },
         },
       },
       async (request, reply) => {
@@ -119,7 +126,7 @@ export default fp(
       '/api/v1/auth/resend-verification',
       {
         config: { rateLimit: loginRateLimit },
-        schema: { tags: ['auth'], body: z.object({ email: z.string().email() }), response: { 200: z.object({ sent: z.literal(true) }) } },
+        schema: { tags: ['auth'], body: resendVerificationRequestSchema, response: { 200: z.object({ sent: z.literal(true) }) } },
       },
       async (request) => {
         await service.resendVerification(ctx(fastify), request.body.email.trim().toLowerCase());

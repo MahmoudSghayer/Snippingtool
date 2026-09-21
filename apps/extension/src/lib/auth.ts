@@ -22,6 +22,8 @@ import {
   type RefreshResponse,
   type RegisterRequest,
   registerRequestSchema,
+  type RegisterResponse,
+  resendVerificationRequestSchema,
 } from '@sl/shared';
 
 import { retryFetch, toApiError } from './http.js';
@@ -88,13 +90,30 @@ export async function handleUnauthorized(): Promise<boolean> {
   return refreshInFlight;
 }
 
-export async function register(request: RegisterRequest): Promise<LoginResponse> {
+/** `POST /auth/register` never returns tokens (201 `{ userId }` — see
+ * `registerResponseSchema`'s own comment); email verification is required
+ * before login works. Previously this was mistyped as `LoginResponse` and
+ * gated on `data.status === 'ok'`, a field the real response never has, so
+ * nothing was ever persisted and the caller (`background/auth.ts`'s
+ * `handleAuthRegister`) had no way to tell a fresh registration apart from
+ * a login — it's now typed and returned as what it actually is. */
+export async function register(request: RegisterRequest): Promise<RegisterResponse> {
   const body = registerRequestSchema.parse(request);
   const res = await retryFetch('/api/v1/auth/register', { method: 'POST', body: JSON.stringify(body) });
   if (!res.ok) throw await toApiError(res);
-  const data = (await res.json()) as LoginResponse;
-  if (data.status === 'ok') await persistTokens(data.accessToken, data.refreshToken);
-  return data;
+  return (await res.json()) as RegisterResponse;
+}
+
+/** `POST /auth/resend-verification` — re-sends the verification email for
+ * an unverified account. Always resolves `{ sent: true }` server-side
+ * regardless of whether the address exists (docs/03-api.md — avoids
+ * account enumeration), so the caller only needs to handle the request
+ * failing outright (rate-limited, validation). */
+export async function resendVerification(email: string): Promise<{ sent: true }> {
+  const body = resendVerificationRequestSchema.parse({ email });
+  const res = await retryFetch('/api/v1/auth/resend-verification', { method: 'POST', body: JSON.stringify(body) });
+  if (!res.ok) throw await toApiError(res);
+  return (await res.json()) as { sent: true };
 }
 
 export async function login(request: LoginRequest): Promise<LoginResponse> {

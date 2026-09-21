@@ -13,11 +13,13 @@
 import {
   backgroundMessageEnvelopeSchema,
   extBackgroundFiltersSavePayloadSchema,
+  extBackgroundGovernorSnapshotPushPayloadSchema,
   extBackgroundLicenseHeartbeatPayloadSchema,
   extBackgroundLoginPayloadSchema,
   extBackgroundLogoutPayloadSchema,
   extBackgroundRecordPayloadSchema,
   extBackgroundRegisterPayloadSchema,
+  extBackgroundResendVerificationPayloadSchema,
   extBackgroundSummaryPayloadSchema,
   extBackgroundTelemetryEnqueuePayloadSchema,
   mfaVerifyRequestSchema,
@@ -29,8 +31,9 @@ import { logger } from '../lib/logger.js';
 import { margin, maxSnipePrice, summarise } from '../model/prices.js';
 import * as db from '../store/db.js';
 
-import { handleAuthLogin, handleAuthLogout, handleAuthMfaVerify, handleAuthRegister, handleAuthStatus } from './auth.js';
+import { handleAuthLogin, handleAuthLogout, handleAuthMfaVerify, handleAuthRegister, handleAuthResendVerification, handleAuthStatus } from './auth.js';
 import { installGlobalErrorHandlers, handleErrorsReport, ensureErrorFlushAlarm, onErrorFlushAlarm } from './errors.js';
+import { handleGovernorSnapshotGet, handleGovernorSnapshotPush } from './governor.js';
 import { ensureHeartbeatAlarm, handleLicenseBootstrap, handleLicenseHeartbeat, onHeartbeatAlarm, runBootstrap } from './license.js';
 import {
   handleDevicesList,
@@ -75,6 +78,7 @@ const handlers: Record<string, Handler> = {
 
   'auth.login': (payload) => handleAuthLogin(payload as never),
   'auth.register': (payload) => handleAuthRegister(payload as never),
+  'auth.resendVerification': (payload) => handleAuthResendVerification(payload as never),
   'auth.mfa': (payload) => handleAuthMfaVerify(payload as never),
   'auth.logout': (payload) => handleAuthLogout(payload as never),
   'auth.refresh': async () => ({ ok: true }), // refresh is transparent (lib/api.ts's interceptor); exposed for the popup's manual "retry" button
@@ -97,6 +101,9 @@ const handlers: Record<string, Handler> = {
 
   'errors.report': () => handleErrorsReport(),
 
+  'governor.snapshotPush': (payload) => handleGovernorSnapshotPush(payload as never),
+  'governor.snapshotGet': () => handleGovernorSnapshotGet(),
+
   async 'engine.state'() {
     return { ok: true };
   },
@@ -112,7 +119,7 @@ const handlers: Record<string, Handler> = {
 // `background/auth.ts` itself). A handler with no payload (`auth.refresh`,
 // `auth.status`, `license.bootstrap`, `settings.get`, `filters.list`,
 // `devices.list`, `logs.export`, `telemetry.flush`, `errors.report`,
-// `engine.state`, `counts`) has nothing to validate and is deliberately
+// `governor.snapshotGet`, `engine.state`, `counts`) has nothing to validate and is deliberately
 // left out — every handler still gets the envelope-level check above plus
 // the try/catch's crash safety net (an `async` handler's thrown `TypeError`
 // from a malformed payload always becomes a rejected promise, never an
@@ -122,12 +129,14 @@ const payloadSchemas: Partial<Record<string, { safeParse: (v: unknown) => { succ
   summary: extBackgroundSummaryPayloadSchema,
   'auth.login': extBackgroundLoginPayloadSchema,
   'auth.register': extBackgroundRegisterPayloadSchema,
+  'auth.resendVerification': extBackgroundResendVerificationPayloadSchema,
   'auth.mfa': mfaVerifyRequestSchema,
   'auth.logout': extBackgroundLogoutPayloadSchema,
   'license.heartbeat': extBackgroundLicenseHeartbeatPayloadSchema,
   'settings.set': updateUserSettingsRequestSchema,
   'filters.save': extBackgroundFiltersSavePayloadSchema,
   'telemetry.enqueue': extBackgroundTelemetryEnqueuePayloadSchema,
+  'governor.snapshotPush': extBackgroundGovernorSnapshotPushPayloadSchema,
 };
 
 // webextension-polyfill's promise-based `onMessage` API: a listener that

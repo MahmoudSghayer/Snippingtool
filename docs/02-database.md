@@ -171,6 +171,7 @@ Reasons:
   `occurred_at`, and **GIN** indexes on `jsonb` columns need hand-tuned
   `CREATE INDEX` statements drizzle-kit doesn't generate from the schema DSL.
 - **Trigger functions** (`set_updated_at`, `bump_row_version`,
+  `bump_users_row_version` — `users`'s own narrower variant, §6.1 —
   `reject_write`) and **views/materialized views** (`v_mrr`, `mv_kpi_daily`,
   …) are plain SQL objects Drizzle can only describe with `.existing()`, not
   create.
@@ -252,13 +253,37 @@ email can be reused by a new signup.
 | `last_login_at`, `last_ip` | timestamptz, inet | |
 | `timezone` | text | default `UTC` |
 | `referral_code` | text | unique among live rows, format-checked |
-| `deleted_at`, `created_at`, `updated_at`, `row_version` | — | standard |
+| `stripe_customer_id` | text | (0025) unique among non-null values; the 4th trial-abuse vector (docs/05-subscriptions.md §5) — persisted the first time this user's Stripe Checkout completes or their Customer Portal session resolves a customer |
+| `email_normalised` | text, `GENERATED ALWAYS ... STORED` | (0025) SQL mirror of `normaliseEmailForAbuseCheck()`, indexed for the trial-abuse email check; never used for login/uniqueness |
+| `deleted_at`, `created_at`, `updated_at`, `row_version` | — | standard, but see `row_version`'s own note below |
 
 **Indexes:** partial unique on `email`; partial unique on `referral_code`;
-partial btree on `status`, `role`, `last_login_at`; btree on `created_at`.
+unique on `stripe_customer_id` (non-null only); btree on `email_normalised`
+(non-deleted only); partial btree on `status`, `role`, `last_login_at`;
+btree on `created_at`.
 **Constraints:** `failed_login_count >= 0`; `referral_code ~ '^[A-Z0-9]{4,16}$'`.
 **Retention:** indefinite; soft-deleted rows are retained for financial/audit
 integrity (subscriptions, payments etc. `RESTRICT` against hard delete).
+
+**`row_version` is not the generic `bump_row_version()` trigger here** —
+`users` is the one table with its own trigger function,
+`bump_users_row_version()` (migrations/0026, docs/12-testing.md "Defects
+found" #8). `row_version` backs every access token's `ver` claim
+(`plugins/auth.ts` compares it on every authenticated request; a mismatch
+forces re-login), so a write that bumps it invalidates every live session
+for that user — appropriate for a password change, a role/status change, a
+2FA change, or a soft-delete, not for `stripe_customer_id` being backfilled
+by a Stripe webhook the account holder's own session had no part in (that
+was the reported defect: checkout completing 401'd the buyer's own
+already-open tab on their very next request). `bump_users_row_version()`
+bumps on any change **except** to `stripe_customer_id` alone (an
+exclude-list, not an allow-list of "security-relevant" columns — see the
+migration's own header comment for why: two existing call sites,
+`modules/auth/repo.ts`'s `bumpUserVersion()` — force-logout's enforcement,
+which deliberately touches only `updated_at` to trigger a bump — and
+`completeLogin()`'s `last_login_at`/`last_ip` bookkeeping, both depend on
+"any `users` UPDATE bumps `row_version`" beyond just those named columns,
+and a strict allow-list would have silently broken both).
 
 #### `admin_users`
 

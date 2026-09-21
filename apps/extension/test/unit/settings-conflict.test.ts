@@ -1,10 +1,11 @@
 // QA suite (owned by the Testing & QA agent — see docs/12-testing.md).
 // Unit coverage for lib/settings.ts's sync-conflict rule, previously
 // untested: docs/06-extension.md documents "server version wins" — a local
-// edit is only ever sent as a PATCH, never applied locally first, and
-// whatever the server hands back (even a *lower* version, e.g. after an
-// admin-triggered reset) unconditionally overwrites the local cache. There
-// is deliberately no merge.
+// edit is only ever sent as a PUT (see defect #4's fix, docs/12-testing.md
+// "Defects found"), never applied locally first, and whatever the server
+// hands back (even a *lower* version, e.g. after an admin-triggered reset)
+// unconditionally overwrites the local cache. There is deliberately no
+// merge.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -83,15 +84,13 @@ describe('lib/settings.ts: sync-conflict rule (server version always wins, no lo
     expect((await getCachedSettings()).targets.minProfitPerSnipe).toBe(500);
 
     // The outgoing request itself carried the client's requested patch (server-side logic decided what to do with it).
-    // Note: this asserts the client's *actual current* method, PATCH — which
-    // is also the defect documented in apps/api/src/test/qa/__tests__/
-    // settings-versioning.test.ts and docs/12-testing.md "Defects found":
-    // apps/api's settings module only ever registers PUT for this route, so
-    // this real request would 404 against the real server. This test's job
-    // is to characterise this file's current behaviour, not the API's; it
-    // should be updated in lockstep if/when that mismatch is fixed.
+    // Defect #4 (docs/12-testing.md "Defects found") is fixed: this now
+    // asserts PUT, the verb apps/api/src/modules/settings/index.ts actually
+    // registers for this route (it used to send PATCH, which 404d against
+    // the real server — see apps/api/src/test/qa/__tests__/
+    // settings-versioning.test.ts's now-passing "DEFECT" test).
     const [, init] = fetchMock.mock.calls[0]!;
-    expect((init as RequestInit).method).toBe('PATCH');
+    expect((init as RequestInit).method).toBe('PUT');
     expect(JSON.parse(String((init as RequestInit).body))).toEqual({ targets: { minProfitPerSnipe: 999_999 } });
   });
 

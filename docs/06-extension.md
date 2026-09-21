@@ -298,6 +298,19 @@ IndexedDB, local-only, no server-side observation table exists at all —
 docs/01-architecture.md instruction 6), the EA session token, club data,
 trade history from the game itself.
 
+**Queue durability** (docs/12-testing.md "Defects found" #9): everything
+above is queued in `lib/telemetry.ts` between `chrome.alarms` flush ticks
+(every 2 minutes). The queue is persisted to `browser.storage.session`
+(falling back to `.local` if `.session` throws) on every enqueue, not just
+held in a bare module variable — an MV3 service worker killed for
+inactivity between ticks used to lose everything queued since the last
+flush; on the next wake, `flush()`/any enqueue call re-hydrates from
+storage first, so a queued batch survives the restart. A best-effort extra
+flush also fires on `chrome.runtime.onSuspend` (background/telemetry.ts) —
+not the safety net (the persistence above is), just an earlier send
+attempt when the browser signals it's about to unload the extension's
+background context.
+
 ## 7. Crash recovery
 
 `content/index.ts` persists `Governor.serialize()` (action timestamps, buy/

@@ -23,7 +23,24 @@ export async function getOrCreateUserSettings(db: Database, userId: string): Pro
   if (existing) {
     return { id: existing.id, settings: existing.settings as UserSettings, version: existing.version };
   }
+  // `userSettings.userId` is unique (packages/db/src/schema/settings.ts) —
+  // two concurrent first-ever calls for the same user (e.g. the extension's
+  // bootstrap and a popup PUT landing at the same instant) can both see no
+  // `existing` row and both attempt this insert. `onConflictDoNothing` plus
+  // a re-select makes the loser fall back to whatever the winner actually
+  // created, instead of surfacing that race as a raw unique-violation 500
+  // (same defect class as #1 in docs/12-testing.md "Defects found", just
+  // one step earlier in this same handler's read-then-write).
   const id = newId();
-  await db.insert(userSettings).values({ id, userId, settings: DEFAULT_SETTINGS, version: 1 });
-  return { id, settings: DEFAULT_SETTINGS, version: 1 };
+  const [inserted] = await db
+    .insert(userSettings)
+    .values({ id, userId, settings: DEFAULT_SETTINGS, version: 1 })
+    .onConflictDoNothing({ target: userSettings.userId })
+    .returning();
+  if (inserted) {
+    return { id: inserted.id, settings: inserted.settings as UserSettings, version: inserted.version };
+  }
+  const raceWinner = await db.query.userSettings.findFirst({ where: eq(userSettings.userId, userId) });
+  if (!raceWinner) throw new Error(`user_settings row for ${userId} missing after onConflictDoNothing insert lost the race`);
+  return { id: raceWinner.id, settings: raceWinner.settings as UserSettings, version: raceWinner.version };
 }

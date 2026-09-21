@@ -77,6 +77,13 @@ async function captureVitals(page: Page): Promise<VitalsResult> {
 
 test.describe('visual smoke (screenshots + no console errors)', () => {
   test('every route at 390/768/1440px', async ({ page }, testInfo) => {
+    // Defect #10 (docs/12-testing.md "Defects found"): this now covers the
+    // 11 admin sub-pages docs/10-design-system.md §14 used to flag as
+    // un-screenshotted (30 routes × 3 breakpoints, one continuous session,
+    // plus Web Vitals captures) — comfortably past the suite-wide default
+    // `timeout: 60_000` in playwright.config.ts, which is sized for the
+    // smaller specs, not this one.
+    test.setTimeout(180_000);
     fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
 
     // Network-layer noise from *this sandboxed test environment's* outbound
@@ -125,6 +132,25 @@ test.describe('visual smoke (screenshots + no console errors)', () => {
       await visit('/settings', 'settings', 'Settings', vp.name);
       await visit('/admin', 'admin-overview', 'Overview', vp.name);
       await visit('/admin/audit', 'admin-audit', 'Audit log', vp.name);
+
+      // The 11 admin sub-pages docs/10-design-system.md §14 flagged as a
+      // screenshot-inventory gap (blocked at the time by the dashboard
+      // e2e's default rate limits — see playwright.config.ts's webServer
+      // env, RATE_LIMIT_GLOBAL_MAX/RATE_LIMIT_LOGIN_MAX, now raised for
+      // exactly this run). `/admin` and `/admin/audit` above are the two
+      // admin pages this spec already covered before that gap was closed.
+      await visit('/admin/users', 'admin-users', 'Users', vp.name);
+      await visit('/admin/profits', 'admin-profits', 'Profits', vp.name);
+      await visit('/admin/activity', 'admin-activity', 'Activity', vp.name);
+      await visit('/admin/system', 'admin-system', 'System', vp.name);
+      await visit('/admin/subscriptions', 'admin-subscriptions', 'Subscriptions', vp.name);
+      await visit('/admin/coupons', 'admin-coupons', 'Coupons', vp.name);
+      await visit('/admin/plans', 'admin-plans', 'Plans', vp.name);
+      await visit('/admin/flags', 'admin-flags', 'Flags', vp.name);
+      await visit('/admin/bans', 'admin-bans', 'Bans', vp.name);
+      await visit('/admin/feature-toggles', 'admin-feature-toggles', 'Feature toggles', vp.name);
+      await visit('/admin/config', 'admin-config', 'System config', vp.name);
+
       await visit('/not-a-real-route', '404', 'Page not found', vp.name);
     }
 

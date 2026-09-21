@@ -413,6 +413,26 @@ Every `admin-subscriptions`/`admin-coupons`/`admin-plans`/`admin-bans`/
 `PERMISSION_MATRIX`) rather than a new permission — a ban is a user-moderation
 action, not a billing one, even though this module owns the endpoint.
 
+**List/lookup routes** (docs/03-api.md's own admin-users table carries a
+pointer here, not a duplicate copy — this is the one place these are
+documented in full). Both are read-only (`subscriptions.read`, not
+`subscriptions.write` — no `reason` body, no audit row, none of the five
+numbered rules above apply) — added to close the gap where only the
+per-id/per-user *action* routes below (extend/suspend/cancel/activate/
+grant-lifetime) existed, with no way to discover a subscription's `id` from
+a bare `userId`, or list/search subscriptions at all from the API:
+
+| Method & path | Notes |
+|---|---|
+| `GET /admin/subscriptions?status=&plan=&userId=&search=&cursor=&limit=` | Cursor-paginated list. `status` filters on the exact `subscriptions.status` enum value; `plan` filters by plan code; `userId` scopes to one user (equivalent to, but more general than, the by-user route below — this also works with the other filters combined); `search` matches the owning user's email (case-insensitive substring) and is resolved to a set of `userId`s first, so it composes with `status`/`plan` too. Each item is `subscriptionDtoSchema` (§1) plus `userId`/`userEmail`. Ordered newest-created first. |
+| `GET /admin/subscriptions/by-user/:userId` | `{ current: subscriptionDtoSchema \| null, currentLicenseId: uuid \| null, history: subscriptionDtoSchema[] }` — `current` is that user's live subscription if any (§2's definition — `trialing`/`active`/`past_due`/`suspended`/`lifetime`), `history` is every subscription row for that user including canceled/expired ones, newest first. `currentLicenseId` is what `POST /admin/licenses/:id/device-limit` (the device-limit override route, table below) needs, since that route takes a *license* id, not a subscription or user id. |
+
+The dashboard's `/admin/subscriptions` page and the `/admin/users` detail
+drawer's Subscription tab both use these (`src/components/
+SubscriptionActions.tsx`) — the list route backs the admin subscriptions
+table itself, the by-user route backs the per-user drawer without needing
+the caller to already know a subscription id.
+
 | Operation | Endpoint | Effect |
 |---|---|---|
 | **Activate** (manual grant) | `POST /admin/subscriptions/:userId/activate` | Creates a `subscriptions` row: `source = 'manual'`, `status = active`, `current_period_start = now()`, `current_period_end = now() + periodDays`, `granted_by_admin_id`. Issues a license. Rejected with `CONFLICT` if a live subscription already exists (§2). |

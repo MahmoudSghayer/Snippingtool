@@ -62,10 +62,20 @@ export async function refreshSettings(): Promise<UserSettings> {
   }
 }
 
-/** PATCH — sends the partial update to the server and caches whatever the
- * server hands back (the merged, version-bumped document), never the
- * locally-optimistic merge. */
+/** Sends the partial update to the server and caches whatever the server
+ * hands back (the merged, version-bumped document), never the
+ * locally-optimistic merge.
+ *
+ * Defect #4 fix (docs/12-testing.md "Defects found"): this used to send
+ * `method: 'PATCH'`, but `apps/api/src/modules/settings/index.ts` only ever
+ * registers `app.put('/api/v1/settings', ...)` for this path — every real
+ * settings sync from the extension 404d. The server's PUT handler already
+ * does a partial merge server-side (it reads the current document, merges
+ * only the patched top-level sections, then validates and persists the
+ * result — see that module's own comment), so the body this function sends
+ * doesn't need to change, only the verb: `PUT` is the route the server
+ * actually exposes, `PATCH` never existed. */
 export async function updateSettings(patch: UpdateUserSettingsRequest): Promise<UserSettings> {
-  const data = await apiJson<UserSettings>('/api/v1/settings', { method: 'PATCH', body: JSON.stringify(patch) });
+  const data = await apiJson<UserSettings>('/api/v1/settings', { method: 'PUT', body: JSON.stringify(patch) });
   return applyServerSettings(data);
 }

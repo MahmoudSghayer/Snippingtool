@@ -49,6 +49,15 @@ export interface AuthContext {
    * warnings — nothing security-sensitive is ever logged here (see
    * docs/09-security.md "Logging & redaction"). */
   log?: { warn: (obj: unknown, msg?: string) => void };
+  /** Defect #5 fix (docs/12-testing.md "Defects found"): this used to be
+   * two hardcoded module constants, independent of
+   * `RATE_LIMIT_LOGIN_MAX`/`RATE_LIMIT_LOGIN_WINDOW_MS` —
+   * `plugins/rate-limit.ts`'s own sibling limiter on these same routes
+   * already reads those two vars from `fastify.config` (config/env.ts).
+   * Optional (defaults to the previous hardcoded 20/15min below) so
+   * existing tests that build an ad-hoc `AuthContext` without it keep
+   * working unchanged. */
+  loginRateLimit?: { max: number; windowMs: number };
 }
 
 const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000;
@@ -60,6 +69,10 @@ const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000;
 // defence — the per-account lockout is. Keeping it above the lockout
 // threshold means the account-specific 423 fires before this 429 does for
 // the common "one attacker, one account" case.
+//
+// Defaults only — `login()` below prefers `ctx.loginRateLimit`
+// (`RATE_LIMIT_LOGIN_MAX`/`RATE_LIMIT_LOGIN_WINDOW_MS`, config/env.ts) when
+// the caller supplies it. See AuthContext.loginRateLimit's own comment.
 const LOGIN_RATE_LIMIT_MAX = 20;
 const LOGIN_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 
@@ -206,8 +219,10 @@ export async function login(
   ip: string | null,
   userAgent: string | null,
 ): Promise<LoginResponse> {
-  await checkSlidingWindowRateLimit(ctx.redis, `ratelimit:login:ip:${ip ?? 'unknown'}`, LOGIN_RATE_LIMIT_MAX, LOGIN_RATE_LIMIT_WINDOW_MS);
-  await checkSlidingWindowRateLimit(ctx.redis, `ratelimit:login:account:${input.email}`, LOGIN_RATE_LIMIT_MAX, LOGIN_RATE_LIMIT_WINDOW_MS);
+  const rateLimitMax = ctx.loginRateLimit?.max ?? LOGIN_RATE_LIMIT_MAX;
+  const rateLimitWindowMs = ctx.loginRateLimit?.windowMs ?? LOGIN_RATE_LIMIT_WINDOW_MS;
+  await checkSlidingWindowRateLimit(ctx.redis, `ratelimit:login:ip:${ip ?? 'unknown'}`, rateLimitMax, rateLimitWindowMs);
+  await checkSlidingWindowRateLimit(ctx.redis, `ratelimit:login:account:${input.email}`, rateLimitMax, rateLimitWindowMs);
 
   const user = await repo.findUserByEmail(ctx.db, input.email);
   if (!user) throw AppErrors.invalidCredentials();

@@ -120,6 +120,22 @@ export async function revokeAllUserSessions(db: Database, userId: string, reason
   return active.map((s) => s.id);
 }
 
+/** Every session id this user has ever had, revoked or not — used only to
+ * pick WS event targets, never to decide what to revoke in the DB (that's
+ * `revokeAllUserSessions`, which correctly no-ops on an already-revoked
+ * row). Defect #7 fix (docs/12-testing.md "Defects found"): `force-logout`
+ * calling `revokeAllUserSessions` a second time after `suspend` already
+ * revoked every session finds nothing newly-revoked (an empty return),
+ * so it had nothing to `publishToUser(..., 'session.revoked', ...)` for —
+ * a silent no-op from the *notification's* point of view, even though the
+ * admin's force-logout action did happen. Falling back to this list lets
+ * the route still notify any live WS connection for the user regardless of
+ * whether the DB-level revoke was a no-op this time. */
+export async function listAllUserSessionIds(db: Database, userId: string): Promise<string[]> {
+  const all = await db.query.sessions.findMany({ where: eq(sessions.userId, userId), columns: { id: true } });
+  return all.map((s) => s.id);
+}
+
 /** Bumps `users.row_version` (any UPDATE fires the `bump_row_version`
  * trigger) so every previously-issued access token's `ver` claim goes stale
  * immediately — the enforcement half of force-logout / password-change /
