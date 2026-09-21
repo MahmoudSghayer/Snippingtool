@@ -23,9 +23,13 @@ you before you look like a bot — it is never sold as "undetectable". See
 
 ## Build status
 
-The build follows a data-first sequence. All eleven phases are built and
-verified on this branch (`pnpm typecheck && pnpm lint && pnpm build && pnpm
-test`: 688 tests across seven packages). Remaining work is the go-live
+The build follows a data-first sequence. All eleven phases are built,
+verified (`pnpm typecheck && pnpm lint && pnpm build && pnpm test`: 688
+tests across seven packages) and **merged into `main` via
+[PR #2](https://github.com/MahmoudSghayer/Snippingtool/pull/2)** with the
+full CI pipeline green (lint, typecheck, unit, migrations, API integration,
+security tests, security scan, CodeQL, extension/dashboard/docker builds,
+coverage, and every Playwright e2e suite). Remaining work is the go-live
 checklist in `docs/13-roadmap.md`, which needs the live market, real Stripe
 keys and infrastructure.
 
