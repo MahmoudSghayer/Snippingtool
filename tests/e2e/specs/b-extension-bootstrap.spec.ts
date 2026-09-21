@@ -79,6 +79,22 @@ test('extension: loads against the mock EA page, popup login against the real AP
     args: [`--disable-extensions-except=${EXTENSION_OUT_DIR}`, `--load-extension=${EXTENSION_OUT_DIR}`, '--no-sandbox'],
   });
 
+  // Diagnostic instrumentation for Defect #9 (docs/12-testing.md "Defects
+  // found" row #9): every 'serviceworker' context event is a *new* SW JS
+  // execution context reaching CDP — i.e. either the very first install, or
+  // Chrome having terminated the previous one for inactivity and spun up a
+  // fresh one (which wipes `lib/telemetry.ts`'s bare in-memory `queue`, the
+  // leading hypothesis for the flush step below reporting `sent: 0`). Not
+  // an assertion by itself — logged so a run that reproduces the failure
+  // also proves or disproves the hypothesis directly, instead of leaving it
+  // as an inference from timing alone.
+  const swSightings: number[] = [];
+  context.on('serviceworker', (w) => {
+    swSightings.push(Date.now());
+    // eslint-disable-next-line no-console -- diagnostic only, read from the test's own stdout
+    console.log(`[diag] service worker context #${swSightings.length} appeared: ${w.url()}`);
+  });
+
   try {
     // Sanity: the id playwright.config.ts baked into apps/api's
     // EXTENSION_IDS really is this install's id (see
@@ -86,6 +102,7 @@ test('extension: loads against the mock EA page, popup login against the real AP
     // read off the running context up front).
     const sw = context.serviceWorkers()[0] ?? (await context.waitForEvent('serviceworker', { timeout: 15_000 }));
     expect(new URL(sw.url()).hostname).toBe(EXTENSION_ID);
+    if (swSightings.length === 0) swSightings.push(Date.now());
 
     // Popup login runs *before* visiting the EA page — deliberately, not
     // just plausible real-world ordering: apps/extension/src/lib/telemetry.ts's
@@ -150,6 +167,11 @@ test('extension: loads against the mock EA page, popup login against the real AP
         .not.toBe('—');
     });
 
+    // eslint-disable-next-line no-console -- diagnostic only
+    console.log(
+      `[diag] before flush poll: ${swSightings.length} service worker context(s) seen so far; currently live: ${context.serviceWorkers().length} (same object as the original install's? ${context.serviceWorkers()[0] === sw})`,
+    );
+
     await test.step("the mock page's passive search was recorded and, once flushed, reaches the API (search_activity)", async () => {
       // content/index.ts enqueues a 'search' activity event as soon as the
       // mock service layer's own passive search response is observed (the
@@ -171,7 +193,12 @@ test('extension: loads against the mock EA page, popup login against the real AP
           },
           { timeout: 20_000, message: 'waiting for the queued search activity event to exist and flush' },
         )
-        .toBeGreaterThan(0);
+        .toBeGreaterThan(0)
+        .catch((err) => {
+          // eslint-disable-next-line no-console -- diagnostic only
+          console.log(`[diag] flush poll gave up: ${swSightings.length} service worker context(s) seen total; currently live: ${context.serviceWorkers().length}`);
+          throw err;
+        });
 
       const db = connect();
       try {

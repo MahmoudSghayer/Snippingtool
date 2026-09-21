@@ -23,6 +23,7 @@ import { toast } from 'sonner';
 
 import { api, apiErrorMessage } from '@/api/client.js';
 import { ReasonDialog } from '@/components/ReasonDialog.js';
+import { SubscriptionActions } from '@/components/SubscriptionActions.js';
 
 import type { FlagDto, UserDto } from '@sl/shared';
 
@@ -133,10 +134,6 @@ function UserDetailDrawer({ user, onClose, onChanged }: { user: UserDto; onClose
   const [banOpen, setBanOpen] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
   const [logoutOpen, setLogoutOpen] = useState(false);
-  const [activateOpen, setActivateOpen] = useState(false);
-  const [lifetimeOpen, setLifetimeOpen] = useState(false);
-  const [planCode, setPlanCode] = useState('pro');
-  const [periodDays, setPeriodDays] = useState(30);
 
   const flagsQuery = useQuery({
     queryKey: ['admin', 'flags', 'user', user.id],
@@ -238,33 +235,6 @@ function UserDetailDrawer({ user, onClose, onChanged }: { user: UserDto; onClose
     onError: (error) => toast.error('Action failed', { description: apiErrorMessage(error) }),
   });
 
-  const activateMutation = useMutation({
-    mutationFn: async (reason: string) => {
-      const { error } = await api.POST('/api/v1/admin/subscriptions/{userId}/activate', {
-        params: { path: { userId: user.id } },
-        body: { planCode, periodDays, reason },
-      });
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      toast.success('Subscription activated');
-      setActivateOpen(false);
-    },
-    onError: (error) => toast.error("Couldn't activate subscription", { description: apiErrorMessage(error) }),
-  });
-
-  const grantLifetimeMutation = useMutation({
-    mutationFn: async (reason: string) => {
-      const { error } = await api.POST('/api/v1/admin/subscriptions/{userId}/grant-lifetime', { params: { path: { userId: user.id } }, body: { planCode, reason } });
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      toast.success('Lifetime access granted');
-      setLifetimeOpen(false);
-    },
-    onError: (error) => toast.error("Couldn't grant lifetime", { description: apiErrorMessage(error) }),
-  });
-
   return (
     <Drawer open onOpenChange={(open) => !open && onClose()} title={user.email} description={`Joined ${formatDate(user.createdAt)}`} width="xl">
       <Tabs defaultValue="profile">
@@ -316,28 +286,7 @@ function UserDetailDrawer({ user, onClose, onChanged }: { user: UserDto; onClose
         </TabsContent>
 
         <TabsContent value="subscription">
-          <div className="flex flex-col gap-4">
-            <p className="text-xs text-ink-2">
-              There is no endpoint to look up this user&apos;s current subscription by user id yet (docs/07-dashboard.md
-              &quot;Known API gaps&quot;) — these actions create/extend entitlements directly.
-            </p>
-            <div className="grid grid-cols-2 gap-3">
-              <FormField label="Plan code" htmlFor="planCode">
-                <Input id="planCode" value={planCode} onChange={(e) => setPlanCode(e.target.value)} />
-              </FormField>
-              <FormField label="Period (days)" htmlFor="periodDays">
-                <Input id="periodDays" type="number" value={periodDays} onChange={(e) => setPeriodDays(Number(e.target.value))} />
-              </FormField>
-            </div>
-            <div className="flex gap-2">
-              <Button size="sm" onClick={() => setActivateOpen(true)}>
-                Activate subscription
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => setLifetimeOpen(true)}>
-                Grant lifetime
-              </Button>
-            </div>
-          </div>
+          <SubscriptionActions userId={user.id} />
         </TabsContent>
 
         <TabsContent value="flags">
@@ -368,8 +317,6 @@ function UserDetailDrawer({ user, onClose, onChanged }: { user: UserDto; onClose
       <ReasonDialog open={banOpen} onOpenChange={setBanOpen} title="Ban user" destructive confirmLabel="Ban" loading={banMutation.isPending} onConfirm={(reason) => banMutation.mutate(reason)} />
       <ReasonDialog open={resetOpen} onOpenChange={setResetOpen} title="Send password reset" loading={resetPasswordMutation.isPending} onConfirm={(reason) => resetPasswordMutation.mutate(reason)} />
       <ReasonDialog open={logoutOpen} onOpenChange={setLogoutOpen} title="Force logout" destructive confirmLabel="Force logout" loading={forceLogoutMutation.isPending} onConfirm={(reason) => forceLogoutMutation.mutate(reason)} />
-      <ReasonDialog open={activateOpen} onOpenChange={setActivateOpen} title={`Activate ${planCode} for ${periodDays}d`} confirmLabel="Activate" loading={activateMutation.isPending} onConfirm={(reason) => activateMutation.mutate(reason)} />
-      <ReasonDialog open={lifetimeOpen} onOpenChange={setLifetimeOpen} title={`Grant lifetime (${planCode})`} confirmLabel="Grant lifetime" loading={grantLifetimeMutation.isPending} onConfirm={(reason) => grantLifetimeMutation.mutate(reason)} />
     </Drawer>
   );
 }

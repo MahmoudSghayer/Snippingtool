@@ -37,7 +37,7 @@ phase lands on this branch.
 | 7 Dashboard | React user + admin dashboard, design system, e2e against the real API | Done | `apps/dashboard`, `packages/ui`, `docs/07-dashboard.md` |
 | 8 Analytics | KPI engine, profit analytics, reports, CSV exports, materialisation jobs | Done | `apps/api/src/modules/{analytics,admin-analytics}`, `docs/08-analytics.md` |
 | 9 Security | Hardening pass, 167 security tests, threat model, controls inventory | Done | `docs/09-security.md`, `docs/threat-model.md` |
-| 10 UI/UX | Design system and dashboard polish done; extension surfaces in progress | In progress | `packages/ui`, `docs/10-design-system.md` |
+| 10 UI/UX | Design system, dashboard and extension surfaces, axe-checked | Done | `packages/ui`, `docs/10-design-system.md` |
 | 11 Testing | Unit, integration, cross-app e2e, k6 load, security suites, coverage | Done | `tests/`, `docs/12-testing.md` |
 | DevOps | Docker, Compose, Caddy, CI/CD, monitoring, backups, deploy guides | Done | `infra/`, `.github/`, `docs/11-devops.md` |
 
