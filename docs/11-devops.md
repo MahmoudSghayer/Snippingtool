@@ -410,7 +410,10 @@ the API follow-ups pass, docs/09-security.md's former open finding #1):
   requires alongside it (`env.ts` refuses to start in production with
   `COOKIE_SAME_SITE=none` and `COOKIE_SECURE` unset, and requires both
   `APP_ORIGIN`/`DASHBOARD_ORIGIN` to be `https://` — a cross-site cookie is
-  pointless between two origins that aren't even TLS). No dashboard-side
+  pointless between two origins that aren't even TLS). The logout clears
+  carry the same `SameSite`/`Secure` as the sets (a clear is a Set-Cookie
+  too, and a browser drops a `Lax` one arriving in a cross-site response),
+  so signing out actually removes `sl_at`/`sl_rt` in this shape. No dashboard-side
   change needed either way — `credentials: 'include'`
   (`apps/dashboard/src/api/client.ts`) already sends cookies cross-site
   once the browser accepts them. Full detail:

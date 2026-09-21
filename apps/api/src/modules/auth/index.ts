@@ -88,9 +88,26 @@ function setSessionCookies(
   });
 }
 
-function clearSessionCookies(reply: FastifyReply) {
-  reply.clearCookie('sl_at', { path: '/' });
-  reply.clearCookie('sl_rt', { path: '/api/v1/auth' });
+/** A clear is an ordinary Set-Cookie with an expiry in the past, so it is
+ * subject to the same browser rules as the set: a Set-Cookie with no
+ * `SameSite` is treated as `Lax`, and browsers drop a `Lax` Set-Cookie that
+ * arrives in a cross-site response. Under `COOKIE_SAME_SITE=none` a
+ * `{ path }`-only clear would therefore be silently discarded and the
+ * dashboard would keep a valid `sl_at` until it expired — so the clear
+ * carries the same `sameSite`/`secure` (lib/cookie-options.ts) as the set. */
+function clearSessionCookies(reply: FastifyReply, cookieAttrs: ResolvedCookieAttrs) {
+  reply.clearCookie('sl_at', {
+    httpOnly: true,
+    sameSite: cookieAttrs.sameSite,
+    secure: cookieAttrs.secure,
+    path: '/',
+  });
+  reply.clearCookie('sl_rt', {
+    httpOnly: true,
+    sameSite: cookieAttrs.sameSite,
+    secure: cookieAttrs.secure,
+    path: '/api/v1/auth',
+  });
 }
 
 export default fp(
@@ -246,7 +263,7 @@ export default fp(
         } else {
           await service.logout(ctx(fastify), token);
         }
-        clearSessionCookies(reply);
+        clearSessionCookies(reply, cookieAttrs);
         return { ok: true as const };
       },
     );
@@ -260,7 +277,7 @@ export default fp(
       },
       async (request, reply) => {
         await service.logoutAll(ctx(fastify), request.authUser!.id);
-        clearSessionCookies(reply);
+        clearSessionCookies(reply, cookieAttrs);
         return { ok: true as const };
       },
     );
