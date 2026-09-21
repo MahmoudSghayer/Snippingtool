@@ -21,7 +21,7 @@ analytics pages' charts.
 8. [Testing](#8-testing)
 9. [Deployment (Vercel)](#9-deployment-vercel)
 10. [Accessibility notes](#10-accessibility-notes)
-11. [Known API gaps](#11-known-api-gaps)
+11. [Known API gaps — resolved](#11-known-api-gaps--resolved)
 
 ---
 
@@ -161,12 +161,20 @@ Two supported shapes, both documented in `apps/dashboard/.env.example`:
 2. **Cross-site (Vercel production/preview)**: `VITE_API_ORIGIN` set to the
    deployed API's origin. The browser now talks to two origins, so the API
    must set its `sl_at`/`sl_rt`/`sl_csrf` cookies with `SameSite=None;
-   Secure` (an API-side change, outside this app's ownership — flagged for
-   the API/DevOps agents) and `DASHBOARD_ORIGIN` must equal the exact
-   Vercel URL. A same-site reverse proxy in front of both (e.g. a Vercel
+   Secure` and `DASHBOARD_ORIGIN` must equal the exact Vercel URL. **Resolved**
+   (API follow-ups pass, docs/09-security.md's former open finding #1): the
+   API's `COOKIE_SAME_SITE` env var (`lax` default \| `strict` \| `none`) makes
+   this a config change, not a code change — set `COOKIE_SAME_SITE=none` and
+   `COOKIE_SECURE=true` on the API for this topology (both `APP_ORIGIN`/
+   `DASHBOARD_ORIGIN` must be `https://`, enforced at boot in production —
+   see [`04-auth.md`](./04-auth.md#101-cookie-samesitesecure-cross-site-dashboard-deployments)).
+   This dashboard app needs no change either way — `credentials: 'include'`
+   (`src/api/client.ts`) already sends cookies cross-site once the browser
+   is willing to. A same-site reverse proxy in front of both (e.g. a Vercel
    rewrite or a shared apex domain with the API on a subdomain fronted by
-   the same edge) avoids the `SameSite=None` requirement entirely and is
-   the preferred production shape if available.
+   the same edge) still avoids the `SameSite=None` requirement entirely and
+   remains the preferred production shape if available — `COOKIE_SAME_SITE`
+   just means it's no longer the *only* option.
 
 ## 6. Design tokens reference
 
@@ -308,50 +316,57 @@ API, which doesn't exist there.
   admin page's tables/grids use responsive Tailwind breakpoints
   (`sm:`/`lg:`) rather than a separate mobile layout.
 
-## 11. Known API gaps
+## 11. Known API gaps — resolved
 
 Found while building against the real, committed
-`apps/api/openapi/openapi.json` — each is handled gracefully in the UI
-(never a silent failure or a fabricated value) and called out in a code
-comment at its call site:
+`apps/api/openapi/openapi.json`, and **closed by the API follow-ups pass**
+(same pass that added `COOKIE_SAME_SITE`, §5 above, and bumped
+`drizzle-orm`). Kept here as a record of what changed and where, rather
+than deleted, since several dashboard call sites still reference this
+section by number in their own comments.
 
-1. **No endpoint exposes the caller's own admin permission set.**
-   `GET /users/me` (`userDtoSchema`) carries only `role: 'user'|'admin'`,
-   never the finer `admin_users.admin_role`/`PERMISSION_MATRIX` grant. The
-   dashboard therefore gates every admin nav item/route on `role ===
-   'admin'` alone (§2) rather than the four-role matrix the plan called
-   for; `src/stores/auth.ts` documents this and defaults `admin.permissions`
-   to the full set so today's UI stays usable, with every mutating call
-   still enforced server-side. **Fix**: add the resolved `adminRole`/
-   `permissions` to `GET /users/me`'s response schema, or a new
-   `GET /admin/me`.
-2. **No `GET /admin/subscriptions` list/lookup endpoint.** Only per-
-   subscription action routes exist (`POST /admin/subscriptions/{id}/
-   extend|suspend|unsuspend|cancel`, keyed by a subscription `id` the
-   admin has no way to discover) plus two `{userId}`-keyed creators
-   (`.../activate`, `.../grant-lifetime`). `/admin/subscriptions` (the
-   page) therefore shows plan-mix/metrics analytics only, and the user
-   detail drawer on `/admin/users` offers activate/grant-lifetime (the
-   routes that work from a bare `userId`) with a visible note about the
-   gap for extend/suspend/cancel. **Fix**: either return the user's live
-   subscription (including its `id`) from `GET /admin/users/:id`, or add a
-   list/lookup endpoint.
-3. **`GET /admin/audit/export.csv` doesn't exist** (documented in
-   `docs/03-api.md` but not in the committed OpenAPI spec). `/admin/audit`'s
-   "Export CSV" button builds a CSV client-side from the currently
-   loaded/filtered rows (`src/lib/csv.ts`) instead — correct for what's on
-   screen, but not an unpaginated full-range server export.
-4. **`admin-activity`'s `logins`/`searches`/`snipes`/`errors`/`ips`
-   routes declare no Zod response schema** (confirmed against the
-   generated `schema.d.ts`: `content?: never`), so `/admin/activity`'s
-   five corresponding tabs render a best-effort generic row shape (time/
-   device/IP + a JSON dump of the rest) instead of a strongly-typed table.
-5. **No GET endpoint for `filter_stats`** (the ranker's realised-return
-   history) — only the extension's ingest `POST /filters/stats`. The user
-   Analytics page's "Filter performance" tab says so explicitly rather than
-   showing empty/fabricated data.
-6. **No GET endpoint for `risk_budget_events`** — only the extension's
-   ingest `POST /risk-events`. The user Dashboard's "Risk posture" card
-   shows the account's configured governor **budget** (`GET /settings`,
-   which is real) instead of live risk-event history, which is the closest
-   available real data to "risk posture".
+1. **Resolved.** `GET /users/me` (`userDtoSchema`) now carries the
+   caller's own resolved `adminRole`/`permissions`
+   ([`03-api.md`](./03-api.md#users), [`04-auth.md`](./04-auth.md#7-admin-roles-and-permissions)).
+   `src/stores/auth.ts` reads them directly (no more full-permission-set
+   fallback); every admin nav item (`src/routes/layouts.tsx`) and route
+   (`src/router.tsx`'s per-route `beforeLoad`) is gated on the real
+   permission(s) it needs (`src/lib/adminNav.ts`'s
+   `ADMIN_NAV_PERMISSIONS` table), not `role === 'admin'` alone. Server
+   enforcement (`fastify.requirePermission`) is unchanged and remains the
+   actual authority.
+2. **Resolved.** `GET /admin/subscriptions` (cursor list, filters
+   `status`/`plan`/`userId`/`search`) and
+   `GET /admin/subscriptions/by-user/:userId` (current + `currentLicenseId`
+   + history) now exist — see the pointer in
+   [`03-api.md`](./03-api.md#admin-users--admin-audit--admin-toggles--admin-config--admin-system--admin-activity).
+   `/admin/subscriptions` now renders a real, filterable subscriptions
+   table below the existing plan-mix analytics, with a row drawer; the
+   `/admin/users` detail drawer's Subscription tab and the new page's row
+   drawer both share `src/components/SubscriptionActions.tsx`, which
+   resolves the live subscription id and offers extend/suspend/unsuspend/
+   cancel/device-limit alongside activate/grant-lifetime. The "not
+   reachable" note is gone.
+3. **Resolved.** `GET /admin/audit/export.csv` streams the full filtered
+   range server-side (keyset-paginated internally, no row cap) and writes
+   an `audit.export` audit row. `/admin/audit`'s "Export CSV" button now
+   calls it via `src/lib/csv.ts`'s `downloadServerCsv()` (`fetch` with
+   `credentials: 'include'`, since a plain `<a href>` can't carry the
+   httpOnly session cookie) instead of exporting only the currently
+   loaded/filtered rows.
+4. **Resolved.** Every `admin-activity` route (`logins`/`searches`/
+   `filter-changes` (new — was the one `user_activity` type with no admin
+   route at all)/`snipes`/`errors`/`ips`/`devices`) now has a dedicated
+   Zod response schema (`@sl/shared`'s `schemas/activity.ts`), so the
+   OpenAPI spec/generated dashboard types are fully typed. `/admin/activity`'s
+   tabs render typed, per-type columns (`ActivityPage.tsx`) instead of a
+   generic best-effort row.
+5. **Resolved.** `GET /filters/stats?filterId=&from=&to=` reads back the
+   ranker's realised-return history. The user Analytics page's "Filter
+   performance" tab now shows a real coins/hour chart + table per saved
+   filter, with a filter picker, instead of an empty-state placeholder.
+6. **Resolved.** `GET /risk-events?from=&to=&kind=&cursor=&limit=` (the
+   caller's own history) and `GET /admin/users/:id/risk-events` (admin,
+   permission `users.read`) now exist. The user Dashboard's "Risk posture"
+   card shows last-24h governor event counts by kind + recent hard stops,
+   alongside the configured budget from `GET /settings` (unchanged).

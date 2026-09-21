@@ -10,7 +10,19 @@
  * origin survives a clear of ea.com's site data — that part of milestone 1
  * is unchanged, just typed and merged into this larger message router.
  */
-import { backgroundMessageEnvelopeSchema, updateUserSettingsRequestSchema } from '@sl/shared';
+import {
+  backgroundMessageEnvelopeSchema,
+  extBackgroundFiltersSavePayloadSchema,
+  extBackgroundLicenseHeartbeatPayloadSchema,
+  extBackgroundLoginPayloadSchema,
+  extBackgroundLogoutPayloadSchema,
+  extBackgroundRecordPayloadSchema,
+  extBackgroundRegisterPayloadSchema,
+  extBackgroundSummaryPayloadSchema,
+  extBackgroundTelemetryEnqueuePayloadSchema,
+  mfaVerifyRequestSchema,
+  updateUserSettingsRequestSchema,
+} from '@sl/shared';
 import browser from 'webextension-polyfill';
 
 import { logger } from '../lib/logger.js';
@@ -90,18 +102,32 @@ const handlers: Record<string, Handler> = {
   },
 };
 
-// Per-type payload validation (docs/09-security.md "Extension"): reuses the
-// exact same zod schema the *server* validates this payload against where
-// one already exists in `@sl/shared`, so the two never drift. Deliberately
-// small — only the handlers whose payload shape already has a ready-made,
-// exactly-matching shared schema are listed; every other handler still
-// gets the envelope-level check below plus the try/catch's crash safety
-// net (an `async` handler's thrown `TypeError` from a malformed payload
-// always becomes a rejected promise, never an uncaught exception in the
-// service worker). See docs/09-security.md "Open findings" for the exact
-// diff to extend this to the remaining handlers.
+// Per-type payload validation (docs/09-security.md "Extension"): every
+// handler that takes a payload now has a dedicated `@sl/shared` zod schema
+// here — either the exact server-side request/DTO schema where the shape
+// matches, or a purpose-built `extBackground*PayloadSchema`
+// (`packages/shared/src/ext-messages.ts`) where it doesn't (e.g.
+// `auth.login` carries no `device` field the way the server's
+// `loginRequestSchema` does — the fingerprint is computed inside
+// `background/auth.ts` itself). A handler with no payload (`auth.refresh`,
+// `auth.status`, `license.bootstrap`, `settings.get`, `filters.list`,
+// `devices.list`, `logs.export`, `telemetry.flush`, `errors.report`,
+// `engine.state`, `counts`) has nothing to validate and is deliberately
+// left out — every handler still gets the envelope-level check above plus
+// the try/catch's crash safety net (an `async` handler's thrown `TypeError`
+// from a malformed payload always becomes a rejected promise, never an
+// uncaught exception in the service worker).
 const payloadSchemas: Partial<Record<string, { safeParse: (v: unknown) => { success: boolean } }>> = {
+  record: extBackgroundRecordPayloadSchema,
+  summary: extBackgroundSummaryPayloadSchema,
+  'auth.login': extBackgroundLoginPayloadSchema,
+  'auth.register': extBackgroundRegisterPayloadSchema,
+  'auth.mfa': mfaVerifyRequestSchema,
+  'auth.logout': extBackgroundLogoutPayloadSchema,
+  'license.heartbeat': extBackgroundLicenseHeartbeatPayloadSchema,
   'settings.set': updateUserSettingsRequestSchema,
+  'filters.save': extBackgroundFiltersSavePayloadSchema,
+  'telemetry.enqueue': extBackgroundTelemetryEnqueuePayloadSchema,
 };
 
 // webextension-polyfill's promise-based `onMessage` API: a listener that

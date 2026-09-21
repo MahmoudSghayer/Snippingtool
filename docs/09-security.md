@@ -488,43 +488,45 @@ backed auth flows: register→verify, password reset, device-limit warning
 emails) all green after the bump; `tests/security` (which boots the real
 built app, mailer included) still 167/167 green.
 
-**After this pass:** 0 low, 0 moderate, **1 high**, 0 critical.
+**After the security pass, before the API follow-ups pass:** 0 low, 0
+moderate, **1 high**, 0 critical (`drizzle-orm`).
 
-**Remaining open finding:** `drizzle-orm` `^0.38.3` → needs `>=0.45.2`
-(SQL-injection-via-improperly-escaped-identifiers advisory,
-[GHSA] via `pnpm audit`). Not bumped this pass — `drizzle-orm` is pinned
-identically across three packages (`packages/db`, `apps/api`,
-`tests/security`) via the pnpm workspace, and `packages/db` (the schema/
-migrations package) is outside this pass's ownership (`packages/db/src`
-is the DB agent's surface; this pass only owns
-`packages/db/migrations/0026_*.sql` *if* a fix needs a schema change, which
-this doesn't). A coordinated bump needs: (1) `packages/db`'s
-`package.json` + a full `packages/db` test run against the 0.45.x query-
-builder API, (2) `apps/api`'s `package.json` + the full API test suite,
-(3) `tests/security`'s `package.json`. Proposed diff (untested this pass):
+**Resolved (API follow-ups pass):** `drizzle-orm` `^0.38.3` → `^0.45.2`
+(SQL-injection-via-improperly-escaped-identifiers advisory, closed by
+`pnpm audit --prod` — now **0 low, 0 moderate, 0 high, 0 critical**), bumped
+identically across all three packages that pin it (`packages/db`,
+`apps/api`, `tests/security`) via `pnpm add --filter <pkg> drizzle-orm@latest`,
+in that order followed by `pnpm --filter @sl/db test && pnpm --filter
+@sl/api test && pnpm --filter @sl/security-tests test` — all green
+(`@sl/db` 10 files/66 tests, `@sl/api` 33 files/165 tests, `@sl/security-tests`
+10 files/167 tests, including the extended authz matrix, §"Open findings"
+below). Two behaviour changes the bump surfaced, both fixed:
 
-```diff
-# packages/db/package.json, apps/api/package.json, tests/security/package.json
--    "drizzle-orm": "^0.38.3",
-+    "drizzle-orm": "^0.45.2",
-```
-
-followed by `pnpm install`, then `pnpm --filter @sl/db test && pnpm
---filter @sl/api test && pnpm --filter @sl/security-tests test` (in that
-order — `@sl/db`'s own migration/query tests are the cheapest place to
-catch a 0.38→0.45 query-builder behaviour change before it reaches the
-much larger API test surface).
+1. **`@sl/db`'s `soft-delete.test.ts`**: 0.45's Postgres driver wraps every
+   query error in a `DrizzleQueryError`, whose own `.message` is the failed
+   SQL text, not the driver's error message — the original `postgres`
+   error (with the "duplicate key"/constraint-name text these two tests
+   assert on) moved to `.cause`. Fixed by asserting against
+   `rejects.toMatchObject({ cause: { message: /duplicate key|unique
+   constraint/i } })` instead of `rejects.toThrow(...)` on the wrapper's
+   own message.
+2. **`apps/api`'s `payments/webhooks.ts#receiveWebhookEvent`**: its
+   idempotency check read `(err as { code?: string }).code === '23505'`
+   directly off the caught insert error — the same wrapping as above means
+   `err.code` is now `undefined`; the Postgres error code moved to
+   `err.cause.code`. Fixed to check both (`err.code ?? err.cause?.code`),
+   confirmed against `payments.test.ts`'s two idempotent-delivery tests
+   (previously green under 0.38, both real regressions this bump would
+   otherwise have introduced silently — a redelivered Stripe webhook event
+   would have thrown instead of returning `{ alreadyProcessed: true }`,
+   since the changed `.code` shape meant it fell through to `throw err`).
 
 This codebase's own mitigation against the *specific* advisory class
-(improperly-escaped SQL identifiers) is already independent of the
-library-level fix: no code path in this repo builds a Drizzle identifier
-from untrusted input (§2) — the two `sql.raw()` call sites use a
-fixed date-format-derived table name, never anything a request body
-supplies. The `drizzle-orm` bump closes the *library's* CVE regardless;
-this repo's own usage pattern was not exploitable via that advisory's
-described vector either way, which is why it was judged safe to leave
-open for one pass rather than risk destabilising the schema layer under
-time pressure.
+(improperly-escaped SQL identifiers) was already independent of the
+library-level fix and remains true post-bump: no code path in this repo
+builds a Drizzle identifier from untrusted input (§2) — the two
+`sql.raw()` call sites use a fixed date-format-derived table name, never
+anything a request body supplies.
 
 ## 16. Logging and redaction
 
@@ -561,67 +563,72 @@ time pressure.
 
 ## 18. Open findings
 
-Everything below is a real, currently-unresolved item — not hidden, with
-the exact proposed fix where one is known.
+Findings #1–#3 below were closed by the **API follow-ups pass**; kept here
+(marked **Resolved**) rather than deleted, both as a record of the fix and
+because other docs (`docs/07-dashboard.md` §11) cross-reference them by
+number. #4–#5 remain open, as before.
 
-1. **Cross-site cookie `SameSite` for the Vercel-hosted dashboard.**
-   `sl_at`/`sl_rt`/`sl_csrf` are all hardcoded `sameSite: 'lax'`
-   (`apps/api/src/modules/auth/index.ts`, `plugins/csrf.ts`). The
-   dashboard is deployed separately on Vercel (`vercel.json`) — a
-   different site from the API's own origin in the documented MVP
-   topology. `SameSite=Lax` cookies are **not** sent on cross-site
-   `fetch`/XHR (only on a top-level navigation), so a genuinely
-   cross-site dashboard deployment would silently fail to authenticate at
-   all via cookies. **This is the known item explicitly reserved for the
-   API follow-ups agent** (per the resume plan: "configurable
-   `COOKIE_SAME_SITE` (none ⇒ Secure) for the cross-site Vercel
-   dashboard"), not fixed in this pass. Proposed diff (for that agent):
-   ```diff
-   # apps/api/src/config/env.ts
-   +  COOKIE_SAME_SITE: z.enum(['lax', 'strict', 'none']).default('lax'),
-   ```
-   ```diff
-   # apps/api/src/modules/auth/index.ts (setSessionCookies) and plugins/csrf.ts
-   -    sameSite: 'lax',
-   +    sameSite: fastify.config.COOKIE_SAME_SITE,
-   -    secure: isProd,
-   +    secure: isProd || fastify.config.COOKIE_SAME_SITE === 'none', // 'none' requires Secure per spec, even outside prod
-   ```
-   plus a production refinement in `env.ts` (alongside the ones added this
-   pass) refusing `COOKIE_SAME_SITE=none` without `secure` effectively
-   true, and a CORS-credentials check that `APP_ORIGIN`/`DASHBOARD_ORIGIN`
-   are both `https://` when `SameSite=None` is configured (browsers reject
-   `SameSite=None` cookies without `Secure` outright).
+1. **Resolved — cross-site cookie `SameSite` for the Vercel-hosted
+   dashboard.** `sl_at`/`sl_rt`/`sl_csrf` were all hardcoded
+   `sameSite: 'lax'`. Fixed exactly as this section previously proposed:
+   `COOKIE_SAME_SITE` (`lax` default \| `strict` \| `none`) and
+   `COOKIE_SECURE` env vars (`apps/api/src/config/env.ts`), applied via a
+   shared `resolveCookieAttrs()` helper (`apps/api/src/lib/cookie-options.ts`)
+   in both `modules/auth/index.ts` (`setSessionCookies`) and
+   `plugins/csrf.ts`. `sameSite: 'none'` always forces `secure: true`
+   regardless of `COOKIE_SECURE`/`NODE_ENV` (spec requirement); a
+   production refinement in `env.ts` refuses to boot with
+   `COOKIE_SAME_SITE=none` unless `COOKIE_SECURE=true` and both
+   `APP_ORIGIN`/`DASHBOARD_ORIGIN` are `https://`. Test coverage:
+   `modules/auth/__tests__/cookie-attrs.test.ts` (two full app builds —
+   default `lax` and cross-site `none`+`COOKIE_SECURE=true` — asserting
+   the real `Set-Cookie` attributes on all three cookies) and
+   `config/__tests__/env.test.ts`'s three new production-refusal cases.
+   Full detail: [`04-auth.md` §10.1](./04-auth.md#101-cookie-samesitesecure-cross-site-dashboard-deployments),
+   [`07-dashboard.md` §5](./07-dashboard.md#5-authcsrf-across-origins-deployment),
+   [`11-devops.md` §6](./11-devops.md#6-cors-cookies-and-the-vercel-dashboard).
 
-2. **`drizzle-orm` dependency advisory** — see §15. Proposed diff given
-   there; deferred pending a coordinated cross-package bump + full
-   `@sl/db` test run.
+2. **Resolved — `drizzle-orm` dependency advisory.** Bumped `^0.38.3` →
+   `^0.45.2` across all three packages that pin it; `pnpm audit --prod` is
+   now clean (0 findings, was 1 high). Two behaviour changes the bump
+   surfaced were fixed (a test assertion, and a real bug in the Stripe
+   webhook idempotency check's error-code detection) — see §15 for full
+   detail.
 
-3. **Extension runtime-message payload validation is not exhaustive.**
-   Only `settings.set` has a dedicated `@sl/shared` payload schema in
-   `background/index.ts`'s `payloadSchemas` map; every other handler
-   (`auth.login`, `auth.register`, `filters.save`, `telemetry.enqueue`,
-   etc.) still type-casts (`payload as never`) rather than validating.
-   Not exploitable for a crash (every handler is `async`, so a malformed-
-   payload `TypeError` is already caught, §13), but is a correctness/
-   defense-in-depth gap versus the "zod on every input" convention used
-   everywhere else in this codebase. Proposed extension (mechanical, one
-   entry per handler once the exact matching client-side schema is
-   confirmed — several server-side schemas differ slightly from what the
-   background script actually sends, e.g. `auth.login`'s payload has no
-   `device` field the way the server's `loginRequestSchema` does, so a
-   dedicated `extBackgroundLoginPayloadSchema` would need to be added to
-   `packages/shared/src/ext-messages.ts` rather than reusing the server
-   schema directly):
-   ```diff
-   # apps/extension/src/background/index.ts
-   const payloadSchemas: Partial<Record<string, { safeParse: (v: unknown) => { success: boolean } }>> = {
-     'settings.set': updateUserSettingsRequestSchema,
-   +   'filters.save': z.object({ filters: z.array(savedFilterSchema) }),
-   +   // auth.login/register/mfa need a dedicated ext-messages.ts schema
-   +   // (their payload shape differs from the server's own request schema)
-   };
-   ```
+3. **Resolved — extension runtime-message payload validation was not
+   exhaustive.** Every `background/index.ts` handler that takes a payload
+   now has a dedicated `@sl/shared` schema in its `payloadSchemas` map —
+   either the exact matching server-side request/DTO schema
+   (`auth.mfa` → `mfaVerifyRequestSchema`, `settings.set` →
+   `updateUserSettingsRequestSchema`) or a purpose-built
+   `extBackground*PayloadSchema` (`packages/shared/src/ext-messages.ts`)
+   where the shape genuinely differs, exactly as this section previously
+   flagged (`auth.login`/`auth.register` carry no `device` field — the
+   fingerprint is computed inside `background/auth.ts` itself). Covers
+   `record`, `summary`, `auth.login`, `auth.register`, `auth.mfa`,
+   `auth.logout`, `license.heartbeat`, `settings.set`, `filters.save`, and
+   `telemetry.enqueue` (a discriminated union over its six queue kinds).
+   Every new payload schema is `.strict()` with `.max()`-bounded arrays,
+   matching this codebase's mass-assignment convention (§1). A handler
+   with no payload (`auth.refresh`/`.status`, `license.bootstrap`,
+   `settings.get`, `filters.list`, `devices.list`, `logs.export`,
+   `telemetry.flush`, `errors.report`, `engine.state`, `counts`) has
+   nothing to validate and is deliberately left out of the map.
+   **Build-safety note**: the `event`-kind item schema is a small
+   deliberate *duplicate* of `schemas/extension.ts`'s `telemetryEventSchema`
+   rather than an import of it — that module also builds
+   `bootstrapResponseSchema`, which references `FEATURE_KEYS` (a plan
+   feature-gate vocabulary that includes the literal string
+   `'automation.autobuyer'`). Importing `telemetryEventSchema` at runtime
+   pulled that whole module — including the `'automation.autobuyer'`
+   string — into the listable build's background service-worker bundle
+   (`apps/extension/dist/ledger/background.js`), confirmed empirically (the
+   bundler didn't tree-shake the unused sibling export away) and caught by
+   this repo's own build check (`grep -rl autobuyer apps/extension/dist/ledger`
+   must print nothing, §19/rule 5 — "Automation ships as a separate
+   build"). The 4-line duplicate schema avoids the whole-module import
+   entirely; verified fixed (background.js shrank ~31KB → ~26KB, and the
+   grep now finds nothing).
 
 4. **No DAST/ZAP baseline scan wired into CI.** Optional per the original
    plan; `pnpm audit` + semgrep + this test suite are the current
@@ -656,12 +663,29 @@ pnpm audit --prod
 pnpm --filter @sl/api openapi   # regenerate apps/api/openapi/openapi.json after a schema change
 ```
 
-**Results as of this pass:** `@sl/api` — 32 test files / 160 tests green
-(typecheck/lint clean); `@sl/shared` — 11 files / 140 tests green;
+**Results as of the security pass:** `@sl/api` — 32 test files / 160 tests
+green (typecheck/lint clean); `@sl/shared` — 11 files / 140 tests green;
 `@sl/extension` — 10 files / 74 tests green, build produces a loadable
 `dist/ledger` + `dist/ledger-auto` with zero `autobuyer` references in the
-listable build; `@sl/security-tests` — **10 files / 167 tests green**
-(up from the 4 files / 125 tests a previous wave reported — this pass
-completed the remaining six suites: IDOR, injection payloads, security
-headers, open redirect, mass assignment, webhook signature). `pnpm audit
---prod` — 0 critical, 1 high (see §15).
+listable build; `@sl/security-tests` — 10 files / 167 tests green (up from
+the 4 files / 125 tests a previous wave reported — this pass completed the
+remaining six suites: IDOR, injection payloads, security headers, open
+redirect, mass assignment, webhook signature). `pnpm audit --prod` — 0
+critical, 1 high (see §15).
+
+**Results as of the API follow-ups pass** (§18 findings #1–#3, the
+`drizzle-orm` bump, and the new routes in `docs/03-api.md`/
+`docs/07-dashboard.md` §11): `@sl/api` — **33 test files / 165 tests**
+green (typecheck/lint clean; +1 file/+5 tests: `cookie-attrs.test.ts`, plus
+3 new `env.test.ts` cases folded into the existing file's count);
+`@sl/shared` — 11 files / 140 tests green; `@sl/db` — 10 files / 66 tests
+green; `@sl/extension` — 10 files / 74 tests green, build still produces a
+loadable `dist/ledger` + `dist/ledger-auto` with zero `autobuyer`
+references (re-verified after the `ext-messages.ts` payload-schema
+additions — see finding #3's build-safety note); `@sl/security-tests` —
+10 files / **167 tests** green (`authz-matrix.test.ts` grew from 48 to 51
+cases: the three new admin routes, `GET /admin/subscriptions`, `GET
+/admin/subscriptions/by-user/:userId` — both `subscriptions.read`, closing
+that permission's prior `KNOWN_UNENFORCED_PERMISSIONS` entry — and `GET
+/admin/users/:id/risk-events`, `users.read`). `pnpm audit --prod` — **0
+findings** (down from 1 high — the `drizzle-orm` bump, §15).

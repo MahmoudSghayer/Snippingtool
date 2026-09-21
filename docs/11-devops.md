@@ -374,30 +374,40 @@ exists (it does). One-time setup in the Vercel project:
 
 **Cookie/CORS shape — read before pointing a Vercel deployment at a
 different apex domain than the API.** `docs/07-dashboard.md` §5 lays out
-two shapes:
+two shapes; both are now fully supported (the cross-site one was closed by
+the API follow-ups pass, docs/09-security.md's former open finding #1):
 
 - **Same-site** (dashboard and API share a registrable domain, e.g.
   `dashboard.sniperledger.com` + `api.sniperledger.com`, or a Vercel
   rewrite that proxies `/api/*` through the dashboard's own origin to the
-  real API): the browser only ever needs `SameSite=Lax` cookies, which is
-  what `apps/api/src/modules/auth/index.ts` and
-  `apps/api/src/plugins/csrf.ts` set today — `sl_at`/`sl_rt`/`sl_csrf` all
-  hard-code `sameSite: 'lax'`. **This is the shape this deployment
-  currently supports and the one to use.**
-- **Cross-site** (dashboard on a Vercel-issued domain like
-  `*.vercel.app` or any domain that does *not* share a registrable apex
-  with the API): `SameSite=Lax` cookies are **not** sent on cross-site
-  fetch/XHR requests, so login would appear to succeed (the response sets
-  the cookie) but every subsequent authenticated request would look
-  logged-out. Fixing this needs an API-side change —
-  `sameSite: 'lax'` becoming a conditional `'none'` (with `secure: true`,
-  which cross-site cookies require) when the deploy shape calls for it —
-  which **has not been implemented** (flagged here for whoever owns
-  `apps/api/src/modules/auth` next; also flagged in
-  `docs/07-dashboard.md` §5 as "outside this app's ownership"). Until that
-  lands, deploy the dashboard on a subdomain of the same apex as the API,
-  or in front of a same-site proxy/rewrite, not on a bare
-  `*.vercel.app`/foreign-domain origin.
+  real API): the browser only ever needs `SameSite=Lax` cookies — leave
+  the API's `COOKIE_SAME_SITE` at its default (`lax`, unset). **Still the
+  preferred shape when available** (avoids the `SameSite=None` requirement
+  entirely, so there's no `Secure`/HTTPS-both-origins constraint to keep
+  satisfied).
+- **Cross-site** (dashboard on a Vercel-issued domain like `*.vercel.app`
+  or any domain that does *not* share a registrable apex with the API):
+  `SameSite=Lax` cookies are **not** sent on cross-site fetch/XHR
+  requests, so login would appear to succeed (the response sets the
+  cookie) but every subsequent authenticated request would look
+  logged-out — unless the API is told to use `SameSite=None`. Set, on the
+  **API's** environment (`infra/.env.{staging,production}` /
+  `apps/api/src/config/env.ts`):
+  ```
+  COOKIE_SAME_SITE=none
+  COOKIE_SECURE=true
+  ```
+  `sameSite: 'none'` always implies `Secure` regardless of
+  `COOKIE_SECURE`/`NODE_ENV` (browsers reject `SameSite=None` without it) —
+  `COOKIE_SECURE=true` here is what the API's own boot-time refinement
+  requires alongside it (`env.ts` refuses to start in production with
+  `COOKIE_SAME_SITE=none` and `COOKIE_SECURE` unset, and requires both
+  `APP_ORIGIN`/`DASHBOARD_ORIGIN` to be `https://` — a cross-site cookie is
+  pointless between two origins that aren't even TLS). No dashboard-side
+  change needed either way — `credentials: 'include'`
+  (`apps/dashboard/src/api/client.ts`) already sends cookies cross-site
+  once the browser accepts them. Full detail:
+  [`04-auth.md` §10.1](./04-auth.md#101-cookie-samesitesecure-cross-site-dashboard-deployments).
 
 ## 7. Monitoring / alerting runbook
 
@@ -753,9 +763,11 @@ rotate during low traffic and expect a support-ticket blip regardless.
 - [ ] Grafana admin password changed from the env default, and (§5.1) its
       public reachability reconsidered if it shouldn't be.
 - [ ] `VITE_API_ORIGIN`/`DASHBOARD_ORIGIN` set correctly for whichever
-      dashboard deployment shape is live (§6), and the same-site cookie
-      constraint (§6) respected — cross-site Vercel-only deploys are not
-      yet supported.
+      dashboard deployment shape is live (§6); if it's the cross-site
+      shape (bare `*.vercel.app` or any non-shared-apex domain),
+      `COOKIE_SAME_SITE=none` + `COOKIE_SECURE=true` are set on the API
+      and both `APP_ORIGIN`/`DASHBOARD_ORIGIN` are `https://` (§6 —
+      enforced at boot in production either way).
 - [ ] STRIPE_* set to **live** keys (not test) with the live webhook
       endpoint registered, if billing is going live alongside this deploy
       (`docs/05-subscriptions.md`).

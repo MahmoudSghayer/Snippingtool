@@ -18,9 +18,13 @@ describe('partial unique index on users.email (soft-delete aware)', () => {
 
   it('rejects a second live user with the same email', async () => {
     await db.insert(users).values({ email: 'dupe@example.com', passwordHash: 'x' });
-    await expect(db.insert(users).values({ email: 'dupe@example.com', passwordHash: 'y' })).rejects.toThrow(
-      /duplicate key|unique constraint/i,
-    );
+    // drizzle-orm 0.45 wraps the driver error in a `DrizzleQueryError` whose
+    // own `.message` is the failed SQL text, not the Postgres error — the
+    // original `postgres` error (with the "duplicate key"/constraint-name
+    // message this test cares about) is preserved on `.cause` instead.
+    await expect(db.insert(users).values({ email: 'dupe@example.com', passwordHash: 'y' })).rejects.toMatchObject({
+      cause: { message: expect.stringMatching(/duplicate key|unique constraint/i) },
+    });
   });
 
   it('allows a new user to reuse an email once the original is soft-deleted', async () => {
@@ -41,8 +45,8 @@ describe('partial unique index on users.email (soft-delete aware)', () => {
     await db.update(users).set({ deletedAt: new Date() }).where(eq(users.id, first!.id));
     await db.insert(users).values({ email: 'triple@example.com', passwordHash: 'y' });
 
-    await expect(db.insert(users).values({ email: 'triple@example.com', passwordHash: 'z' })).rejects.toThrow(
-      /duplicate key|unique constraint/i,
-    );
+    await expect(db.insert(users).values({ email: 'triple@example.com', passwordHash: 'z' })).rejects.toMatchObject({
+      cause: { message: expect.stringMatching(/duplicate key|unique constraint/i) },
+    });
   });
 });

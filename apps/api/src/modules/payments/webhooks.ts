@@ -462,7 +462,11 @@ export async function receiveWebhookEvent(db: Database, redis: Redis, stripe: St
       processedAt: null,
     });
   } catch (err) {
-    const code = (err as { code?: string } | null)?.code;
+    // drizzle-orm 0.45 wraps the driver error in a `DrizzleQueryError`
+    // (bumped for docs/09-security.md's drizzle-orm advisory) — its own
+    // `.code` is undefined; the Postgres error code this check needs is on
+    // `.cause` instead. Checking both keeps this resilient to either shape.
+    const code = (err as { code?: string; cause?: { code?: string } } | null)?.code ?? (err as { cause?: { code?: string } } | null)?.cause?.code;
     if (code === '23505') return { alreadyProcessed: true }; // unique_violation on event_id
     throw err;
   }

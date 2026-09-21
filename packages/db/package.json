@@ -33,17 +33,17 @@
   },
   "dependencies": {
     "argon2": "^0.41.1",
-    "drizzle-orm": "^0.38.3",
+    "drizzle-orm": "^0.45.2",
     "postgres": "^3.4.5",
     "uuidv7": "^1.0.2"
   },
   "devDependencies": {
     "@sl/config": "workspace:*",
     "@types/node": "^22.10.5",
+    "@vitest/coverage-v8": "^2.1.8",
     "dotenv": "^16.4.7",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
-    "vitest": "^2.1.8",
-    "@vitest/coverage-v8": "^2.1.8"
+    "vitest": "^2.1.8"
   }
 }

@@ -59,19 +59,21 @@ const ADMIN_ROUTES: AdminRoute[] = [
     permission: 'subscriptions.write',
     body: { planCode: 'basic', periodDays: 30, reason: 'x' },
   },
+  // API follow-ups pass (docs/07-dashboard.md §11 gaps #2/#5): the list/
+  // lookup endpoints that previously left `subscriptions.read` unenforced
+  // (see the old `KNOWN_UNENFORCED_PERMISSIONS` comment, now removed below).
+  { method: 'GET', path: '/api/v1/admin/subscriptions', permission: 'subscriptions.read' },
+  { method: 'GET', path: `/api/v1/admin/subscriptions/by-user/${NIL_LIKE_UUID}`, permission: 'subscriptions.read' },
+  { method: 'GET', path: `/api/v1/admin/users/${NIL_LIKE_UUID}/risk-events`, permission: 'users.read' },
 ];
 
 /** Permissions that exist in `@sl/shared`'s `PERMISSION_MATRIX` but have no
  * enforcement point anywhere in the API yet — checked so the coverage test
  * below documents *why* a permission is missing from `ADMIN_ROUTES` instead
- * of silently skipping it. `subscriptions.read` is declared (billing/
- * analyst/support all list it) but no route currently gates on it — every
- * admin-subscriptions route that reads subscription data is either public
- * data via another gate or not yet built; see docs/09-security.md "Open
- * findings" for the exact fix (gate the read endpoints on it once they
- * exist — owned by the subscriptions/payments module, not this pass). */
+ * of silently skipping it. (`subscriptions.read` used to be here too — it's
+ * now enforced by `GET /admin/subscriptions`/`.../by-user/:userId`, added in
+ * the API follow-ups pass, docs/07-dashboard.md §11 gap #2.) */
 const KNOWN_UNENFORCED_PERMISSIONS: readonly Permission[] = [
-  'subscriptions.read',
   // Declared, granted to no role in PERMISSION_MATRIX (only 'system.read'
   // is), and gated by no route — reserved for a future system-mutation
   // endpoint. Not a live gap (nothing currently needs it to be enforced),

@@ -13,7 +13,7 @@
   "dependencies": {
     "@sl/db": "workspace:*",
     "@sl/shared": "workspace:*",
-    "drizzle-orm": "^0.38.3"
+    "drizzle-orm": "^0.45.2"
   },
   "devDependencies": {
     "@sl/api": "workspace:*",

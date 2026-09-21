@@ -122,7 +122,7 @@ Module: `src/modules/users`.
 
 | Method & path | Auth | Notes |
 |---|---|---|
-| `GET /users/me` | `user` | `userDtoSchema`. |
+| `GET /users/me` | `user` | `userDtoSchema` — now includes the caller's own resolved `adminRole`/`permissions` (`admin_users.admin_role` → `PERMISSION_MATRIX`; `null`/`[]` for a non-admin). The dashboard gates admin nav items and routes on these real permissions, not just `role === 'admin'` (server enforcement, `fastify.requirePermission`, is unchanged and remains the actual authority). |
 | `PATCH /users/me` | `user` | CSRF (cookie only). Body `updateProfileRequestSchema` (`timezone`). Audited (`user.profile_updated`). |
 | `DELETE /users/me` | `user` | CSRF (cookie only). Body `{ password }` (re-auth required). Soft-deletes (`status='deleted'`, `deleted_at`), revokes every session, bumps `row_version`. Audited (`user.deleted`). |
 
@@ -191,7 +191,9 @@ only, never raw market observations.
 | `PATCH /filters/:id` | `user` | Body `updateSavedFilterRequestSchema` (partial). |
 | `DELETE /filters/:id` | `user` | Soft delete. |
 | `POST /filters/stats` | `user` | Body `reportFilterStatsRequestSchema` — batch upsert of the ranker's realised-return history (`filter_stats`, keyed `(filterId, windowStart)`), synced from the extension so it survives a reinstall. Silently skips stats for a `filterId` that isn't the caller's. |
+| `GET /filters/stats?filterId=&from=&to=` | `user` | Reads back what the `POST` above ingests — the caller's own `filter_stats` rows, newest window first. `filterId` narrows to one filter (404 if it isn't the caller's); omitted, every one of the caller's filters' stats in range. `200 filterStatsSchema[]`. Backs the user Analytics page's "Filter performance" tab. |
 | `POST /risk-events` | `user` | Body `reportRiskBudgetEventsRequestSchema` — up to 200 governor decisions. `200 { accepted }`. |
+| `GET /risk-events?from=&to=&kind=&cursor=&limit=` | `user` | The caller's own `risk_budget_events` history, cursor-paginated, newest first. `200 { items: riskBudgetEventRowSchema[], nextCursor }`. Backs the user Dashboard's "Risk posture" card (last-24h counts by kind + recent hard stops), alongside the configured budget from `GET /settings`. |
 
 ### `extension`
 
@@ -249,6 +251,23 @@ role → permission matrix and why `support` gets 403 on e.g. `users.ban`
 writes both an `audit_logs` row (before/after, via `recordAudit`) and an
 `admin_actions` row.
 
+> **`admin-subscriptions` list/lookup** (module still documented in
+> [`05-subscriptions.md`](./05-subscriptions.md) §8, per that section's own
+> ownership note above — this is a pointer, not a duplicate table): the API
+> follow-ups pass added `GET /admin/subscriptions?status=&plan=&userId=&search=&cursor=&limit=`
+> (cursor list, permission `subscriptions.read`, each item is
+> `subscriptionDtoSchema` plus the owning `userId`/`userEmail`) and
+> `GET /admin/subscriptions/by-user/:userId` (permission `subscriptions.read`,
+> `{ current: subscriptionDtoSchema | null, currentLicenseId: uuid | null,
+> history: subscriptionDtoSchema[] }`) — closing the gap where only the
+> per-id/per-user *action* routes (`extend`/`suspend`/`cancel`/
+> `activate`/`grant-lifetime`) existed with no way to discover a
+> subscription's `id` from a bare `userId`. `currentLicenseId` is what the
+> device-limit override route (`POST /admin/licenses/:id/device-limit`)
+> needs. The dashboard's `/admin/subscriptions` page and the `/admin/users`
+> detail drawer's Subscription tab both use these now (`src/components/
+> SubscriptionActions.tsx`).
+
 | Method & path | Permission | Notes |
 |---|---|---|
 | `GET /admin/users?q=&status=&cursor=&limit=` | `users.read` | `q` matches email (case-insensitive substring). Cursor-paginated. |
@@ -258,16 +277,17 @@ writes both an `audit_logs` row (before/after, via `recordAudit`) and an
 | `POST /admin/users/:id/unsuspend` | `users.suspend` | Body `{ reason }`. Audited `user.unsuspended`. |
 | `POST /admin/users/:id/reset-password` | `users.reset_password` | Body `{ reason }`. Triggers the same password-reset email flow as the user-initiated one. Audited `user.reset_password_sent`. |
 | `POST /admin/users/:id/force-logout` | `users.force_logout` | Body `{ reason }`. Revokes every session, bumps `row_version`, pushes `session.revoked` over WS for each revoked session, and emails the user a force-logout notice. Audited `user.force_logout`. |
+| `GET /admin/users/:id/risk-events?from=&to=&kind=&cursor=&limit=` | `users.read` | One user's `risk_budget_events` history — same shape/pagination as the user-scoped `GET /risk-events` above, keyed by `:id` instead of the caller. |
 | `GET /admin/audit?actorId=&entityType=&entityId=&from=&to=&limit=` | `audit.read` | `auditLogEntrySchema[]`, newest first. `actorId`/`entityId` are validated as UUIDs (`audit_logs.actor_id`/`.entity_id` are `uuid` columns) — a malformed value 400s `VALIDATION_FAILED` rather than reaching the database. |
-| `GET /admin/audit/export.csv?...` (same filters) | `audit.read` | Streams a CSV (`id,occurred_at,actor_type,actor_id,action,entity_type,entity_id,diff`), capped at 10,000 rows. |
+| `GET /admin/audit/export.csv?...` (same filters as the list above) | `audit.read` | Server-side streaming CSV export (`id,occurred_at,actor_type,actor_id,action,entity_type,entity_id,diff`) — keyset-paginated internally (1,000 rows/page) so an arbitrarily large export never buffers fully in memory, unlike the list route's 500-row cap. Writes an `audit.export` audit row (actor, filters used) before streaming starts, same pattern as `admin-analytics`'s `analytics.export`. The dashboard's Audit page downloads it via `fetch` with `credentials: 'include'` (a plain `<a href>` navigation can't carry the httpOnly session cookie). |
 | `GET /admin/toggles` | `system.read` | `featureToggleDtoSchema[]`. |
 | `PATCH /admin/toggles/:key` | `feature_toggles.write` | Body `updateFeatureToggleRequestSchema`. Broadcasts `feature_toggles.changed` to `admin:overview`; toggling the `kill_switch` key additionally broadcasts `kill_switch` to `admin:overview` **and** to every currently-online user's own `user:{id}` channel (iterated in batches from the Redis presence set via `publishToUser` — best-effort: online set only, offline clients pick it up on their next heartbeat). Audited `feature_toggle.updated`. |
 | `GET /admin/config` | `system.read` | `systemConfigDtoSchema[]` — `is_secret` values are masked (`"[hidden]"`) unless the caller also has `config.write`. |
 | `PUT /admin/config/:key` | `config.write` | Body `{ value, isSecret?, description? }`. Upserts. Audited `system_config.updated`/`.created` (secret values never appear in the audit row — masked the same way). |
 | `GET /admin/system/health` | `system.read` | Process uptime, DB connectivity, parsed `redis INFO` (connected clients/used memory/uptime), per-queue BullMQ depths (every job in `src/jobs/*.job.ts`, both agents' — via a plain, unprefixed Redis connection matching what `worker.ts` itself connects with), WS online-user count (Redis presence set), active-device extension-version distribution, and a 5-minute error rate (Redis minute-bucketed 5xx counter). |
-| `GET /admin/activity/{logins,errors,searches,snipes}?from=&to=&cursor=&limit=` | `analytics.read` | Cursor-paginated raw rows from `user_activity` (filtered by `type`), `search_activity`, `sniping_activity`. |
+| `GET /admin/activity/{logins,errors,searches,snipes,filter-changes}?from=&to=&cursor=&limit=` | `analytics.read` | Cursor-paginated rows from `user_activity` (filtered by `type`: `login`/`error`/`filter_change`), `search_activity`, `sniping_activity` — each typed by a dedicated `@sl/shared` response schema (`admin{Login,Error,Search,Snipe,FilterChange}ActivityRowSchema`, `schemas/activity.ts`), so the generated OpenAPI spec/dashboard types are no longer `content?: never` for these routes. `filter-changes` is new (was the one `user_activity` type with no admin route at all). |
 | `GET /admin/activity/devices` | `analytics.read` | `{ byVersion, byOs, total }` — active-device breakdown. |
-| `GET /admin/activity/ips?flaggedOnly=&limit=` | `analytics.read` | `ip_activity` rows, newest-seen first. |
+| `GET /admin/activity/ips?flaggedOnly=&limit=` | `analytics.read` | `ip_activity` rows, newest-seen first — typed by `adminIpActivityRowSchema`. |
 
 ---
 

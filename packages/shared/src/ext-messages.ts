@@ -1,7 +1,12 @@
 import { z } from 'zod';
 
 import { ADAPTER_CHANNEL } from './adapter-channel.js';
-import { filterCriteriaSchema } from './schemas/filters.js';
+import { activityEventSchema } from './schemas/activity.js';
+import { emailSchema, passwordSchema } from './schemas/auth.js';
+import { filterCriteriaSchema, filterStatsSchema, savedFilterSchema } from './schemas/filters.js';
+import { riskBudgetEventSchema } from './schemas/risk.js';
+import { snipingAttemptSchema } from './schemas/sniping.js';
+import { tradeSchema } from './schemas/trades.js';
 
 /**
  * Typed message shapes for the extension's two internal channels. These are
@@ -192,3 +197,125 @@ export const backgroundResponseSchema = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(false), error: z.string() }),
 ]);
 export type BackgroundResponse = z.infer<typeof backgroundResponseSchema>;
+
+// ---------------------------------------------------------------------------
+// Per-handler payload schemas for `background/index.ts`'s `payloadSchemas`
+// map (docs/09-security.md open finding #3: validation was not exhaustive —
+// only `settings.set` had a dedicated schema, every other handler
+// type-cast `payload as never`). One entry per message type that actually
+// carries a payload; a handler with no payload (`auth.refresh`,
+// `auth.status`, `license.bootstrap`, `settings.get`, `filters.list`,
+// `devices.list`, `logs.export`, `telemetry.flush`, `errors.report`,
+// `engine.state`, `counts`) has nothing here to validate and isn't listed —
+// `backgroundMessageEnvelopeSchema.payload` is optional/`unknown` already,
+// and every handler ignores its argument in that case.
+//
+// Reuses the exact matching `@sl/shared` request/DTO schema wherever the
+// background handler's payload shape is identical to what the server
+// expects (`auth.mfa` -> `mfaVerifyRequestSchema`, `settings.set` ->
+// `updateUserSettingsRequestSchema`, `filters.save`/`telemetry.enqueue`'s
+// per-kind items -> the matching DTO schemas) — additive, dedicated schemas
+// only where the shape genuinely differs (`auth.login`/`auth.register`/
+// `auth.logout`/`license.heartbeat`/`record`/`summary`), per the plan's own
+// note that several server-side schemas don't match what the background
+// script actually sends (e.g. `auth.login` has no `device` field the way
+// the server's `loginRequestSchema` does — the fingerprint is computed
+// inside `background/auth.ts` itself, not sent by the caller).
+// ---------------------------------------------------------------------------
+
+/** `record` — passive-observation batch (`background/index.ts`'s `record`
+ * handler -> `store/db.ts`'s `recordSightings`). Reuses the adapter
+ * channel's own auction shape, since this is the same trimmed data the
+ * adapter posted, just forwarded to the service worker's IndexedDB store. */
+export const extBackgroundRecordPayloadSchema = z
+  .object({
+    auctions: z.array(trimmedAuctionSchema).max(500),
+  })
+  .strict();
+
+/** `summary` — one resource's floor/median/sell-through/max-snipe card. */
+export const extBackgroundSummaryPayloadSchema = z
+  .object({
+    resourceId: z.number().int().positive(),
+    minProfit: z.number().int().min(0).optional(),
+  })
+  .strict();
+
+/** `auth.login` — no `device` field: `background/auth.ts`'s `buildDevice()`
+ * computes the fingerprint itself from inside the handler. */
+export const extBackgroundLoginPayloadSchema = z
+  .object({
+    email: emailSchema,
+    password: z.string().min(1).max(256),
+  })
+  .strict();
+
+/** `auth.register` — same device note as `auth.login` above. */
+export const extBackgroundRegisterPayloadSchema = z
+  .object({
+    email: emailSchema,
+    password: passwordSchema,
+    timezone: z.string().min(1).max(64).optional(),
+    referralCode: z.string().min(1).max(40).optional(),
+  })
+  .strict();
+
+/** `.optional()` at the top level (not just its one field): `background/
+ * auth.ts`'s `handleAuthLogout` defaults its whole argument to `{}`, and the
+ * envelope's `payload` itself is optional — a caller that omits it entirely
+ * (payload `undefined`) must still validate, not be rejected as malformed. */
+export const extBackgroundLogoutPayloadSchema = z
+  .object({
+    allDevices: z.boolean().optional(),
+  })
+  .strict()
+  .optional();
+
+export const extBackgroundLicenseHeartbeatPayloadSchema = z
+  .object({
+    engineState: z.enum(['idle', 'running', 'paused', 'halted']),
+  })
+  .strict();
+
+/** `filters.save` — the *locally-persisted* `SavedFilter[]` (id, filterHash,
+ * etc. already computed), not a creation request. */
+export const extBackgroundFiltersSavePayloadSchema = z
+  .object({
+    filters: z.array(savedFilterSchema).max(200),
+  })
+  .strict();
+
+/** `event` kind — mirrors `schemas/extension.ts`'s `telemetryEventSchema`
+ * exactly, duplicated (not imported) deliberately: that module also builds
+ * `bootstrapResponseSchema`, which references `FEATURE_KEYS` (a plan
+ * feature-gate vocabulary that includes `'automation.autobuyer'`) — this
+ * file is imported by the *listable* extension build's background service
+ * worker (`apps/extension/src/background/index.ts`), and docs/09-security.md's
+ * build check greps `dist/ledger` for the literal string `autobuyer` and
+ * must find none. Importing `telemetryEventSchema` at runtime from
+ * `schemas/extension.ts` pulled that whole module — including the
+ * `'automation.autobuyer'` string constant — into the background bundle
+ * (verified empirically: the bundler didn't tree-shake the unused sibling
+ * export away). A 4-line duplicate here avoids that entirely; the two are
+ * covered by the same cross-package equivalence, not by import identity. */
+const extTelemetryPlainEventSchema = z
+  .object({
+    name: z.string().min(1).max(80),
+    occurredAt: z.string().datetime(),
+    data: z.record(z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
+  })
+  .strict();
+
+/** `telemetry.enqueue` — mirrors `background/telemetry.ts`'s
+ * `TelemetryEnqueuePayload` discriminated union exactly (one array-of-items
+ * schema per queue kind, each already a `@sl/shared` DTO/event schema —
+ * see `extTelemetryPlainEventSchema` above for why the `event` kind's item
+ * schema is duplicated rather than imported). */
+export const extBackgroundTelemetryEnqueuePayloadSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('activity'), items: z.array(activityEventSchema).max(500) }).strict(),
+  z.object({ kind: z.literal('sniping'), items: z.array(snipingAttemptSchema).max(500) }).strict(),
+  z.object({ kind: z.literal('trades'), items: z.array(tradeSchema).max(500) }).strict(),
+  z.object({ kind: z.literal('filterStats'), items: z.array(filterStatsSchema).max(200) }).strict(),
+  z.object({ kind: z.literal('riskEvents'), items: z.array(riskBudgetEventSchema).max(200) }).strict(),
+  z.object({ kind: z.literal('event'), items: z.array(extTelemetryPlainEventSchema).max(500) }).strict(),
+]);

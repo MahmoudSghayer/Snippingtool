@@ -23,6 +23,7 @@ they do.
 8. [Force logout](#8-force-logout)
 9. [Password reset](#9-password-reset)
 10. [CSRF model](#10-csrf-model)
+    - [10.1. Cookie SameSite/Secure (cross-site dashboard deployments)](#101-cookie-samesitesecure-cross-site-dashboard-deployments)
 11. [Token/secret storage rules](#11-tokensecret-storage-rules)
 
 ---
@@ -294,6 +295,17 @@ permission.
 | `analyst` | `users.read`, `subscriptions.read`, `audit.read`, `analytics.read`, `system.read`. Read-only everywhere, including audit — safe for reporting with zero write risk. |
 | `billing` | `users.read`, `subscriptions.read`, `subscriptions.write`, `coupons.write`, `plans.write`, `audit.read`. The money-shaped surface, plus enough user read access to look up an account — but never `users.suspend`/`.ban`/`.force_logout`. |
 
+The caller's own resolved `admin_role`/permission set (this table, applied)
+is exposed client-side on `GET /users/me` (`userDtoSchema.adminRole`/
+`.permissions`, [`03-api.md`](./03-api.md#users)) — `null`/`[]` for a
+non-admin, resolved once per call via `lib/admin-session.ts`'s
+`resolveAdminSession()`. The dashboard reads this to gate admin nav items
+and routes on the caller's real permissions (`src/lib/adminNav.ts`,
+`src/stores/auth.ts`) instead of only `role === 'admin'`; server enforcement
+(`fastify.requirePermission`, this section) is unaffected and remains the
+actual authority — a call the caller's role doesn't grant still 403s
+regardless of what the UI shows.
+
 Since admin login always requires 2FA (§6), there is no separate mid-session
 step-up for admin actions — an admin's access token already attests to a
 2FA-verified login. `requirePermission` does not re-check TOTP per request.
@@ -354,6 +366,30 @@ context), which a CSRF attack by definition does not have.
 Routes that mutate state under a cookie session add
 `preHandler: [fastify.verifyCsrf]` alongside `onRequest: [fastify.authenticate]`
 — see the "CSRF (cookie only)" notes in [`03-api.md`](./03-api.md).
+
+### 10.1. Cookie `SameSite`/`Secure` (cross-site dashboard deployments)
+
+`sl_at`/`sl_rt` (this module, `setSessionCookies`) and `sl_csrf`
+(`plugins/csrf.ts`) all derive their `sameSite`/`secure` attributes from
+`lib/cookie-options.ts`'s `resolveCookieAttrs()`, driven by two env vars
+(`config/env.ts`):
+
+| Var | Default | Meaning |
+|---|---|---|
+| `COOKIE_SAME_SITE` | `lax` | `lax` \| `strict` \| `none`. `Lax` (the default) is correct for a same-site or subdomain-shared dashboard/API topology — same-origin `fetch`/XHR always carries `Lax` cookies. A **genuinely cross-site** deployment (e.g. the dashboard on Vercel, the API on its own origin — the documented MVP topology, [`11-devops.md`](./11-devops.md) §6) needs `none`: `SameSite=Lax` cookies are **not** sent on a cross-site `fetch`/XHR (only a top-level navigation), so a cross-site dashboard would silently fail to authenticate via cookies with `lax`. |
+| `COOKIE_SECURE` | `false` | Forces `Secure` outside `NODE_ENV=production` (e.g. an HTTPS staging/preview deploy that isn't `production`). Cookies are `Secure` whenever `isProd \|\| COOKIE_SECURE`. |
+
+`COOKIE_SAME_SITE=none` **always** sets `Secure: true` regardless of
+`COOKIE_SECURE`/`NODE_ENV` — required by spec (browsers reject
+`SameSite=None` cookies with no `Secure`). `config/env.ts`'s
+`refineForProduction` additionally refuses to boot in production with
+`COOKIE_SAME_SITE=none` unless `COOKIE_SECURE=true` is also set, and unless
+`APP_ORIGIN`/`DASHBOARD_ORIGIN` are both `https://` — a `SameSite=None`
+cookie is pointless between two origins that aren't even served over TLS.
+Test coverage: `modules/auth/__tests__/cookie-attrs.test.ts` (two full app
+builds — default `lax` and cross-site `none`+`COOKIE_SECURE=true` — asserting
+the real `Set-Cookie` attributes on all three cookies); `config/__tests__/env.test.ts`
+covers the production refusal cases.
 
 ## 11. Token/secret storage rules
 
