@@ -75,9 +75,9 @@ const css = `
   /* Risk meter — a *segmented* gauge (PHASE 10: "segmented risk gauge"),
      not a plain continuous bar: two always-visible tick marks (at the 80%
      "approaching limit" and 100% "at limit" thresholds — the same two
-     bands `meterClass()` below switches color on) divide the track into
+     bands meterClass() below switches color on) divide the track into
      three zones, so the fill's proximity to a boundary reads at a glance
-     even before its color changes, not only after. `::after`'s gradient
+     even before its color changes, not only after. The ::after gradient's
      ticks are purely decorative — the row above already states the
      number, and the color change plus label below never make the zone
      color-only. */
@@ -87,9 +87,13 @@ const css = `
   .meter.over i { background: var(--sl-negative); }
   .meter::after {
     content: ''; position: absolute; inset: 0; pointer-events: none;
+    /* --sl-ground, not the track's own --sl-card-2 — the ticks need to
+       read against both the empty track and every fill color (green/
+       amber/red), and the darkest token in the palette is the one value
+       that contrasts against all of them. */
     background: linear-gradient(to right,
-      transparent calc(80% - 1px), var(--sl-surface-2) calc(80% - 1px), var(--sl-surface-2) 80%, transparent 80%,
-      transparent calc(100% - 1px), var(--sl-surface-2) calc(100% - 1px));
+      transparent calc(80% - 1px), var(--sl-ground) calc(80% - 1px), var(--sl-ground) 80%, transparent 80%,
+      transparent calc(100% - 1px), var(--sl-ground) calc(100% - 1px));
   }
   .ranklist { display: flex; flex-direction: column; gap: 4px; }
   .rankrow { display: flex; justify-content: space-between; font-size: 11px; }

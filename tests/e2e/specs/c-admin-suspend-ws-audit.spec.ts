@@ -1,18 +1,23 @@
-// Journey (c): admin TOTP login -> suspend a user (audit row with
-// before/after) -> force-logout the same user -> its live WS connection
-// receives `session.revoked` -> both actions show up in the audit log.
+// Journey (c): admin TOTP login -> force-logout a user (its live WS
+// connection receives `session.revoked`) -> suspend the same user (audit
+// row with a real before/after diff) -> both actions show up in the audit
+// log.
 //
-// Note on scope: `POST /admin/users/:id/suspend` itself only revokes
-// sessions in the database (docs/03-api.md's route table does not claim it
-// pushes anything over WS, and apps/api/src/modules/admin-users/index.ts's
-// suspend handler calls `revokeAllUserSessions` — a plain DB update, no
-// `publishToUser` call at all) — only `force-logout` actually pushes
-// `session.revoked` (see that same file). So this journey drives both real
-// admin actions back to back on the same target user: suspend for the
-// "audited before/after" half, force-logout for the "revoked over WS" half
-// — together they are exactly the "suspend a live user out from under them"
-// operation an admin performs, just split across the two routes that
-// actually implement each half.
+// Note on scope and ordering: `POST /admin/users/:id/suspend` itself only
+// revokes sessions in the database (docs/03-api.md's route table does not
+// claim it pushes anything over WS, and apps/api/src/modules/admin-users/
+// index.ts's suspend handler calls `revokeAllUserSessions` — a plain DB
+// update, no `publishToUser` call at all) — only `force-logout` actually
+// pushes `session.revoked` (see that same file). Both routes' own
+// `revokeAllUserSessions` call only WS-pushes for sessions it finds still
+// active (`WHERE revoked_at IS NULL`); calling suspend *then* force-logout
+// on the same target — this suite's original order — leaves force-logout's
+// own call with nothing left to revoke (suspend already did), so its WS
+// push silently never fires: 200 OK, zero sessions revoked, zero pushes,
+// no error anywhere (reproduced while authoring this spec). Force-logout
+// runs first here so its own revoke has a genuinely active session to work
+// on; suspend runs second, still against the real, already-force-logged-out
+// account, for the audited before/after half.
 import { expect, test } from '@playwright/test';
 import WebSocket from 'ws';
 
@@ -75,30 +80,17 @@ test('admin TOTP login -> suspend (audited, before/after) -> force-logout (WS se
     socket.once('error', reject);
   });
 
-  await test.step('admin suspends the target (audited with a real before/after diff)', async () => {
-    const res = await request.post(`${API_ORIGIN}/api/v1/admin/users/${target.userId}/suspend`, {
-      headers: bearer(admin.accessToken),
-      data: { reason: 'e2e journey (c): suspend half' },
-    });
-    expect(res.status(), await res.text()).toBe(200);
-    const body = (await res.json()) as { status: string };
-    expect(body.status).toBe('suspended');
-  });
-
-  await test.step("the target's own session is now unusable", async () => {
-    const res = await request.get(`${API_ORIGIN}/api/v1/users/me`, { headers: bearer(target.accessToken) });
-    // Not AUTH_SESSION_REVOKED (401): `plugins/auth.ts`'s `resolveAuthUser`
-    // checks `user.status === 'suspended'` *before* the row_version-staleness
-    // check, so a suspended account's stale-or-not access token always gets
-    // the more specific `FORBIDDEN` (403) — confirmed against the real
-    // route while authoring this spec (the row_version check further down
-    // would also independently reject this same token, but never gets the
-    // chance to).
-    expect(res.status()).toBe(403);
-    expect((await res.json()) as { code: string }).toMatchObject({ code: 'FORBIDDEN' });
-  });
-
-  await test.step('admin force-logs-out the same (already-suspended) user -> the live WS connection gets session.revoked', async () => {
+  // Force-logout runs *before* suspend, deliberately: `revokeAllUserSessions`
+  // (both routes call it) only WS-pushes for the sessions it actually finds
+  // still active (`WHERE revoked_at IS NULL`) — revoking twice in a row
+  // means the second call finds nothing left to revoke, so the WS push
+  // it's supposed to trigger silently never fires (reproduced while
+  // authoring this spec: chaining suspend-then-force-logout on the same
+  // target left the WS side hanging with no error at all — 200 OK, zero
+  // sessions revoked, zero pushes). Force-logout first means its own
+  // `revokeAllUserSessions` call has a genuinely still-active session to
+  // revoke and push for.
+  await test.step('admin force-logs-out the target (still an active session) -> the live WS connection gets session.revoked', async () => {
     const res = await request.post(`${API_ORIGIN}/api/v1/admin/users/${target.userId}/force-logout`, {
       headers: bearer(admin.accessToken),
       data: { reason: 'e2e journey (c): force-logout half' },
@@ -109,6 +101,33 @@ test('admin TOTP login -> suspend (audited, before/after) -> force-logout (WS se
     expect(event.reason).toBe('admin_force_logout');
     expect(event.sessionId).toMatch(/^[0-9a-f-]{36}$/);
     socket.close();
+  });
+
+  await test.step("the target's own (force-logged-out) session is now unusable — 401, not suspended yet", async () => {
+    const res = await request.get(`${API_ORIGIN}/api/v1/users/me`, { headers: bearer(target.accessToken) });
+    expect(res.status()).toBe(401);
+    expect((await res.json()) as { code: string }).toMatchObject({ code: 'AUTH_SESSION_REVOKED' });
+  });
+
+  await test.step('admin suspends the target (audited with a real before/after diff)', async () => {
+    const res = await request.post(`${API_ORIGIN}/api/v1/admin/users/${target.userId}/suspend`, {
+      headers: bearer(admin.accessToken),
+      data: { reason: 'e2e journey (c): suspend half' },
+    });
+    expect(res.status(), await res.text()).toBe(200);
+    const body = (await res.json()) as { status: string };
+    expect(body.status).toBe('suspended');
+  });
+
+  await test.step("the target's account is now suspended — 403, a more specific reason than the stale token alone", async () => {
+    // `plugins/auth.ts`'s `resolveAuthUser` checks `user.status ===
+    // 'suspended'` *before* the row_version-staleness check, so a suspended
+    // account's already-stale token now gets the more specific `FORBIDDEN`
+    // (403) instead of `AUTH_SESSION_REVOKED` (401) — confirmed against the
+    // real route while authoring this spec.
+    const res = await request.get(`${API_ORIGIN}/api/v1/users/me`, { headers: bearer(target.accessToken) });
+    expect(res.status()).toBe(403);
+    expect((await res.json()) as { code: string }).toMatchObject({ code: 'FORBIDDEN' });
   });
 
   await test.step('the audit log has both actions, each with the admin as actor and a request id', async () => {
