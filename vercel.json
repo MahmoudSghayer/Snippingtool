@@ -1,0 +1,19 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "corepack enable && corepack prepare pnpm@12.5.1 --activate && pnpm install --frozen-lockfile",
+  "buildCommand": "pnpm --filter @sl/dashboard... build",
+  "outputDirectory": "apps/dashboard/dist",
+  "ignoreCommand": "if [ -d apps/dashboard ]; then exit 1; else echo 'apps/dashboard not present yet - skipping deploy'; exit 0; fi",
+  "rewrites": [{ "source": "/((?!assets/).*)", "destination": "/index.html" }],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-Frame-Options", "value": "DENY" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" }
+      ]
+    }
+  ]
+}

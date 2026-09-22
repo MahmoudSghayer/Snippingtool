@@ -1,0 +1,631 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # Nightly load smoke (see the `load-smoke` job below) — 03:17 UTC,
+    # off-the-hour on purpose so it doesn't pile up with every other repo's
+    # on-the-hour cron jobs on GitHub's shared runners.
+    - cron: '17 3 * * *'
+  workflow_dispatch: {} # lets a human fire `load-smoke` on demand from the Actions tab
+
+# Cancel superseded runs on the same ref (a new push to a PR branch makes
+# the previous run's results moot).
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22'
+  PNPM_VERSION: '12.5.1'
+
+jobs:
+  # -------------------------------------------------------------------------
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - run: pnpm -r lint
+      - run: pnpm format:check
+
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      # turbo's typecheck task depends on ^build, so workspace deps (@sl/shared,
+      # @sl/db, @sl/ui) are compiled to dist before their consumers typecheck.
+      - run: pnpm typecheck
+
+  # -------------------------------------------------------------------------
+  # Everything that needs no external service: packages/shared,
+  # packages/ui, apps/extension (jsdom + fake-indexeddb). apps/api and
+  # packages/db need Postgres/Redis — see their own jobs below.
+  unit-tests:
+    name: Unit tests (shared / ui / extension)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - run: pnpm exec turbo run test --filter=@sl/shared --filter=@sl/ui --filter=@sl/extension
+
+  # -------------------------------------------------------------------------
+  db-migration-test:
+    name: DB migration test (from scratch)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sl
+          POSTGRES_PASSWORD: sl
+          POSTGRES_DB: sniper_ledger
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U sl -d sniper_ledger"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://sl:sl@localhost:5432/sniper_ledger
+      TEST_DATABASE_URL: postgres://sl:sl@localhost:5432/sniper_ledger_test
+      SEED_ADMIN_EMAIL: admin@sniperledger.local
+      SEED_ADMIN_PASSWORD: ci-only-not-a-real-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - name: create test database
+        run: PGPASSWORD=sl psql -h localhost -U sl -d sniper_ledger -c "CREATE DATABASE sniper_ledger_test;"
+      - name: migrate a fresh database, twice (idempotency)
+        run: |
+          pnpm --filter @sl/db migrate
+          pnpm --filter @sl/db migrate:status
+          pnpm --filter @sl/db migrate # re-running applies zero new migrations, must not error
+      - name: seed, twice (idempotency)
+        run: |
+          pnpm --filter @sl/db seed
+          pnpm --filter @sl/db seed
+      - name: packages/db's own test suite (schema, partitions, triggers, views, soft-delete, audit)
+        run: pnpm --filter @sl/db test
+
+  # -------------------------------------------------------------------------
+  api-integration-tests:
+    name: API integration tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sl
+          POSTGRES_PASSWORD: sl
+          POSTGRES_DB: sniper_ledger
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U sl -d sniper_ledger"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - name: create test database
+        run: PGPASSWORD=sl psql -h localhost -U sl -d sniper_ledger -c "CREATE DATABASE sniper_ledger_test;"
+      - name: write apps/api/.env (dev-only example keys — see apps/api/src/test/setup.ts)
+        run: cp infra/env/.env.development.example apps/api/.env
+      - name: validate the env file the tests will boot with
+        run: node infra/scripts/check-env.mjs apps/api/.env
+      - name: build @sl/db and @sl/shared (apps/api resolves them via their built dist, not source)
+        run: pnpm exec turbo run build --filter=@sl/api^...
+      - run: pnpm --filter @sl/api test
+        env:
+          NODE_ENV: test
+
+  # -------------------------------------------------------------------------
+  # Cross-cutting security tests (tests/security — authz matrix, CSRF,
+  # rate-limit/lockout, injection payloads, webhook signatures, …), run
+  # against the real built @sl/api app, on its own dedicated test database
+  # and Redis logical DB so it never collides with api-integration-tests
+  # above if a future change makes them run concurrently.
+  security-tests:
+    name: Security tests (tests/security)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sl
+          POSTGRES_PASSWORD: sl
+          POSTGRES_DB: sniper_ledger
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U sl -d sniper_ledger"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - name: create this package's own test database (see tests/security/src/setup.ts)
+        run: PGPASSWORD=sl psql -h localhost -U sl -d sniper_ledger -c "CREATE DATABASE sniper_ledger_test_security;"
+      - name: write apps/api/.env (dotenv'd by tests/security/src/setup.ts for JWT/entitlement keys)
+        run: cp infra/env/.env.development.example apps/api/.env
+      - name: build @sl/api and its deps (tests/security imports the real built app via '@sl/api/app')
+        run: pnpm exec turbo run build --filter=@sl/api...
+      - run: pnpm --filter @sl/security-tests test
+        env:
+          NODE_ENV: test
+          TEST_DATABASE_URL: postgres://sl:sl@localhost:5432/sniper_ledger_test_security
+          REDIS_TEST_DB: '13'
+
+  # -------------------------------------------------------------------------
+  extension-build:
+    name: Extension build (both targets) + no-autobuyer-in-ledger check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - run: pnpm exec turbo run build --filter=@sl/extension...
+      - name: ledger (listable) build must never contain "autobuyer"
+        run: |
+          if grep -rIl "autobuyer" apps/extension/dist/ledger; then
+            echo "::error::found the string 'autobuyer' in the listable (ledger) build — M3 automation must never ship in the Web-Store-listed target. See apps/extension/README.md 'End-to-end test'."
+            exit 1
+          fi
+          echo "OK — dist/ledger contains no reference to autobuyer."
+      - name: ledger-auto build DOES ship automation
+        run: |
+          if ! grep -rIlq "autobuyer" apps/extension/dist/ledger-auto; then
+            echo "::warning::expected 'autobuyer' to appear somewhere in dist/ledger-auto (VITE_AUTOMATION build) — verify engine/autobuyer.ts is still wired into that target."
+          fi
+
+  # -------------------------------------------------------------------------
+  dashboard-build:
+    name: Dashboard build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - name: build (skipped if apps/dashboard doesn't exist yet)
+        run: |
+          if [ -d apps/dashboard ]; then
+            pnpm exec turbo run build --filter=@sl/dashboard...
+          else
+            echo "apps/dashboard not present yet - skipping (mirrors vercel.json's ignoreCommand)"
+          fi
+        env:
+          VITE_API_ORIGIN: https://api.ci.sniperledger.invalid
+
+  # -------------------------------------------------------------------------
+  security-scan:
+    name: Security scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read # gitleaks-action lists the PR's commits
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # gitleaks needs full history to scan every commit on the PR
+      - uses: ./.github/actions/setup-pnpm
+
+      - name: pnpm audit (production dependencies only)
+        run: pnpm audit --prod --audit-level=high
+        continue-on-error: false
+
+      - name: gitleaks (secret scanning — rules + allowlist in .gitleaks.toml)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The default GITHUB_TOKEN cannot post PR comments from a
+          # fork/PR context (403 "Resource not accessible by integration");
+          # findings still fail the step and are listed in the job log.
+          GITLEAKS_ENABLE_COMMENTS: 'false'
+
+      - name: semgrep (custom ruleset — see .github/semgrep/rules.yml)
+        run: |
+          python3 -m pip install --quiet semgrep
+          semgrep scan \
+            --config .github/semgrep/rules.yml \
+            --error \
+            --metrics=off \
+            apps packages
+
+  # -------------------------------------------------------------------------
+  docker-build:
+    name: Docker build (api server/worker, dashboard) — no push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: build api (server target)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/api.Dockerfile
+          target: server
+          push: false
+          tags: sniper-ledger/api:ci
+          cache-from: type=gha,scope=api-server
+          cache-to: type=gha,mode=max,scope=api-server
+
+      - name: build api (worker target)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/api.Dockerfile
+          target: worker
+          push: false
+          tags: sniper-ledger/worker:ci
+          cache-from: type=gha,scope=api-worker
+          cache-to: type=gha,mode=max,scope=api-worker
+
+      - name: build db-migrator
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/db-migrator.Dockerfile
+          push: false
+          tags: sniper-ledger/db-migrator:ci
+          cache-from: type=gha,scope=db-migrator
+          cache-to: type=gha,mode=max,scope=db-migrator
+
+      - name: check apps/dashboard exists
+        id: dashboard-check
+        run: echo "exists=$([ -d apps/dashboard ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      - name: build dashboard
+        if: steps.dashboard-check.outputs.exists == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/dashboard.Dockerfile
+          push: false
+          tags: sniper-ledger/dashboard:ci
+          build-args: |
+            VITE_API_ORIGIN=https://api.ci.sniperledger.invalid
+          cache-from: type=gha,scope=dashboard
+          cache-to: type=gha,mode=max,scope=dashboard
+
+  # -------------------------------------------------------------------------
+  # Playwright e2e — dashboard (real @sl/api + Postgres/Redis, no mocks; see
+  # apps/dashboard/playwright.config.ts and docs/07-dashboard.md "Testing").
+  # GitHub-hosted runners have no display, so this runs under `xvfb-run`;
+  # Chromium is installed to the fixed path both playwright.config.ts files
+  # expect (see ./.github/actions/setup-playwright-chromium).
+  e2e-dashboard:
+    name: E2E — dashboard (Playwright, xvfb)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sl
+          POSTGRES_PASSWORD: sl
+          POSTGRES_DB: sniper_ledger
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U sl -d sniper_ledger"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://sl:sl@localhost:5432/sniper_ledger
+      REDIS_URL: redis://localhost:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - uses: ./.github/actions/setup-playwright-chromium
+        with:
+          workspace-filter: '@sl/dashboard'
+      - name: write apps/api/.env (the e2e-spawned api process reads this via dotenv/config)
+        run: cp infra/env/.env.development.example apps/api/.env
+      - name: build @sl/api's and @sl/dashboard's deps (both webServers run from source, but @sl/db/@sl/shared/@sl/ui resolve through their built dist)
+        run: pnpm exec turbo run build --filter=@sl/api^... --filter=@sl/dashboard^...
+      - name: migrate + seed (seeds the admin dashboard.spec.ts / global-setup.ts drive)
+        run: pnpm --filter @sl/db migrate
+      - run: pnpm --filter @sl/db seed
+        env:
+          SEED_ADMIN_EMAIL: admin@sniperledger.local
+          SEED_ADMIN_PASSWORD: 'Admin-Passw0rd!'
+      - name: playwright e2e (xvfb)
+        run: xvfb-run -a pnpm --filter @sl/dashboard test:e2e
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: /opt/pw-browsers
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: dashboard-e2e-report
+          # playwright.config.ts's `trace: 'retain-on-failure'` /
+          # `screenshot: 'only-on-failure'` write here (test-results/), not
+          # to an HTML report dir — this config uses the plain `list`
+          # reporter, so there's no playwright-report/ to upload instead.
+          path: apps/dashboard/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # -------------------------------------------------------------------------
+  # Playwright e2e — extension (loads the real built `ledger` dist into
+  # Chromium against the mock EA web app fixture; see
+  # apps/extension/test/e2e/extension.spec.ts and docs/06-extension.md).
+  e2e-extension:
+    name: E2E — extension (Playwright, xvfb, built artifacts)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - uses: ./.github/actions/setup-playwright-chromium
+        with:
+          workspace-filter: '@sl/extension'
+      - name: build the ledger (listable) target — the e2e suite loads dist/ledger
+        run: pnpm exec turbo run build --filter=@sl/extension...
+      - name: playwright e2e (xvfb)
+        run: xvfb-run -a pnpm --filter @sl/extension test:e2e
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: /opt/pw-browsers
+          PLAYWRIGHT_CHROMIUM_PATH: /opt/pw-browsers/chromium
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: extension-e2e-report
+          # extension.spec.ts's persistent-context Chromium runs headed
+          # (`headless: false`, required to load an unpacked extension) with
+          # no trace/screenshot capture configured — this uploads whatever
+          # the `list` reporter's default output directory holds, if any;
+          # `if-no-files-found: ignore` keeps an already-red job from
+          # failing a second time over nothing to upload.
+          path: apps/extension/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # -------------------------------------------------------------------------
+  # Cross-app e2e (@sl/tests, tests/e2e) — journeys that span more than one
+  # app at once: extension <-> real API, admin action <-> another user's
+  # live WS connection, a signed Stripe webhook <-> the dashboard. Owned by
+  # the Testing & QA agent; see docs/12-testing.md "tests/e2e" and each spec
+  # file's own header. Builds its own extension target (pointed at this
+  # job's API instance — see tests/e2e/build-extension.mjs) and drives it
+  # headed via xvfb, same as e2e-extension above, so needs the same
+  # Chromium setup.
+  e2e-cross-app:
+    name: E2E — cross-app journeys (Playwright, xvfb, built artifacts)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sl
+          POSTGRES_PASSWORD: sl
+          POSTGRES_DB: sniper_ledger
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U sl -d sniper_ledger"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://sl:sl@localhost:5432/sniper_ledger
+      REDIS_URL: redis://localhost:6379
+      SEED_ADMIN_EMAIL: admin@sniperledger.local
+      SEED_ADMIN_PASSWORD: 'Admin-Passw0rd!'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - uses: ./.github/actions/setup-playwright-chromium
+        with:
+          workspace-filter: '@sl/tests'
+      - name: write apps/api/.env (dotenv'd by the tsx-spawned api/worker processes — see tests/e2e/playwright.config.ts's webServer env)
+        run: cp infra/env/.env.development.example apps/api/.env
+      - name: build @sl/api's and @sl/dashboard's deps (both webServers run from source, but @sl/db/@sl/shared/@sl/ui resolve through their built dist)
+        run: pnpm exec turbo run build --filter=@sl/api^... --filter=@sl/dashboard^...
+      - name: cross-app e2e (xvfb — prepare.mjs resets+seeds the database and builds the extension as a prefix to the api webServer entry, then Playwright starts api+dashboard)
+        run: xvfb-run -a pnpm --filter @sl/tests test:e2e
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: /opt/pw-browsers
+          PLAYWRIGHT_CHROMIUM_PATH: /opt/pw-browsers/chromium
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: cross-app-e2e-report
+          # Playwright's default outputDir is relative to the process cwd
+          # (`pnpm --filter @sl/tests test:e2e` runs with cwd=tests/, not
+          # tests/e2e/, even though the config file itself lives in
+          # tests/e2e/) — confirmed empirically while authoring this suite.
+          path: tests/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # -------------------------------------------------------------------------
+  # Coverage (v8, vitest --coverage) for every package with a vitest suite.
+  # Additive — every job above still runs its own `test`/`test:e2e` script
+  # unmodified; this job re-runs the same suites once more with `--coverage`
+  # and uploads the reports, so a coverage regression is visible without
+  # slowing down (or risking) any existing job. See docs/12-testing.md
+  # "Coverage" for the numbers this produces and the per-package targets.
+  coverage:
+    name: Coverage (vitest --coverage, all packages)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sl
+          POSTGRES_PASSWORD: sl
+          POSTGRES_DB: sniper_ledger
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U sl -d sniper_ledger"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://sl:sl@localhost:5432/sniper_ledger
+      TEST_DATABASE_URL: postgres://sl:sl@localhost:5432/sniper_ledger_test
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - name: create test database
+        run: PGPASSWORD=sl psql -h localhost -U sl -d sniper_ledger -c "CREATE DATABASE sniper_ledger_test;"
+      - name: write apps/api/.env (dev-only example keys — see apps/api/src/test/setup.ts)
+        run: cp infra/env/.env.development.example apps/api/.env
+      - name: build @sl/db and @sl/shared (apps/api/apps/extension resolve them via built dist, not source)
+        run: pnpm exec turbo run build --filter=@sl/api^... --filter=@sl/extension^...
+      - name: packages/shared coverage
+        run: pnpm --filter @sl/shared exec vitest run --coverage
+      - name: packages/db coverage
+        run: pnpm --filter @sl/db exec vitest run --coverage
+      - name: apps/extension coverage
+        run: pnpm --filter @sl/extension exec vitest run --coverage
+      - name: apps/api coverage
+        run: pnpm --filter @sl/api exec vitest run --coverage
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-reports
+          path: |
+            packages/shared/coverage
+            packages/db/coverage
+            apps/extension/coverage
+            apps/api/coverage
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # -------------------------------------------------------------------------
+  # Nightly load smoke (tests/load, k6 profile "smoke" — see
+  # tests/load/README.md). Never gates a PR/push (only runs on the nightly
+  # schedule or a manual workflow_dispatch — see this file's top-level
+  # `on:`), and is deliberately left out of ci-success's `needs` below so a
+  # bad night doesn't block every subsequent PR until someone notices; a
+  # failure here is a signal to look at docs/12-testing.md "Defects found",
+  # not a merge blocker by itself.
+  load-smoke:
+    name: Load smoke (k6, nightly)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sl
+          POSTGRES_PASSWORD: sl
+          POSTGRES_DB: sniper_ledger
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U sl -d sniper_ledger"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://sl:sl@localhost:5432/sniper_ledger
+      REDIS_URL: redis://localhost:6379
+      LOAD_BASE_URL: http://127.0.0.1:3100
+      # The hardcoded per-IP login sliding-window (apps/api/src/modules/auth/
+      # service.ts's LOGIN_RATE_LIMIT_MAX=20/15min, not env-configurable —
+      # see docs/12-testing.md "Defects found") means a real k6 run of
+      # auth-login-refresh.js from one runner IP trips it well before 30s at
+      # any realistic VU count. RATE_LIMIT_LOGIN_MAX below raises the
+      # *configurable* layer (plugins/rate-limit.ts) out of the way so only
+      # that one hardcoded ceiling remains — nightly runs still expect
+      # auth-login-refresh.js's own threshold to legitimately fail past ~20
+      # requests; see the same doc section for how that's interpreted (not a
+      # release blocker on its own).
+      RATE_LIMIT_LOGIN_MAX: '5000'
+      RATE_LIMIT_GLOBAL_MAX: '100000'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - name: write apps/api/.env
+        run: cp infra/env/.env.development.example apps/api/.env
+      - name: migrate + seed
+        run: |
+          pnpm --filter @sl/db migrate
+          pnpm --filter @sl/db seed
+        env:
+          SEED_ADMIN_EMAIL: admin@sniperledger.local
+          SEED_ADMIN_PASSWORD: 'Admin-Passw0rd!'
+      - name: build @sl/api's deps
+        run: pnpm exec turbo run build --filter=@sl/api^...
+      - name: start apps/api on :3100 (background)
+        run: |
+          PORT=3100 HOST=127.0.0.1 APP_ORIGIN=http://127.0.0.1:3100 \
+            nohup pnpm --filter @sl/api exec tsx src/server.ts > api-3100.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:3100/health/ready && exit 0
+            sleep 1
+          done
+          echo "::error::apps/api never became ready on :3100" >&2
+          cat api-3100.log
+          exit 1
+      - name: install k6
+        run: |
+          mkdir -p .tools
+          curl -sSL -o /tmp/k6.tar.gz "https://github.com/grafana/k6/releases/download/v0.55.0/k6-v0.55.0-linux-amd64.tar.gz"
+          tar -xzf /tmp/k6.tar.gz -C /tmp
+          cp /tmp/k6-v0.55.0-linux-amd64/k6 .tools/k6 && chmod +x .tools/k6
+      - name: load smoke
+        run: pnpm --filter @sl/tests load:smoke
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: load-smoke-summaries
+          path: tests/load/.artifacts/*.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # -------------------------------------------------------------------------
+  # Single required status check for branch protection — green iff every
+  # job above is green (or intentionally skipped).
+  ci-success:
+    name: CI success
+    if: always()
+    needs:
+      - lint
+      - typecheck
+      - unit-tests
+      - db-migration-test
+      - api-integration-tests
+      - security-tests
+      - extension-build
+      - dashboard-build
+      - security-scan
+      - docker-build
+      - e2e-dashboard
+      - e2e-extension
+      - e2e-cross-app
+      - coverage
+    runs-on: ubuntu-latest
+    steps:
+      - name: check every job succeeded
+        run: |
+          if [ "${{ contains(needs.*.result, 'failure') }}" = "true" ] || [ "${{ contains(needs.*.result, 'cancelled') }}" = "true" ]; then
+            echo "one or more required jobs failed"
+            exit 1
+          fi

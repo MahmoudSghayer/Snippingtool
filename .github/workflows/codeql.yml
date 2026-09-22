@@ -1,0 +1,61 @@
+name: CodeQL
+
+# Static analysis (SAST) across the monorepo's JS/TypeScript. Complements
+# ci.yml's `security-scan` job (pnpm audit / gitleaks / semgrep — dependency
+# vulnerabilities, secrets, and this repo's own custom rules) with GitHub's
+# own, continuously-updated query suite. Runs on every PR/push to `main` and
+# once a week to catch newly-published queries against unchanged code. See
+# docs/11-devops.md "CI/CD" for how this fits with the rest of the pipeline.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # 04:17 UTC every Monday — off-peak, offset from other scheduled jobs.
+    - cron: '17 4 * * 1'
+
+permissions:
+  contents: read
+  actions: read # codeql-action v3 reads its own workflow run metadata
+  security-events: write # only used once `upload: always` is restored (see the analyze step)
+
+jobs:
+  analyze:
+    name: Analyze (javascript-typescript)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          # No compiled artifacts needed for JS/TS analysis (unlike a
+          # compiled language) — skip the workspace install/build entirely.
+          build-mode: none
+
+      # This repository is private without GitHub Advanced Security, so
+      # code scanning (the Security-tab upload) is not available and an
+      # upload attempt fails the job ("Code scanning is not enabled for this
+      # repository"). Analyse anyway, keep the SARIF, and gate on it here
+      # (docs/11-devops.md "CI/CD"). Flip `upload` to `always` once the
+      # repository is public or has Advanced Security.
+      - name: perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: '/language:javascript-typescript'
+          upload: never
+          output: codeql-results
+
+      - name: fail on error-level CodeQL findings (annotates every finding)
+        run: node .github/scripts/codeql-gate.mjs codeql-results/javascript.sarif
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: codeql-results
+          path: codeql-results
+          if-no-files-found: warn
+          retention-days: 14

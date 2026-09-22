@@ -1,0 +1,21 @@
+-- Down for 0002_enums.sql
+DROP TYPE IF EXISTS audit_actor_type;
+DROP TYPE IF EXISTS flag_status;
+DROP TYPE IF EXISTS flag_severity;
+DROP TYPE IF EXISTS flag_kind;
+DROP TYPE IF EXISTS ban_type;
+DROP TYPE IF EXISTS coupon_type;
+DROP TYPE IF EXISTS payment_status;
+DROP TYPE IF EXISTS payment_provider;
+DROP TYPE IF EXISTS notification_channel;
+DROP TYPE IF EXISTS risk_event_kind;
+DROP TYPE IF EXISTS trade_status;
+DROP TYPE IF EXISTS sniping_outcome;
+DROP TYPE IF EXISTS user_activity_type;
+DROP TYPE IF EXISTS device_status;
+DROP TYPE IF EXISTS license_status;
+DROP TYPE IF EXISTS subscription_source;
+DROP TYPE IF EXISTS subscription_status;
+DROP TYPE IF EXISTS admin_role;
+DROP TYPE IF EXISTS user_role;
+DROP TYPE IF EXISTS user_status;

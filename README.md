@@ -1,109 +1,176 @@
-# Ledger
+# The Sniper's Ledger
 
-A recorder for the EA FC transfer market. It watches the searches you already
-run and builds a private history of what the market actually did — the real BIN
-floor, how many of a card are listed, and how often one sells before it expires.
+A commercial-grade SaaS companion for EA FC Ultimate Team transfer-market
+sniping, built on a private, per-user record of what the market actually did
+— not a crowd-sourced guess. It ships in three milestones:
 
-This is milestone 1. **There is no automation in it.** It does not search, bid,
-buy or list. It reads the responses the web app was already receiving and writes
-them down.
+- **M1 — Ledger (done).** A read-only MV3 extension that passively records
+  market listings into local IndexedDB and shows floor / median / sell-through
+  / max-snipe in an in-page panel. No automation.
+- **M2 — Assist (built, awaiting live-market verification).** Human-in-the-loop
+  opportunity ranking, filter rotation by realised coins/hour, session P&L and
+  a visible risk-budget meter, backed by accounts, subscriptions and a
+  dashboard.
+- **M3 — Automation (built, gated).** An autobuyer that only ever acts through
+  the safety governor, shipped as a **separate extension build** from the
+  listable one.
 
-## Why a recorder before a sniper
+Two rules hold across every milestone: the extension only ever **drives the
+game's own service layer**, never forges a request; and the **safety
+governor** sits between every decision and every action so the product stops
+you before you look like a bot — it is never sold as "undetectable". See
+[`docs/01-architecture.md`](docs/01-architecture.md) for how that is enforced.
 
-Every sniping tool on the market is a fast hand with no eyes. It buys the card
-you picked at the price you guessed, and the guess normally comes from FUTBIN —
-players submitting prices by hand, always a little behind, with nothing at all
-about how many are listed or how fast they sell.
+## Build status
 
-Meanwhile the listings streaming through your own client are a free, continuous
-sample of the real market, and every existing tool throws them away after asking
-"is this under my buy price?". Kept, they answer the question that actually
-decides a trade: *is this card worth sniping at all, and at what price.*
+The build follows a data-first sequence. All eleven phases are built,
+verified (`pnpm typecheck && pnpm lint && pnpm build && pnpm test`: 688
+tests across seven packages) and **merged into `main` via
+[PR #2](https://github.com/MahmoudSghayer/Snippingtool/pull/2)** with the
+full CI pipeline green (lint, typecheck, unit, migrations, API integration,
+security tests, security scan, CodeQL, extension/dashboard/docker builds,
+coverage, and every Playwright e2e suite). Remaining work is the go-live
+checklist in `docs/13-roadmap.md`, which needs the live market, real Stripe
+keys and infrastructure.
 
-The recorder has to go in first because history can only be collected forwards.
-A sniper built later can read a month of data; a sniper built first leaves you a
-month from now with nothing to aim with.
+| Phase            | Scope                                                                       | Status | Where                                                                                                         |
+| ---------------- | --------------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------- |
+| 1 Architecture   | Monorepo, shared contracts, diagrams, roadmap                               | Done   | `packages/shared`, `docs/01-architecture.md`, `docs/13-roadmap.md`                                            |
+| 2 Database       | 35 tables, partitioning, audit, views, seed, tests                          | Done   | `packages/db`, `docs/02-database.md`                                                                          |
+| 3 Backend API    | Fastify, 110+ routes, WS gateway, jobs, OpenAPI                             | Done   | `apps/api`, `docs/03-api.md`                                                                                  |
+| 4 Authentication | JWT + rotating refresh, sessions, devices, 2FA, lockout, admin roles        | Done   | `apps/api/src/modules/auth`, `docs/04-auth.md`                                                                |
+| 5 Subscriptions  | Plans, trials with abuse protection, licenses, Stripe, coupons, bans, flags | Done   | `apps/api/src/modules/{subscriptions,licenses,payments,coupons,plans,bans,flags}`, `docs/05-subscriptions.md` |
+| 6 Extension      | TypeScript port, ranker, governor, assist, gated autobuyer, popup, options  | Done   | `apps/extension`, `docs/06-extension.md`                                                                      |
+| 7 Dashboard      | React user + admin dashboard, design system, e2e against the real API       | Done   | `apps/dashboard`, `packages/ui`, `docs/07-dashboard.md`                                                       |
+| 8 Analytics      | KPI engine, profit analytics, reports, CSV exports, materialisation jobs    | Done   | `apps/api/src/modules/{analytics,admin-analytics}`, `docs/08-analytics.md`                                    |
+| 9 Security       | Hardening pass, 167 security tests, threat model, controls inventory        | Done   | `docs/09-security.md`, `docs/threat-model.md`                                                                 |
+| 10 UI/UX         | Design system, dashboard and extension surfaces, axe-checked                | Done   | `packages/ui`, `docs/10-design-system.md`                                                                     |
+| 11 Testing       | Unit, integration, cross-app e2e, k6 load, security suites, coverage        | Done   | `tests/`, `docs/12-testing.md`                                                                                |
+| DevOps           | Docker, Compose, Caddy, CI/CD, monitoring, backups, deploy guides           | Done   | `infra/`, `.github/`, `docs/11-devops.md`                                                                     |
 
-## Install
+Follow-ups from every phase report and all ten QA defects have been closed
+(see `docs/12-testing.md` §12 for the defect table with statuses). The last
+one, found while driving the pull request's CI to green, was a critical
+extension bug: the content script's crash-recovery read of `storage.session`
+is forbidden in MV3 content scripts, which aborted its boot and silently
+killed market recording and telemetry on every page load. It is fixed, the
+e2e assertions that had hidden it are now real, and every cross-app journey
+passes.
 
-No build step — it loads as-is, so you can edit a file and hit reload.
+## What exists today
 
-1. `chrome://extensions` → turn on **Developer mode**
-2. **Load unpacked** → select this folder
-3. Open the FC web app. A small panel appears bottom-right.
+**Extension** (`apps/extension`): two build targets from one codebase.
+`ledger` is the listable build (recorder + assist); `ledger-auto` adds the
+autobuyer, which is excluded from the `ledger` bundle at build time. The
+only EA-aware file is `src/main/adapter.ts`; it observes passively, probes the
+web app's service layer at load and before every action, and hard-stops on a
+shape mismatch. The governor enforces actions per hour, session length,
+buy-to-search ratio and coin flow, with cooldowns and an unconditional server
+kill switch. Raw observations stay in IndexedDB. What the extension sends to
+the backend is itemised in `docs/06-extension.md` and in the options page.
 
-Run a few market searches. The panel fills in as it sees them.
+**Backend** (`apps/api`): Fastify 5 with Zod validation and generated OpenAPI,
+Drizzle over PostgreSQL 16, Redis-backed rate limits and presence, a
+WebSocket gateway with Redis pub/sub fan-out, BullMQ workers, Stripe billing,
+and an audit log with before/after on every admin action.
 
-## What it sends
+**Database** (`packages/db`): hand-written SQL migrations with monthly
+partitioning for activity and audit tables, append-only audit logs, soft
+deletes everywhere, KPI views and a materialised daily KPI table.
 
-Nothing. There is no server, no account and no telemetry in this milestone.
+**Dashboard** (`apps/dashboard` + `packages/ui`): React 19 user and admin
+dashboard on the generated OpenAPI client, cookie sessions with CSRF, live
+counters and notifications over WebSocket, and a component library in the
+dark gaming theme. Deployed to Vercel.
 
-Two things worth checking yourself rather than taking on trust:
+**Shared contracts** (`packages/shared`): plan and feature constants, error
+codes, the admin permission matrix, every request and response schema, the
+WebSocket event union and the extension message contracts.
 
-- `manifest.json` declares no `host_permissions` at all. The extension cannot
-  make a request to ea.com or anywhere else.
-- `src/main/adapter.js` has one function, `trimAuction`, that decides what
-  leaves the page. It copies price, rating, expiry and ids. The session token,
-  your club and your trade history are never read.
-
-Data lives in the extension's own IndexedDB, so clearing ea.com's site data
-doesn't wipe your history. `unlimitedStorage` is requested because months of
-market history is the whole point.
-
-## How it is put together
-
-```
-src/main/adapter.js   MAIN world. The only file that knows EA's internals.
-                      Passively reads market responses, posts a trimmed copy out.
-src/content.js        Isolated world. Batches sightings, drives the panel.
-src/background.js     Service worker. Owns the database. No loops, no timers.
-src/store/db.js       IndexedDB. One row per auction, first seen and last seen.
-src/model/prices.js   Floor, median, sell-through, margin after EA's 5% cut.
-src/ui/panel.js       The readout, in a shadow root so EA's CSS can't reach it.
-```
-
-Two rules that shape the whole thing:
-
-**Observe at the network layer, act through the app.** Reading is done by
-patching `XMLHttpRequest` and `fetch` — passive, adds zero requests, and the
-UTAS market path has outlived many bundle rewrites. When automation arrives it
-will drive the web app's own controls instead of forging requests, so what EA
-receives is the app's own traffic.
-
-**Everything EA-specific lives in one file.** `adapter.js` is the seam. When a
-patch changes the market payload, the panel turns amber and says so instead of
-silently recording nothing — which is how every tool in this space actually
-breaks, with the user finding out by losing coins.
-
-**The service worker owns no loops.** MV3 kills it after ~30s idle. Several
-competing extensions put their sniping loop there and quietly stop working
-after half a minute.
-
-## Honest limits
-
-- **Sell-through is an estimate.** We can't see a sale. We infer one when an
-  auction stops appearing well before its own expiry. It can also stop appearing
-  because you stopped searching for it. The code only judges auctions whose
-  ending fell inside a window you were actually watching, and reports nothing
-  below a sample of 5 — but treat the number as a way to compare two cards, not
-  as a true rate.
-- **It only knows what you searched.** This is a record of your market, not the
-  market.
-- **The first days are thin.** Percentiles over a handful of listings are noise.
-  It gets useful at somewhere around a few hundred sightings per card.
-
-## Risk
-
-EA's rules name auto-buyers as prohibited, and the penalties ladder from a
-market cooldown up to a franchise ban that carries between titles. Nothing in
-this milestone automates anything, so nothing here breaks that rule — but the
-plan is to build automation on top of it, and that does. Worth knowing before
-the next milestone, not after.
-
-## Tests
+## Layout
 
 ```
-npm test
+apps/
+  api/          Fastify backend: REST, WebSocket, BullMQ workers
+  dashboard/    React user + admin dashboard (Vite, TanStack, Tailwind)
+  extension/    MV3 extension, two build targets
+packages/
+  shared/       Zod schemas, DTOs, error codes, plans, permissions, message contracts
+  db/           SQL migrations, Drizzle schema, seed, test utilities
+  config/       Shared tsconfig / ESLint / Prettier presets
+  ui/           Design system: tokens and React components
+infra/          Docker, Compose, Caddy, monitoring, backups
+docs/           One document per phase; start at docs/01-architecture.md
 ```
 
-Covers the price model, which is the part where being wrong costs coins.
+## Quick start
+
+Requirements: Node 22, pnpm via Corepack, PostgreSQL 16 and Redis 7.
+
+```bash
+corepack enable
+pnpm install
+
+# database (defaults: postgres://sl:sl@127.0.0.1:5432/sniper_ledger)
+pnpm --filter @sl/db migrate
+SEED_ADMIN_EMAIL=admin@example.com SEED_ADMIN_PASSWORD='change-me' pnpm --filter @sl/db seed
+
+# API (copy apps/api/.env.example to apps/api/.env first)
+pnpm --filter @sl/api keys:generate      # JWT + entitlement signing keys
+pnpm --filter @sl/api dev                # http://localhost:3000, /health/ready
+pnpm --filter @sl/api worker             # BullMQ jobs
+
+# extension
+pnpm --filter @sl/extension build        # dist/ledger and dist/ledger-auto
+# chrome://extensions → Developer mode → Load unpacked → apps/extension/dist/ledger
+
+# everything (test suites run serially: they share the test database)
+pnpm typecheck && pnpm lint && pnpm build && pnpm test
+pnpm test:e2e && pnpm test:security && pnpm test:load   # see docs/12-testing.md
+```
+
+API, db and security tests need `DATABASE_URL`, `TEST_DATABASE_URL`,
+`REDIS_URL` and `REDIS_TEST_DB`; see `apps/api/.env.example` and
+`docs/12-testing.md` for per-suite isolation.
+
+## Deployment
+
+The dashboard deploys to Vercel from `apps/dashboard` (see `vercel.json`);
+set `VITE_API_ORIGIN` in the Vercel project and `DASHBOARD_ORIGIN` on the
+API, see `docs/07-dashboard.md`. The API,
+worker, PostgreSQL and Redis run on a VM with Docker Compose behind Caddy.
+Images, Compose files for dev/staging/prod, monitoring, backups, CI/CD and
+the step-by-step deployment guide live under `infra/`, `.github/` and
+`docs/11-devops.md`.
+
+## Documentation
+
+| Document                   | Contents                                                                                    |
+| -------------------------- | ------------------------------------------------------------------------------------------- |
+| `docs/01-architecture.md`  | Components, deployment, sequence diagrams, trust boundaries, build targets                  |
+| `docs/02-database.md`      | ERD, every table, indexes, partitioning and retention runbooks                              |
+| `docs/03-api.md`           | Every route with auth, permission, rate limit and schema                                    |
+| `docs/04-auth.md`          | Token lifetimes, refresh rotation, devices, 2FA, CSRF, admin roles                          |
+| `docs/05-subscriptions.md` | Plan matrix, state machine, license keys, trial protection, Stripe webhooks                 |
+| `docs/06-extension.md`     | Worlds, message flows, governor math, telemetry itemisation, day-one checklist              |
+| `docs/07-dashboard.md`     | Routes and permissions, auth/CSRF/WS handling, tokens, components, Vercel deployment        |
+| `docs/08-analytics.md`     | Every metric formula, source tables, materialisation schedule, export formats               |
+| `docs/09-security.md`      | Controls inventory with file and test references, key rotation, open findings               |
+| `docs/threat-model.md`     | STRIDE per component, attack vectors with mitigations, residual risks, non-goals            |
+| `docs/10-design-system.md` | Tokens, typography, components, chart rules, page specs, accessibility                      |
+| `docs/11-devops.md`        | Local dev, environments, deployment guide, monitoring runbook, backups, readiness checklist |
+| `docs/12-testing.md`       | Test strategy, commands, isolation rules, coverage, load thresholds, defects found          |
+| `docs/13-roadmap.md`       | Remaining phases, exit criteria, go-live checklist                                          |
+
+## What this product will and will not do
+
+- It drives the transfer-market app's own controls; it does not forge UTAS
+  requests or lift a session token.
+- It does not bypass CAPTCHAs or spoof a client.
+- Raw market observations never leave the browser. What the backend does
+  receive is listed in `docs/06-extension.md`.
+- The safety governor cannot be loosened past the admin-set ceiling from the
+  UI, and the server kill switch is unconditional.
+- The live market is not yet unlocked for this title, so the adapter's
+  assumed service-layer shape must be verified on day one against the real
+  web app; the checklist is in `docs/06-extension.md`.

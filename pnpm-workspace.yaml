@@ -1,0 +1,15 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+  - 'tests'
+  - 'tests/security'
+
+# All transitive build-time deps (esbuild via vitest, unrs-resolver via
+# eslint-import-resolver-typescript, msgpackr-extract via bullmq/ioredis);
+# their install scripts only fetch/build their own native binaries, nothing
+# repo-specific.
+allowBuilds:
+  argon2: true
+  esbuild: true
+  msgpackr-extract: true
+  unrs-resolver: true

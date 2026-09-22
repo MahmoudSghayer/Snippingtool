@@ -1,0 +1,37 @@
+{
+  "name": "@sl/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared Zod schemas, DTO types, error codes, plan/permission constants and WS/extension message types for The Sniper's Ledger.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./adapter-channel.js": {
+      "types": "./dist/adapter-channel.d.ts",
+      "import": "./dist/adapter-channel.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@sl/config": "workspace:*",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8",
+    "@vitest/coverage-v8": "^2.1.8"
+  }
+}

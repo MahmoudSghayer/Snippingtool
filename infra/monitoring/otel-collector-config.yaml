@@ -1,0 +1,41 @@
+# OpenTelemetry Collector — receives OTLP from @sl/api (traces + the
+# p50/p95 latency histograms docs/08-analytics.md's performance metrics read
+# from) and re-exports metrics for Prometheus to scrape, traces to logging
+# (swap for an APM backend later; out of scope for the MVP). Dev/monitoring
+# profile only — staging/prod point OTEL_EXPORTER_OTLP_ENDPOINT at this same
+# collector, run as its own compose service there too.
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 1024
+  memory_limiter:
+    check_interval: 5s
+    limit_mib: 200
+
+exporters:
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    resource_to_telemetry_conversion:
+      enabled: true
+  logging:
+    verbosity: basic
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [prometheus]
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [logging]

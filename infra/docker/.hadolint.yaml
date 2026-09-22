@@ -1,0 +1,14 @@
+# hadolint config for every Dockerfile under infra/docker/. Run as:
+#   hadolint --config infra/docker/.hadolint.yaml infra/docker/*.Dockerfile
+ignored:
+  # Alpine's package repo doesn't retain old package versions the way Debian
+  # snapshots do (apk add foo=1.2.3-r0 breaks the next time that exact
+  # build is GC'd from the repo, often within one Alpine point release), so
+  # every Dockerfile here pins reproducibility at the base image tag
+  # (node:22-alpine, postgres:16-alpine) instead of per apk package.
+  - DL3018
+  # Stylistic only (fewer, larger RUN layers vs. more, smaller ones); this
+  # repo intentionally keeps install/build/deploy as separate RUN steps for
+  # readable `docker build` output and per-step BuildKit cache reuse.
+  - DL3059
+failure-threshold: warning

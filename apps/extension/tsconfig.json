@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "@sl/config/tsconfig.web.json",
+  "compilerOptions": {
+    "types": ["chrome", "webextension-polyfill", "vite/client"],
+    "baseUrl": ".",
+    "paths": {
+      "@sl/shared": ["../../packages/shared/src/index.ts"],
+      "@sl/shared/*": ["../../packages/shared/src/*"]
+    }
+  },
+  "include": ["src", "test", "vite.config.ts", "vitest.config.ts", "playwright.config.ts", "scripts"]
+}

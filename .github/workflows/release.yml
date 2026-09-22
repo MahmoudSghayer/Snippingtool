@@ -1,0 +1,207 @@
+name: Release
+
+# Two triggers, different scope:
+#   push to main   -> build+push `:main`-tagged images, migrate + deploy STAGING (auto, no approval)
+#   push tag vX.Y.Z -> build+push semver-tagged images, extension release zips,
+#                      migrate + deploy PRODUCTION (gated by the `production`
+#                      GitHub Environment's required reviewers)
+# See docs/11-devops.md "Environments" / "Deployment guide" for the full
+# picture, including the one-time GitHub Environment + secrets setup this
+# workflow assumes.
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write # create the GitHub Release + upload assets
+  packages: write # push images to GHCR
+
+env:
+  NODE_VERSION: '22'
+  PNPM_VERSION: '12.5.1'
+  REGISTRY: ghcr.io
+  IMAGE_NAMESPACE: ${{ github.repository_owner }}
+
+jobs:
+  # -------------------------------------------------------------------------
+  build-and-push:
+    name: Build & push images (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - image: api
+            dockerfile: infra/docker/api.Dockerfile
+            target: server
+          - image: worker
+            dockerfile: infra/docker/api.Dockerfile
+            target: worker
+          - image: db-migrator
+            dockerfile: infra/docker/db-migrator.Dockerfile
+            target: ''
+          - image: backup
+            dockerfile: infra/docker/backup.Dockerfile
+            target: ''
+          - image: dashboard
+            dockerfile: infra/docker/dashboard.Dockerfile
+            target: ''
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: check apps/dashboard exists (dashboard image only)
+        id: guard
+        run: |
+          if [ "${{ matrix.image }}" = "dashboard" ] && [ ! -d apps/dashboard ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-buildx-action@v3
+        if: steps.guard.outputs.skip == 'false'
+
+      - uses: docker/login-action@v3
+        if: steps.guard.outputs.skip == 'false'
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: metadata (tags + OCI labels)
+        if: steps.guard.outputs.skip == 'false'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.image }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=ref,event=branch
+            type=sha,format=long
+
+      - name: build & push
+        if: steps.guard.outputs.skip == 'false'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BUILD_DATE=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
+            VCS_REF=${{ github.sha }}
+            VERSION=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.version'] }}
+            VITE_API_ORIGIN=${{ startsWith(github.ref, 'refs/tags/v') && 'https://api.sniperledger.com' || 'https://api.staging.sniperledger.com' }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+  # -------------------------------------------------------------------------
+  # Only on a version tag: zip both extension build targets and attach them
+  # to the GitHub Release. `ledger` is also what gets uploaded to the Chrome
+  # Web Store by hand (out of scope for automation — see docs/13-roadmap.md);
+  # `ledger-auto` is distributed solely via these release assets +
+  # EXTENSION_UPDATE_URL's self-hosted update manifest.
+  extension-release-assets:
+    name: Extension release zips
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - run: pnpm exec turbo run build --filter=@sl/extension...
+      - name: zip both targets
+        run: |
+          cd apps/extension/dist
+          zip -r "../../../sniper-ledger-extension-ledger-${GITHUB_REF_NAME}.zip" ledger
+          zip -r "../../../sniper-ledger-extension-ledger-auto-${GITHUB_REF_NAME}.zip" ledger-auto
+      - name: upload as release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            sniper-ledger-extension-ledger-${{ github.ref_name }}.zip
+            sniper-ledger-extension-ledger-auto-${{ github.ref_name }}.zip
+          generate_release_notes: true
+
+  # -------------------------------------------------------------------------
+  # SSH-less migration: the CI runner connects directly to the target
+  # Postgres over the network (its connection string is a GitHub secret,
+  # never an SSH hop) and runs @sl/db's own migrator. This requires the
+  # database to accept a connection from GitHub-hosted runners — either its
+  # own TLS-terminated public endpoint with a strong password (managed
+  # Postgres, or a `postgres` container whose port is deliberately published
+  # and firewalled to GitHub Actions' published IP ranges, see
+  # https://api.github.com/meta), or a self-hosted runner on the same
+  # private network as the VM (see docs/11-devops.md "Deployment guide" for
+  # both options — the compose-bundled Postgres in docker-compose.prod.yml
+  # is NOT published to the internet by default, so pick one of those two
+  # before relying on this job against it).
+  migrate-staging:
+    name: Migrate staging DB
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - run: pnpm --filter @sl/db migrate
+        env:
+          DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+
+  migrate-production:
+    name: Migrate production DB
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment: production # requires the reviewers configured on this GitHub Environment
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - run: pnpm --filter @sl/db migrate
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+
+  # -------------------------------------------------------------------------
+  deploy-staging:
+    name: Deploy staging
+    if: github.ref == 'refs/heads/main'
+    needs: [build-and-push, migrate-staging]
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - name: docker compose pull && up -d (over SSH)
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.STAGING_SSH_HOST }}
+          username: ${{ secrets.STAGING_SSH_USER }}
+          key: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
+          script: |
+            set -euo pipefail
+            cd /opt/sniper-ledger
+            export IMAGE_TAG=main
+            docker compose -f infra/docker-compose.staging.yml pull
+            docker compose -f infra/docker-compose.staging.yml up -d
+            docker image prune -f
+
+  deploy-production:
+    name: Deploy production
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-and-push, migrate-production, extension-release-assets]
+    runs-on: ubuntu-latest
+    environment: production # requires the reviewers configured on this GitHub Environment — see docs/11-devops.md
+    steps:
+      - name: docker compose pull && up -d (over SSH, zero-downtime — see docs/11-devops.md)
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.PRODUCTION_SSH_HOST }}
+          username: ${{ secrets.PRODUCTION_SSH_USER }}
+          key: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          script: |
+            set -euo pipefail
+            cd /opt/sniper-ledger
+            export IMAGE_TAG=${{ github.ref_name }}
+            docker compose -f infra/docker-compose.prod.yml pull
+            docker compose -f infra/docker-compose.prod.yml up -d
+            docker image prune -f

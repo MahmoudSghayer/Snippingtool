@@ -1,0 +1,39 @@
+name: Setup pnpm + Node
+description: >-
+  Pins pnpm to the version the repo's packageManager field declares, sets up
+  Node 22 with pnpm's store cached, and runs a frozen-lockfile install.
+  Shared by every ci.yml/release.yml/codeql.yml job so the pin lives in one
+  place (root package.json's `packageManager`), not copy-pasted per job.
+
+inputs:
+  node-version:
+    description: Node.js version
+    required: false
+    default: '22'
+  pnpm-version:
+    description: pnpm version (must match root package.json's packageManager)
+    required: false
+    default: '12.5.1'
+  install:
+    description: Whether to run `pnpm install --frozen-lockfile`
+    required: false
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    - name: enable corepack, pin pnpm
+      shell: bash
+      run: |
+        corepack enable
+        corepack prepare pnpm@${{ inputs.pnpm-version }} --activate
+
+    - uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: pnpm
+
+    - name: pnpm install --frozen-lockfile
+      if: inputs.install == 'true'
+      shell: bash
+      run: pnpm install --frozen-lockfile

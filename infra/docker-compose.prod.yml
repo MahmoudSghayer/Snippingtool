@@ -1,0 +1,315 @@
+name: sniper-ledger-prod
+
+# Production stack for the single-VM deployment (docs/01-architecture.md
+# §2a, docs/11-devops.md "Deployment guide"). Every app image is pulled from
+# GHCR at a pinned tag (${IMAGE_TAG}, set by release.yml on a `vX.Y.Z` tag
+# push) — nothing is built on the VM. Secrets/config come from a real
+# `.env.production` file (copied from infra/env/.env.production.example,
+# filled in, never committed — see .dockerignore/.gitignore) referenced via
+# `env_file` below.
+#
+# Deploy:
+#   docker compose -f infra/docker-compose.prod.yml pull
+#   docker compose -f infra/docker-compose.prod.yml run --rm migrator
+#   docker compose -f infra/docker-compose.prod.yml up -d
+# Zero-downtime restart / rollback procedure is in docs/11-devops.md.
+
+x-app-env: &app-env
+  env_file:
+    - .env.production
+  logging:
+    driver: json-file
+    options:
+      max-size: '20m'
+      max-file: '5'
+
+x-restart-always: &restart-always
+  restart: unless-stopped
+
+services:
+  caddy:
+    build:
+      context: ..
+      dockerfile: infra/docker/caddy.Dockerfile
+    <<: *restart-always
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env.production, e.g. sniperledger.com}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env.production}
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp' # HTTP/3
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    logging:
+      driver: json-file
+      options: { max-size: '20m', max-file: '5' }
+    depends_on:
+      - api
+      - dashboard
+    deploy:
+      resources:
+        limits: { cpus: '1.0', memory: 256M }
+
+  api:
+    image: ${REGISTRY:-ghcr.io/sniper-ledger}/api:${IMAGE_TAG:?set IMAGE_TAG, e.g. v1.2.3}
+    <<: [*app-env, *restart-always]
+    environment:
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      replicas: ${API_REPLICAS:-2}
+      resources:
+        limits: { cpus: '1.0', memory: 512M }
+        reservations: { cpus: '0.25', memory: 256M }
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 5
+        window: 60s
+      update_config:
+        parallelism: 1
+        order: start-first
+        failure_action: rollback
+        delay: 10s
+
+  worker:
+    image: ${REGISTRY:-ghcr.io/sniper-ledger}/worker:${IMAGE_TAG:?set IMAGE_TAG}
+    <<: [*app-env, *restart-always]
+    environment:
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      replicas: ${WORKER_REPLICAS:-1}
+      resources:
+        limits: { cpus: '1.0', memory: 512M }
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 5
+        window: 60s
+
+  # Self-host option only — Vercel is the primary dashboard host (see
+  # /vercel.json and docs/11-devops.md "Vercel dashboard deployment"). Only
+  # started if `docker compose up dashboard` / this service isn't scaled to
+  # 0; kept in the default `up -d` set since a single-VM operator without
+  # Vercel needs it reachable at dashboard.$DOMAIN via Caddy above.
+  dashboard:
+    image: ${REGISTRY:-ghcr.io/sniper-ledger}/dashboard:${IMAGE_TAG:?set IMAGE_TAG}
+    <<: *restart-always
+    logging:
+      driver: json-file
+      options: { max-size: '20m', max-file: '5' }
+    deploy:
+      replicas: ${DASHBOARD_REPLICAS:-1}
+      resources:
+        limits: { cpus: '0.5', memory: 128M }
+
+  migrator:
+    image: ${REGISTRY:-ghcr.io/sniper-ledger}/db-migrator:${IMAGE_TAG:?set IMAGE_TAG}
+    <<: *app-env
+    environment:
+      RUN_SEED: 'false' # prod never auto-seeds; grant lifetime/admin via the seeded-once bootstrap documented in docs/11-devops.md instead
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles: ['migrate'] # `docker compose run --rm migrator`, never part of `up -d`
+
+  postgres:
+    image: postgres:16-alpine
+    <<: *restart-always
+    env_file: [.env.production]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sl}
+      POSTGRES_DB: ${POSTGRES_DB:-sniper_ledger}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    logging:
+      driver: json-file
+      options: { max-size: '50m', max-file: '10' }
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-sl} -d ${POSTGRES_DB:-sniper_ledger}']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits: { cpus: '2.0', memory: 2G }
+        reservations: { memory: 1G }
+
+  redis:
+    image: redis:7-alpine
+    <<: *restart-always
+    command:
+      [
+        'redis-server',
+        '/usr/local/etc/redis/redis.conf',
+        '--requirepass',
+        '${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.production}',
+      ]
+    volumes:
+      - redisdata:/data
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    logging:
+      driver: json-file
+      options: { max-size: '20m', max-file: '5' }
+    healthcheck:
+      test: ['CMD', 'redis-cli', '-a', '${REDIS_PASSWORD}', '--no-auth-warning', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits: { cpus: '1.0', memory: 512M }
+
+  backup:
+    build:
+      context: ..
+      dockerfile: infra/docker/backup.Dockerfile
+    <<: *restart-always
+    env_file: [.env.production]
+    environment:
+      PGHOST: postgres
+      PGPORT: '5432'
+      PGUSER: ${POSTGRES_USER:-sl}
+      PGDATABASE: ${POSTGRES_DB:-sniper_ledger}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    volumes:
+      - backupdata:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits: { cpus: '0.5', memory: 256M }
+
+  # --- monitoring stack (always-on in prod; dev gates this behind a
+  # `monitoring` profile, staging mirrors prod) ---
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.116.1
+    <<: *restart-always
+    command: ['--config=/etc/otel-collector-config.yaml']
+    volumes:
+      - ./monitoring/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    <<: *restart-always
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
+      - promdata:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+    deploy:
+      resources:
+        limits: { memory: 1G }
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    <<: *restart-always
+    environment:
+      DATA_SOURCE_NAME: postgresql://${POSTGRES_USER:-sl}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-sniper_ledger}?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.66.0
+    <<: *restart-always
+    environment:
+      REDIS_ADDR: redis://redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_EXPORTER_CHECK_KEYS: 'bull:*:wait,bull:*:active,bull:*:delayed'
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    <<: *restart-always
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+      # Shares the backup volume so its textfile collector picks up
+      # sl_backup_last_success_timestamp_seconds / _last_verify_status,
+      # written by infra/backups/pg-backup.sh + verify-backup.sh (see
+      # infra/monitoring/prometheus/alert-rules.yml's BackupTooOld /
+      # BackupVerifyFailed).
+      - backupdata:/textfile:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.textfile.directory=/textfile'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    <<: *restart-always
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env.production}
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_SERVER_ROOT_URL: 'https://grafana.${DOMAIN}'
+      GRAFANA_PG_HOST: postgres
+      GRAFANA_PG_PORT: '5432'
+      GRAFANA_PG_DATABASE: ${POSTGRES_DB:-sniper_ledger}
+      GRAFANA_PG_USER: ${GRAFANA_PG_USER:-sl}
+      GRAFANA_PG_PASSWORD: ${GRAFANA_PG_PASSWORD:?set a read-only reporting user in .env.production, see docs/11-devops.md}
+      GRAFANA_PG_SSLMODE: disable
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafanadata:/var/lib/grafana
+    depends_on:
+      - prometheus
+      - loki
+
+  loki:
+    image: grafana/loki:3.3.2
+    <<: *restart-always
+    command: ['-config.file=/etc/loki/loki-config.yaml']
+    volumes:
+      - ./monitoring/loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+      - lokidata:/loki
+
+  promtail:
+    image: grafana/promtail:3.3.2
+    <<: *restart-always
+    command: ['-config.file=/etc/promtail/promtail-config.yaml']
+    volumes:
+      - ./monitoring/promtail/promtail-config.yaml:/etc/promtail/promtail-config.yaml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - loki
+
+volumes:
+  pgdata:
+  redisdata:
+  backupdata:
+  caddy_data:
+  caddy_config:
+  promdata:
+  grafanadata:
+  lokidata:

@@ -1,0 +1,361 @@
+// Journey (b): extension (this suite's own build — see build-extension.mjs
+// for why it's a separate build from apps/extension/dist/ledger) loaded
+// against the mock EA page -> popup login against the *real* API (built
+// with EXTENSION_IDS set to this exact unpacked install's id, see
+// playwright.config.ts) -> bootstrap ok -> a passive observation is
+// recorded and its activity event reaches the API (rows in
+// user_activity/search_activity) -> admin flips the kill switch -> the
+// panel (the popup — see this file's own comment further down for why the
+// popup, not the shadow-DOM page panel, is what this journey asserts on)
+// reports halted.
+//
+// Reuses apps/extension/test/fixtures/mock-ea-app (owned by the extension
+// agent) read-only, the same way apps/extension/test/e2e/extension.spec.ts
+// does — never duplicated into tests/fixtures (see tests/fixtures/README.md).
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { chromium, expect, test } from '@playwright/test';
+
+import { EXTENSION_OUT_DIR } from '../build-extension.mjs';
+import {
+  bearer,
+  createAdminSession,
+  registerAndVerifyOnly,
+  TEST_PASSWORD,
+} from '../helpers/auth.js';
+import { connect, deleteUsersByEmailPrefix } from '../helpers/db.js';
+import { API_ORIGIN, EXTENSION_ID } from '../playwright.config.js';
+
+import type { BrowserContext } from '@playwright/test';
+
+const dirname = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(dirname, '..', '..', '..');
+const fixtureDir = path.join(repoRoot, 'apps', 'extension', 'test', 'fixtures', 'mock-ea-app');
+const chromiumPath = process.env.PLAYWRIGHT_CHROMIUM_PATH || '/opt/pw-browsers/chromium';
+const EA_PAGE_URL = 'https://www.ea.com/en/ultimate-team/web-app/index.html';
+
+const EXT_EMAIL = `e2e-journey-b-${Date.now()}@example.com`;
+const ADMIN_EMAIL = `e2e-journey-b-admin-${Date.now()}@example.com`;
+
+test.afterAll(async () => {
+  const db = connect();
+  try {
+    await deleteUsersByEmailPrefix(db, 'e2e-journey-b-');
+  } finally {
+    await db.end({ timeout: 5 });
+  }
+});
+
+async function routeMockEa(context: BrowserContext): Promise<void> {
+  await context.route('https://www.ea.com/**', async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname.endsWith('/transfermarket')) {
+      const payload = await import('../../../apps/extension/test/fixtures/mock-ea-app/payloads.js');
+      await route.fulfill({ json: payload.SEARCH_PAGE_1 });
+      return;
+    }
+    if (url.pathname.endsWith('/index.html') || url.pathname.endsWith('/web-app/')) {
+      await route.fulfill({ path: path.join(fixtureDir, 'index.html'), contentType: 'text/html' });
+      return;
+    }
+    if (url.pathname.endsWith('mock-service-layer.js')) {
+      await route.fulfill({
+        path: path.join(fixtureDir, 'mock-service-layer.js'),
+        contentType: 'application/javascript',
+      });
+      return;
+    }
+    if (url.pathname.endsWith('payloads.js')) {
+      await route.fulfill({
+        path: path.join(fixtureDir, 'payloads.js'),
+        contentType: 'application/javascript',
+      });
+      return;
+    }
+    await route.continue();
+  });
+}
+
+test('extension: loads against the mock EA page, popup login against the real API, observation + telemetry reach it, kill switch halts the panel', async ({
+  request,
+}) => {
+  test.skip(
+    !existsSync(EXTENSION_OUT_DIR),
+    'extension not built — prepare.mjs should have built it; see build-extension.mjs',
+  );
+
+  const targetUser =
+    await test.step('a verified (but not yet logged in anywhere) user exists to log into the extension with', () =>
+      registerAndVerifyOnly(API_ORIGIN, EXT_EMAIL));
+  const admin = await test.step('an admin exists to flip the kill switch later', () =>
+    createAdminSession(API_ORIGIN, ADMIN_EMAIL, 'journey-b-admin'));
+
+  const context = await chromium.launchPersistentContext('', {
+    headless: false,
+    executablePath: existsSync(chromiumPath) ? chromiumPath : undefined,
+    args: [
+      `--disable-extensions-except=${EXTENSION_OUT_DIR}`,
+      `--load-extension=${EXTENSION_OUT_DIR}`,
+      '--no-sandbox',
+    ],
+  });
+
+  // Diagnostic instrumentation for Defect #9 (docs/12-testing.md "Defects
+  // found" row #9): every 'serviceworker' context event is a *new* SW JS
+  // execution context reaching CDP — i.e. either the very first install, or
+  // Chrome having terminated the previous one for inactivity and spun up a
+  // fresh one (which wipes `lib/telemetry.ts`'s bare in-memory `queue`, the
+  // leading hypothesis for the flush step below reporting `sent: 0`). Not
+  // an assertion by itself — logged so a run that reproduces the failure
+  // also proves or disproves the hypothesis directly, instead of leaving it
+  // as an inference from timing alone.
+  const swSightings: number[] = [];
+  context.on('serviceworker', (w) => {
+    swSightings.push(Date.now());
+    // eslint-disable-next-line no-console -- diagnostic only, read from the test's own stdout
+    console.log(`[diag] service worker context #${swSightings.length} appeared: ${w.url()}`);
+  });
+
+  try {
+    // Sanity: the id playwright.config.ts baked into apps/api's
+    // EXTENSION_IDS really is this install's id (see
+    // helpers/extension-id.mjs's header for why it's computed rather than
+    // read off the running context up front).
+    const sw =
+      context.serviceWorkers()[0] ??
+      (await context.waitForEvent('serviceworker', { timeout: 15_000 }));
+    expect(new URL(sw.url()).hostname).toBe(EXTENSION_ID);
+    if (swSightings.length === 0) swSightings.push(Date.now());
+    // logger.ts's warn/error levels go to `console` (see that file) — the
+    // service worker's own console is otherwise invisible from here, and
+    // `void send(...)`'s fire-and-forget calls (reportSearchActivity below)
+    // would only ever surface a rejection this way. Playwright's `Worker`
+    // object has no 'console' event of its own (only 'close'); service
+    // worker console messages are delivered on the *context*, so listen
+    // there and label them by their originating page/worker URL.
+    context.on('console', (msg) => {
+      if (msg.type() !== 'warning' && msg.type() !== 'error') return;
+      const origin = msg.page()?.url() ?? 'service-worker';
+      console.warn(`[console:${msg.type()} @ ${origin}] ${msg.text()}`);
+    });
+
+    // Popup login runs *before* visiting the EA page — deliberately, not
+    // just plausible real-world ordering: apps/extension/src/lib/telemetry.ts's
+    // queue is a bare in-memory variable in the service worker (see
+    // docs/12-testing.md "Defects found" row #9), and MV3 kills an idle
+    // service worker and restarts it with that state gone. Minimising the
+    // gap between "the observation is enqueued" and "flush is attempted"
+    // keeps this step's own pass/fail about the enqueue-then-flush
+    // mechanism itself, not about how long everything else in the test
+    // happened to take.
+    const popup = await context.newPage();
+    await test.step('popup login against the real API', async () => {
+      // Vite's multi-page build preserves each HTML entry's source path
+      // under outDir (`src/popup/index.html`, not flattened to
+      // `popup/index.html`) — matches manifest.json's own
+      // `action.default_popup` (generate-manifest.mjs), confirmed against
+      // the real build while authoring this spec.
+      await popup.goto(`chrome-extension://${EXTENSION_ID}/src/popup/index.html`);
+      await popup.locator('#email').fill(EXT_EMAIL);
+      await popup.locator('#password').fill(TEST_PASSWORD);
+      await popup.locator('#login').click();
+      // renderLoggedIn() (popup/main.ts) shows the plan row once
+      // license.bootstrap resolves against the real API. `getByText('Plan',
+      // { exact: false })` alone is ambiguous — Playwright's substring text
+      // match is case-insensitive, so it matches both the "Plan" row label
+      // *and* "No active plan" (reproduced while authoring this spec:
+      // "strict mode violation ... resolved to 2 elements"); asserting on
+      // the value text alone is unambiguous and is the thing that actually
+      // proves bootstrap resolved.
+      await expect(popup.getByText('No active plan')).toBeVisible({ timeout: 15_000 });
+    });
+
+    await test.step('bootstrap registered the device server-side', async () => {
+      const db = connect();
+      try {
+        const rows = await db<
+          { id: string }[]
+        >`select id from devices where user_id = ${targetUser.userId} and status = 'active'`;
+        expect(rows.length).toBeGreaterThanOrEqual(1);
+      } finally {
+        await db.end({ timeout: 5 });
+      }
+    });
+
+    await routeMockEa(context);
+    const eaPage = await context.newPage();
+    // (content/index.ts's `logger.warn`/`.error` run in the EA page's own
+    // JS realm — the `context.on('console', ...)` listener above covers
+    // pages as well as the service worker.)
+    await eaPage.goto(EA_PAGE_URL, { waitUntil: 'load' });
+
+    const host = eaPage.locator('#ledger-root');
+    await test.step('the panel appears against the mock EA page and the bundle probe reports ok', async () => {
+      await expect(host).toHaveCount(1, { timeout: 15_000 });
+      const dotClass = await host.evaluate(
+        (el) =>
+          (el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.getElementById('dot')
+            ?.className,
+      );
+      expect(dotClass).not.toContain('warn');
+
+      // The mock page fires its own passive search 50ms after its module
+      // script runs (mock-service-layer.js) — on this instantly-fulfilled
+      // page that is *before* the ISOLATED-world content script
+      // (`run_at: document_idle`) has attached its adapter listener, so
+      // that first observation is posted into the void and nothing is ever
+      // enqueued (the root cause of docs/12-testing.md row #9's "journey
+      // (b) re-run result": zero `record`/`telemetry.enqueue` traffic). The
+      // panel's "Auctions recorded" row moving off its "—" placeholder is
+      // *not* evidence of an observation either — content/index.ts fills
+      // it from the boot-time `counts` reply ("0") before anything has
+      // been seen. So: now that the panel host proves the content script
+      // is live, trigger the same passive search again through the
+      // fixture's own hook (the exact `fetch` a human's search issues,
+      // which adapter.ts's patch observes), and assert on the panel's
+      // "Searches this session" counter — incremented only inside
+      // `adapter.onAuctions`, i.e. only once the observation has actually
+      // crossed from the MAIN world into the content script.
+      await eaPage.evaluate(() =>
+        (
+          window as unknown as { __mock: { triggerPassiveSearch(): Promise<void> } }
+        ).__mock.triggerPassiveSearch(),
+      );
+      const panelNumber = (id: string) =>
+        host.evaluate(
+          (el, elementId) =>
+            Number(
+              (
+                (el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.getElementById(
+                  elementId,
+                )?.textContent ?? ''
+              ).replace(/[^\d]/g, ''),
+            ),
+          id,
+        );
+      await expect
+        .poll(() => panelNumber('searches'), {
+          timeout: 15_000,
+          message: 'waiting for the triggered passive search to be observed by the content script',
+        })
+        .toBeGreaterThanOrEqual(1);
+      // ...and the recorded-auctions counter (refreshed from the service
+      // worker's `counts` reply after `record` round-trips) goes above 0.
+      await expect
+        .poll(() => panelNumber('total'), {
+          timeout: 15_000,
+          message: 'waiting for the observed auctions to be recorded via the service worker',
+        })
+        .toBeGreaterThan(0);
+    });
+
+    // eslint-disable-next-line no-console -- diagnostic only
+    console.log(
+      `[diag] before flush poll: ${swSightings.length} service worker context(s) seen so far; currently live: ${context.serviceWorkers().length} (same object as the original install's? ${context.serviceWorkers()[0] === sw})`,
+    );
+
+    await test.step("the mock page's passive search was recorded and, once flushed, reaches the API (search_activity)", async () => {
+      // content/index.ts enqueues a 'search' activity event as soon as the
+      // mock service layer's own passive search response is observed (the
+      // same event the panel's "Auctions recorded" counter reacts to,
+      // already proven non-zero by apps/extension/test/e2e/extension.spec.ts —
+      // this step is the cross-app half: does it reach apps/api). Flushed
+      // on a 2-minute chrome.alarms tick in real usage
+      // (background/telemetry.ts) — forced immediately here (right after
+      // the observation was confirmed above, deliberately with as little
+      // else happening in between as possible — see this test's own note
+      // near where `popup` is created) via the same 'telemetry.flush'
+      // message the alarm itself sends, from an extension page context
+      // (popup), rather than waiting out the real interval.
+      await expect
+        .poll(
+          async () => {
+            const result = (await popup.evaluate(() =>
+              chrome.runtime.sendMessage({ type: 'telemetry.flush' }),
+            )) as { ok: boolean; error?: string; data?: { ok: boolean; sent: number } };
+            if (!result?.ok) {
+              // eslint-disable-next-line no-console -- diagnostic only
+              console.log(
+                `[diag] telemetry.flush handler rejected: ${result?.error ?? 'no response'}`,
+              );
+            }
+            return result?.data?.sent ?? 0;
+          },
+          {
+            timeout: 20_000,
+            message: 'waiting for the queued search activity event to exist and flush',
+          },
+        )
+        .toBeGreaterThan(0)
+        .catch((err) => {
+          // eslint-disable-next-line no-console -- diagnostic only
+          console.log(
+            `[diag] flush poll gave up: ${swSightings.length} service worker context(s) seen total; currently live: ${context.serviceWorkers().length}`,
+          );
+          throw err;
+        });
+
+      const db = connect();
+      try {
+        const rows = await db<
+          { id: string; user_id: string }[]
+        >`select id, user_id from search_activity where user_id = ${targetUser.userId}`;
+        expect(
+          rows.length,
+          'expected the flushed search event to land in search_activity',
+        ).toBeGreaterThanOrEqual(1);
+      } finally {
+        await db.end({ timeout: 5 });
+      }
+    });
+
+    await test.step('admin flips the kill switch -> the next heartbeat carries it -> the panel (popup) reports halted', async () => {
+      try {
+        const patch = await request.patch(`${API_ORIGIN}/api/v1/admin/toggles/kill_switch`, {
+          headers: bearer(admin.accessToken),
+          data: { enabled: true },
+        });
+        expect(patch.status(), await patch.text()).toBe(200);
+
+        // The kill switch reaches an installed extension through the
+        // 10-minute `chrome.alarms` heartbeat (docs/06-extension.md §5:
+        // "driven by lib/license.ts's bootstrap/heartbeat response's
+        // killSwitchActive field") — `lib/license.ts`'s `heartbeat()`
+        // refreshes the cached entitlement, and `background/license.ts`'s
+        // `license.bootstrap` handler deliberately serves that cache while
+        // it is under 10 minutes old rather than re-bootstrapping on every
+        // popup open. So: force the same heartbeat the alarm fires (same
+        // message, same handler), assert the contract on its own response,
+        // *then* check the popup renders the refreshed cache.
+        const heartbeat = (await popup.evaluate(() =>
+          chrome.runtime.sendMessage({
+            type: 'license.heartbeat',
+            payload: { engineState: 'idle' },
+          }),
+        )) as { ok: boolean; data?: { killSwitchActive: boolean } };
+        expect(heartbeat.data?.killSwitchActive).toBe(true);
+
+        await popup.reload();
+        await expect(popup.getByText('Kill switch active', { exact: false })).toBeVisible({
+          timeout: 15_000,
+        });
+      } finally {
+        // Cleanup: kill_switch is a single global toggle shared by the whole
+        // (dev) database — leaving it 'enabled' would halt every other
+        // extension instance/test that reads it after this spec runs.
+        const reset = await request.patch(`${API_ORIGIN}/api/v1/admin/toggles/kill_switch`, {
+          headers: bearer(admin.accessToken),
+          data: { enabled: false },
+        });
+        expect(
+          reset.status(),
+          "failed to reset kill_switch back to disabled — see this step's try block",
+        ).toBe(200);
+      }
+    });
+  } finally {
+    await context.close();
+  }
+});

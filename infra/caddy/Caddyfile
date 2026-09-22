@@ -1,0 +1,100 @@
+# Caddy reverse proxy for the single-VM deployment (docs/01-architecture.md
+# §2a). Automatic TLS (Let's Encrypt via ALPN/HTTP-01) for two subdomains:
+#   api.{$DOMAIN}        -> apps/api (REST + WS on the same origin/port)
+#   dashboard.{$DOMAIN}  -> self-hosted dashboard (nginx image) — the
+#                            SELF-HOST option only; Vercel is primary.
+# {$DOMAIN} / {$ACME_EMAIL} come from the environment (compose passes them
+# through from infra/env/.env.{staging,production}.example).
+#
+# Validate: `caddy validate --config infra/caddy/Caddyfile --adapter caddyfile`
+# (no daemon needed).
+
+{
+	email {$ACME_EMAIL}
+	# Staging/prod both terminate real TLS; docker-compose.staging.yml points
+	# ACME_EMAIL/DOMAIN at a *.staging.{$DOMAIN} host and Caddy gets its own
+	# cert for that host same as prod — no separate "staging CA" directive is
+	# needed here since Let's Encrypt's production CA has no meaningful
+	# per-environment rate-limit risk at this project's traffic volume; if
+	# that ever changes, add `acme_ca https://acme-staging-v02.api.letsencrypt.org/directory`
+	# under a staging-only override file.
+}
+
+# --- security headers, shared by every site below ---------------------------
+(security_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=()"
+		-Server
+	}
+}
+
+# --- coarse edge rate limiting (belt-and-suspenders over the API's own
+# Redis-backed per-route limits, docs/03-api.md §1) ---------------------------
+(rate_limit) {
+	rate_limit {
+		zone dynamic_{args[0]} {
+			key {remote_host}
+			events {args[1]}
+			window {args[2]}
+		}
+	}
+}
+
+api.{$DOMAIN} {
+	import security_headers
+	import rate_limit api 600 1m
+
+	encode zstd gzip
+
+	# WebSocket upgrade and REST share the same origin/port in apps/api
+	# (docs/01-architecture.md's WS gateway is mounted at /ws on the same
+	# Fastify instance) — Caddy's reverse_proxy handles the Upgrade header
+	# transparently, no separate matcher needed.
+	reverse_proxy api:3000 {
+		# X-Forwarded-For/-Proto/-Host are set automatically by reverse_proxy.
+		# X-Real-IP is not set by default; kept for any client-IP logic that
+		# prefers a single unambiguous header over parsing X-Forwarded-For.
+		header_up X-Real-IP {remote_host}
+		health_uri /health/live
+		health_interval 10s
+		health_timeout 5s
+		lb_policy round_robin
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}
+
+dashboard.{$DOMAIN} {
+	import security_headers
+	import rate_limit dashboard 1200 1m
+
+	encode zstd gzip
+
+	reverse_proxy dashboard:8080 {
+		health_uri /healthz
+		health_interval 15s
+		health_timeout 5s
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}
+
+grafana.{$DOMAIN} {
+	import security_headers
+	# Operator-only surface: not linked from the product, no edge rate
+	# limit beyond Caddy's own defaults — access is expected to be further
+	# restricted at the firewall/VPN layer per docs/11-devops.md's
+	# deployment guide, this is TLS + a convenient hostname, not the only
+	# access control.
+	reverse_proxy grafana:3000
+}

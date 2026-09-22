@@ -1,0 +1,279 @@
+name: sniper-ledger-dev
+
+# Local development stack. api/worker run the real source via `tsx watch`
+# with the repo bind-mounted for hot reload — NOT the production images in
+# infra/docker/*.Dockerfile (those are built/tested by
+# infra/docker-compose.staging.yml and .prod.yml, and by CI). node_modules
+# is deliberately NOT bind-mounted from the host: every workspace package
+# gets its own named volume mounted over its node_modules path so
+# pnpm-installed, container-native (alpine/musl) binaries (argon2's native
+# addon, esbuild, etc.) are never shadowed by host (possibly glibc)
+# binaries the bind mount would otherwise expose.
+#
+# Quick start:
+#   cp infra/env/.env.development.example .env
+#   docker compose -f infra/docker-compose.yml up -d postgres redis mailpit
+#   docker compose -f infra/docker-compose.yml run --rm migrator
+#   docker compose -f infra/docker-compose.yml up api worker
+# Full no-compose path (Postgres/Redis run on the host instead) is in
+# docs/11-devops.md.
+
+# NOTE: YAML's `<<:` merge key only works for *mappings*, not sequences, so
+# the node_modules volume list below is repeated (not aliased) for the api
+# and worker services — both need the exact same set of mount points.
+
+x-api-env: &api-env
+  env_file:
+    - ../.env
+  environment:
+    DATABASE_URL: postgres://sl:sl@postgres:5432/sniper_ledger
+    TEST_DATABASE_URL: postgres://sl:sl@postgres:5432/sniper_ledger_test
+    REDIS_URL: redis://redis:6379
+    SMTP_HOST: mailpit
+    SMTP_PORT: '1025'
+    SMTP_SECURE: 'false'
+    OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sl
+      POSTGRES_PASSWORD: sl
+      POSTGRES_DB: sniper_ledger
+    ports:
+      - '127.0.0.1:5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U sl -d sniper_ledger']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ['redis-server', '/usr/local/etc/redis/redis.conf']
+    ports:
+      - '127.0.0.1:6379:6379'
+    volumes:
+      - redisdata:/data
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mailpit:
+    image: axllent/mailpit:v1.21.3
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:1025:1025' # SMTP
+      - '127.0.0.1:8025:8025' # web UI
+    healthcheck:
+      test: ['CMD', 'wget', '--spider', '-q', 'http://127.0.0.1:8025/']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  migrator:
+    build:
+      context: ..
+      dockerfile: infra/docker/db-migrator.Dockerfile
+    <<: *api-env
+    environment:
+      DATABASE_URL: postgres://sl:sl@postgres:5432/sniper_ledger
+      SEED_ADMIN_EMAIL: admin@sniperledger.local
+      SEED_ADMIN_PASSWORD: dev-only-change-me
+      RUN_SEED: 'true'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles: ['tools']
+
+  api:
+    image: node:22-alpine
+    working_dir: /repo
+    command: >
+      sh -c "corepack enable &&
+             corepack prepare pnpm@12.5.1 --activate &&
+             pnpm install --frozen-lockfile &&
+             pnpm --filter @sl/api dev"
+    restart: unless-stopped
+    <<: *api-env
+    ports:
+      - '127.0.0.1:3000:3000'
+    volumes:
+      - ..:/repo
+      - node_modules_root:/repo/node_modules
+      - node_modules_api:/repo/apps/api/node_modules
+      - node_modules_extension:/repo/apps/extension/node_modules
+      - node_modules_dashboard:/repo/apps/dashboard/node_modules
+      - node_modules_db:/repo/packages/db/node_modules
+      - node_modules_shared:/repo/packages/shared/node_modules
+      - node_modules_ui:/repo/packages/ui/node_modules
+      - node_modules_config:/repo/packages/config/node_modules
+      - pnpm_store:/root/.local/share/pnpm/store
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    image: node:22-alpine
+    working_dir: /repo
+    command: >
+      sh -c "corepack enable &&
+             corepack prepare pnpm@12.5.1 --activate &&
+             pnpm install --frozen-lockfile &&
+             pnpm --filter @sl/api worker"
+    restart: unless-stopped
+    <<: *api-env
+    volumes:
+      - ..:/repo
+      - node_modules_root:/repo/node_modules
+      - node_modules_api:/repo/apps/api/node_modules
+      - node_modules_extension:/repo/apps/extension/node_modules
+      - node_modules_dashboard:/repo/apps/dashboard/node_modules
+      - node_modules_db:/repo/packages/db/node_modules
+      - node_modules_shared:/repo/packages/shared/node_modules
+      - node_modules_ui:/repo/packages/ui/node_modules
+      - node_modules_config:/repo/packages/config/node_modules
+      - pnpm_store:/root/.local/share/pnpm/store
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # --- optional observability stack (`docker compose --profile monitoring up`) ---
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.116.1
+    restart: unless-stopped
+    command: ['--config=/etc/otel-collector-config.yaml']
+    volumes:
+      - ./monitoring/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - '127.0.0.1:4318:4318' # OTLP HTTP
+    profiles: ['monitoring']
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
+      - promdata:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    ports:
+      - '127.0.0.1:9090:9090'
+    profiles: ['monitoring']
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_NAME: postgresql://sl:sl@postgres:5432/sniper_ledger?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles: ['monitoring']
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.66.0
+    restart: unless-stopped
+    environment:
+      REDIS_ADDR: redis://redis:6379
+      # Exports each BullMQ list/zset's length as redis_key_size{key=...} —
+      # what QueueBacklogGrowing (infra/monitoring/prometheus/alert-rules.yml)
+      # alerts on.
+      REDIS_EXPORTER_CHECK_KEYS: 'bull:*:wait,bull:*:active,bull:*:delayed'
+    depends_on:
+      redis:
+        condition: service_healthy
+    profiles: ['monitoring']
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    restart: unless-stopped
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    profiles: ['monitoring']
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GRAFANA_PG_HOST: postgres
+      GRAFANA_PG_PORT: '5432'
+      GRAFANA_PG_DATABASE: sniper_ledger
+      GRAFANA_PG_USER: sl
+      GRAFANA_PG_PASSWORD: sl
+      GRAFANA_PG_SSLMODE: disable
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafanadata:/var/lib/grafana
+    ports:
+      - '127.0.0.1:3001:3000'
+    depends_on:
+      - prometheus
+      - loki
+    profiles: ['monitoring']
+
+  loki:
+    image: grafana/loki:3.3.2
+    restart: unless-stopped
+    command: ['-config.file=/etc/loki/loki-config.yaml']
+    volumes:
+      - ./monitoring/loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+      - lokidata:/loki
+    ports:
+      - '127.0.0.1:3100:3100'
+    profiles: ['monitoring']
+
+  promtail:
+    image: grafana/promtail:3.3.2
+    restart: unless-stopped
+    command: ['-config.file=/etc/promtail/promtail-config.yaml']
+    volumes:
+      - ./monitoring/promtail/promtail-config.yaml:/etc/promtail/promtail-config.yaml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - loki
+    profiles: ['monitoring']
+
+volumes:
+  pgdata:
+  redisdata:
+  promdata:
+  grafanadata:
+  lokidata:
+  node_modules_root:
+  node_modules_api:
+  node_modules_extension:
+  node_modules_dashboard:
+  node_modules_db:
+  node_modules_shared:
+  node_modules_ui:
+  node_modules_config:
+  pnpm_store:

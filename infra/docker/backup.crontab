@@ -1,0 +1,14 @@
+# supercronic crontab (standard 5-field cron syntax, container-local time —
+# TZ=UTC is set in backup.Dockerfile). One line per scheduled job; comments
+# and blank lines are ignored.
+#
+# 02:00 UTC daily: full Postgres backup (pg-backup.sh handles daily/weekly/
+# monthly retention tiers itself based on the day it runs — see the script).
+0 2 * * * /app/pg-backup.sh >> /proc/1/fd/1 2>> /proc/1/fd/2
+
+# 02:30 UTC daily: Redis RDB snapshot copy.
+30 2 * * * /app/redis-backup.sh >> /proc/1/fd/1 2>> /proc/1/fd/2
+
+# 03:30 UTC daily: verify the backup that just ran restores cleanly into a
+# scratch database (catches a corrupt dump before anyone needs it).
+30 3 * * * /app/verify-backup.sh >> /proc/1/fd/1 2>> /proc/1/fd/2

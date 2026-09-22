@@ -1,10 +1,53 @@
 {
-  "name": "ledger",
+  "name": "sniper-ledger",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "FC transfer market recorder — an unpacked MV3 extension, no build step.",
+  "description": "The Sniper's Ledger — an EA FC Ultimate Team transfer-market sniping companion SaaS. Monorepo root.",
+  "packageManager": "pnpm@12.5.1",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
-    "test": "node --test test/*.test.js"
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test --concurrency=1",
+    "format": "prettier --write \"**/*.{ts,tsx,js,mjs,cjs,json,md,yml,yaml}\" --ignore-unknown",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,mjs,cjs,json,md,yml,yaml}\" --ignore-unknown",
+    "docker:dev": "docker compose -f infra/docker-compose.yml up -d postgres redis mailpit",
+    "docker:dev:down": "docker compose -f infra/docker-compose.yml down",
+    "docker:dev:logs": "docker compose -f infra/docker-compose.yml logs -f",
+    "docker:build:api": "docker build -f infra/docker/api.Dockerfile --target server -t sniper-ledger/api:local .",
+    "docker:build:worker": "docker build -f infra/docker/api.Dockerfile --target worker -t sniper-ledger/worker:local .",
+    "docker:build:dashboard": "docker build -f infra/docker/dashboard.Dockerfile -t sniper-ledger/dashboard:local .",
+    "docker:build:migrator": "docker build -f infra/docker/db-migrator.Dockerfile -t sniper-ledger/db-migrator:local .",
+    "docker:build:backup": "docker build -f infra/docker/backup.Dockerfile -t sniper-ledger/backup:local .",
+    "docker:config:staging": "docker compose --env-file infra/.env.staging -f infra/docker-compose.staging.yml config",
+    "docker:config:prod": "docker compose --env-file infra/.env.production -f infra/docker-compose.prod.yml config",
+    "ci:lint": "pnpm -r lint && pnpm format:check",
+    "ci:typecheck": "pnpm -r typecheck",
+    "ci:check-env": "node infra/scripts/check-env.mjs infra/env/.env.development.example",
+    "ci:hadolint": "hadolint --config infra/docker/.hadolint.yaml infra/docker/*.Dockerfile",
+    "ci:actionlint": "actionlint",
+    "test:unit": "pnpm exec turbo run test --filter=@sl/shared --filter=@sl/ui --filter=@sl/extension",
+    "test:integration": "pnpm --filter @sl/db test && pnpm --filter @sl/api test",
+    "test:e2e": "pnpm --filter @sl/dashboard test:e2e && pnpm --filter @sl/extension test:e2e && pnpm --filter @sl/tests test:e2e",
+    "test:load": "pnpm --filter @sl/tests load:smoke",
+    "test:security": "pnpm --filter @sl/security-tests test",
+    "test:all": "pnpm run test:unit && pnpm run test:integration && pnpm run test:security && pnpm run test:e2e"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.18.0",
+    "@types/node": "^22.10.5",
+    "eslint": "^9.18.0",
+    "eslint-import-resolver-typescript": "^3.7.0",
+    "eslint-plugin-import": "^2.31.0",
+    "globals": "^15.14.0",
+    "prettier": "^3.4.2",
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.19.1"
   }
 }

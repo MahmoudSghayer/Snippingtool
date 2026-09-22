@@ -1,0 +1,36 @@
+{
+  "name": "@sl/extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The Sniper's Ledger — MV3 Chrome extension. Two build targets from one codebase: `ledger` (listable: M1 recorder + M2 assist) and `ledger-auto` (adds M3 automation).",
+  "scripts": {
+    "dev": "node scripts/build.mjs ledger --watch",
+    "build": "pnpm run build:ledger && pnpm run build:auto",
+    "build:ledger": "node scripts/build.mjs ledger",
+    "build:auto": "node scripts/build.mjs ledger-auto",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint . --max-warnings=0",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "tokens:sync": "node scripts/sync-tokens.mjs"
+  },
+  "dependencies": {
+    "@sl/shared": "workspace:*",
+    "webextension-polyfill": "^0.12.0"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.10.1",
+    "@playwright/test": "^1.49.1",
+    "@sl/config": "workspace:*",
+    "@types/chrome": "^0.0.287",
+    "@types/webextension-polyfill": "^0.12.1",
+    "fake-indexeddb": "^6.0.0",
+    "jsdom": "^25.0.1",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.7",
+    "vitest": "^2.1.8",
+    "@vitest/coverage-v8": "^2.1.8"
+  }
+}

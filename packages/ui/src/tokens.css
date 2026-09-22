@@ -1,0 +1,103 @@
+/**
+ * The Sniper's Ledger — design tokens (dark gaming theme, the only theme for
+ * now). Consumed by apps/dashboard's Tailwind v4 entry (`@import
+ * "@sl/ui/tokens.css";` before `@import "tailwindcss";`) and mapped into
+ * Tailwind's `@theme` there. Values match docs/07-dashboard.md "Design
+ * tokens reference" and the extension popup/panel palette
+ * (apps/extension/src/popup/style.css, src/ui/panel.ts) so the dashboard,
+ * popup and panel read as one product.
+ *
+ * `prefers-reduced-motion` is respected globally here so no component has to
+ * remember to check it individually.
+ */
+
+:root {
+  /* Surfaces */
+  --sl-ground: #0d1311;
+  --sl-surface: #151d1a;
+  --sl-surface-2: #1b2522;
+  --sl-line: #242f2b;
+
+  /* Ink */
+  --sl-ink: #e7edea;
+  --sl-ink-2: #94a49e;
+
+  /* Accents */
+  --sl-gold: #ddb35c;
+  --sl-gold-ink: #221a0b;
+  --sl-green: #6fbf9b;
+  --sl-red: #e08678;
+  --sl-mid: #d6a94e;
+
+  /* Semantic aliases (used by components, so a future re-theme only edits
+     the block above) */
+  --sl-bg: var(--sl-ground);
+  --sl-card: var(--sl-surface);
+  --sl-card-2: var(--sl-surface-2);
+  --sl-border: var(--sl-line);
+  --sl-fg: var(--sl-ink);
+  --sl-fg-muted: var(--sl-ink-2);
+  --sl-accent: var(--sl-gold);
+  --sl-accent-ink: var(--sl-gold-ink);
+  --sl-positive: var(--sl-green);
+  --sl-negative: var(--sl-red);
+  --sl-warning: var(--sl-mid);
+
+  /* Chart series — one consistent categorical palette across every chart
+     (dataviz skill: "one visual system"). This is a *marks-only* ramp,
+     deliberately more saturated/darker than the --sl-green/--sl-gold/--sl-red
+     status tokens above (those are tuned for 4.5:1+ small-text contrast on
+     badges/labels; marks only need 3:1 against the chart surface, so they can
+     sit at a chroma/lightness that reads clearly as fills and lines). Order
+     is the CVD-safety mechanism, not cosmetic: validated with the `dataviz`
+     skill's `scripts/validate_palette.js` against this app's dark surfaces —
+     `node validate_palette.js "#35a87e,#b96fd9,#d9584a,#2fa8ad,#b9822a,#4f7fd9"
+     --mode dark --surface "#151d1a"` — all checks pass (lightness band,
+     chroma floor, adjacent CVD ΔE, normal-vision floor, contrast). Do not
+     reorder without re-running the validator: slots 2/6 (purple/blue) and
+     3/5 (red/gold) are deliberately non-adjacent. Slot 1 (green) still reads
+     as "positive" first and slot 3 (red) as "negative" for 2-series
+     profit/loss charts (POSITIVE_COLOR/NEGATIVE_COLOR in charts/palette.ts
+     pin to these two directly rather than by index, so a future reorder
+     can't silently flip profit to red). */
+  --sl-chart-1: #35a87e;
+  --sl-chart-2: #b96fd9;
+  --sl-chart-3: #d9584a;
+  --sl-chart-4: #2fa8ad;
+  --sl-chart-5: #b9822a;
+  --sl-chart-6: #4f7fd9;
+
+  /* Radii */
+  --sl-radius-sm: 6px;
+  --sl-radius-md: 10px;
+  --sl-radius-lg: 14px;
+
+  /* Motion */
+  --sl-motion-fast: 150ms;
+  --sl-motion-base: 200ms;
+  --sl-motion-slow: 250ms;
+  --sl-ease: cubic-bezier(0.4, 0, 0.2, 1);
+
+  color-scheme: dark;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --sl-motion-fast: 0ms;
+    --sl-motion-base: 0ms;
+    --sl-motion-slow: 0ms;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+body {
+  background-color: var(--sl-bg);
+  color: var(--sl-fg);
+}

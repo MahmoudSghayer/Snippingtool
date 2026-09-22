@@ -1,0 +1,225 @@
+# apps/api skeleton — ready for module development
+
+This file's presence is the signal the "subscriptions" agent polls for
+before writing its own modules (subscriptions, licenses, payments, coupons,
+plans, bans, flags + their admin routes + the jobs
+subscriptions.expire/licenses.revalidate/abuse.scan). Everything below this
+line has been built and typechecks (`pnpm --filter @sl/api typecheck`).
+
+## Boot & layout
+
+- `src/config/env.ts` — zod-validated env (`loadEnv()`), memoised. Includes
+  every var your module needs (STRIPE_*, ENTITLEMENT_SIGNING_KEY /
+  ENTITLEMENT_PUBLIC_KEY) even though this agent doesn't consume them.
+- `src/app.ts` — `buildApp(options?)` builds (does not `.listen()`) the
+  Fastify instance. Used by `server.ts`, every integration test (`.inject()`),
+  and `src/scripts/generate-openapi.ts`.
+- `src/server.ts` — real process entrypoint (`pnpm --filter @sl/api dev` /
+  `start`).
+- `src/worker.ts` — BullMQ job runner, separate process (`pnpm --filter
+  @sl/api worker`).
+- `src/plugins/*` — config, otel, security (helmet), cors, cookie, csrf,
+  request-id, db, redis, entitlements, mailer, metrics, rate-limit, auth,
+  websocket, error-handler. Registered in that order in `app.ts`. **Do not
+  edit these or `app.ts`'s plugin registration / module-autoload block** —
+  if you need an env var or an additive plugin change, extend
+  `config/env.ts` additively and say so in your final report; don't touch
+  registration order.
+
+## Module convention (mandatory — how to add a module)
+
+Each module is one folder: `src/modules/<name>/index.ts` default-exports a
+`fastify-plugin`-wrapped plugin. `app.ts` uses `@fastify/autoload` on
+`src/modules`; **autoload registers only `index.ts` per folder** (its own
+rule: a directory containing an index file registers *only* that file —
+your `service.ts`/`repo.ts`/`schema.ts`/`__tests__/` files next to it are
+never auto-registered, they're just imported by `index.ts`).
+
+- **Every route uses its own full absolute path** —
+  `fastify.get('/api/v1/subscriptions/me', ...)`, never a relative path
+  under an assumed prefix. This was a deliberate finding, not a stylistic
+  choice: `fastify-plugin` (`fp()`) marks a plugin as **non-encapsulated**
+  so it can decorate/reach the shared instance (`fastify.db`,
+  `fastify.authenticate`, etc.) directly — and Fastify's `prefix`
+  register-option only applies to *encapsulated* children, so it has **no
+  effect** on an fp()-wrapped plugin (verified empirically while building
+  this skeleton — autoload's folder-name-derived prefix and any
+  `autoPrefix` export are silently ignored for fp() plugins). Don't rely on
+  either; always write the complete path.
+- Your admin routes belong in their own folders — `admin-subscriptions`,
+  `admin-payments`, `admin-coupons`, `admin-plans`, `admin-bans`,
+  `admin-flags` (or similar; your call) — each registering full paths under
+  `/api/v1/admin/...`. This agent's admin folders are named `admin-users`,
+  `admin-audit`, `admin-system`, `admin-toggles`, `admin-config`,
+  `admin-activity`, so there's no collision either way.
+- Example skeleton:
+
+  ```ts
+  // src/modules/subscriptions/index.ts
+  import fp from 'fastify-plugin';
+  import type { FastifyInstance } from 'fastify';
+
+  export default fp(
+    async function subscriptionsModule(fastify: FastifyInstance) {
+      fastify.get('/api/v1/subscriptions/me', { onRequest: [fastify.authenticate] }, async (request) => {
+        // ...
+      });
+    },
+    { name: 'module:subscriptions', dependencies: ['auth', 'db', 'redis'] },
+  );
+  ```
+
+- Use `zod` schemas from `@sl/shared` (or module-local ones) as Fastify route
+  `schema.body`/`schema.response` — `fastify-type-provider-zod` is already
+  wired via `setValidatorCompiler`/`setSerializerCompiler` in `app.ts`, and
+  `@fastify/swagger` picks the schemas up for OpenAPI automatically. **For
+  `request.body`/`request.query` to come out correctly typed** (not
+  `unknown`), call `const app = fastify.withTypeProvider<ZodTypeProvider>();`
+  once at the top of your plugin function and register routes on `app.post`/
+  `app.get`/etc instead of `fastify.post`/... (same instance, just a
+  differently-typed view — `app.db`, `app.authenticate`, etc. all still work
+  identically). Every module in this codebase, including this agent's,
+  follows this pattern — copy it from `src/modules/auth/index.ts`.
+
+## Getting db / redis / auth / permissions / audit in a route
+
+- `fastify.db` — Drizzle client (`@sl/db`'s `schema`), `fastify.sqlClient` —
+  raw `postgres.js` connection (LISTEN/NOTIFY, `REFRESH MATERIALIZED VIEW`).
+- `fastify.redis` — general-purpose ioredis client (cache/locks/dedupe).
+  `fastify.redisSub` is a **separate** connection reserved for pub/sub
+  (ws/publish.ts + ws/router.ts use it) — never issue non-pub/sub commands
+  on it.
+- `fastify.authenticate` — preHandler; verifies bearer or `sl_at` cookie,
+  sets `request.authUser = { id, role, plan, sessionId, deviceId }`. Use it
+  on every route that requires *any* logged-in user (admin or not).
+- `fastify.requireAdmin` — preHandler; `authenticate` + `role === 'admin'`.
+- `fastify.requirePermission(permission)` — preHandler factory;
+  `requireAdmin` + checks the admin's `admin_role` against
+  `@sl/shared`'s `PERMISSION_MATRIX` for that `Permission`. Use this for
+  every admin mutation (`users.ban`, `subscriptions.write`, etc.).
+- `fastify.verifyCsrf` — preHandler (callback-style, matches
+  `fastify.csrfProtection`'s own signature); add it alongside
+  `fastify.authenticate` on cookie-session-mutating dashboard routes. It's a
+  no-op when the request carries a bearer `Authorization` header (the
+  extension), since bearer calls can't be CSRF'd.
+- `recordAudit({ db, actor, action, entityType, entityId, before, after, ip,
+  userAgent, requestId })` from `src/lib/audit.ts` — call this after every
+  admin mutation (or any mutation you want in the audit trail). `entityId`
+  must be the row's UUID `id` (audit_logs.entity_id is a `uuid` column,
+  polymorphic via `entityType`, no FK). It computes the before/after diff
+  for you.
+- `src/lib/errors.ts` — `AppError` + `AppErrors.*` helpers
+  (`AppErrors.notFound('subscription')`, `AppErrors.conflict(...)`, etc.).
+  Throw these from anywhere in a request; `plugins/error-handler.ts` renders
+  the `{ code, message, details?, requestId }` envelope automatically. Codes
+  come from `@sl/shared`'s `ERROR_CODES` — `LICENSE_INVALID`,
+  `LICENSE_EXPIRED`, `LICENSE_REVOKED`, `SUBSCRIPTION_REQUIRED`,
+  `TRIAL_ABUSE_DETECTED`, `KILL_SWITCH_ACTIVE` are already declared there
+  for your module to use (`new AppError('LICENSE_EXPIRED', '...')`).
+- `src/lib/ids.ts` — `newId()` (uuidv7) for every app-generated PK.
+- `src/lib/pagination.ts` — `encodeCursor`/`decodeCursor`/`paginate()` for
+  cursor-based list endpoints (`{ items, nextCursor }`).
+- `src/lib/crypto.ts` — `hashSecret`/`verifySecret` (argon2id),
+  `randomToken`, `fastHash` (SHA-256 hex, for fast-lookup token hashes),
+  `generateLicenseKey()` (Crockford base32 `SL-XXXX-XXXX-XXXX-XXXX` +
+  prefix — already implemented here since it's a pure crypto/formatting
+  helper; your licenses module can use it directly instead of
+  reimplementing).
+- `src/lib/entitlements.ts` — the `EntitlementProvider` interface +
+  `DefaultEntitlementProvider` (reads subscriptions/plans/licenses directly,
+  signs with `ENTITLEMENT_SIGNING_KEY` via `fastify.entitlements`). This is
+  **your** seam to extend: `modules/extension`'s bootstrap/heartbeat routes
+  only ever call `fastify.entitlements.getEntitlements(userId)` /
+  `.signEntitlementBlob(...)`, never a concrete class. If you need richer
+  behaviour (grace periods, etc.), either extend
+  `DefaultEntitlementProvider` and redecorate `entitlements` from your own
+  module-scoped child context, or ask — don't edit
+  `plugins/entitlements.ts` itself (owned by this agent).
+- `src/ws/publish.ts` — `publishToUser(fastify.redis, userId, event)` /
+  `publishAdmin(fastify.redis, event)`. `event` must match `@sl/shared`'s
+  `wsEventSchema` (`subscription.changed` is already in there for you).
+- `src/lib/mailer.ts` / `fastify.mailer.send({ to, subject, html, text })` —
+  real SMTP in production, in-memory JSON transport in dev/test
+  (`fastify.mailer.sentEmails` for test assertions).
+
+## Jobs convention
+
+`src/jobs/<name>.job.ts` default-exports `defineJob({ name, schedule?,
+processor })` from `src/jobs/types.ts` (`schedule` is a cron string; omit it
+for a job only ever triggered by `queue.add` from elsewhere). `src/worker.ts`
+discovers every `*.job.ts` file in `src/jobs/` via `loadJobs()`
+(`src/jobs/index.ts` — plain filesystem scan, not `@fastify/autoload`, since
+jobs aren't Fastify plugins) and wires each to its own BullMQ `Queue` +
+`Worker`. Add `src/jobs/subscriptions.expire.job.ts`,
+`src/jobs/licenses.revalidate.job.ts`, `src/jobs/abuse.scan.job.ts` the same
+way this agent added `profits.rollup.job.ts` etc. — no registration step
+needed beyond dropping the file in.
+
+```ts
+// src/jobs/subscriptions.expire.job.ts
+import { defineJob } from './types.js';
+
+export default defineJob({
+  name: 'subscriptions.expire',
+  schedule: '*/5 * * * *',
+  async processor(_job, { db, log }) {
+    // ...
+  },
+});
+```
+
+## Tests
+
+Integration tests live in `src/modules/<name>/__tests__/*.test.ts`
+(`vitest.config.ts` includes `src/**/__tests__/*.test.ts`, runs against the
+real `TEST_DATABASE_URL` Postgres and real local Redis, `fileParallelism:
+false` since files share test-DB state). Use `@sl/db/test-utils`'s
+`resetDatabase(db)` (note the subpath — `@sl/db`'s own `package.json`
+`exports` didn't originally expose `test-utils`; this agent added that
+subpath, additively, since it's needed from outside the package) between
+tests, and `buildApp()` + `app.inject({ method, url, payload, headers,
+remoteAddress })` — see `src/modules/auth/__tests__/auth.test.ts` for the
+pattern (build app once per file in `beforeAll`, `resetDatabase` in
+`beforeEach`, and give each `it()` its own `remoteAddress` via a small
+`nextIp()` counter so one test's IP-based rate limiting never leaks into
+another's).
+
+**Redis test isolation is a dedicated logical DB (`SELECT 15`), not a key
+prefix.** `plugins/redis.ts` connects to Redis DB 15 whenever
+`NODE_ENV=test` (vitest sets this by default) instead of DB 0 — so
+`app.redis`/`app.redisSub` are already isolated from dev data and from each
+other's runs without you doing anything, and `src/test/global-setup.ts`
+`FLUSHDB`s index 15 once before the whole suite runs. **This was a key
+prefix (`ioredis`'s `keyPrefix` option) in an earlier version of this
+skeleton — it was changed after discovering `keyPrefix` breaks BullMQ**
+(`new Queue(name, { connection: <prefixed client> })` throws "ioredis does
+not support ioredis prefixes, use the prefix option instead"), which both
+the health module's readiness probe and (per your admin-system module's
+"queue depths per BullMQ queue" requirement) your own code will hit if you
+ever pass `fastify.redis` to `new Queue()`/`new Worker()` — with the DB-index
+approach that now just works, no special-casing needed. If you connect your
+own extra `ioredis` client instead of reusing `fastify.redis`, connect it to
+the same DB 15 under test (`db: fastify.config.NODE_ENV === 'test' ? 15 :
+undefined`) for the same isolation.
+
+## Env additions
+
+None yet beyond what's already in `config/env.ts` (all your `STRIPE_*` /
+`ENTITLEMENT_*` vars are already declared there, optional, so your module
+never has to touch this file either — just read `fastify.config.STRIPE_*`).
+If you truly need a new one, add it there additively (new field, safe
+default or `.optional()`) and mention it in your final report.
+
+## Package.json / deps
+
+This agent's `apps/api/package.json` is done; add your own deps (`stripe`,
+etc.) with `pnpm add --filter @sl/api <pkg>` — expect `package.json` and the
+root `pnpm-lock.yaml` to change under you as a result of your own installs;
+that's expected and not a conflict to resolve against this agent's work.
+
+## Verified so far
+
+- `pnpm --filter @sl/api typecheck` — clean.
+- App boots (`buildApp()` + `/health/live`, `/health/ready` — the latter
+  checks db, redis, and a BullMQ queue handle) — verified against real local
+  Postgres (`sniper_ledger`/`sniper_ledger_test`) and Redis.

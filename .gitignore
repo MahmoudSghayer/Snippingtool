@@ -1,4 +1,45 @@
+# dependencies
 node_modules/
+
+# build outputs
 dist/
+build/
+.turbo/
 *.zip
+
+# test / coverage
+coverage/
+playwright-report/
+test-results/
+
+# env
+.env
+.env.*
+!.env.example
+# infra/env/*.example are committed templates (DevOps deliverable), not
+# real secrets — every other .env* file (a real infra/.env.production,
+# infra/.env.staging, or root .env for local dev) stays ignored above.
+!infra/env/*.example
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# editors / OS
 .DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# locally downloaded CLI tools (actionlint, hadolint, k6)
+.tools/
+
+# tests/load & tests/e2e generated artifacts: provisioned test-user
+# credentials/secrets (never committed), k6 JSON result summaries, and the
+# extension build tests/e2e produces for itself (see tests/e2e/build-extension.mjs).
+# (tests/test-results/ — where Playwright's default outputDir actually lands,
+# since `@sl/tests`'s scripts run with cwd=tests/ — is already covered by the
+# blanket `test-results/` pattern above.)
+tests/load/.artifacts/
+tests/e2e/.artifacts/

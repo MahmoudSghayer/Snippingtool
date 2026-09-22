@@ -1,0 +1,24 @@
+# Code owners for The Sniper's Ledger. Placeholder GitHub handles/teams —
+# replace @sniper-ledger/* with real usernames or teams once the repo has
+# one; until then this file still documents *intended* ownership boundaries
+# (matching the wave/agent split in the build plan) even though GitHub
+# can't enforce review requests against a team that doesn't exist yet.
+
+* @sniper-ledger/core
+
+/apps/api/                     @sniper-ledger/backend
+/apps/dashboard/                @sniper-ledger/frontend
+/apps/extension/                @sniper-ledger/extension
+/packages/db/                   @sniper-ledger/backend
+/packages/shared/                @sniper-ledger/backend
+/packages/ui/                    @sniper-ledger/frontend
+
+/infra/                          @sniper-ledger/devops
+/.github/                        @sniper-ledger/devops
+/docs/11-devops.md                @sniper-ledger/devops
+/.dockerignore                    @sniper-ledger/devops
+
+/docs/09-security.md              @sniper-ledger/security
+/docs/threat-model.md              @sniper-ledger/security
+
+/tests/                            @sniper-ledger/qa
