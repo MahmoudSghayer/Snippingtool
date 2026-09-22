@@ -145,6 +145,15 @@ const envSchema = z.object({
   APP_ORIGIN: z.string().url().default('http://localhost:3000'),
   DASHBOARD_ORIGIN: z.string().url().default('http://localhost:5173'),
   EXTENSION_IDS: z.string().default(''),
+  // Additional browser origins allowed to call this API, comma-separated.
+  // DASHBOARD_ORIGIN is deliberately NOT a list: it doubles as a security
+  // boundary in modules/payments (assertDashboardOrigin pins Stripe
+  // success/cancel redirect URLs to it), so widening it there would widen
+  // where a checkout session can send a user. This var only ever feeds the
+  // CORS allowlist. Needed when the same API serves more than one dashboard
+  // deployment — e.g. the Vercel host alongside the self-hosted
+  // docker-compose.prod.yml one (docs/11-devops.md 6).
+  EXTRA_CORS_ORIGINS: z.string().default(''),
 
   // --- Cookies / CSRF ---
   COOKIE_SECRET: z.string().min(16).default('dev-cookie-secret-change-me-32-bytes-min'),
