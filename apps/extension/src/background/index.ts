@@ -47,6 +47,7 @@ import {
 } from './settings.js';
 import { ensureFlushAlarm, handleTelemetryEnqueue, handleTelemetryFlush, onFlushAlarm } from './telemetry.js';
 import { installUpdateHandler } from './update.js';
+import { installWelcomeHandler } from './welcome.js';
 
 
 import type { BackgroundResponse } from '@sl/shared';
@@ -195,6 +196,7 @@ function startAlarms(): void {
 
 installGlobalErrorHandlers();
 installUpdateHandler();
+installWelcomeHandler();
 startAlarms();
 // A cold-started service worker (MV3 kills it after ~30s idle, per rule 5)
 // re-bootstraps on every wake rather than assuming any in-memory state

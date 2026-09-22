@@ -9,6 +9,7 @@ import {
   BarChart3,
   Ban,
   CreditCard,
+  Crosshair,
   FileClock,
   Flag,
   Gauge,
@@ -41,6 +42,12 @@ const ROUTES: PaletteRoute[] = [
     label: 'Dashboard',
     href: '/dashboard',
     icon: <LayoutDashboard className="size-4" />,
+  },
+  {
+    key: 'bot',
+    label: 'Bot',
+    href: '/bot',
+    icon: <Crosshair className="size-4" />,
   },
   {
     key: 'analytics',

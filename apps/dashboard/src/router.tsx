@@ -117,6 +117,12 @@ const tradesRoute = createRoute({
   component: lazyRouteComponent(() => import('@/pages/user/TradesPage.js'), 'TradesPage'),
 });
 
+const botRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: '/bot',
+  component: lazyRouteComponent(() => import('@/pages/user/BotPage.js'), 'BotPage'),
+});
+
 const analyticsRoute = createRoute({
   getParentRoute: () => appLayoutRoute,
   path: '/analytics',
@@ -280,6 +286,7 @@ const routeTree = rootRoute.addChildren([
   appLayoutRoute.addChildren([
     dashboardRoute,
     tradesRoute,
+    botRoute,
     analyticsRoute,
     subscriptionsRoute,
     settingsRoute,

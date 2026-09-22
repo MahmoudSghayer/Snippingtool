@@ -8,6 +8,7 @@ import {
   Bell,
   Ban,
   CreditCard,
+  Crosshair,
   FileClock,
   Flag,
   Gauge,
@@ -75,6 +76,12 @@ const userNav = [
     label: 'Trades',
     href: '/trades',
     icon: <ArrowLeftRight className="size-4" />,
+  },
+  {
+    key: 'bot',
+    label: 'Bot',
+    href: '/bot',
+    icon: <Crosshair className="size-4" />,
   },
   {
     key: 'analytics',

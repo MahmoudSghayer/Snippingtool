@@ -46,6 +46,10 @@ const env = {
   VITE_AUTOMATION: target === 'ledger-auto' ? '1' : '0',
   VITE_BUILD_TARGET: target,
   VITE_API_ORIGIN: process.env.VITE_API_ORIGIN || 'https://api.snipersledger.app',
+  // Where the companion site lives, for the install-time welcome tab
+  // (background/welcome.ts). Same override story as VITE_API_ORIGIN:
+  // set it in the environment to point a build at a self-hosted stack.
+  VITE_DASHBOARD_ORIGIN: process.env.VITE_DASHBOARD_ORIGIN || 'https://snipersledger.app',
   VITE_UPDATE_URL: target === 'ledger-auto' ? process.env.VITE_UPDATE_URL || 'https://updates.snipersledger.app/ledger-auto/update.xml' : '',
   VITE_EXTENSION_VERSION: pkg.version,
   VITE_LICENSE_PUBLIC_KEY: process.env.VITE_LICENSE_PUBLIC_KEY || '',
