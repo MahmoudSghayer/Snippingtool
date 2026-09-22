@@ -30,6 +30,25 @@ function extractToken(html: string): string {
   return decodeURIComponent(match[1]!);
 }
 
+/** The IP-monitoring write is best-effort and fired without awaiting from
+ * `completeLogin` (service.ts), so it lands some time *after* the login
+ * response. A fixed sleep raced it — 50ms was enough on a warm laptop and
+ * not under CI's coverage instrumentation. Poll for the condition instead
+ * (bounded), so the assertion is about *what* landed, not *when*. */
+async function waitFor<T>(
+  read: () => Promise<T>,
+  ready: (value: T) => boolean,
+  timeoutMs = 5_000,
+): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  let last = await read();
+  while (!ready(last) && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 25));
+    last = await read();
+  }
+  return last;
+}
+
 describe('auth module — IP monitoring', () => {
   let app: FastifyInstance;
 
@@ -93,12 +112,11 @@ describe('auth module — IP monitoring', () => {
     );
 
     // Best-effort background write (service.ts fires it without awaiting) —
-    // give the event loop a tick to let it land before asserting.
-    await new Promise((r) => setTimeout(r, 50));
-
-    const rows = await app.db.query.ipActivity.findMany({
-      where: (t, { eq }) => eq(t.userId, userId),
-    });
+    // wait for it to land before asserting.
+    const rows = await waitFor(
+      () => app.db.query.ipActivity.findMany({ where: (t, { eq }) => eq(t.userId, userId) }),
+      (r) => r.length > 0,
+    );
     expect(rows).toHaveLength(1);
     expect(rows[0]?.ip).toBe(IP_US);
     expect(rows[0]?.country).toBe('US');
@@ -108,7 +126,10 @@ describe('auth module — IP monitoring', () => {
   it('increments request_count on a repeat login from the same IP, without re-flagging', async () => {
     const email = 'geo2@example.com';
     const userId = await registerVerifyAndLogin(email, IP_US, 'fp-geo-2-0000000000000000');
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(
+      () => app.db.query.ipActivity.findMany({ where: (t, { eq }) => eq(t.userId, userId) }),
+      (r) => r.length > 0,
+    );
 
     const secondLogin = await app.inject({
       method: 'POST',
@@ -121,11 +142,11 @@ describe('auth module — IP monitoring', () => {
       },
     });
     expect(secondLogin.statusCode).toBe(200);
-    await new Promise((r) => setTimeout(r, 50));
 
-    const rows = await app.db.query.ipActivity.findMany({
-      where: (t, { eq }) => eq(t.userId, userId),
-    });
+    const rows = await waitFor(
+      () => app.db.query.ipActivity.findMany({ where: (t, { eq }) => eq(t.userId, userId) }),
+      (r) => r[0]?.requestCount === 2,
+    );
     expect(rows).toHaveLength(1);
     expect(rows[0]?.requestCount).toBe(2);
 
@@ -140,7 +161,12 @@ describe('auth module — IP monitoring', () => {
     const email = 'geo3@example.com';
     const sharedFingerprint = 'fp-geo-3-00000000000000000';
     const userId = await registerVerifyAndLogin(email, IP_US, sharedFingerprint);
-    await new Promise((r) => setTimeout(r, 50));
+    // The first login's (US) row is what the second login is compared
+    // against — it must have landed before the DE login runs.
+    await waitFor(
+      () => app.db.query.ipActivity.findMany({ where: (t, { eq }) => eq(t.userId, userId) }),
+      (r) => r.length > 0,
+    );
 
     const secondLogin = await app.inject({
       method: 'POST',
@@ -149,9 +175,11 @@ describe('auth module — IP monitoring', () => {
       payload: { email, password: 'correcthorsebattery12', device: device(sharedFingerprint) },
     });
     expect(secondLogin.statusCode).toBe(200);
-    await new Promise((r) => setTimeout(r, 50));
 
-    const flags = await app.db.query.flags.findMany({ where: (t, { eq }) => eq(t.userId, userId) });
+    const flags = await waitFor(
+      () => app.db.query.flags.findMany({ where: (t, { eq }) => eq(t.userId, userId) }),
+      (f) => f.length > 0,
+    );
     expect(flags).toHaveLength(1);
     expect(flags[0]?.kind).toBe('suspicious_ip');
     expect(flags[0]?.severity).toBe('high');
@@ -161,9 +189,15 @@ describe('auth module — IP monitoring', () => {
       previousCountry: 'US',
     });
 
-    const flaggedRow = await app.db.query.ipActivity.findFirst({
-      where: (t, { and: andOp, eq }) => andOp(eq(t.userId, userId), eq(t.ip, IP_DE)),
-    });
+    // `flagged` is set right after the flag row, in the same background
+    // chain — poll for it the same way.
+    const flaggedRow = await waitFor(
+      () =>
+        app.db.query.ipActivity.findFirst({
+          where: (t, { and: andOp, eq }) => andOp(eq(t.userId, userId), eq(t.ip, IP_DE)),
+        }),
+      (row) => row?.flagged === true,
+    );
     expect(flaggedRow?.flagged).toBe(true);
   });
 

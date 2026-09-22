@@ -22,6 +22,7 @@ import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, ne } from 'drizzle-
 
 import { AppErrors } from '../../lib/errors.js';
 import { newId } from '../../lib/ids.js';
+import { upsertIpActivity } from '../../lib/ip-activity.js';
 import { publishToUser } from '../../ws/publish.js';
 import { createFlag } from '../flags/service.js';
 import {
@@ -278,30 +279,19 @@ export function trialAbuseSeverity(matchCount: number): 'low' | 'medium' | 'crit
 
 /** Upserts the (ip, userId) counter row `checkTrialAbuse`'s IP check reads
  * back later — written on every trial attempt, successful or not
- * (docs §5, check 3's data source). */
+ * (docs §5, check 3's data source). Delegates to `lib/ip-activity.ts`'s
+ * `upsertIpActivity`, which absorbs the insert race: `completeLogin` fires
+ * the same upsert for the same (ip, user) in the background, and a trial
+ * started right after login used to race it with a bare select-then-insert
+ * here — the loser hit `ip_activity_ip_user_unique` and the trial request
+ * 500'd (seen intermittently in CI's coverage run, where the login's
+ * background write is slower). */
 export async function recordTrialIpActivity(
   db: Database,
   ip: string,
   userId: string,
 ): Promise<void> {
-  const existing = await db.query.ipActivity.findFirst({
-    where: and(eq(ipActivity.ip, ip), eq(ipActivity.userId, userId)),
-  });
-  if (existing) {
-    await db
-      .update(ipActivity)
-      .set({ lastSeen: new Date(), requestCount: existing.requestCount + 1 })
-      .where(eq(ipActivity.id, existing.id));
-  } else {
-    await db.insert(ipActivity).values({
-      id: newId(),
-      ip,
-      userId,
-      firstSeen: new Date(),
-      lastSeen: new Date(),
-      requestCount: 1,
-    });
-  }
+  await upsertIpActivity(db, { ip, userId, deviceId: null });
 }
 
 export interface StartTrialInput {
