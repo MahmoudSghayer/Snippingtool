@@ -145,6 +145,7 @@ test.describe('visual smoke (screenshots + no console errors)', () => {
     for (const vp of VIEWPORTS) {
       await page.setViewportSize({ width: vp.width, height: vp.height });
       await visit('/dashboard', 'dashboard', 'Dashboard', vp.name);
+      await visit('/trades', 'trades', 'Trades', vp.name);
       await visit('/analytics', 'analytics', 'Analytics', vp.name);
       await visit('/subscriptions', 'subscriptions', 'Subscription', vp.name);
       await visit('/settings', 'settings', 'Settings', vp.name);
