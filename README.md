@@ -154,9 +154,47 @@ pnpm --filter @sl/extension build        # dist/ledger and dist/ledger-auto
 
 # sign in as the seeded dev user (NODE_ENV != production):
 #   dev@sniperledger.local / dev-password-123
-# The trial plan allows one device, so a second browser profile needs the
-# first device revoked from Settings → Devices.
+# A plan's device limit is enforced at login (the trial's is 1), so a second
+# browser profile or a curl session needs the first device revoked from
+# Settings → Devices, else login returns DEVICE_LIMIT_REACHED.
+```
 
+### See the profit path work without the extension
+
+The extension is the normal source of trades, but every step it drives is a
+plain authenticated API call, so the whole path can be exercised with curl
+against the local stack above — useful for checking the dashboard end to end
+before the live market is available.
+
+```bash
+API=http://localhost:3000
+TOKEN=$(curl -s $API/api/v1/auth/login -H 'content-type: application/json' \
+  -d '{"email":"dev@sniperledger.local","password":"dev-password-123",
+       "device":{"fingerprint":"local-dev-device-0001","name":"curl"}}' \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["accessToken"])')
+
+# 1. report a bought card, exactly as the extension's telemetry flush does
+curl -s $API/api/v1/trades/batch -H "authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' -d '{"trades":[{
+    "id":"'"$(python3 -c 'import uuid; print(uuid.uuid4())')"'","tradeId":"demo-1","resourceId":158023,"assetId":null,
+    "rating":91,"buyPrice":50000,"sellPrice":null,"eaTax":0.05,"netProfit":null,
+    "status":"bought","boughtAt":"'"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"'","soldAt":null}]}'
+
+# 2. record the sale — or do it from the dashboard's Trades page, which is
+#    what a trader actually does. The API computes the tax and the net.
+TRADE_ID=$(curl -s "$API/api/v1/trades?limit=1" -H "authorization: Bearer $TOKEN" \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["items"][0]["id"])')
+curl -s $API/api/v1/trades/$TRADE_ID/close -H "authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' -d '{"sellPrice":60000}'
+# -> netProfit 7000: 60,000 sale less 3,000 EA tax less the 50,000 purchase
+
+# 3. the figures are already rolled up — no waiting for the hourly job
+curl -s $API/api/v1/analytics/me/overview -H "authorization: Bearer $TOKEN"
+```
+
+### Checks
+
+```bash
 # everything (test suites run serially: they share the test database)
 pnpm typecheck && pnpm lint && pnpm build && pnpm test
 pnpm test:e2e && pnpm test:security && pnpm test:load   # see docs/12-testing.md
