@@ -24,7 +24,10 @@ import { ReasonDialog } from '@/components/ReasonDialog.js';
 import type { z } from 'zod';
 
 type PlanRow = NonNullable<Awaited<ReturnType<typeof fetchPlans>>>['items'][number];
-type CreateForm = z.infer<typeof planCreateRequestSchema>;
+// @hookform/resolvers v5 types the form by the schema's input (defaults optional)
+// and the submit handler by its output (defaults applied), so keep both.
+type CreateFormInput = z.input<typeof planCreateRequestSchema>;
+type CreateForm = z.output<typeof planCreateRequestSchema>;
 
 async function fetchPlans() {
   const { data, error } = await api.GET('/api/v1/admin/plans');
@@ -39,7 +42,7 @@ export function PlansPage() {
 
   const plansQuery = useQuery({ queryKey: ['admin', 'plans'], queryFn: fetchPlans });
 
-  const createForm = useForm<CreateForm>({
+  const createForm = useForm<CreateFormInput, unknown, CreateForm>({
     resolver: zodResolver(planCreateRequestSchema),
     defaultValues: {
       code: '',
