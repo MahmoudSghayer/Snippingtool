@@ -284,6 +284,84 @@ plus `PRODUCTION_DATABASE_URL` for the separate `migrate-production` job —
 see §11) — this section is what to run **once, by hand**, before the first
 automated deploy ever runs.
 
+### 5.2a Mint the datastore TLS certificates
+
+`config/env.ts` refuses to boot under `NODE_ENV=production` unless
+`DATABASE_URL` carries `sslmode=require` (or stronger) and `REDIS_URL` uses
+the `rediss://` scheme — the mitigation `docs/threat-model.md` §3.7/§3.8
+names for "network sniffing between the API and the DB/Redis". On this
+topology Postgres and Redis are containers on the private compose bridge
+rather than managed services handing you a provider certificate, so the
+stack issues its own CA and the API verifies against it:
+
+```bash
+./infra/scripts/gen-datastore-certs.sh
+```
+
+Output lands in `infra/certs/`, which is git-ignored — this is per-host
+material, regenerated on each new box and never committed:
+
+| File                    | Who reads it                                                                                                        |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `ca.crt` / `ca.key`     | `ca.crt` is mounted read-only into api, worker, redis-exporter and backup; `ca.key` is only ever used by the script |
+| `postgres.crt` / `.key` | Postgres, as its server certificate (CN + SAN `postgres`)                                                           |
+| `redis.crt` / `.key`    | Redis, as its server certificate (CN + SAN `redis`)                                                                 |
+
+The SANs are the **compose service names**, which are exactly the hostnames
+the API dials, so hostname verification passes on its own — nothing here
+needs `rejectUnauthorized: false` or an equivalent escape hatch. The script
+also sets each key's owner to the uid its image runs as (postgres `70`,
+redis `999`) at mode `0600`: both servers refuse to start on a
+group/world-readable key, and a bind mount carries host ownership straight
+into the container.
+
+Then set the matching values in `infra/.env.production` (the
+`.env.production.example` template already ships them in this shape):
+
+```bash
+DATABASE_URL=postgres://sl:<POSTGRES_PASSWORD>@postgres:5432/sniper_ledger?sslmode=require
+REDIS_URL=rediss://:<REDIS_PASSWORD>@redis:6379
+REDIS_TLS_CA_FILE=/certs/ca.crt
+```
+
+`check-env.mjs` (§5.2) runs the real `config/env.ts` schema, so a leftover
+`sslmode=disable` or `redis://` fails there rather than at first boot.
+
+What this turns on, and what it deliberately doesn't:
+
+- **Postgres runs with `ssl=on`.** This is _additive_ — it makes Postgres
+  offer TLS, not refuse plaintext — so `postgres-exporter`, the `backup`
+  container and Grafana keep working over their existing `sslmode=disable`
+  connections. Only the API was ever the connection this control is about.
+- **Redis is TLS-only** (`--port 0 --tls-port 6379`). There is no "offer
+  both" middle ground worth having here: a surviving plaintext port would
+  still carry `requirepass` in the clear for anything that used it, so every
+  consumer moves together — the API, the container healthcheck,
+  `redis-exporter` and `redis-backup.sh` (via `REDIS_CA_FILE`).
+
+Certificates default to a 10-year life (`CERT_DAYS`). To reissue — on expiry,
+or if the CA key is ever exposed — run `FORCE=1 ./infra/scripts/gen-datastore-certs.sh`,
+then restart the datastores and everything holding a connection to them:
+
+```bash
+docker compose -f infra/docker-compose.prod.yml up -d --force-recreate \
+  postgres redis api worker redis-exporter backup
+```
+
+To confirm the API is genuinely encrypted rather than merely _configured_
+to be — `sslmode=require` in a URL is a string, not a handshake:
+
+```bash
+# Expect ssl=t for the api container's IP (the postgres-exporter row stays f).
+docker compose -f infra/docker-compose.prod.yml exec postgres \
+  psql -U sl -d sniper_ledger \
+  -c "select client_addr, ssl, version from pg_stat_activity join pg_stat_ssl using (pid) where client_addr is not null;"
+
+# Expect an I/O error — the plaintext listener is gone.
+docker compose -f infra/docker-compose.prod.yml exec redis \
+  redis-cli -a "$REDIS_PASSWORD" --no-auth-warning ping
+```
+
 ### 5.3 First migration + seed admin
 
 ```bash
@@ -756,6 +834,15 @@ and `@fastify/cookie`'s signing) immediately. None of these are silent
 failures — each shows up as a wave of re-auths, not corrupted state — but
 rotate during low traffic and expect a support-ticket blip regardless.
 
+The datastore CA in `infra/certs/` (§5.2a) is secret material in the same
+category as the env file — gitignored, per-host, and never committed — but
+it rotates differently from everything above: nothing user-facing depends
+on it, so reissuing costs a restart of the datastores and their clients and
+nothing else. It is also the one item here that a secrets manager does
+_not_ solve by itself, since the certificates must exist as files on the
+host at the paths the compose bind mounts expect; render them at deploy
+time or regenerate them per host, but don't try to hold them as env vars.
+
 ## 12. Production readiness checklist
 
 - [ ] `infra/.env.production` filled in, `check-env.mjs` passes, mode
@@ -765,6 +852,10 @@ rotate during low traffic and expect a support-ticket blip regardless.
 - [ ] Firewall: only 22/80/443(+443/udp) open (§5.1); Grafana's public
       reachability is an intentional decision, not an oversight (§5.1's
       note).
+- [ ] Datastore TLS certificates minted on this host (§5.2a),
+      `infra/certs/` present and git-ignored, and the API verified to be
+      actually using TLS (`pg_stat_ssl` reports `ssl=t` for it) rather
+      than just carrying `sslmode=require` in a string.
 - [ ] First migration run, super admin seeded once and its password
       rotated out of the shell/env (§5.3), admin TOTP enrolled.
 - [ ] `production` GitHub Environment has required reviewers configured —
@@ -787,7 +878,7 @@ rotate during low traffic and expect a support-ticket blip regardless.
       `COOKIE_SAME_SITE=none` + `COOKIE_SECURE=true` are set on the API
       and both `APP_ORIGIN`/`DASHBOARD_ORIGIN` are `https://` (§6 —
       enforced at boot in production either way).
-- [ ] STRIPE_* set to **live** keys (not test) with the live webhook
+- [ ] STRIPE\_\* set to **live** keys (not test) with the live webhook
       endpoint registered, if billing is going live alongside this deploy
       (`docs/05-subscriptions.md`).
 - [ ] A restore drill (§9) has actually been run against this
