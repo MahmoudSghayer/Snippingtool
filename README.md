@@ -24,7 +24,7 @@ you before you look like a bot — it is never sold as "undetectable". See
 ## Build status
 
 The build follows a data-first sequence. All eleven phases are built,
-verified (`pnpm typecheck && pnpm lint && pnpm build && pnpm test`: 688
+verified (`pnpm typecheck && pnpm lint && pnpm build && pnpm test`: 700
 tests across seven packages) and **merged into `main` via
 [PR #2](https://github.com/MahmoudSghayer/Snippingtool/pull/2)** with the
 full CI pipeline green (lint, typecheck, unit, migrations, API integration,
@@ -56,6 +56,31 @@ is forbidden in MV3 content scripts, which aborted its boot and silently
 killed market recording and telemetry on every page load. It is fixed, the
 e2e assertions that had hidden it are now real, and every cross-app journey
 passes.
+
+### Post-merge hardening ([PR #19](https://github.com/MahmoudSghayer/Snippingtool/pull/19), merged)
+
+- **The server kill switch now reaches an EA tab that is already open.**
+  The background pushes an `engine.killSwitch` message into every open EA
+  tab after each bootstrap and heartbeat, and the content script's engine
+  tick pulls the cached flag as a fallback, so a running engine halts
+  without a page reload (worst case: one heartbeat period plus one tick).
+  The cross-app e2e journey asserts this on a live tab. See
+  `docs/06-extension.md` §5.
+- **Trial creation is race-safe.** Starting a trial right after login could
+  lose a race with the login's background IP-activity write and return a
+  500; the trial endpoint now uses the shared race-safe upsert.
+- **The Release workflow no longer fails on `main` without a staging
+  host.** A preflight job checks the four `STAGING_*` secrets and skips the
+  staging migrate and deploy with a workflow notice until they exist;
+  images are still built and pushed. See `docs/11-devops.md` §4.
+- CodeQL runs as a gate without code scanning (private repo, no Advanced
+  Security): the analysis fails the job on any error-level finding and
+  keeps the SARIF as a run artifact.
+
+What remains is on the go-live side and needs the live market or real
+accounts: day-one verification of the adapter's assumed EA service-layer
+shape, Stripe live keys, a staging/production host with its secrets, and
+the Chrome Web Store listing (`docs/13-roadmap.md`).
 
 ## What exists today
 
