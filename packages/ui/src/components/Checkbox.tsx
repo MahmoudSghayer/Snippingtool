@@ -17,16 +17,16 @@ export function Checkbox({ className, ...props }: CheckboxProps) {
   return (
     <CheckboxPrimitive.Root
       className={cn(
-        'flex size-5 items-center justify-center rounded-[4px] border border-[--sl-border] bg-[--sl-ground]',
-        'data-[state=checked]:bg-[--sl-accent] data-[state=checked]:border-[--sl-accent]',
-        'data-[state=indeterminate]:bg-[--sl-accent] data-[state=indeterminate]:border-[--sl-accent]',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[--sl-accent]',
+        'flex size-5 items-center justify-center rounded-[4px] border border-(--sl-border) bg-(--sl-ground)',
+        'data-[state=checked]:bg-(--sl-accent) data-[state=checked]:border-(--sl-accent)',
+        'data-[state=indeterminate]:bg-(--sl-accent) data-[state=indeterminate]:border-(--sl-accent)',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--sl-accent)',
         'disabled:opacity-50 disabled:cursor-not-allowed',
         className,
       )}
       {...props}
     >
-      <CheckboxPrimitive.Indicator className="text-[--sl-accent-ink]">
+      <CheckboxPrimitive.Indicator className="text-(--sl-accent-ink)">
         {props.checked === 'indeterminate' ? (
           <Minus className="size-3.5" />
         ) : (

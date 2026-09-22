@@ -596,8 +596,14 @@ NULL`.
 
 #### `profits`
 
-Daily per-user rollup, maintained by the `profits.rollup` hourly job
-(upsert on `(user_id, day)`). Financial record: `user_id` **RESTRICT**.
+Daily per-user rollup (upsert on `(user_id, day)`), written by
+`apps/api/src/lib/analytics/rollup.ts`. Every ingest route (`POST
+/trades/batch`, `POST /trades/:id/close`, `POST /sniping/attempts`)
+recomputes the days its write touched in the same request, so the dashboard
+never shows stale figures; the `profits.rollup` job sweeps today hourly as a
+self-healing backstop. Coins spent and snipes land on the day of the
+purchase/attempt, coins earned, net profit and closed trades on the day of
+the sale. Financial record: `user_id` **RESTRICT**.
 
 | Column                                      | Type                                   | Notes                 |
 | ------------------------------------------- | -------------------------------------- | --------------------- |
@@ -853,7 +859,7 @@ production`.
 | `search_activity_filter_hash_idx`, `saved_filters_user_filter_hash_unique_live`    | Correlating a live search back to a saved filter for the ranker.                                                                                                                   |
 | `sniping_activity_trade_id_idx`                                                    | Joining a snipe attempt to the `trades` row it became.                                                                                                                             |
 | `trades_user_id_trade_id_unique_live`                                              | Idempotent upsert from the extension (same `trade_id` reported twice is a no-op/update, not a duplicate).                                                                          |
-| `profits_user_id_day_unique`                                                       | The hourly `profits.rollup` job's upsert target.                                                                                                                                   |
+| `profits_user_id_day_unique`                                                       | The rollup's upsert target (ingest routes and the hourly job alike).                                                                                                               |
 | `filter_stats_coins_per_hour_idx`                                                  | Ranker "best filters right now" queries and admin filter-performance leaderboards.                                                                                                 |
 | `coupon_redemptions_coupon_user_unique`                                            | Enforces "one redemption per coupon per user" and doubles as the existence check before applying a coupon.                                                                         |
 | `payments_provider_payment_id_unique`                                              | Webhook-driven insert idempotency (a re-delivered Stripe event for the same payment is a no-op).                                                                                   |

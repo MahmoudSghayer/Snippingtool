@@ -20,18 +20,18 @@ function stringify(value: unknown): string {
 export function DiffViewer({ before, after, className }: DiffViewerProps) {
   if (!before && !after) {
     return (
-      <p className="text-sm text-[--sl-fg-muted]">No before/after data recorded for this entry.</p>
+      <p className="text-sm text-(--sl-fg-muted)">No before/after data recorded for this entry.</p>
     );
   }
   if (!before) {
     return (
       <div
         className={cn(
-          'rounded-[--sl-radius-md] border border-[--sl-positive]/30 bg-[--sl-positive]/5 p-3',
+          'rounded-(--sl-radius-md) border border-(--sl-positive)/30 bg-(--sl-positive)/5 p-3',
           className,
         )}
       >
-        <p className="mb-2 text-xs font-medium uppercase tracking-wide text-[--sl-positive]">
+        <p className="mb-2 text-xs font-medium uppercase tracking-wide text-(--sl-positive)">
           Created
         </p>
         <DiffTable
@@ -48,11 +48,11 @@ export function DiffViewer({ before, after, className }: DiffViewerProps) {
     return (
       <div
         className={cn(
-          'rounded-[--sl-radius-md] border border-[--sl-negative]/30 bg-[--sl-negative]/5 p-3',
+          'rounded-(--sl-radius-md) border border-(--sl-negative)/30 bg-(--sl-negative)/5 p-3',
           className,
         )}
       >
-        <p className="mb-2 text-xs font-medium uppercase tracking-wide text-[--sl-negative]">
+        <p className="mb-2 text-xs font-medium uppercase tracking-wide text-(--sl-negative)">
           Deleted
         </p>
         <DiffTable
@@ -73,7 +73,7 @@ export function DiffViewer({ before, after, className }: DiffViewerProps) {
     .map((key) => ({ key, before: before[key], after: after[key] }));
 
   if (rows.length === 0) {
-    return <p className="text-sm text-[--sl-fg-muted]">No field-level changes recorded.</p>;
+    return <p className="text-sm text-(--sl-fg-muted)">No field-level changes recorded.</p>;
   }
 
   return (
@@ -87,30 +87,30 @@ function DiffTable({ rows }: { rows: { key: string; before: unknown; after: unkn
   return (
     <table className="w-full border-collapse font-mono text-xs">
       <thead>
-        <tr className="text-[--sl-fg-muted]">
-          <th className="w-1/4 border-b border-[--sl-border] px-2 py-1.5 text-left font-medium">
+        <tr className="text-(--sl-fg-muted)">
+          <th className="w-1/4 border-b border-(--sl-border) px-2 py-1.5 text-left font-medium">
             Field
           </th>
-          <th className="border-b border-[--sl-border] px-2 py-1.5 text-left font-medium">
+          <th className="border-b border-(--sl-border) px-2 py-1.5 text-left font-medium">
             Before
           </th>
-          <th className="border-b border-[--sl-border] px-2 py-1.5 text-left font-medium">After</th>
+          <th className="border-b border-(--sl-border) px-2 py-1.5 text-left font-medium">After</th>
         </tr>
       </thead>
       <tbody>
         {rows.map((row) => (
-          <tr key={row.key} className="border-b border-[--sl-border] last:border-0">
-            <td className="px-2 py-1.5 align-top text-[--sl-fg-muted]">{row.key}</td>
-            <td className="px-2 py-1.5 align-top text-[--sl-negative]/90 break-all">
+          <tr key={row.key} className="border-b border-(--sl-border) last:border-0">
+            <td className="px-2 py-1.5 align-top text-(--sl-fg-muted)">{row.key}</td>
+            <td className="px-2 py-1.5 align-top text-(--sl-negative)/90 break-all">
               {row.before === undefined ? (
-                <span className="text-[--sl-fg-muted]">—</span>
+                <span className="text-(--sl-fg-muted)">—</span>
               ) : (
                 stringify(row.before)
               )}
             </td>
-            <td className="px-2 py-1.5 align-top text-[--sl-positive]/90 break-all">
+            <td className="px-2 py-1.5 align-top text-(--sl-positive)/90 break-all">
               {row.after === undefined ? (
-                <span className="text-[--sl-fg-muted]">—</span>
+                <span className="text-(--sl-fg-muted)">—</span>
               ) : (
                 stringify(row.after)
               )}

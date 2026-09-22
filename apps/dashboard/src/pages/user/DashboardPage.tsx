@@ -204,10 +204,10 @@ export function DashboardPage() {
           <CardHeader>
             <CardTitle>Recent trades</CardTitle>
             <Link
-              to="/analytics"
+              to="/trades"
               className="text-xs text-gold underline underline-offset-2 hover:text-gold/80"
             >
-              View analytics
+              All trades
             </Link>
           </CardHeader>
           <CardContent>

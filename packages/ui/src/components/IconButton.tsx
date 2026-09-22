@@ -13,11 +13,11 @@ export interface IconButtonProps extends ButtonHTMLAttributes<HTMLButtonElement>
 }
 
 const variantClasses: Record<ButtonVariant, string> = {
-  primary: 'bg-[--sl-accent] text-[--sl-accent-ink] hover:brightness-110',
-  secondary: 'bg-[--sl-card-2] text-[--sl-fg] border border-[--sl-border] hover:bg-[--sl-card]',
-  outline: 'bg-transparent text-[--sl-fg] border border-[--sl-border] hover:bg-[--sl-card-2]',
-  ghost: 'bg-transparent text-[--sl-fg-muted] hover:bg-[--sl-card-2] hover:text-[--sl-fg]',
-  destructive: 'bg-[--sl-negative] text-[#2a0f0a] hover:brightness-110',
+  primary: 'bg-(--sl-accent) text-(--sl-accent-ink) hover:brightness-110',
+  secondary: 'bg-(--sl-card-2) text-(--sl-fg) border border-(--sl-border) hover:bg-(--sl-card)',
+  outline: 'bg-transparent text-(--sl-fg) border border-(--sl-border) hover:bg-(--sl-card-2)',
+  ghost: 'bg-transparent text-(--sl-fg-muted) hover:bg-(--sl-card-2) hover:text-(--sl-fg)',
+  destructive: 'bg-(--sl-negative) text-[#2a0f0a] hover:brightness-110',
 };
 
 /** Icon-only control action button. `label` is mandatory (rendered as
@@ -34,8 +34,8 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
       aria-label={label}
       title={label}
       className={cn(
-        'inline-flex items-center justify-center rounded-[--sl-radius-sm] transition-colors duration-[--sl-motion-fast]',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[--sl-accent]',
+        'inline-flex items-center justify-center rounded-(--sl-radius-sm) transition-colors duration-(--sl-motion-fast)',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--sl-accent)',
         'disabled:opacity-50 disabled:cursor-not-allowed',
         size === 'sm' ? 'size-8' : 'size-10',
         variantClasses[variant],

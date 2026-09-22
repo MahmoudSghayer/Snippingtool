@@ -127,13 +127,13 @@ export function DataTable<TData>({
         </div>
       )}
 
-      <div className="max-h-[70vh] overflow-auto rounded-[--sl-radius-lg] border border-[--sl-border]">
+      <div className="max-h-[70vh] overflow-auto rounded-(--sl-radius-lg) border border-(--sl-border)">
         <table className="w-full border-collapse text-sm">
           <thead className="sticky top-0 z-10">
             {table.getHeaderGroups().map((headerGroup) => (
               <tr
                 key={headerGroup.id}
-                className="border-b border-[--sl-border] bg-[--sl-surface-2]"
+                className="border-b border-(--sl-border) bg-(--sl-surface-2)"
               >
                 {headerGroup.headers.map((header) => {
                   const canSort = header.column.getCanSort();
@@ -141,13 +141,13 @@ export function DataTable<TData>({
                   return (
                     <th
                       key={header.id}
-                      className="whitespace-nowrap px-4 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-[--sl-fg-muted]"
+                      className="whitespace-nowrap px-4 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-(--sl-fg-muted)"
                     >
                       {header.isPlaceholder ? null : canSort ? (
                         <button
                           type="button"
                           onClick={header.column.getToggleSortingHandler()}
-                          className="inline-flex items-center gap-1 hover:text-[--sl-fg]"
+                          className="inline-flex items-center gap-1 hover:text-(--sl-fg)"
                         >
                           {flexRender(header.column.columnDef.header, header.getContext())}
                           {sortDir === 'asc' ? (
@@ -187,7 +187,7 @@ export function DataTable<TData>({
               </tr>
             ) : showSkeleton ? (
               Array.from({ length: skeletonRows }).map((_, i) => (
-                <tr key={i} className="border-b border-[--sl-border]">
+                <tr key={i} className="border-b border-(--sl-border)">
                   {allColumns.map((_col, j) => (
                     <td key={j} className="px-4 py-3">
                       <Skeleton className="h-4 w-full max-w-40" />
@@ -211,12 +211,12 @@ export function DataTable<TData>({
                   key={row.id}
                   onClick={onRowClick ? () => onRowClick(row.original) : undefined}
                   className={cn(
-                    'border-b border-[--sl-border] last:border-0',
-                    onRowClick && 'cursor-pointer hover:bg-[--sl-surface-2]',
+                    'border-b border-(--sl-border) last:border-0',
+                    onRowClick && 'cursor-pointer hover:bg-(--sl-surface-2)',
                   )}
                 >
                   {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id} className="px-4 py-3 text-[--sl-fg]">
+                    <td key={cell.id} className="px-4 py-3 text-(--sl-fg)">
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </td>
                   ))}

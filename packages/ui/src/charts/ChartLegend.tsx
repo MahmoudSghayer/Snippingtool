@@ -20,7 +20,7 @@ export function ChartLegend({ items, className }: ChartLegendProps) {
   return (
     <ul className={`flex flex-wrap items-center gap-x-4 gap-y-1.5 ${className ?? ''}`}>
       {items.map((item) => (
-        <li key={item.key} className="flex items-center gap-1.5 text-xs text-[--sl-fg-muted]">
+        <li key={item.key} className="flex items-center gap-1.5 text-xs text-(--sl-fg-muted)">
           <span
             className="size-2.5 shrink-0 rounded-full"
             style={{ backgroundColor: item.color }}

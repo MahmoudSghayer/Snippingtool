@@ -21,12 +21,12 @@ export function Tooltip({ content, children, side = 'top' }: TooltipProps) {
           side={side}
           sideOffset={6}
           className={cn(
-            'z-50 rounded-[--sl-radius-sm] border border-[--sl-border] bg-[--sl-surface-2] px-2.5 py-1.5 text-xs text-[--sl-fg] shadow-lg',
+            'z-50 rounded-(--sl-radius-sm) border border-(--sl-border) bg-(--sl-surface-2) px-2.5 py-1.5 text-xs text-(--sl-fg) shadow-lg',
             'data-[state=delayed-open]:animate-in data-[state=delayed-open]:fade-in-0 data-[state=delayed-open]:zoom-in-95',
           )}
         >
           {content}
-          <TooltipPrimitive.Arrow className="fill-[--sl-surface-2]" />
+          <TooltipPrimitive.Arrow className="fill-(--sl-surface-2)" />
         </TooltipPrimitive.Content>
       </TooltipPrimitive.Portal>
     </TooltipPrimitive.Root>

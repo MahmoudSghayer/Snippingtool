@@ -81,7 +81,19 @@ deletes everywhere, KPI views and a materialised daily KPI table.
 **Dashboard** (`apps/dashboard` + `packages/ui`): React 19 user and admin
 dashboard on the generated OpenAPI client, cookie sessions with CSRF, live
 counters and notifications over WebSocket, and a component library in the
-dark gaming theme. Deployed to Vercel.
+dark gaming theme. Deployed to Vercel. The **Trades** page lists every card
+the extension has logged with the tax and net profit the API computed, and
+records a sale on a card that is still open — the extension never sees the
+trader's own transfer list, so that is how a bought card becomes a closed,
+profit-bearing trade.
+
+**Where profit numbers come from.** The API is the only thing that computes
+them. Whatever a client reports for tax and net profit is ignored: both are
+derived from the buy and sell prices with `@sl/shared`'s
+`computeTradeProfit` (5% EA tax, integer coins), and every write recomputes
+the affected `(user, UTC day)` rows of the `profits` table in the same
+request, so the dashboard reflects a trade immediately rather than after the
+hourly job.
 
 **Shared contracts** (`packages/shared`): plan and feature constants, error
 codes, the admin permission matrix, every request and response schema, the
@@ -111,18 +123,39 @@ Requirements: Node 22, pnpm via Corepack, PostgreSQL 16 and Redis 7.
 corepack enable
 pnpm install
 
+# Postgres 16 + Redis 7. Either use the repo's compose file:
+pnpm docker:dev                          # postgres, redis, mailpit
+# …or point at your own instances, creating the role and both databases once:
+#   createuser sl --login --pwprompt && createdb sniper_ledger -O sl \
+#     && createdb sniper_ledger_test -O sl
+
+# env: one file serves the API, the worker, the migrator and the seed
+cp infra/env/.env.development.example apps/api/.env
+node infra/scripts/check-env.mjs apps/api/.env   # validates it against the zod schema
+
 # database (defaults: postgres://sl:sl@127.0.0.1:5432/sniper_ledger)
 pnpm --filter @sl/db migrate
 SEED_ADMIN_EMAIL=admin@example.com SEED_ADMIN_PASSWORD='change-me' pnpm --filter @sl/db seed
 
-# API (copy apps/api/.env.example to apps/api/.env first)
-pnpm --filter @sl/api keys:generate      # JWT + entitlement signing keys
+# build the workspace packages the api and dashboard resolve through dist/
+pnpm exec turbo run build --filter=@sl/api^... --filter=@sl/dashboard^...
+
+# API (the example env ships a working dev keypair; regenerate your own with
+# `pnpm --filter @sl/api keys:generate` if you would rather not share one)
 pnpm --filter @sl/api dev                # http://localhost:3000, /health/ready
 pnpm --filter @sl/api worker             # BullMQ jobs
+
+# dashboard — http://localhost:5173, proxies /api and /ws to the API above
+pnpm --filter @sl/dashboard dev
 
 # extension
 pnpm --filter @sl/extension build        # dist/ledger and dist/ledger-auto
 # chrome://extensions → Developer mode → Load unpacked → apps/extension/dist/ledger
+
+# sign in as the seeded dev user (NODE_ENV != production):
+#   dev@sniperledger.local / dev-password-123
+# The trial plan allows one device, so a second browser profile needs the
+# first device revoked from Settings → Devices.
 
 # everything (test suites run serially: they share the test database)
 pnpm typecheck && pnpm lint && pnpm build && pnpm test

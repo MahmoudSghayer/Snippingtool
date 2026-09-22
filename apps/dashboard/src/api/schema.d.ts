@@ -6537,6 +6537,68 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/trades/{id}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        sellPrice: number;
+                        /** Format: date-time */
+                        soldAt?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            id: string;
+                            tradeId: string;
+                            resourceId: number;
+                            assetId: number | null;
+                            rating: number | null;
+                            buyPrice: number;
+                            sellPrice: number | null;
+                            eaTax: number;
+                            netProfit: number | null;
+                            /** @enum {string} */
+                            status: "bought" | "listed" | "sold" | "expired" | "unsold";
+                            /** Format: date-time */
+                            boughtAt: string;
+                            /** Format: date-time */
+                            soldAt: string | null;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/trades": {
         parameters: {
             query?: never;

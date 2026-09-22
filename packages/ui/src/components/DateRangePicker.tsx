@@ -81,7 +81,7 @@ export function DateRangePicker({ value, onChange, className }: DateRangePickerP
             className="w-40"
             onChange={(e) => onChange({ from: e.target.value, to: value.to }, 'custom')}
           />
-          <span className="text-[--sl-fg-muted]">–</span>
+          <span className="text-(--sl-fg-muted)">–</span>
           <Input
             type="date"
             value={value.to}
