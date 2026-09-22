@@ -4,8 +4,10 @@
 // connection once you call .subscribe(), since that connection can then only
 // be used for pub/sub commands). Both close on shutdown.
 
+import { readFileSync } from 'node:fs';
+
 import fp from 'fastify-plugin';
-import { Redis } from 'ioredis';
+import { Redis, type RedisOptions } from 'ioredis';
 
 import type { FastifyInstance } from 'fastify';
 
@@ -41,16 +43,29 @@ export default fp(
     const isTest = fastify.config.NODE_ENV === 'test';
     const db = isTest ? fastify.config.REDIS_TEST_DB : undefined;
 
-    const redis = new Redis(fastify.config.REDIS_URL, {
+    // ioredis turns TLS on from the `rediss://` scheme alone, but then
+    // verifies against Node's built-in trust store — which does not contain
+    // the private CA that signs the in-stack Redis certificate on the
+    // single-VM topology, so the handshake would fail. Handing it that CA
+    // explicitly is what makes verification *succeed* here; note this adds
+    // trust rather than removing it — `rejectUnauthorized` stays at its
+    // default, so a wrong or self-signed cert is still refused, and the
+    // hostname is still checked against the cert's SAN.
+    const caFile = fastify.config.REDIS_TLS_CA_FILE;
+    const tls: Pick<RedisOptions, 'tls'> =
+      caFile && fastify.config.REDIS_URL.startsWith('rediss://')
+        ? { tls: { ca: [readFileSync(caFile)] } }
+        : {};
+
+    const options: RedisOptions = {
       maxRetriesPerRequest: null,
       lazyConnect: false,
       db,
-    });
-    const redisSub = new Redis(fastify.config.REDIS_URL, {
-      maxRetriesPerRequest: null,
-      lazyConnect: false,
-      db,
-    });
+      ...tls,
+    };
+
+    const redis = new Redis(fastify.config.REDIS_URL, options);
+    const redisSub = new Redis(fastify.config.REDIS_URL, options);
 
     redis.on('error', (err) => fastify.log.error({ err }, 'redis connection error'));
     redisSub.on('error', (err) => fastify.log.error({ err }, 'redis pub/sub connection error'));

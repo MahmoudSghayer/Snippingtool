@@ -65,4 +65,7 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
   CMD wget --spider -q http://127.0.0.1:8080/healthz || exit 1
 STOPSIGNAL SIGQUIT
-CMD ["nginx", "-g", "daemon off;"]
+# fholzer/nginx-brotli sets ENTRYPOINT ["nginx"], so CMD supplies *arguments*
+# only. Repeating "nginx" here made the container exec `nginx nginx -g
+# 'daemon off;'`, which nginx rejects with "invalid option: nginx".
+CMD ["-g", "daemon off;"]

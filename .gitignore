@@ -21,6 +21,11 @@ test-results/
 # infra/.env.staging, or root .env for local dev) stays ignored above.
 !infra/env/*.example
 
+# Datastore TLS material, minted per-host by
+# infra/scripts/gen-datastore-certs.sh. Private keys — regenerate on a
+# new box, never commit.
+infra/certs/
+
 # logs
 *.log
 npm-debug.log*

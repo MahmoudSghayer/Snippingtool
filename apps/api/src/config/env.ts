@@ -109,8 +109,29 @@ const envSchema = z.object({
 
   // --- Data stores ---
   DATABASE_URL: z.string().min(1).default('postgres://sl:sl@127.0.0.1:5432/sniper_ledger'),
-  TEST_DATABASE_URL: z.string().min(1).optional(),
+  // Test-only, and absent in real deployments — but an env *file* spells
+  // "unset" as `TEST_DATABASE_URL=`, which is an empty string, not
+  // undefined, and `.min(1)` rejected it hard enough to stop the
+  // production API booting. Every other optional var here is a bare
+  // `.optional()` that tolerates ''; normalise '' to undefined so this
+  // one behaves the same while keeping the non-empty guarantee for
+  // callers that do set it.
+  TEST_DATABASE_URL: z.preprocess(
+    (v) => (v === '' ? undefined : v),
+    z.string().min(1).optional(),
+  ),
   REDIS_URL: z.string().min(1).default('redis://127.0.0.1:6379'),
+  // PEM bundle used to verify the Redis server certificate when REDIS_URL
+  // is `rediss://`. Needed by the single-VM compose topology, where Redis
+  // is an in-stack container holding a cert from this repo's own CA
+  // (infra/scripts/gen-datastore-certs.sh) rather than one chaining to a
+  // public root Node already trusts. Leave unset against a managed Redis
+  // with a publicly-trusted cert — the system trust store is then used, and
+  // verification stays on either way (plugins/redis.ts).
+  REDIS_TLS_CA_FILE: z.preprocess(
+    (v) => (v === '' ? undefined : v),
+    z.string().min(1).optional(),
+  ),
   // Logical Redis DB index used only under NODE_ENV=test (plugins/redis.ts,
   // src/test/global-setup.ts) — see the SKELETON_READY note on why this is a
   // dedicated DB index rather than a key prefix. Configurable so two test
