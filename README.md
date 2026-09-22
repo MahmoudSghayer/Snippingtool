@@ -24,7 +24,7 @@ you before you look like a bot — it is never sold as "undetectable". See
 ## Build status
 
 The build follows a data-first sequence. All eleven phases are built,
-verified (`pnpm typecheck && pnpm lint && pnpm build && pnpm test`: 700
+verified (`pnpm typecheck && pnpm lint && pnpm build && pnpm test`: 698
 tests across seven packages) and **merged into `main` via
 [PR #2](https://github.com/MahmoudSghayer/Snippingtool/pull/2)** with the
 full CI pipeline green (lint, typecheck, unit, migrations, API integration,
