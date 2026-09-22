@@ -23,7 +23,7 @@
     "autocannon": "^7.15.0",
     "@sl/api": "workspace:*",
     "@sl/config": "workspace:*",
-    "@types/chrome": "^0.0.287",
+    "@types/chrome": "^0.3.0",
     "@types/node": "^22.10.5",
     "@types/ws": "^8.5.13",
     "dotenv": "^16.4.7",
