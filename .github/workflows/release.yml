@@ -172,7 +172,7 @@ jobs:
     environment: staging
     steps:
       - name: docker compose pull && up -d (over SSH)
-        uses: appleboy/ssh-action@v1.2.0
+        uses: appleboy/ssh-action@v1.2.5
         with:
           host: ${{ secrets.STAGING_SSH_HOST }}
           username: ${{ secrets.STAGING_SSH_USER }}
@@ -193,7 +193,7 @@ jobs:
     environment: production # requires the reviewers configured on this GitHub Environment — see docs/11-devops.md
     steps:
       - name: docker compose pull && up -d (over SSH, zero-downtime — see docs/11-devops.md)
-        uses: appleboy/ssh-action@v1.2.0
+        uses: appleboy/ssh-action@v1.2.5
         with:
           host: ${{ secrets.PRODUCTION_SSH_HOST }}
           username: ${{ secrets.PRODUCTION_SSH_USER }}
