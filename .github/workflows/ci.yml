@@ -347,7 +347,7 @@ jobs:
         run: xvfb-run -a pnpm --filter @sl/dashboard test:e2e
         env:
           PLAYWRIGHT_BROWSERS_PATH: /opt/pw-browsers
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: dashboard-e2e-report
@@ -379,7 +379,7 @@ jobs:
         env:
           PLAYWRIGHT_BROWSERS_PATH: /opt/pw-browsers
           PLAYWRIGHT_CHROMIUM_PATH: /opt/pw-browsers/chromium
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: extension-e2e-report
@@ -442,7 +442,7 @@ jobs:
         env:
           PLAYWRIGHT_BROWSERS_PATH: /opt/pw-browsers
           PLAYWRIGHT_CHROMIUM_PATH: /opt/pw-browsers/chromium
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: cross-app-e2e-report
@@ -502,7 +502,7 @@ jobs:
         run: pnpm --filter @sl/extension exec vitest run --coverage
       - name: apps/api coverage
         run: pnpm --filter @sl/api exec vitest run --coverage
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: coverage-reports
@@ -592,7 +592,7 @@ jobs:
           cp /tmp/k6-v0.55.0-linux-amd64/k6 .tools/k6 && chmod +x .tools/k6
       - name: load smoke
         run: pnpm --filter @sl/tests load:smoke
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: load-smoke-summaries
