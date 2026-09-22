@@ -1,7 +1,8 @@
 name: Release
 
 # Two triggers, different scope:
-#   push to main   -> build+push `:main`-tagged images, migrate + deploy STAGING (auto, no approval)
+#   push to main   -> build+push `:main`-tagged images, migrate + deploy STAGING (auto, no approval;
+#                     skipped with a notice until the STAGING_* secrets exist)
 #   push tag vX.Y.Z -> build+push semver-tagged images, extension release zips,
 #                      migrate + deploy PRODUCTION (gated by the `production`
 #                      GitHub Environment's required reviewers)
@@ -139,9 +140,33 @@ jobs:
   # both options — the compose-bundled Postgres in docker-compose.prod.yml
   # is NOT published to the internet by default, so pick one of those two
   # before relying on this job against it).
+  # Until a staging host exists, the four STAGING_* secrets are absent and
+  # both staging jobs below would fail on every push to main (the migrator
+  # falls back to localhost and gets ECONNREFUSED). Secrets are not readable
+  # in a job-level `if`, so this job reads them in a step and exposes one
+  # output the staging jobs gate on — a skipped staging deploy is a visible
+  # notice, not a red run (docs/11-devops.md "Environments").
+  staging-preflight:
+    name: Staging configured?
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: staging
+    outputs:
+      configured: ${{ steps.check.outputs.configured }}
+    steps:
+      - id: check
+        env:
+          CONFIGURED: ${{ secrets.STAGING_DATABASE_URL != '' && secrets.STAGING_SSH_HOST != '' && secrets.STAGING_SSH_USER != '' && secrets.STAGING_SSH_PRIVATE_KEY != '' }}
+        run: |
+          echo "configured=${CONFIGURED}" >> "$GITHUB_OUTPUT"
+          if [ "${CONFIGURED}" != "true" ]; then
+            echo "::notice title=staging deploy skipped::STAGING_DATABASE_URL / STAGING_SSH_HOST / STAGING_SSH_USER / STAGING_SSH_PRIVATE_KEY are not all set on the 'staging' environment — images were built and pushed, migration and deploy were skipped (docs/11-devops.md 'Environments')."
+          fi
+
   migrate-staging:
     name: Migrate staging DB
-    if: github.ref == 'refs/heads/main'
+    needs: [staging-preflight]
+    if: github.ref == 'refs/heads/main' && needs.staging-preflight.outputs.configured == 'true'
     runs-on: ubuntu-latest
     environment: staging
     steps:
@@ -166,8 +191,8 @@ jobs:
   # -------------------------------------------------------------------------
   deploy-staging:
     name: Deploy staging
-    if: github.ref == 'refs/heads/main'
-    needs: [build-and-push, migrate-staging]
+    needs: [build-and-push, staging-preflight, migrate-staging]
+    if: github.ref == 'refs/heads/main' && needs.staging-preflight.outputs.configured == 'true'
     runs-on: ubuntu-latest
     environment: staging
     steps:

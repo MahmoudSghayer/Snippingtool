@@ -261,6 +261,38 @@ The **kill switch** (`Governor.setKillSwitch(active, reason)`, driven by
 is checked first, always, and is unconditional — no threshold math runs
 once it is active, regardless of build target.
 
+It also has to reach an engine that is **already running**, not just the
+next page load. Two paths, both in the extension (the extension has no
+WebSocket client; the API's `kill_switch` WS event fans out to the admin
+overview only):
+
+- **Push** — `background/kill-switch.ts`: after every bootstrap and every
+  heartbeat (the 10-minute `chrome.alarms` tick, or a forced one from the
+  popup), `propagateKillSwitch()` sends `engine.killSwitch` (strict schema
+  `extContentKillSwitchMessageSchema` in `@sl/shared`) to every open EA tab
+  via `tabs.query({ url: EA_WEB_APP_MATCHES })` + `tabs.sendMessage`. No
+  new manifest permission: a URL-filtered query needs only the EA host
+  permissions the manifest already declares. An active switch is
+  re-broadcast on every heartbeat (cheap, and closes the "tab opened
+  between two heartbeats" gap); a deactivation is broadcast once. The last
+  pushed value lives in `storage.session` so a restarted service worker
+  does not re-announce a deactivation.
+- **Pull** — `content/index.ts`'s engine tick (every 8 s) asks background
+  for `license.killSwitchGet`, the cached entitlement's flag from
+  `storage.local` (no network), and applies any difference. A missed push
+  is therefore corrected within one tick.
+
+Either path calls the content script's `applyKillSwitch()`, which sets the
+governor's switch, updates the in-page panel's status line ("Kill switch
+active — all actions blocked.") and, while active, short-circuits the
+engine tick entirely. The flag is tracked in the content script as well as
+in the governor so the panel reports it even on an account with no engine
+(M1-only) and so a push that arrives before the M2 bootstrap finishes is
+not lost. Worst-case latency from an admin flipping the toggle to an open
+tab halting is therefore one heartbeat period (10 min) plus one engine
+tick; the cross-app e2e journey (b) asserts the open EA tab reports the
+switch after the heartbeat with no reload.
+
 `Governor.snapshot()` is the always-on "current utilization" read the risk
 meter (`ui/panel.ts`'s "Risk budget" section, and the popup) displays; it
 never denies anything itself, `allow()` is the only gate.

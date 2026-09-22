@@ -193,6 +193,15 @@ over SSH (`appleboy/ssh-action`) running
 Production deploy/migrate both run under the `production` GitHub
 Environment, which should have required reviewers configured (one-time
 repo setup: **Settings → Environments → production → Required reviewers**).
+The staging pair (`migrate-staging`, `deploy-staging`) is gated by a
+`staging-preflight` job that checks, inside a step (secrets are not
+readable in a job-level `if`), that all four staging secrets exist —
+`STAGING_DATABASE_URL`, `STAGING_SSH_HOST`, `STAGING_SSH_USER`,
+`STAGING_SSH_PRIVATE_KEY` on the `staging` environment. Until they do, a
+push to `main` still builds and pushes the `:main` images but skips
+migration and deploy with a workflow notice instead of failing; set the
+four secrets and the next push to `main` deploys staging with no workflow
+change.
 
 `.github/actions/setup-pnpm` pins pnpm/Node once (from root
 `package.json`'s `packageManager`) for every job in every workflow.

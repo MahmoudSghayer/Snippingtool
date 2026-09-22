@@ -17,6 +17,7 @@
  * boot here used to take M1 recording down with it (docs/12-testing.md
  * "Defects found" row #10). Nothing in this file touches `lib/storage.ts`.
  */
+import { extContentKillSwitchMessageSchema } from '@sl/shared';
 import browser from 'webextension-polyfill';
 
 import { AssistEngine } from '../engine/assist.js';
@@ -104,6 +105,11 @@ async function main(): Promise<void> {
   // having booted.
   let governor: Governor | null = null;
   let assist: AssistEngine | null = null;
+  // Server kill switch, tracked here as well as inside the governor so the
+  // panel reports it even on an account with no engine (M1-only), and so
+  // an `engine.killSwitch` push arriving before the M2 bootstrap finishes
+  // is not lost (it is re-applied to the governor once one exists).
+  let killSwitchActive = false;
 
   function dominantResource(auctions: TrimmedAuction[]): number | null {
     const tally = new Map<number, number>();
@@ -210,14 +216,40 @@ async function main(): Promise<void> {
 
   function engineHealthState(): 'live' | 'warn' | 'risk' {
     if (!probeOk) return 'warn';
-    if (governor?.isKillSwitchActive()) return 'risk';
+    if (killSwitchActive || governor?.isKillSwitchActive()) return 'risk';
     return 'live';
   }
   function engineHealthMessage(): string {
     if (!probeOk) return `Bundle probe failed — assist/automation are hard-stopped until adapter.ts is updated.`;
-    if (governor?.isKillSwitchActive()) return 'Kill switch active — all actions blocked.';
+    if (killSwitchActive || governor?.isKillSwitchActive()) return 'Kill switch active — all actions blocked.';
     return assist ? 'Assist engine active.' : 'Recording. Nothing beyond product telemetry is sent.';
   }
+
+  // ---- server kill switch: push (background -> this tab) + pull ------------
+  //
+  // Project rule 3 makes the kill switch unconditional, so it must reach an
+  // engine that is already running, not just the next page load.
+  // `background/kill-switch.ts` broadcasts `engine.killSwitch` to every open
+  // EA tab after each bootstrap/heartbeat; `engineTick()` below also pulls
+  // the cached flag (`license.killSwitchGet`, no network) every tick, so a
+  // missed push is corrected within one tick.
+  function applyKillSwitch(active: boolean, reason?: string): void {
+    const changed = active !== killSwitchActive;
+    killSwitchActive = active;
+    governor?.setKillSwitch(active, active ? (reason ?? 'server kill switch active') : undefined);
+    if (changed) {
+      if (active) logger.warn(`kill switch active — ${reason ?? 'server kill switch active'}`, 'kill-switch');
+      else logger.info('kill switch cleared by the server', 'kill-switch');
+    }
+    panel.setHealth(engineHealthState(), engineHealthMessage());
+  }
+
+  browser.runtime.onMessage.addListener((message: unknown): undefined => {
+    const parsed = extContentKillSwitchMessageSchema.safeParse(message);
+    if (!parsed.success) return undefined; // not for us — another listener's
+    applyKillSwitch(parsed.data.payload.active, parsed.data.payload.reason);
+    return undefined;
+  });
 
   // ---- M2/M3: engine bootstrap (account required) --------------------------
 
@@ -232,13 +264,14 @@ async function main(): Promise<void> {
 
   const authStatus = await send<{ authenticated: boolean }>('auth.status');
   let features: FeatureKey[] = [];
-  let killSwitchActive = false;
 
   if (authStatus?.authenticated) {
     const bootstrap = await send<BootstrapResponse>('license.bootstrap');
     if (bootstrap) {
       features = bootstrap.features;
-      killSwitchActive = bootstrap.killSwitchActive;
+      // A push may already have arrived while this bootstrap was in flight;
+      // an active switch from either source wins.
+      killSwitchActive = killSwitchActive || bootstrap.killSwitchActive;
       settingsCache = bootstrap.settings;
     }
   }
@@ -387,6 +420,9 @@ async function main(): Promise<void> {
 
   async function engineTick(): Promise<void> {
     if (!governor || !probeOk) return;
+    const pulled = await send<{ active: boolean; reason?: string }>('license.killSwitchGet');
+    if (pulled && pulled.active !== killSwitchActive) applyKillSwitch(pulled.active, pulled.reason);
+    if (killSwitchActive) return; // nothing to rank or attempt while halted
     await refreshSummaries();
     const candidates = buildCandidatesFromTracked();
     rankedCandidates = rankCandidates(candidates, { minEv: settingsCache.targets.minProfitPerSnipe });

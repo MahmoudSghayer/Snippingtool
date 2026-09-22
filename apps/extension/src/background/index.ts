@@ -35,6 +35,7 @@ import * as db from '../store/db.js';
 import { handleAuthLogin, handleAuthLogout, handleAuthMfaVerify, handleAuthRegister, handleAuthResendVerification, handleAuthStatus } from './auth.js';
 import { installGlobalErrorHandlers, handleErrorsReport, ensureErrorFlushAlarm, onErrorFlushAlarm } from './errors.js';
 import { handleEngineStateGet, handleEngineStateSet, handleGovernorSnapshotGet, handleGovernorSnapshotPush } from './governor.js';
+import { handleKillSwitchGet } from './kill-switch.js';
 import { ensureHeartbeatAlarm, handleLicenseBootstrap, handleLicenseHeartbeat, onHeartbeatAlarm, runBootstrap } from './license.js';
 import {
   handleDevicesList,
@@ -87,6 +88,7 @@ const handlers: Record<string, Handler> = {
 
   'license.bootstrap': () => handleLicenseBootstrap(),
   'license.heartbeat': (payload) => handleLicenseHeartbeat((payload as { engineState: 'idle' | 'running' | 'paused' | 'halted' }).engineState),
+  'license.killSwitchGet': () => handleKillSwitchGet(),
 
   'settings.get': () => handleSettingsGet(),
   'settings.set': (payload) => handleSettingsSet(payload as never),
@@ -123,7 +125,7 @@ const handlers: Record<string, Handler> = {
 // `background/auth.ts` itself). A handler with no payload (`auth.refresh`,
 // `auth.status`, `license.bootstrap`, `settings.get`, `filters.list`,
 // `devices.list`, `logs.export`, `telemetry.flush`, `errors.report`,
-// `governor.snapshotGet`, `engine.stateGet`, `engine.state`, `counts`) has nothing to validate and is deliberately
+// `governor.snapshotGet`, `engine.stateGet`, `license.killSwitchGet`, `engine.state`, `counts`) has nothing to validate and is deliberately
 // left out — every handler still gets the envelope-level check above plus
 // the try/catch's crash safety net (an `async` handler's thrown `TypeError`
 // from a malformed payload always becomes a rejected promise, never an

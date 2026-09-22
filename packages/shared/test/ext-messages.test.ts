@@ -7,6 +7,7 @@ import {
   backgroundMessageEnvelopeSchema,
   extBackgroundEngineStateSetPayloadSchema,
   extBackgroundGovernorSnapshotPushPayloadSchema,
+  extContentKillSwitchMessageSchema,
 } from '../src/ext-messages.js';
 
 // Regression: background/index.ts registers a 'governor.snapshotPush'/
@@ -75,6 +76,53 @@ describe('backgroundMessageEnvelopeSchema', () => {
     expect(backgroundMessageEnvelopeSchema.safeParse({ type: 'engine.stateGet' }).success).toBe(
       true,
     );
+  });
+
+  // Kill-switch propagation (docs/06-extension.md §5): the content script's
+  // no-network pull is a payload-less background message; the push is a
+  // background -> tab message with its own strict schema.
+  it('accepts license.killSwitchGet with no payload', () => {
+    expect(
+      backgroundMessageEnvelopeSchema.safeParse({ type: 'license.killSwitchGet' }).success,
+    ).toBe(true);
+  });
+});
+
+describe('extContentKillSwitchMessageSchema (background -> EA tab)', () => {
+  it('accepts an activation with a reason and a bare deactivation', () => {
+    expect(
+      extContentKillSwitchMessageSchema.safeParse({
+        type: 'engine.killSwitch',
+        payload: { active: true, reason: 'admin' },
+      }).success,
+    ).toBe(true);
+    expect(
+      extContentKillSwitchMessageSchema.safeParse({
+        type: 'engine.killSwitch',
+        payload: { active: false },
+      }).success,
+    ).toBe(true);
+  });
+
+  it('rejects unknown keys, a wrong type, and a non-boolean flag', () => {
+    expect(
+      extContentKillSwitchMessageSchema.safeParse({
+        type: 'engine.killSwitch',
+        payload: { active: true, extra: 1 },
+      }).success,
+    ).toBe(false);
+    expect(
+      extContentKillSwitchMessageSchema.safeParse({
+        type: 'engine.stateGet',
+        payload: { active: true },
+      }).success,
+    ).toBe(false);
+    expect(
+      extContentKillSwitchMessageSchema.safeParse({
+        type: 'engine.killSwitch',
+        payload: { active: 'yes' },
+      }).success,
+    ).toBe(false);
   });
 });
 

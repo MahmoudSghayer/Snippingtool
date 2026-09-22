@@ -4,13 +4,12 @@
 // manifest shape is easy to unit-test/read on its own (see
 // docs/06-extension.md, "Build targets" for the field-by-field rationale).
 
-// The UTAS market path has outlived many bundle rewrites; the EA web app
-// itself lives at these two origins (with/without a locale segment) — see
-// `src/main/adapter.ts` for the matching passive-observation regex.
-export const EA_WEB_APP_MATCHES = [
-  'https://www.ea.com/*/ultimate-team/web-app/*',
-  'https://www.ea.com/ultimate-team/web-app/*',
-];
+// The EA web-app URL patterns live in ../ea-origins.mjs (shared with the
+// background's kill-switch tab broadcast); re-exported here so existing
+// importers of this module keep working.
+import { EA_WEB_APP_MATCHES } from '../ea-origins.mjs';
+
+export { EA_WEB_APP_MATCHES };
 
 /**
  * @param {'ledger' | 'ledger-auto'} target

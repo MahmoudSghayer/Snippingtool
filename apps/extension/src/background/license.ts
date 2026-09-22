@@ -14,6 +14,8 @@ import { logger } from '../lib/logger.js';
 import { applyServerSettings } from '../lib/settings.js';
 import { getLocal, setLocal } from '../lib/storage.js';
 
+import { propagateKillSwitch } from './kill-switch.js';
+
 import type { BootstrapResponse, HeartbeatResponse } from '@sl/shared';
 
 const HEARTBEAT_ALARM = 'sl.license.heartbeat';
@@ -28,6 +30,7 @@ export function ensureHeartbeatAlarm(): void {
 async function applyEntitlement(data: BootstrapResponse): Promise<void> {
   await setLocal(DEVICE_ID_KEY, data.deviceId);
   await applyServerSettings(data.settings);
+  await propagateKillSwitch(data.killSwitchActive);
 }
 
 /** Always hits `/extension/bootstrap` — used right after login, and once at
@@ -61,7 +64,13 @@ export async function handleLicenseHeartbeat(engineState: 'idle' | 'running' | '
   const deviceId = await getLocal<string | null>(DEVICE_ID_KEY, null);
   if (!deviceId) return null;
   const data = await license.heartbeat(deviceId, engineState);
-  if (data) await applyServerSettings(data.settings);
+  if (data) {
+    await applyServerSettings(data.settings);
+    // The heartbeat is how a kill switch flipped mid-session reaches an
+    // installed extension (docs/06-extension.md §5); push it into every
+    // open EA tab right away instead of waiting for their next reload.
+    await propagateKillSwitch(data.killSwitchActive);
+  }
   return data;
 }
 
