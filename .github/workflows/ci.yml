@@ -243,7 +243,7 @@ jobs:
 
   # -------------------------------------------------------------------------
   docker-build:
-    name: Docker build (api server/worker, dashboard) — no push
+    name: Docker build (api server/worker, dashboard, caddy) — no push
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -280,6 +280,19 @@ jobs:
           tags: sniper-ledger/db-migrator:ci
           cache-from: type=gha,scope=db-migrator
           cache-to: type=gha,mode=max,scope=db-migrator
+
+      # Built here because it is part of the production stack and was
+      # previously unbuilt anywhere, which let a nonexistent plugin version
+      # sit in its Dockerfile undetected.
+      - name: build caddy
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/caddy.Dockerfile
+          push: false
+          tags: sniper-ledger/caddy:ci
+          cache-from: type=gha,scope=caddy
+          cache-to: type=gha,mode=max,scope=caddy
 
       - name: check apps/dashboard exists
         id: dashboard-check

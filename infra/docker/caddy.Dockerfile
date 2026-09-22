@@ -7,7 +7,10 @@
 # in, only builds the binary.
 
 ARG CADDY_VERSION=2.9
-ARG CADDY_RATELIMIT_VERSION=v0.2.1
+# v0.1.0 is the only release this plugin has ever tagged. The previous
+# v0.2.1 here was never a real version, so every build of this image
+# failed with "unknown revision" — nothing built it, so nobody noticed.
+ARG CADDY_RATELIMIT_VERSION=v0.1.0
 
 FROM caddy:${CADDY_VERSION}-builder-alpine AS build
 ARG CADDY_RATELIMIT_VERSION
