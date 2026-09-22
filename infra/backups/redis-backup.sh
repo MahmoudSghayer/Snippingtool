@@ -71,7 +71,7 @@ echo "[redis-backup] wrote $final_rdb ($(du -h "$final_rdb" | cut -f1))"
 prune_tier() {
   local dir="$1" keep="$2"
   local files total drop
-  files=$(find "$dir" -maxdepth 1 -name '*.rdb.gz' -printf '%f\n' | sort)
+  files=$(find "$dir" -maxdepth 1 -name '*.rdb.gz' | sed 's|.*/||' | sort)
   total=$(echo "$files" | grep -c . || true)
   if [ "$total" -le "$keep" ]; then return; fi
   drop=$((total - keep))

@@ -80,7 +80,7 @@ prune_tier() {
   # lexicographic sort is also chronological. Keep the newest $keep, remove
   # everything older (dump + its sidecar checksum together).
   local files
-  files=$(find "$dir" -maxdepth 1 -name '*.dump.gz' -printf '%f\n' | sort)
+  files=$(find "$dir" -maxdepth 1 -name '*.dump.gz' | sed 's|.*/||' | sort)
   local count total
   total=$(echo "$files" | grep -c . || true)
   if [ "$total" -le "$keep" ]; then return; fi
