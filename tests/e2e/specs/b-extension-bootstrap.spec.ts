@@ -337,6 +337,25 @@ test('extension: loads against the mock EA page, popup login against the real AP
         )) as { ok: boolean; data?: { killSwitchActive: boolean } };
         expect(heartbeat.data?.killSwitchActive).toBe(true);
 
+        // The already-open EA tab must halt *without a reload*: the
+        // heartbeat pushes `engine.killSwitch` into every open EA tab
+        // (background/kill-switch.ts), and the content script's own engine
+        // tick pulls the cached flag as a fallback — either way the
+        // in-page panel's status line reports it. This is the scenario that
+        // used to silently keep an engine running until the next page load.
+        await expect
+          .poll(
+            () =>
+              host.evaluate(
+                (el) =>
+                  (el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.getElementById(
+                    'status',
+                  )?.textContent ?? '',
+              ),
+            { timeout: 15_000, message: 'waiting for the open EA tab to report the kill switch' },
+          )
+          .toContain('Kill switch active');
+
         await popup.reload();
         await expect(popup.getByText('Kill switch active', { exact: false })).toBeVisible({
           timeout: 15_000,

@@ -59,4 +59,17 @@ const listeners = new Set<(msg: unknown, sender: unknown, sendResponse: (r: unkn
     clear: vi.fn(),
     onAlarm: { addListener: vi.fn(), removeListener: vi.fn() },
   },
+  // `tabs.query`/`tabs.sendMessage` are wrapped by webextension-polyfill into
+  // promise-returning calls that expect the callback convention underneath
+  // (last argument is the callback) — tests replace these with their own
+  // implementations via `vi.fn(...)` where they need real tabs.
+  tabs: {
+    query: vi.fn((_query: unknown, cb?: (tabs: unknown[]) => void) => {
+      cb?.([]);
+    }),
+    sendMessage: vi.fn((_tabId: number, _msg: unknown, optionsOrCb?: unknown, cb?: (r: unknown) => void) => {
+      const done = typeof optionsOrCb === 'function' ? (optionsOrCb as (r: unknown) => void) : cb;
+      done?.(undefined);
+    }),
+  },
 };

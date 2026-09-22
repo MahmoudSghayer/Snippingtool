@@ -192,6 +192,11 @@ export const backgroundMessageTypeSchema = z.enum([
    * *not* widened, because `storage.session` also holds the access token. */
   'engine.stateGet',
   'engine.stateSet',
+  /** Added additively: the content script's cheap, no-network read of the
+   * server kill switch from background's cached entitlement (`storage.local`)
+   * on every engine tick — the pull half of kill-switch propagation; the
+   * push half is the `engine.killSwitch` tab message below. */
+  'license.killSwitchGet',
   /** Locally-persisted saved filters (`SavedFilter[]`, `storage.local`) —
    * server sync against `/api/v1/filters` lands once `apps/api` ships (see
    * docs/06-extension.md); the message shape already matches that DTO so
@@ -398,6 +403,25 @@ export type ExtGovernorSnapshotPushPayload = z.infer<
  * `engine.stateGet` (no payload; replies with this shape or `null`). Mirrors
  * that interface field-for-field; `.strict()` per the mass-assignment rule
  * (docs/09-security.md "Extension"). */
+/** Background -> content (`browser.tabs.sendMessage` to every open EA tab,
+ * `background/kill-switch.ts`): the server kill switch changed, or a
+ * heartbeat re-confirmed it active. Project rule 3 makes the kill switch
+ * unconditional, so it cannot wait for the next page load — this message
+ * is how an already-running engine learns about it. Validated by
+ * `content/index.ts` before it touches the governor. */
+export const extContentKillSwitchMessageSchema = z
+  .object({
+    type: z.literal('engine.killSwitch'),
+    payload: z
+      .object({
+        active: z.boolean(),
+        reason: z.string().max(500).optional(),
+      })
+      .strict(),
+  })
+  .strict();
+export type ExtContentKillSwitchMessage = z.infer<typeof extContentKillSwitchMessageSchema>;
+
 export const extBackgroundEngineStateSetPayloadSchema = z
   .object({
     sessionStartedAt: z.number().min(0),

@@ -44,11 +44,15 @@ checklist at the end.
 | DevOps           | Done   | `infra/`, `.github/workflows`, `docs/11-devops.md`                          |
 
 Open items carried into go-live (tracked in `docs/12-testing.md` §12 and
-`docs/09-security.md` "Open findings"): the cross-app e2e journey for the
-extension telemetry step fails on a mock-fixture timing race in the
-multi-page harness (the single-app extension e2e covering the same path
-passes); the adapter's assumed EA service-layer shape is unverified until
-the market unlocks.
+`docs/09-security.md` "Open findings"): the adapter's assumed EA
+service-layer shape is unverified until the market unlocks; staging and
+production deploys in `.github/workflows/release.yml` wait on the
+`STAGING_*` / `PRODUCTION_*` secrets (staging is skipped with a notice
+until then — `docs/11-devops.md` §4); code-scanning upload for CodeQL waits
+on the repository being public or having Advanced Security. The cross-app
+e2e item previously listed here is closed (`docs/12-testing.md` §12 rows
+#9–#10), and the kill switch now reaches already-open EA tabs
+(`docs/06-extension.md` §5).
 
 ---
 
