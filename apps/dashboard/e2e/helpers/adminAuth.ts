@@ -57,13 +57,25 @@ export async function loginAsAdmin(
   await page.getByLabel('This device').fill(deviceName);
   await page.getByRole('button', { name: 'Sign in' }).click();
 
-  const enrollHeading = page.getByRole('heading', { name: 'Set up two-factor authentication' });
+  // Branch on the enrolment *secret*, not on the heading above it. The
+  // heading is only a label; the secret is what this helper actually
+  // consumes, so keying off it can never commit to a screen whose data has
+  // not rendered. LoginPage.tsx no longer shows either heading while it is
+  // still probing enroll-vs-verify (it used to show the enrolment one, which
+  // made this branch pick the enrolment path and then wait out the whole
+  // timeout on a secret that was never coming), and this keeps the suite from
+  // re-acquiring that race should the page ever regress.
+  const enrollSecret = page.getByTestId('copy-field-value');
   const verifyHeading = page.getByRole('heading', { name: 'Two-factor verification' });
 
-  await expect(enrollHeading.or(verifyHeading)).toBeVisible({ timeout: 15_000 });
+  await expect(enrollSecret.or(verifyHeading)).toBeVisible({ timeout: 15_000 });
 
-  if (await enrollHeading.isVisible().catch(() => false)) {
-    const secret = (await page.getByTestId('copy-field-value').innerText()).trim();
+  if (await enrollSecret.isVisible().catch(() => false)) {
+    // The heading and the secret must always render together.
+    await expect(
+      page.getByRole('heading', { name: 'Set up two-factor authentication' }),
+    ).toBeVisible();
+    const secret = (await enrollSecret.innerText()).trim();
     expect(secret.length).toBeGreaterThan(0);
     fs.writeFileSync(SECRET_FILE, secret, 'utf8');
 
