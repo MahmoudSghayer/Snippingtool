@@ -30,6 +30,10 @@ import {
   PageHeader,
   Select,
   Switch,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
   formatDate,
   type ColumnDef,
 } from '@sl/ui';
@@ -40,6 +44,7 @@ import { toast } from 'sonner';
 import { z } from 'zod';
 
 import { api, apiErrorMessage } from '@/api/client.js';
+import { MarketPanel } from '@/pages/user/MarketPanel.js';
 
 type SavedFilterRow = {
   id: string;
@@ -337,51 +342,61 @@ export function BotPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Bot"
-        description="The searches the bot rotates through, and which of them are armed."
-      />
+      <PageHeader title="Bot" description="What the bot looks for, and what the market is doing." />
 
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>
-            Saved searches{' '}
-            <Badge tone={activeCount > 0 ? 'positive' : 'neutral'}>{activeCount} armed</Badge>
-          </CardTitle>
-          <Button size="sm" onClick={openCreate}>
-            New search
-          </Button>
-        </CardHeader>
-        <CardContent>
-          {!filtersQuery.isLoading && rows.length === 0 ? (
-            <EmptyState
-              title="No saved searches yet"
-              description="Create one to give the bot something to look for. Nothing is searched until at least one is armed."
-              action={<Button onClick={openCreate}>New search</Button>}
-            />
-          ) : (
-            <DataTable
-              columns={columns}
-              data={rows}
-              isLoading={filtersQuery.isLoading}
-              isError={filtersQuery.isError}
-              onRetry={() => void filtersQuery.refetch()}
-              emptyTitle="No saved searches"
-              getRowId={(row) => row.id}
-              rowActions={(row) => (
-                <div className="flex gap-2">
-                  <Button size="sm" variant="outline" onClick={() => openEdit(row)}>
-                    Edit
-                  </Button>
-                  <Button size="sm" variant="destructive" onClick={() => setDeleting(row)}>
-                    Delete
-                  </Button>
-                </div>
+      <Tabs defaultValue="searches">
+        <TabsList>
+          <TabsTrigger value="searches">Saved searches</TabsTrigger>
+          <TabsTrigger value="market">Market</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="market">
+          <MarketPanel />
+        </TabsContent>
+
+        <TabsContent value="searches" className="space-y-6">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle>
+                Saved searches{' '}
+                <Badge tone={activeCount > 0 ? 'positive' : 'neutral'}>{activeCount} armed</Badge>
+              </CardTitle>
+              <Button size="sm" onClick={openCreate}>
+                New search
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {!filtersQuery.isLoading && rows.length === 0 ? (
+                <EmptyState
+                  title="No saved searches yet"
+                  description="Create one to give the bot something to look for. Nothing is searched until at least one is armed."
+                  action={<Button onClick={openCreate}>New search</Button>}
+                />
+              ) : (
+                <DataTable
+                  columns={columns}
+                  data={rows}
+                  isLoading={filtersQuery.isLoading}
+                  isError={filtersQuery.isError}
+                  onRetry={() => void filtersQuery.refetch()}
+                  emptyTitle="No saved searches"
+                  getRowId={(row) => row.id}
+                  rowActions={(row) => (
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="outline" onClick={() => openEdit(row)}>
+                        Edit
+                      </Button>
+                      <Button size="sm" variant="destructive" onClick={() => setDeleting(row)}>
+                        Delete
+                      </Button>
+                    </div>
+                  )}
+                />
               )}
-            />
-          )}
-        </CardContent>
-      </Card>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       <Modal
         open={formOpen}

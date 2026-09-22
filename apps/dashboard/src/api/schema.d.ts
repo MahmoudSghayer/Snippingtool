@@ -5254,6 +5254,186 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    window?: "1h" | "24h" | "7d" | "30d";
+                    scope?: "mine" | "market";
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            meta: {
+                                /** @enum {string} */
+                                scope: "mine" | "market";
+                                /** @enum {string} */
+                                window: "1h" | "24h" | "7d" | "30d";
+                                contributors: number | null;
+                                suppressedForPrivacy: boolean;
+                                emptyReason: string | null;
+                            };
+                            rows: {
+                                resourceId: string;
+                                name: string | null;
+                                rating: number | null;
+                                attempts: number;
+                                successes: number;
+                                successRate: number | null;
+                                medianListedPrice: number | null;
+                                minListedPrice: number | null;
+                                maxListedPrice: number | null;
+                                /** Format: date-time */
+                                lastSeenAt: string;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/movers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    window?: "1h" | "24h" | "7d" | "30d";
+                    scope?: "mine" | "market";
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            meta: {
+                                /** @enum {string} */
+                                scope: "mine" | "market";
+                                /** @enum {string} */
+                                window: "1h" | "24h" | "7d" | "30d";
+                                contributors: number | null;
+                                suppressedForPrivacy: boolean;
+                                emptyReason: string | null;
+                            };
+                            rows: {
+                                resourceId: string;
+                                name: string | null;
+                                rating: number | null;
+                                currentMedian: number;
+                                previousMedian: number;
+                                changePct: number;
+                                currentSamples: number;
+                                previousSamples: number;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/cards/{resourceId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    window?: "1h" | "24h" | "7d" | "30d";
+                    scope?: "mine" | "market";
+                };
+                header?: never;
+                path: {
+                    resourceId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            meta: {
+                                /** @enum {string} */
+                                scope: "mine" | "market";
+                                /** @enum {string} */
+                                window: "1h" | "24h" | "7d" | "30d";
+                                contributors: number | null;
+                                suppressedForPrivacy: boolean;
+                                emptyReason: string | null;
+                            };
+                            resourceId: string;
+                            name: string | null;
+                            rating: number | null;
+                            points: {
+                                /** Format: date-time */
+                                bucket: string;
+                                medianListedPrice: number;
+                                samples: number;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/notifications": {
         parameters: {
             query?: never;

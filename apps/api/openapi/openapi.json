@@ -11044,6 +11044,467 @@
         }
       }
     },
+    "/api/v1/market/activity": {
+      "get": {
+        "tags": [
+          "market"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1h",
+                "24h",
+                "7d",
+                "30d"
+              ],
+              "default": "24h"
+            },
+            "in": "query",
+            "name": "window",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "mine",
+                "market"
+              ],
+              "default": "mine"
+            },
+            "in": "query",
+            "name": "scope",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "meta": {
+                      "type": "object",
+                      "properties": {
+                        "scope": {
+                          "type": "string",
+                          "enum": [
+                            "mine",
+                            "market"
+                          ]
+                        },
+                        "window": {
+                          "type": "string",
+                          "enum": [
+                            "1h",
+                            "24h",
+                            "7d",
+                            "30d"
+                          ]
+                        },
+                        "contributors": {
+                          "type": "integer",
+                          "nullable": true
+                        },
+                        "suppressedForPrivacy": {
+                          "type": "boolean"
+                        },
+                        "emptyReason": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      },
+                      "required": [
+                        "scope",
+                        "window",
+                        "contributors",
+                        "suppressedForPrivacy",
+                        "emptyReason"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "resourceId": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "rating": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "attempts": {
+                            "type": "integer"
+                          },
+                          "successes": {
+                            "type": "integer"
+                          },
+                          "successRate": {
+                            "type": "number",
+                            "nullable": true
+                          },
+                          "medianListedPrice": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "minListedPrice": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "maxListedPrice": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "lastSeenAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "resourceId",
+                          "name",
+                          "rating",
+                          "attempts",
+                          "successes",
+                          "successRate",
+                          "medianListedPrice",
+                          "minListedPrice",
+                          "maxListedPrice",
+                          "lastSeenAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "meta",
+                    "rows"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/movers": {
+      "get": {
+        "tags": [
+          "market"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1h",
+                "24h",
+                "7d",
+                "30d"
+              ],
+              "default": "24h"
+            },
+            "in": "query",
+            "name": "window",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "mine",
+                "market"
+              ],
+              "default": "mine"
+            },
+            "in": "query",
+            "name": "scope",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "meta": {
+                      "type": "object",
+                      "properties": {
+                        "scope": {
+                          "type": "string",
+                          "enum": [
+                            "mine",
+                            "market"
+                          ]
+                        },
+                        "window": {
+                          "type": "string",
+                          "enum": [
+                            "1h",
+                            "24h",
+                            "7d",
+                            "30d"
+                          ]
+                        },
+                        "contributors": {
+                          "type": "integer",
+                          "nullable": true
+                        },
+                        "suppressedForPrivacy": {
+                          "type": "boolean"
+                        },
+                        "emptyReason": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      },
+                      "required": [
+                        "scope",
+                        "window",
+                        "contributors",
+                        "suppressedForPrivacy",
+                        "emptyReason"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "resourceId": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "rating": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "currentMedian": {
+                            "type": "integer"
+                          },
+                          "previousMedian": {
+                            "type": "integer"
+                          },
+                          "changePct": {
+                            "type": "number"
+                          },
+                          "currentSamples": {
+                            "type": "integer"
+                          },
+                          "previousSamples": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "resourceId",
+                          "name",
+                          "rating",
+                          "currentMedian",
+                          "previousMedian",
+                          "changePct",
+                          "currentSamples",
+                          "previousSamples"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "meta",
+                    "rows"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/cards/{resourceId}": {
+      "get": {
+        "tags": [
+          "market"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1h",
+                "24h",
+                "7d",
+                "30d"
+              ],
+              "default": "7d"
+            },
+            "in": "query",
+            "name": "window",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "mine",
+                "market"
+              ],
+              "default": "mine"
+            },
+            "in": "query",
+            "name": "scope",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "in": "path",
+            "name": "resourceId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "meta": {
+                      "type": "object",
+                      "properties": {
+                        "scope": {
+                          "type": "string",
+                          "enum": [
+                            "mine",
+                            "market"
+                          ]
+                        },
+                        "window": {
+                          "type": "string",
+                          "enum": [
+                            "1h",
+                            "24h",
+                            "7d",
+                            "30d"
+                          ]
+                        },
+                        "contributors": {
+                          "type": "integer",
+                          "nullable": true
+                        },
+                        "suppressedForPrivacy": {
+                          "type": "boolean"
+                        },
+                        "emptyReason": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      },
+                      "required": [
+                        "scope",
+                        "window",
+                        "contributors",
+                        "suppressedForPrivacy",
+                        "emptyReason"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "resourceId": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "rating": {
+                      "type": "integer",
+                      "nullable": true
+                    },
+                    "points": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "bucket": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "medianListedPrice": {
+                            "type": "integer"
+                          },
+                          "samples": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "bucket",
+                          "medianListedPrice",
+                          "samples"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "meta",
+                    "resourceId",
+                    "name",
+                    "rating",
+                    "points"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/notifications": {
       "get": {
         "tags": [
@@ -14366,7 +14827,7 @@
   },
   "servers": [
     {
-      "url": "http://localhost:3000"
+      "url": "https://api.46.62.142.29.sslip.io"
     }
   ]
 }
