@@ -16,7 +16,7 @@
     "api:types": "openapi-typescript ../api/openapi/openapi.json -o ./src/api/schema.d.ts"
   },
   "dependencies": {
-    "@hookform/resolvers": "^3.9.1",
+    "@hookform/resolvers": "^5.9.1",
     "@sl/shared": "workspace:*",
     "@sl/ui": "workspace:*",
     "@tanstack/react-query": "^5.62.11",
