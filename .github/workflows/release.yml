@@ -48,7 +48,7 @@ jobs:
             dockerfile: infra/docker/dashboard.Dockerfile
             target: ''
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: check apps/dashboard exists (dashboard image only)
         id: guard
@@ -72,7 +72,7 @@ jobs:
       - name: metadata (tags + OCI labels)
         if: steps.guard.outputs.skip == 'false'
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.image }}
           tags: |
@@ -111,7 +111,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-pnpm
       - run: pnpm exec turbo run build --filter=@sl/extension...
       - name: zip both targets
@@ -120,7 +120,7 @@ jobs:
           zip -r "../../../sniper-ledger-extension-ledger-${GITHUB_REF_NAME}.zip" ledger
           zip -r "../../../sniper-ledger-extension-ledger-auto-${GITHUB_REF_NAME}.zip" ledger-auto
       - name: upload as release assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             sniper-ledger-extension-ledger-${{ github.ref_name }}.zip
@@ -170,7 +170,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: staging
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-pnpm
       - run: pnpm --filter @sl/db migrate
         env:
@@ -182,7 +182,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: production # requires the reviewers configured on this GitHub Environment
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-pnpm
       - run: pnpm --filter @sl/db migrate
         env:
@@ -197,7 +197,7 @@ jobs:
     environment: staging
     steps:
       - name: docker compose pull && up -d (over SSH)
-        uses: appleboy/ssh-action@v1.2.0
+        uses: appleboy/ssh-action@v1.2.5
         with:
           host: ${{ secrets.STAGING_SSH_HOST }}
           username: ${{ secrets.STAGING_SSH_USER }}
@@ -218,7 +218,7 @@ jobs:
     environment: production # requires the reviewers configured on this GitHub Environment — see docs/11-devops.md
     steps:
       - name: docker compose pull && up -d (over SSH, zero-downtime — see docs/11-devops.md)
-        uses: appleboy/ssh-action@v1.2.0
+        uses: appleboy/ssh-action@v1.2.5
         with:
           host: ${{ secrets.PRODUCTION_SSH_HOST }}
           username: ${{ secrets.PRODUCTION_SSH_USER }}

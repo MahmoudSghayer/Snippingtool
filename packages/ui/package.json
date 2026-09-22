@@ -37,7 +37,7 @@
     "@radix-ui/react-tooltip": "^1.1.6",
     "@tanstack/react-table": "^8.20.6",
     "clsx": "^2.1.1",
-    "lucide-react": "^0.469.0",
+    "lucide-react": "^1.47.0",
     "recharts": "^2.15.0",
     "sonner": "^1.7.1",
     "tailwind-merge": "^2.6.0"
