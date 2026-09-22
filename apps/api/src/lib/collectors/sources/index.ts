@@ -11,6 +11,7 @@
 // enabling one is a one-line change plus a parser, not a rediscovery of why
 // they are missing.
 
+import eaArticles from './ea-articles.js';
 import eaNews from './ea-news.js';
 
 import type { SourceAdapter } from '../types.js';
@@ -24,6 +25,9 @@ export interface RegisteredSource extends SourceAdapter {
 
 export const COLLECTOR_SOURCES: RegisteredSource[] = [
   { ...eaNews, enabled: true },
+  // Drains the body queue ea.news leaves behind. Registered after it so a
+  // first sweep records the articles before this tries to fetch them.
+  { ...eaArticles, enabled: true },
 
   // FUTBIN and FUT.GG both sit behind an interstitial that refuses this
   // infrastructure outright — at the time of writing even `/robots.txt`

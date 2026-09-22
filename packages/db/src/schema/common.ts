@@ -56,6 +56,23 @@ export const priceKindEnum = pgEnum('price_kind', [
   'range_max',
   'average',
 ]);
+export const newsKindEnum = pgEnum('news_kind', ['news', 'pitch_notes']);
+// `content` is the honest catch-all for "EA announced something that puts
+// items into the game" — promo, campaign, SBC event — without claiming to
+// know which. Phase D's extraction is what narrows it.
+export const marketEventKindEnum = pgEnum('market_event_kind', [
+  'content',
+  'season',
+  'pitch_notes',
+  'ratings_refresh',
+  'other',
+]);
+export const eventDateConfidenceEnum = pgEnum('event_date_confidence', [
+  'announced',
+  'stated',
+  'inferred',
+]);
+
 export const collectorRunStatusEnum = pgEnum('collector_run_status', [
   'running',
   'success',

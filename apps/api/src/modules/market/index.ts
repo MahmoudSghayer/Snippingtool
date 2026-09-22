@@ -27,18 +27,20 @@
 //      safe. Column names are fully qualified because `resource_id` exists
 //      on both joined tables.
 
-import { cards, snipingActivity } from '@sl/db';
+import { cards, collectorRuns, marketEvents, newsItems, snipingActivity } from '@sl/db';
 import {
   marketActivityResponseSchema,
   marketCardHistoryQuerySchema,
   marketCardHistoryResponseSchema,
   marketMoversResponseSchema,
+  marketEventsQuerySchema,
+  marketEventsResponseSchema,
   marketQuerySchema,
   MARKET_WINDOW_HOURS,
   type MarketScope,
   type MarketWindow,
 } from '@sl/shared';
-import { and, eq, gte, lt, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, lt, sql } from 'drizzle-orm';
 import fp from 'fastify-plugin';
 import { z } from 'zod';
 
@@ -378,6 +380,78 @@ export default fp(
             medianListedPrice: p.medianListedPrice!,
             samples: p.samples,
           })),
+        };
+      },
+    );
+
+    // --- Events (Phase C) -------------------------------------------------
+    //
+    // The content calendar, collected from EA's own announcements — the
+    // strongest available predictor of a price move, since FUT supply is
+    // driven by content releases and EA publishes them in advance.
+    //
+    // `dateConfidence` is returned rather than hidden: almost every event
+    // here is `announced`, meaning we know when EA posted, not when the
+    // content lands. EA's promo posts do not state machine-readable windows,
+    // and presenting a publication date as a start time would assert
+    // something nobody established.
+    app.get(
+      '/api/v1/market/events',
+      {
+        onRequest: [fastify.authenticate],
+        schema: {
+          tags: ['market'],
+          querystring: marketEventsQuerySchema,
+          response: { 200: marketEventsResponseSchema },
+        },
+      },
+      async (request) => {
+        const { kind, limit } = request.query;
+
+        const rows = await fastify.db
+          .select({
+            id: marketEvents.id,
+            kind: marketEvents.kind,
+            title: marketEvents.title,
+            slug: marketEvents.slug,
+            sourceUrl: marketEvents.sourceUrl,
+            announcedAt: marketEvents.announcedAt,
+            startsAt: marketEvents.startsAt,
+            endsAt: marketEvents.endsAt,
+            dateConfidence: marketEvents.dateConfidence,
+            fcTitle: marketEvents.fcTitle,
+            summary: newsItems.summary,
+          })
+          .from(marketEvents)
+          .leftJoin(newsItems, eq(newsItems.id, marketEvents.newsItemId))
+          .where(kind ? eq(marketEvents.kind, kind) : undefined)
+          .orderBy(desc(marketEvents.announcedAt))
+          .limit(limit);
+
+        // An empty calendar and a collector that has never run look identical
+        // from the client's side, and only one of them is a problem.
+        const [lastRun] = await fastify.db
+          .select({ finishedAt: collectorRuns.finishedAt })
+          .from(collectorRuns)
+          .where(and(eq(collectorRuns.source, 'ea'), eq(collectorRuns.status, 'success')))
+          .orderBy(desc(collectorRuns.startedAt))
+          .limit(1);
+
+        return {
+          events: rows.map((r) => ({
+            id: r.id,
+            kind: r.kind,
+            title: r.title,
+            slug: r.slug,
+            sourceUrl: r.sourceUrl,
+            announcedAt: r.announcedAt.toISOString(),
+            startsAt: r.startsAt ? r.startsAt.toISOString() : null,
+            endsAt: r.endsAt ? r.endsAt.toISOString() : null,
+            dateConfidence: r.dateConfidence,
+            fcTitle: r.fcTitle,
+            summary: r.summary ?? null,
+          })),
+          lastCollectedAt: lastRun?.finishedAt ? lastRun.finishedAt.toISOString() : null,
         };
       },
     );

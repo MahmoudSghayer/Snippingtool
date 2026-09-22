@@ -23,6 +23,9 @@ import {
 import {
   collectorRunStatusEnum,
   createdAt,
+  eventDateConfidenceEnum,
+  marketEventKindEnum,
+  newsKindEnum,
   marketPlatformEnum,
   marketSourceEnum,
   priceKindEnum,
@@ -209,3 +212,84 @@ export const collectorRuns = pgTable(
     index('collector_runs_status_idx').on(t.status, t.startedAt),
   ],
 );
+
+// ---------------------------------------------------------------------------
+// news_items — the evidence Phase D extraction reads (0028).
+//
+// `body` is nullable because a listing and an article detail are two separate
+// fetches: a row with a NULL body is a work queue, not a defect.
+// ---------------------------------------------------------------------------
+
+export const newsItems = pgTable(
+  'news_items',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+
+    source: marketSourceEnum('source').notNull(),
+    kind: newsKindEnum('kind').notNull().default('news'),
+    url: text('url').notNull(),
+    slug: text('slug').notNull(),
+
+    title: text('title').notNull(),
+    summary: text('summary'),
+    body: text('body'),
+
+    fcTitle: text('fc_title'),
+    publishedAt: timestamptz('published_at'),
+
+    /** Of the body, so a re-fetch that changed nothing is a no-op and an
+     * edited article shows up as a change rather than a silent overwrite. */
+    contentHash: text('content_hash'),
+
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index('news_items_published_idx').on(t.publishedAt),
+    index('news_items_kind_idx').on(t.kind, t.publishedAt),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// market_events — the calendar (0028).
+//
+// Separate from news_items because an event is a *claim about the world*
+// while a news item is a document we fetched: a classification can be revised
+// or re-run without touching the evidence it came from.
+// ---------------------------------------------------------------------------
+
+export const marketEvents = pgTable(
+  'market_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+
+    newsItemId: uuid('news_item_id').references(() => newsItems.id, { onDelete: 'cascade' }),
+
+    kind: marketEventKindEnum('kind').notNull().default('content'),
+    title: text('title').notNull(),
+    slug: text('slug').notNull(),
+    sourceUrl: text('source_url'),
+
+    /** Always known: when the announcement was published. */
+    announcedAt: timestamptz('announced_at').notNull(),
+    /** Known only when a source actually stated it — EA's promo articles
+     * generally do not, so these stay null rather than being fabricated from
+     * the publishing date. */
+    startsAt: timestamptz('starts_at'),
+    endsAt: timestamptz('ends_at'),
+    dateConfidence: eventDateConfidenceEnum('date_confidence').notNull().default('announced'),
+
+    fcTitle: text('fc_title'),
+
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index('market_events_announced_idx').on(t.announcedAt),
+    index('market_events_kind_idx').on(t.kind, t.announcedAt),
+  ],
+);
+
+export const marketEventsRelations = relations(marketEvents, ({ one }) => ({
+  newsItem: one(newsItems, { fields: [marketEvents.newsItemId], references: [newsItems.id] }),
+}));

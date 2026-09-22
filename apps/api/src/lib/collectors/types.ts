@@ -66,6 +66,16 @@ export interface ParseResult {
   /** Cards the source described well enough to create/enrich canonical rows. */
   cards?: CardRef[];
   failures?: ParseFailure[];
+  /**
+   * Rows the adapter wrote itself, to be counted into the run.
+   *
+   * Prices and cards go through the runner because they need entity
+   * resolution. A parser whose output is already its own domain shape — news
+   * items, calendar events — writes them directly and reports the count, so
+   * `collector_runs.rows_written` stays an honest measure of whether a run
+   * actually produced anything rather than silently reading zero.
+   */
+  rowsWritten?: number;
 }
 
 export interface CollectorContext {
@@ -97,8 +107,15 @@ export interface SourceAdapter {
   /** Hard cap on documents per run, so a discovery bug cannot turn into a
    * thousand-request crawl. */
   maxDocumentsPerRun?: number;
-  /** Whether bodies are worth persisting to `raw_documents` for replay.
-   * Default true; set false for very large, low-value payloads. */
+  /**
+   * Whether the fetched *body* is worth persisting to `raw_documents` for
+   * replay. Default true; set false for very large payloads whose useful
+   * content is already extracted into domain tables.
+   *
+   * The `raw_documents` row itself is written either way — it is what change
+   * detection compares against, so skipping it entirely would leave the
+   * detector reading hashes nobody updates.
+   */
   storeRawBodies?: boolean;
 
   discover(ctx: CollectorContext): Promise<DiscoveredTarget[]>;

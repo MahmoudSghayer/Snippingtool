@@ -110,24 +110,31 @@ export async function runCollector(
 
       documentsChanged += 1;
 
-      if (adapter.storeRawBodies !== false) {
-        // onConflictDoNothing: the (source, url, hash) unique key means an
-        // identical body re-fetched later is not a new row, which is what
-        // keeps this table bounded on slow-changing pages.
-        await db
-          .insert(rawDocuments)
-          .values({
-            source: adapter.source,
-            url: target.url,
-            contentHash: storedHash,
-            contentType: outcome.contentType,
-            httpStatus: outcome.status,
-            byteSize: Buffer.byteLength(outcome.body, 'utf8'),
-            body: outcome.body,
-            runId,
-          })
-          .onConflictDoNothing();
-      }
+      // The row is always written, because this table is what change
+      // detection reads: `storeRawBodies: false` drops the *body*, not the
+      // record of having fetched it. Writing only when bodies are stored
+      // made detection incoherent — hashes were read from here but never
+      // updated, so a page could be parsed and then compared forever against
+      // a hash from some earlier adapter's run. That is not hypothetical: it
+      // silently cost this collector a whole page of articles, which were
+      // skipped as "unchanged" despite never having been written.
+      //
+      // onConflictDoNothing: the (source, url, hash) unique key means the
+      // same content re-fetched later is not a new row, keeping the table
+      // bounded on slow-changing pages.
+      await db
+        .insert(rawDocuments)
+        .values({
+          source: adapter.source,
+          url: target.url,
+          contentHash: storedHash,
+          contentType: outcome.contentType,
+          httpStatus: outcome.status,
+          byteSize: Buffer.byteLength(outcome.body, 'utf8'),
+          body: adapter.storeRawBodies === false ? null : outcome.body,
+          runId,
+        })
+        .onConflictDoNothing();
 
       let parsed;
       try {
@@ -146,6 +153,7 @@ export async function runCollector(
       }
 
       for (const f of parsed.failures ?? []) failures.push(f);
+      rowsWritten += parsed.rowsWritten ?? 0;
 
       // Cards first: a price can only be written once its card exists.
       for (const ref of parsed.cards ?? []) {

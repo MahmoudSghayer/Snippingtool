@@ -5434,6 +5434,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    kind?: "content" | "season" | "pitch_notes" | "ratings_refresh" | "other";
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            events: {
+                                /** Format: uuid */
+                                id: string;
+                                /** @enum {string} */
+                                kind: "content" | "season" | "pitch_notes" | "ratings_refresh" | "other";
+                                title: string;
+                                slug: string;
+                                sourceUrl: string | null;
+                                /** Format: date-time */
+                                announcedAt: string;
+                                /** Format: date-time */
+                                startsAt: string | null;
+                                /** Format: date-time */
+                                endsAt: string | null;
+                                /** @enum {string} */
+                                dateConfidence: "announced" | "stated" | "inferred";
+                                fcTitle: string | null;
+                                summary: string | null;
+                            }[];
+                            /** Format: date-time */
+                            lastCollectedAt: string | null;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/notifications": {
         parameters: {
             query?: never;

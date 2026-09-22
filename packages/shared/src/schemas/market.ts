@@ -144,3 +144,54 @@ export const marketCardHistoryQuerySchema = z
   })
   .strict();
 export type MarketCardHistoryQuery = z.infer<typeof marketCardHistoryQuerySchema>;
+
+// --- Events (Phase C) -------------------------------------------------------
+
+export const marketEventKindSchema = z.enum([
+  'content',
+  'season',
+  'pitch_notes',
+  'ratings_refresh',
+  'other',
+]);
+export type MarketEventKind = z.infer<typeof marketEventKindSchema>;
+
+/**
+ * How an event's dates were arrived at. Exposed to clients on purpose: an
+ * `announced` event knows only when EA published the post, not when the
+ * content actually lands, and a UI that renders the two identically would be
+ * asserting something nobody established.
+ */
+export const eventDateConfidenceSchema = z.enum(['announced', 'stated', 'inferred']);
+export type EventDateConfidence = z.infer<typeof eventDateConfidenceSchema>;
+
+export const marketEventSchema = z.object({
+  id: z.string().uuid(),
+  kind: marketEventKindSchema,
+  title: z.string(),
+  slug: z.string(),
+  sourceUrl: z.string().nullable(),
+  announcedAt: z.string().datetime(),
+  startsAt: z.string().datetime().nullable(),
+  endsAt: z.string().datetime().nullable(),
+  dateConfidence: eventDateConfidenceSchema,
+  fcTitle: z.string().nullable(),
+  summary: z.string().nullable(),
+});
+export type MarketEvent = z.infer<typeof marketEventSchema>;
+
+export const marketEventsQuerySchema = z
+  .object({
+    kind: marketEventKindSchema.optional(),
+    limit: z.coerce.number().int().min(1).max(100).default(30),
+  })
+  .strict();
+export type MarketEventsQuery = z.infer<typeof marketEventsQuerySchema>;
+
+export const marketEventsResponseSchema = z.object({
+  events: z.array(marketEventSchema),
+  /** Present so a caller can tell "no events yet" from "the collector has
+   * never run", which look identical in an empty list. */
+  lastCollectedAt: z.string().datetime().nullable(),
+});
+export type MarketEventsResponse = z.infer<typeof marketEventsResponseSchema>;
