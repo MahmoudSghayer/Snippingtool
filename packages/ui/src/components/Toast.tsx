@@ -11,14 +11,14 @@ export function Toaster() {
       toastOptions={{
         classNames: {
           toast:
-            'group toast !bg-[--sl-surface-2] !border !border-[--sl-border] !text-[--sl-fg] !shadow-2xl !rounded-[--sl-radius-md]',
-          title: '!text-[--sl-fg] !font-medium',
-          description: '!text-[--sl-fg-muted]',
-          actionButton: '!bg-[--sl-accent] !text-[--sl-accent-ink]',
-          cancelButton: '!bg-[--sl-card-2] !text-[--sl-fg]',
-          success: '!border-[--sl-positive]/40',
-          error: '!border-[--sl-negative]/40',
-          warning: '!border-[--sl-warning]/40',
+            'group toast !bg-(--sl-surface-2) !border !border-(--sl-border) !text-(--sl-fg) !shadow-2xl !rounded-(--sl-radius-md)',
+          title: '!text-(--sl-fg) !font-medium',
+          description: '!text-(--sl-fg-muted)',
+          actionButton: '!bg-(--sl-accent) !text-(--sl-accent-ink)',
+          cancelButton: '!bg-(--sl-card-2) !text-(--sl-fg)',
+          success: '!border-(--sl-positive)/40',
+          error: '!border-(--sl-negative)/40',
+          warning: '!border-(--sl-warning)/40',
         },
       }}
     />

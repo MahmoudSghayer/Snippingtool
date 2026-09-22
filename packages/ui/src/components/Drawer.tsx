@@ -45,8 +45,8 @@ export function Drawer({
           className={cn(
             'fixed inset-y-0 z-50 flex w-full flex-col shadow-2xl',
             isLeft
-              ? 'left-0 border-r border-[--sl-border] bg-[--sl-surface]'
-              : 'right-0 border-l border-[--sl-border] bg-[--sl-surface]',
+              ? 'left-0 border-r border-(--sl-border) bg-(--sl-surface)'
+              : 'right-0 border-l border-(--sl-border) bg-(--sl-surface)',
             isLeft
               ? 'data-[state=open]:animate-in data-[state=open]:slide-in-from-left data-[state=closed]:animate-out data-[state=closed]:slide-out-to-left'
               : 'data-[state=open]:animate-in data-[state=open]:slide-in-from-right data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right',
@@ -54,20 +54,20 @@ export function Drawer({
           )}
         >
           {title ? (
-            <div className="flex items-start justify-between gap-4 border-b border-[--sl-border] px-5 py-4">
+            <div className="flex items-start justify-between gap-4 border-b border-(--sl-border) px-5 py-4">
               <div>
-                <DialogPrimitive.Title className="text-base font-semibold text-[--sl-fg]">
+                <DialogPrimitive.Title className="text-base font-semibold text-(--sl-fg)">
                   {title}
                 </DialogPrimitive.Title>
                 {description && (
-                  <DialogPrimitive.Description className="mt-1 text-sm text-[--sl-fg-muted]">
+                  <DialogPrimitive.Description className="mt-1 text-sm text-(--sl-fg-muted)">
                     {description}
                   </DialogPrimitive.Description>
                 )}
               </div>
               <DialogPrimitive.Close
                 aria-label="Close"
-                className="rounded-[--sl-radius-sm] p-1 text-[--sl-fg-muted] hover:bg-[--sl-card-2] hover:text-[--sl-fg]"
+                className="rounded-(--sl-radius-sm) p-1 text-(--sl-fg-muted) hover:bg-(--sl-card-2) hover:text-(--sl-fg)"
               >
                 <X className="size-4" aria-hidden="true" />
               </DialogPrimitive.Close>
@@ -81,7 +81,7 @@ export function Drawer({
             {children}
           </div>
           {footer && (
-            <div className="flex items-center justify-end gap-2 border-t border-[--sl-border] px-5 py-3">
+            <div className="flex items-center justify-end gap-2 border-t border-(--sl-border) px-5 py-3">
               {footer}
             </div>
           )}

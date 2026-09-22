@@ -7,7 +7,7 @@ export function Skeleton({ className, ...props }: HTMLAttributes<HTMLDivElement>
     <div
       role="status"
       aria-label="Loading"
-      className={cn('animate-pulse rounded-[--sl-radius-sm] bg-[--sl-card-2]', className)}
+      className={cn('animate-pulse rounded-(--sl-radius-sm) bg-(--sl-card-2)', className)}
       {...props}
     />
   );

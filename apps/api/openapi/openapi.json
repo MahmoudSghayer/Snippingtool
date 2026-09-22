@@ -13742,6 +13742,140 @@
         }
       }
     },
+    "/api/v1/trades/{id}/close": {
+      "post": {
+        "tags": [
+          "trades"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sellPrice": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "soldAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": [
+                  "sellPrice"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "tradeId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
+                    "resourceId": {
+                      "type": "integer",
+                      "exclusiveMinimum": true,
+                      "minimum": 0
+                    },
+                    "assetId": {
+                      "type": "integer",
+                      "exclusiveMinimum": true,
+                      "minimum": 0,
+                      "nullable": true
+                    },
+                    "rating": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 99,
+                      "nullable": true
+                    },
+                    "buyPrice": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "sellPrice": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "nullable": true
+                    },
+                    "eaTax": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "netProfit": {
+                      "type": "integer",
+                      "nullable": true
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "bought",
+                        "listed",
+                        "sold",
+                        "expired",
+                        "unsold"
+                      ]
+                    },
+                    "boughtAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "soldAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "tradeId",
+                    "resourceId",
+                    "assetId",
+                    "rating",
+                    "buyPrice",
+                    "sellPrice",
+                    "eaTax",
+                    "netProfit",
+                    "status",
+                    "boughtAt",
+                    "soldAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/trades": {
       "get": {
         "tags": [

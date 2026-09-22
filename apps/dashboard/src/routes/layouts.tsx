@@ -2,6 +2,7 @@ import { Badge, Drawer, Sidebar, Toaster } from '@sl/ui';
 import { Link, Outlet, useMatchRoute, useNavigate } from '@tanstack/react-router';
 import {
   Activity,
+  ArrowLeftRight,
   AlertTriangle,
   BarChart3,
   Bell,
@@ -60,12 +61,20 @@ export function PublicLayout() {
   );
 }
 
+const NO_PERMISSIONS: readonly string[] = [];
+
 const userNav = [
   {
     key: 'dashboard',
     label: 'Dashboard',
     href: '/dashboard',
     icon: <LayoutDashboard className="size-4" />,
+  },
+  {
+    key: 'trades',
+    label: 'Trades',
+    href: '/trades',
+    icon: <ArrowLeftRight className="size-4" />,
   },
   {
     key: 'analytics',
@@ -156,7 +165,14 @@ export function AppLayout() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const isAdmin = useAuthStore((s) => s.admin !== null);
-  const adminPermissions = useAuthStore((s) => s.admin?.permissions ?? []);
+  // Select the store's own array (or null) and default outside the
+  // selector: a `?? []` inside it hands zustand's useSyncExternalStore a
+  // fresh array on every call for a non-admin user, which React treats as
+  // a changed snapshot and re-renders until it throws "Maximum update
+  // depth exceeded" — every regular (non-admin) account hit that on its
+  // first page after login, while the admin-only e2e suite never did.
+  const adminPermissionsOrNull = useAuthStore((s) => s.admin?.permissions ?? null);
+  const adminPermissions = adminPermissionsOrNull ?? NO_PERMISSIONS;
   const connectionStatus = useConnectionStore((s) => s.status);
   const [navOpen, setNavOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -278,7 +294,7 @@ export function AppLayout() {
               type="button"
               onClick={() => setNavOpen(true)}
               aria-label="Open navigation"
-              className="rounded-[--sl-radius-sm] p-1.5 text-ink-2 hover:bg-surface-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 focus-visible:ring-offset-ground lg:hidden"
+              className="rounded-(--sl-radius-sm) p-1.5 text-ink-2 hover:bg-surface-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 focus-visible:ring-offset-ground lg:hidden"
             >
               <Menu className="size-5" aria-hidden="true" />
             </button>
@@ -299,7 +315,7 @@ export function AppLayout() {
             <button
               type="button"
               onClick={() => setPaletteOpen(true)}
-              className="hidden items-center gap-2 rounded-[--sl-radius-sm] border border-line bg-surface-2 px-2.5 py-1.5 text-xs text-ink-2 transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 focus-visible:ring-offset-ground sm:flex"
+              className="hidden items-center gap-2 rounded-(--sl-radius-sm) border border-line bg-surface-2 px-2.5 py-1.5 text-xs text-ink-2 transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 focus-visible:ring-offset-ground sm:flex"
             >
               <Search className="size-3.5" aria-hidden="true" />
               Search
@@ -309,7 +325,7 @@ export function AppLayout() {
               type="button"
               onClick={() => setPaletteOpen(true)}
               aria-label="Open command palette"
-              className="rounded-[--sl-radius-sm] p-1.5 text-ink-2 hover:bg-surface-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 focus-visible:ring-offset-ground sm:hidden"
+              className="rounded-(--sl-radius-sm) p-1.5 text-ink-2 hover:bg-surface-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 focus-visible:ring-offset-ground sm:hidden"
             >
               <Search className="size-4" aria-hidden="true" />
             </button>

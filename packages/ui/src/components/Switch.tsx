@@ -15,9 +15,9 @@ export function Switch({ className, ...props }: SwitchProps & { className?: stri
   return (
     <SwitchPrimitive.Root
       className={cn(
-        'relative h-6 w-11 shrink-0 rounded-full border border-[--sl-border] bg-[--sl-card-2] transition-colors',
-        'data-[state=checked]:bg-[--sl-accent] data-[state=checked]:border-[--sl-accent]',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[--sl-accent] focus-visible:ring-offset-2 focus-visible:ring-offset-[--sl-bg]',
+        'relative h-6 w-11 shrink-0 rounded-full border border-(--sl-border) bg-(--sl-card-2) transition-colors',
+        'data-[state=checked]:bg-(--sl-accent) data-[state=checked]:border-(--sl-accent)',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--sl-accent) focus-visible:ring-offset-2 focus-visible:ring-offset-(--sl-bg)',
         'disabled:opacity-50 disabled:cursor-not-allowed',
         className,
       )}
@@ -25,8 +25,8 @@ export function Switch({ className, ...props }: SwitchProps & { className?: stri
     >
       <SwitchPrimitive.Thumb
         className={cn(
-          'block size-4 translate-x-1 rounded-full bg-[--sl-ink] transition-transform duration-[--sl-motion-fast]',
-          'data-[state=checked]:translate-x-6 data-[state=checked]:bg-[--sl-accent-ink]',
+          'block size-4 translate-x-1 rounded-full bg-(--sl-ink) transition-transform duration-(--sl-motion-fast)',
+          'data-[state=checked]:translate-x-6 data-[state=checked]:bg-(--sl-accent-ink)',
         )}
       />
     </SwitchPrimitive.Root>

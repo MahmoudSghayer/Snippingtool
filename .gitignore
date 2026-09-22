@@ -43,3 +43,6 @@ pnpm-debug.log*
 # blanket `test-results/` pattern above.)
 tests/load/.artifacts/
 tests/e2e/.artifacts/
+
+# Redis dump written by a locally-run redis-server
+dump.rdb

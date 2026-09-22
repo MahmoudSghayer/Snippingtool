@@ -79,7 +79,7 @@ export function CommandPalette({
         <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/60 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0" />
         <DialogPrimitive.Content
           className={
-            'fixed left-1/2 top-[15vh] z-50 w-[calc(100vw-2rem)] max-w-lg -translate-x-1/2 overflow-hidden rounded-[--sl-radius-lg] border border-[--sl-border] bg-[--sl-surface] shadow-2xl ' +
+            'fixed left-1/2 top-[15vh] z-50 w-[calc(100vw-2rem)] max-w-lg -translate-x-1/2 overflow-hidden rounded-(--sl-radius-lg) border border-(--sl-border) bg-(--sl-surface) shadow-2xl ' +
             'data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0'
           }
           onKeyDown={onKeyDown}
@@ -90,14 +90,14 @@ export function CommandPalette({
               {description}
             </DialogPrimitive.Description>
           )}
-          <div className="flex items-center gap-2 border-b border-[--sl-border] px-4 py-3">
-            <Search className="size-4 shrink-0 text-[--sl-fg-muted]" aria-hidden="true" />
+          <div className="flex items-center gap-2 border-b border-(--sl-border) px-4 py-3">
+            <Search className="size-4 shrink-0 text-(--sl-fg-muted)" aria-hidden="true" />
             <input
               autoFocus
               value={query}
               onChange={(e) => onQueryChange(e.target.value)}
               placeholder={placeholder}
-              className="w-full bg-transparent text-sm text-[--sl-fg] outline-none placeholder:text-[--sl-fg-muted]"
+              className="w-full bg-transparent text-sm text-(--sl-fg) outline-none placeholder:text-(--sl-fg-muted)"
               aria-label={placeholder}
               role="combobox"
               aria-expanded="true"
@@ -106,13 +106,13 @@ export function CommandPalette({
                 items[activeIndex] ? `cmdk-${items[activeIndex].key}` : undefined
               }
             />
-            <kbd className="hidden shrink-0 rounded border border-[--sl-border] px-1.5 py-0.5 font-mono text-[10px] text-[--sl-fg-muted] sm:inline">
+            <kbd className="hidden shrink-0 rounded border border-(--sl-border) px-1.5 py-0.5 font-mono text-[10px] text-(--sl-fg-muted) sm:inline">
               Esc
             </kbd>
           </div>
           <div id="command-palette-list" role="listbox" className="max-h-80 overflow-y-auto p-2">
             {items.length === 0 ? (
-              <p className="px-3 py-6 text-center text-sm text-[--sl-fg-muted]">{emptyMessage}</p>
+              <p className="px-3 py-6 text-center text-sm text-(--sl-fg-muted)">{emptyMessage}</p>
             ) : (
               items.map((item, i) => (
                 <button
@@ -124,22 +124,22 @@ export function CommandPalette({
                   onMouseEnter={() => setActiveIndex(i)}
                   onClick={() => activate(i)}
                   className={
-                    'flex w-full items-center gap-2.5 rounded-[--sl-radius-sm] px-3 py-2 text-left text-sm transition-colors ' +
+                    'flex w-full items-center gap-2.5 rounded-(--sl-radius-sm) px-3 py-2 text-left text-sm transition-colors ' +
                     (i === activeIndex
-                      ? 'bg-[--sl-accent]/15 text-[--sl-accent]'
-                      : 'text-[--sl-fg] hover:bg-[--sl-card-2]')
+                      ? 'bg-(--sl-accent)/15 text-(--sl-accent)'
+                      : 'text-(--sl-fg) hover:bg-(--sl-card-2)')
                   }
                 >
                   {item.icon && (
                     <span
-                      className={i === activeIndex ? 'text-[--sl-accent]' : 'text-[--sl-fg-muted]'}
+                      className={i === activeIndex ? 'text-(--sl-accent)' : 'text-(--sl-fg-muted)'}
                     >
                       {item.icon}
                     </span>
                   )}
                   <span className="flex-1 truncate">{item.label}</span>
                   {item.sub && (
-                    <span className="shrink-0 text-xs text-[--sl-fg-muted]">{item.sub}</span>
+                    <span className="shrink-0 text-xs text-(--sl-fg-muted)">{item.sub}</span>
                   )}
                 </button>
               ))
