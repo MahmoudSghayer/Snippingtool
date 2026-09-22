@@ -162,7 +162,29 @@ export function LoginPage() {
     }
   }
 
-  if (mfaTicket && (detectingMode || enrollment)) {
+  // While the enroll-vs-verify probe above is still in flight we do not yet
+  // know which screen this is, so claim neither. Rendering the enrollment
+  // heading here meant an already-enrolled admin saw a one-time-setup screen
+  // flash on every single login, and left anything keying off that heading —
+  // a screen reader, or the e2e helper — acting on a screen that was about to
+  // be replaced by the verify form.
+  if (mfaTicket && detectingMode) {
+    return (
+      <Card>
+        <CardHeader className="flex-col items-start gap-1">
+          <CardTitle>Two-factor authentication</CardTitle>
+          <p className="text-xs text-ink-2">Checking how this account signs in…</p>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-ink-2">Loading…</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // Reached only once `enrollment` actually holds a secret, so the secret and
+  // recovery codes below are always rendered alongside this heading.
+  if (mfaTicket && enrollment) {
     return (
       <Card>
         <CardHeader className="flex-col items-start gap-1">
@@ -172,57 +194,53 @@ export function LoginPage() {
           </p>
         </CardHeader>
         <CardContent>
-          {detectingMode || !enrollment ? (
-            <p className="text-sm text-ink-2">Loading…</p>
-          ) : (
-            <form
-              className="flex flex-col gap-4"
-              onSubmit={enrollConfirmForm.handleSubmit(onSubmitEnrollConfirm)}
-            >
-              {enrollment.qrDataUrl && (
-                <img
-                  src={enrollment.qrDataUrl}
-                  alt="Authenticator QR code"
-                  width={180}
-                  height={180}
-                  className="self-center rounded-md border border-line"
-                />
-              )}
-              <CopyField label="Manual entry secret" value={enrollment.secret} />
-              <div>
-                <p className="mb-1 text-xs font-medium text-ink-2">
-                  Recovery codes (save these somewhere safe)
-                </p>
-                <div className="grid grid-cols-2 gap-1 rounded-md border border-line bg-ground p-3 font-mono text-xs">
-                  {enrollment.recoveryCodes.map((code) => (
-                    <span key={code}>{code}</span>
-                  ))}
-                </div>
+          <form
+            className="flex flex-col gap-4"
+            onSubmit={enrollConfirmForm.handleSubmit(onSubmitEnrollConfirm)}
+          >
+            {enrollment.qrDataUrl && (
+              <img
+                src={enrollment.qrDataUrl}
+                alt="Authenticator QR code"
+                width={180}
+                height={180}
+                className="self-center rounded-md border border-line"
+              />
+            )}
+            <CopyField label="Manual entry secret" value={enrollment.secret} />
+            <div>
+              <p className="mb-1 text-xs font-medium text-ink-2">
+                Recovery codes (save these somewhere safe)
+              </p>
+              <div className="grid grid-cols-2 gap-1 rounded-md border border-line bg-ground p-3 font-mono text-xs">
+                {enrollment.recoveryCodes.map((code) => (
+                  <span key={code}>{code}</span>
+                ))}
               </div>
-              <FormField
-                label="Enter the 6-digit code to confirm"
-                htmlFor="enroll-code"
-                error={enrollConfirmForm.formState.errors.code?.message}
-              >
-                <Input
-                  id="enroll-code"
-                  autoFocus
-                  inputMode="numeric"
-                  {...enrollConfirmForm.register('code')}
-                />
-              </FormField>
-              <Button type="submit" loading={submitting} className="w-full">
-                Confirm and sign in
-              </Button>
-              <button
-                type="button"
-                className="text-xs text-ink-2 underline hover:text-ink"
-                onClick={resetMfaState}
-              >
-                Use a different account
-              </button>
-            </form>
-          )}
+            </div>
+            <FormField
+              label="Enter the 6-digit code to confirm"
+              htmlFor="enroll-code"
+              error={enrollConfirmForm.formState.errors.code?.message}
+            >
+              <Input
+                id="enroll-code"
+                autoFocus
+                inputMode="numeric"
+                {...enrollConfirmForm.register('code')}
+              />
+            </FormField>
+            <Button type="submit" loading={submitting} className="w-full">
+              Confirm and sign in
+            </Button>
+            <button
+              type="button"
+              className="text-xs text-ink-2 underline hover:text-ink"
+              onClick={resetMfaState}
+            >
+              Use a different account
+            </button>
+          </form>
         </CardContent>
       </Card>
     );
