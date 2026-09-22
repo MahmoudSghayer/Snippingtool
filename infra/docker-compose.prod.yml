@@ -68,11 +68,14 @@ services:
       resources:
         limits: { cpus: '1.0', memory: 512M }
         reservations: { cpus: '0.25', memory: 256M }
-      restart_policy:
-        condition: any
-        delay: 5s
-        max_attempts: 5
-        window: 60s
+      # No `restart_policy` here. It is Swarm syntax, and outside Swarm
+      # Compose maps it onto the container restart policy, where
+      # `condition: any` becomes `always` and `max_attempts` becomes a
+      # maximum retry count. The daemon rejects that pair outright:
+      # "invalid restart policy: maximum retry count can only be used with
+      # 'on-failure'", which killed `up -d` before any container started.
+      # `restart: unless-stopped` from *restart-always above is what
+      # actually keeps these services alive, and it says the same thing.
       update_config:
         parallelism: 1
         order: start-first
@@ -93,11 +96,14 @@ services:
       replicas: ${WORKER_REPLICAS:-1}
       resources:
         limits: { cpus: '1.0', memory: 512M }
-      restart_policy:
-        condition: any
-        delay: 5s
-        max_attempts: 5
-        window: 60s
+      # No `restart_policy` here. It is Swarm syntax, and outside Swarm
+      # Compose maps it onto the container restart policy, where
+      # `condition: any` becomes `always` and `max_attempts` becomes a
+      # maximum retry count. The daemon rejects that pair outright:
+      # "invalid restart policy: maximum retry count can only be used with
+      # 'on-failure'", which killed `up -d` before any container started.
+      # `restart: unless-stopped` from *restart-always above is what
+      # actually keeps these services alive, and it says the same thing.
 
   # Self-host option only — Vercel is the primary dashboard host (see
   # /vercel.json and docs/11-devops.md "Vercel dashboard deployment"). Only
