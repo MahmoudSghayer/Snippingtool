@@ -10,6 +10,7 @@ export * from './subscriptions.js';
 export * from './billing.js';
 export * from './activity.js';
 export * from './trading.js';
+export * from './market.js';
 export * from './settings.js';
 export * from './system.js';
 export * from './types.js';
@@ -19,6 +20,7 @@ import * as admin from './admin.js';
 import * as auth from './auth.js';
 import * as billing from './billing.js';
 import * as common from './common.js';
+import * as market from './market.js';
 import * as settings from './settings.js';
 import * as subscriptions from './subscriptions.js';
 import * as system from './system.js';
@@ -34,6 +36,7 @@ export const schema = {
   ...billing,
   ...activity,
   ...trading,
+  ...market,
   ...settings,
   ...system,
 };

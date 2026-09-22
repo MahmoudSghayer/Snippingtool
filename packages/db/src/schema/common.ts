@@ -37,6 +37,32 @@ export const rowVersion = () => integer('row_version').notNull().default(0);
 // ---------------------------------------------------------------------------
 
 export const userStatusEnum = pgEnum('user_status', ['active', 'suspended', 'banned', 'deleted']);
+
+// --- Market intelligence (migrations/0027_market_intelligence.sql) ---------
+// `first_party` is the extension's own pooled observations (docs/14 Phase F);
+// it shares this enum rather than bypassing it so cross-source agreement
+// checks treat it as just another opinion to reconcile.
+export const marketSourceEnum = pgEnum('market_source', [
+  'futbin',
+  'futgg',
+  'futwiz',
+  'ea',
+  'first_party',
+]);
+export const marketPlatformEnum = pgEnum('market_platform', ['console', 'pc']);
+export const priceKindEnum = pgEnum('price_kind', [
+  'lowest_bin',
+  'range_min',
+  'range_max',
+  'average',
+]);
+export const collectorRunStatusEnum = pgEnum('collector_run_status', [
+  'running',
+  'success',
+  'partial',
+  'failed',
+  'skipped',
+]);
 export const userRoleEnum = pgEnum('user_role', ['user', 'admin']);
 export const adminRoleEnum = pgEnum('admin_role', ['super_admin', 'support', 'analyst', 'billing']);
 

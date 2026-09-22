@@ -16,6 +16,10 @@ const PARTITIONED_TABLES = [
   'user_activity',
   'search_activity',
   'sniping_activity',
+  // 0027_market_intelligence.sql. Without it here, price_observations would
+  // quietly fall into its DEFAULT partition once the 13 months created by
+  // that migration run out — still correct, but unpartitioned in practice.
+  'price_observations',
 ] as const;
 const MONTHS_AHEAD = 3;
 
