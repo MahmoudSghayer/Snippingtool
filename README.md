@@ -24,14 +24,18 @@ you before you look like a bot — it is never sold as "undetectable". See
 ## Build status
 
 The build follows a data-first sequence. All eleven phases are built,
-verified (`pnpm typecheck && pnpm lint && pnpm build && pnpm test`: 688
-tests across seven packages) and **merged into `main` via
-[PR #2](https://github.com/MahmoudSghayer/Snippingtool/pull/2)** with the
-full CI pipeline green (lint, typecheck, unit, migrations, API integration,
-security tests, security scan, CodeQL, extension/dashboard/docker builds,
-coverage, and every Playwright e2e suite). Remaining work is the go-live
+verified (`pnpm typecheck && pnpm lint && pnpm build && pnpm test` across
+seven packages, plus the e2e, security and load suites) and **merged into
+`main` via [PR #2](https://github.com/MahmoudSghayer/Snippingtool/pull/2)**
+with the full CI pipeline green (lint, typecheck, unit, migrations, API
+integration, security tests, security scan, CodeQL, extension/dashboard/docker
+builds, coverage, and every Playwright e2e suite).
+[PR #19](https://github.com/MahmoudSghayer/Snippingtool/pull/19) hardened
+that merge: the server kill switch now reaches EA tabs that are already open,
+the staging deploy skips itself with a notice until its secrets exist, and a
+trial-start race found by CI is closed. Remaining work is the go-live
 checklist in `docs/13-roadmap.md`, which needs the live market, real Stripe
-keys and infrastructure.
+keys and the staging/production deploy secrets.
 
 | Phase            | Scope                                                                       | Status | Where                                                                                                         |
 | ---------------- | --------------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------- |
@@ -50,12 +54,17 @@ keys and infrastructure.
 
 Follow-ups from every phase report and all ten QA defects have been closed
 (see `docs/12-testing.md` §12 for the defect table with statuses). The last
-one, found while driving the pull request's CI to green, was a critical
-extension bug: the content script's crash-recovery read of `storage.session`
-is forbidden in MV3 content scripts, which aborted its boot and silently
-killed market recording and telemetry on every page load. It is fixed, the
-e2e assertions that had hidden it are now real, and every cross-app journey
-passes.
+of those, found while driving PR #2's CI to green, was a critical extension
+bug: the content script's crash-recovery read of `storage.session` is
+forbidden in MV3 content scripts, which aborted its boot and silently killed
+market recording and telemetry on every page load. It is fixed, the e2e
+assertions that had hidden it are now real, and every cross-app journey
+passes. Two more were fixed after the merge in PR #19: an engine already
+running in an open EA tab did not learn about a kill switch flipped
+mid-session until the next reload (it now halts within one heartbeat plus
+one engine tick, no reload needed; `docs/06-extension.md` §5), and a trial
+started right after login could fail on an insert race in the IP-activity
+counter that `completeLogin` writes in the background.
 
 ## What exists today
 
@@ -66,8 +75,11 @@ only EA-aware file is `src/main/adapter.ts`; it observes passively, probes the
 web app's service layer at load and before every action, and hard-stops on a
 shape mismatch. The governor enforces actions per hour, session length,
 buy-to-search ratio and coin flow, with cooldowns and an unconditional server
-kill switch. Raw observations stay in IndexedDB. What the extension sends to
-the backend is itemised in `docs/06-extension.md` and in the options page.
+kill switch. The kill switch is pushed into every open EA tab after each
+bootstrap and heartbeat, and the engine tick pulls the cached flag as a
+fallback, so a switch flipped mid-session halts a running engine without a
+reload. Raw observations stay in IndexedDB. What the extension sends to the
+backend is itemised in `docs/06-extension.md` and in the options page.
 
 **Backend** (`apps/api`): Fastify 5 with Zod validation and generated OpenAPI,
 Drizzle over PostgreSQL 16, Redis-backed rate limits and presence, a
@@ -142,6 +154,15 @@ worker, PostgreSQL and Redis run on a VM with Docker Compose behind Caddy.
 Images, Compose files for dev/staging/prod, monitoring, backups, CI/CD and
 the step-by-step deployment guide live under `infra/`, `.github/` and
 `docs/11-devops.md`.
+
+`.github/workflows/release.yml` builds and pushes `:main`-tagged images on
+every push to `main`, then migrates and deploys staging only once the four
+`STAGING_*` secrets (`STAGING_DATABASE_URL`, `STAGING_SSH_HOST`,
+`STAGING_SSH_USER`, `STAGING_SSH_PRIVATE_KEY`) are set on the `staging`
+GitHub Environment; until then the staging jobs are skipped with a workflow
+notice rather than failing the run. A `vX.Y.Z` tag builds semver-tagged
+images and the extension release zips and deploys production behind the
+`production` environment's required reviewers. See `docs/11-devops.md` §4.
 
 ## Documentation
 
