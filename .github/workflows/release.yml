@@ -47,7 +47,7 @@ jobs:
             dockerfile: infra/docker/dashboard.Dockerfile
             target: ''
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: check apps/dashboard exists (dashboard image only)
         id: guard
@@ -110,7 +110,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-pnpm
       - run: pnpm exec turbo run build --filter=@sl/extension...
       - name: zip both targets
@@ -145,7 +145,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: staging
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-pnpm
       - run: pnpm --filter @sl/db migrate
         env:
@@ -157,7 +157,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: production # requires the reviewers configured on this GitHub Environment
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-pnpm
       - run: pnpm --filter @sl/db migrate
         env:

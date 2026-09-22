@@ -27,7 +27,7 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-pnpm
       - run: pnpm -r lint
       - run: pnpm format:check
@@ -36,7 +36,7 @@ jobs:
     name: Typecheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-pnpm
       # turbo's typecheck task depends on ^build, so workspace deps (@sl/shared,
       # @sl/db, @sl/ui) are compiled to dist before their consumers typecheck.
@@ -50,7 +50,7 @@ jobs:
     name: Unit tests (shared / ui / extension)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-pnpm
       - run: pnpm exec turbo run test --filter=@sl/shared --filter=@sl/ui --filter=@sl/extension
 
@@ -75,7 +75,7 @@ jobs:
       SEED_ADMIN_EMAIL: admin@sniperledger.local
       SEED_ADMIN_PASSWORD: ci-only-not-a-real-secret
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-pnpm
       - name: create test database
         run: PGPASSWORD=sl psql -h localhost -U sl -d sniper_ledger -c "CREATE DATABASE sniper_ledger_test;"
@@ -113,7 +113,7 @@ jobs:
           --health-cmd "redis-cli ping"
           --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-pnpm
       - name: create test database
         run: PGPASSWORD=sl psql -h localhost -U sl -d sniper_ledger -c "CREATE DATABASE sniper_ledger_test;"
@@ -154,7 +154,7 @@ jobs:
           --health-cmd "redis-cli ping"
           --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-pnpm
       - name: create this package's own test database (see tests/security/src/setup.ts)
         run: PGPASSWORD=sl psql -h localhost -U sl -d sniper_ledger -c "CREATE DATABASE sniper_ledger_test_security;"
@@ -173,7 +173,7 @@ jobs:
     name: Extension build (both targets) + no-autobuyer-in-ledger check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-pnpm
       - run: pnpm exec turbo run build --filter=@sl/extension...
       - name: ledger (listable) build must never contain "autobuyer"
@@ -194,7 +194,7 @@ jobs:
     name: Dashboard build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-pnpm
       - name: build (skipped if apps/dashboard doesn't exist yet)
         run: |
@@ -214,7 +214,7 @@ jobs:
       contents: read
       pull-requests: read # gitleaks-action lists the PR's commits
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # gitleaks needs full history to scan every commit on the PR
       - uses: ./.github/actions/setup-pnpm
@@ -246,7 +246,7 @@ jobs:
     name: Docker build (api server/worker, dashboard) — no push
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v3
 
       - name: build api (server target)
@@ -328,7 +328,7 @@ jobs:
       DATABASE_URL: postgres://sl:sl@localhost:5432/sniper_ledger
       REDIS_URL: redis://localhost:6379
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-pnpm
       - uses: ./.github/actions/setup-playwright-chromium
         with:
@@ -367,7 +367,7 @@ jobs:
     name: E2E — extension (Playwright, xvfb, built artifacts)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-pnpm
       - uses: ./.github/actions/setup-playwright-chromium
         with:
@@ -428,7 +428,7 @@ jobs:
       SEED_ADMIN_EMAIL: admin@sniperledger.local
       SEED_ADMIN_PASSWORD: 'Admin-Passw0rd!'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-pnpm
       - uses: ./.github/actions/setup-playwright-chromium
         with:
@@ -486,7 +486,7 @@ jobs:
       TEST_DATABASE_URL: postgres://sl:sl@localhost:5432/sniper_ledger_test
       NODE_ENV: test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-pnpm
       - name: create test database
         run: PGPASSWORD=sl psql -h localhost -U sl -d sniper_ledger -c "CREATE DATABASE sniper_ledger_test;"
@@ -560,7 +560,7 @@ jobs:
       RATE_LIMIT_LOGIN_MAX: '5000'
       RATE_LIMIT_GLOBAL_MAX: '100000'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-pnpm
       - name: write apps/api/.env
         run: cp infra/env/.env.development.example apps/api/.env
