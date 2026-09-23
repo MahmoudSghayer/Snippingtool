@@ -10,12 +10,14 @@
 # The files go into the running Caddy container's /data/userscript (the
 # caddy_data volume, see infra/caddy/Caddyfile), so no restart is needed.
 #
-# Usage: DOMAIN=46.62.142.29.sslip.io infra/scripts/publish-userscript.sh
-#   DOMAIN          required; the api./dashboard. hosts hang off it
+# Usage: infra/scripts/publish-userscript.sh 46.62.142.29.sslip.io
+#    or: DOMAIN=46.62.142.29.sslip.io infra/scripts/publish-userscript.sh
+#   DOMAIN          required (argument or env); the api./dashboard. hosts hang off it
 #   CADDY_CONTAINER default sniper-ledger-prod-caddy-1
 set -euo pipefail
 
-: "${DOMAIN:?set DOMAIN, e.g. DOMAIN=46.62.142.29.sslip.io}"
+DOMAIN="${1:-${DOMAIN:-}}"
+: "${DOMAIN:?pass the domain, e.g. publish-userscript.sh 46.62.142.29.sslip.io}"
 caddy="${CADDY_CONTAINER:-sniper-ledger-prod-caddy-1}"
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 base_url="https://dashboard.${DOMAIN}/userscript"
