@@ -183,3 +183,25 @@ describe('Autobuyer: respects governor denial', () => {
     expect(buy).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('Autobuyer: adapter refusals are failed attempts, not retries (defect C12)', () => {
+  it.each(['price_mismatch', 'listing_unknown', 'adapter_unauthenticated'])(
+    'a %s refusal is recorded once as failed, with no trade and no retry',
+    async (error) => {
+      const onAttempt = vi.fn();
+      const onTrade = vi.fn();
+      const governor = new Governor(SETTINGS, { now: () => 0 });
+      const buy = vi.fn(async () => ({ ok: false, error, latencyMs: 1 }));
+      const { adapter } = fakeAdapter(buy);
+
+      const autobuyer = new Autobuyer({ governor, adapter, onAttempt, onTrade, maxRetriesPerCandidate: 2 });
+      const successes = await autobuyer.runCycle([opportunity({ tradeId: 't-1' })]);
+
+      expect(successes).toBe(0);
+      expect(buy).toHaveBeenCalledTimes(1);
+      expect(onTrade).not.toHaveBeenCalled();
+      expect(onAttempt).toHaveBeenCalledTimes(1);
+      expect(onAttempt).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'failed', errorCode: error }));
+    },
+  );
+});

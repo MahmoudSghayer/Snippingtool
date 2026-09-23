@@ -14,6 +14,7 @@
  * longer matches reality, and continuing to act on stale assumptions is
  * exactly the failure mode this whole architecture exists to avoid.
  */
+import { ACT_ERROR } from '../lib/act-auth.js';
 import { backoffMs, sleep } from '../lib/http.js';
 
 import type { Governor } from './governor.js';
@@ -45,6 +46,12 @@ export type StopReason = 'probe_failure' | 'shape_mismatch' | 'manual' | 'sessio
  * auction that is simply gone. Adjust this list on day one alongside
  * `adapter.ts`'s ASSUMED SHAPE once real error text is known. */
 const NON_RETRYABLE_PATTERN = /sold|no longer available|expired|not found/i;
+
+/** The adapter's own refusals (lib/act-auth.ts's `ACT_ERROR`): it never
+ * called buyNow, and asking again cannot change the answer — the listing's
+ * price, or the missing nonce, is what it is. A failed attempt, not a
+ * retry and not `too_slow`. */
+const ADAPTER_REFUSALS: ReadonlySet<string> = new Set(Object.values(ACT_ERROR));
 
 export class Autobuyer {
   private running = false;
@@ -154,8 +161,9 @@ export class Autobuyer {
         return true;
       }
 
-      const nonRetryable = NON_RETRYABLE_PATTERN.test(result.error ?? '');
-      const isLastAttempt = attempt === maxRetries;
+      const refused = ADAPTER_REFUSALS.has(result.error ?? '');
+      const nonRetryable = !refused && NON_RETRYABLE_PATTERN.test(result.error ?? '');
+      const isLastAttempt = attempt === maxRetries || refused;
       this.deps.onAttempt({
         resourceId: candidate.resourceId,
         tradeId: candidate.tradeId,

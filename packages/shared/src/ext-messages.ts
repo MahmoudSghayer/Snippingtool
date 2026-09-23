@@ -78,6 +78,14 @@ export const adapterAuctionsMessageSchema = z.object({
   }),
 });
 
+/** HMAC-SHA256 (hex) of an act-channel message under the per-page-load
+ * nonce (apps/extension/src/lib/act-auth.ts). Optional in these schemas so
+ * the shapes stay additive, but both ends of the extension require it: the
+ * adapter ignores an `act_request` without a valid one, and content drops
+ * an `action_result` without one — any page script can post on this
+ * channel, and the MAC is what tells the extension's own messages apart. */
+export const adapterMessageMacSchema = z.string().regex(/^[0-9a-f]{64}$/);
+
 /** Result of an `act()` call (`search`/`buy`/`readResult`) driven through
  * the web app's own service layer — never a forged request. Only present in
  * builds where M2/M3 act surface is enabled. `requestId` (added
@@ -100,6 +108,7 @@ export const adapterActionResultMessageSchema = z.object({
      * `trimAuction` already allows out of the page. */
     stillListed: z.boolean().optional(),
   }),
+  mac: adapterMessageMacSchema.optional(),
 });
 
 /** ISOLATED world (content/engine) -> MAIN world (adapter): drive the act
@@ -122,6 +131,9 @@ export const adapterActRequestMessageSchema = z.object({
       action: z.literal('buy'),
       requestId: z.string().min(1),
       tradeId: z.string().min(1),
+      /** The buy-now price content expects to pay. The adapter refuses
+       * (`price_mismatch` / `listing_unknown`) unless it equals the price
+       * it last saw listed for `tradeId`. */
       price: z.number().int().min(0),
     }),
     z.object({
@@ -130,6 +142,7 @@ export const adapterActRequestMessageSchema = z.object({
       tradeId: z.string().min(1),
     }),
   ]),
+  mac: adapterMessageMacSchema.optional(),
 });
 export type AdapterActRequestMessage = z.infer<typeof adapterActRequestMessageSchema>;
 

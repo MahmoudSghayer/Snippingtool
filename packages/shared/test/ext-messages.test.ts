@@ -155,6 +155,49 @@ describe('adapterActRequestMessageSchema', () => {
   });
 });
 
+describe('adapter channel MACs (defect C10)', () => {
+  const mac = 'ab'.repeat(32);
+
+  it('accepts a hex HMAC-SHA256 on act requests and action results', () => {
+    expect(
+      adapterActRequestMessageSchema.safeParse({
+        channel: 'ledger:v2',
+        kind: 'act_request',
+        data: { action: 'readResult', requestId: 'r1', tradeId: 't1' },
+        mac,
+      }).success,
+    ).toBe(true);
+    expect(
+      adapterActionResultMessageSchema.safeParse({
+        channel: 'ledger:v2',
+        kind: 'action_result',
+        data: {
+          action: 'buy',
+          requestId: 'r1',
+          ok: false,
+          error: 'price_mismatch',
+          requestedAt: 1,
+          completedAt: 2,
+        },
+        mac,
+      }).success,
+    ).toBe(true);
+  });
+
+  it('rejects a MAC that is not 64 lowercase hex characters', () => {
+    for (const bad of ['', 'xyz', 'AB'.repeat(32), 'ab'.repeat(33)]) {
+      expect(
+        adapterActionResultMessageSchema.safeParse({
+          channel: 'ledger:v2',
+          kind: 'action_result',
+          data: { action: 'buy', requestId: 'r1', ok: true, requestedAt: 1, completedAt: 2 },
+          mac: bad,
+        }).success,
+      ).toBe(false);
+    }
+  });
+});
+
 describe('adapterActionResultMessageSchema', () => {
   it('is still valid without the additive requestId/stillListed fields', () => {
     const result = adapterActionResultMessageSchema.safeParse({

@@ -99,7 +99,14 @@ Three channels, none of which overlap in purpose:
    `readResult`, each carrying a `requestId` the matching `action_result`
    echoes back — see `content/adapter-client.ts`). This is the only
    direction data about EA's internals ever flows, and only the fields
-   `trimAuction` copies ever cross it (§11).
+   `trimAuction` copies ever cross it (§11). Any page script can post on
+   this channel too, so `act_request` and `action_result` each carry an
+   HMAC under a per-page-load nonce that `content/handoff.ts` hands the
+   adapter at `document_start` (`lib/act-auth.ts`); unsigned or replayed
+   requests are ignored, and content schema-validates every inbound
+   message and drops unsigned or unmatched results. A `buy` is refused
+   (`price_mismatch` / `listing_unknown`) unless its price equals the
+   buy-now price the adapter itself last saw for that `tradeId`.
 2. **`content/index.ts` ↔ `background/index.ts`**, `browser.runtime.sendMessage`,
    typed by `backgroundMessageTypeSchema`
    (`packages/shared/src/ext-messages.ts`). Content sends `record` (raw
@@ -128,6 +135,7 @@ modules that benefit from shared chunks:
 | Call | Entry                                                                         | Format                     | Output                                                            |
 | ---- | ----------------------------------------------------------------------------- | -------------------------- | ----------------------------------------------------------------- |
 | 1    | `src/main/adapter.ts`                                                         | `lib` (IIFE, single entry) | `adapter.js`                                                      |
+| 1b   | `src/content/handoff.ts` (ISOLATED, `document_start`, before `adapter.js`)    | `lib` (IIFE, single entry) | `handoff.js`                                                      |
 | 2    | `src/content/index.ts`                                                        | `lib` (IIFE, single entry) | `content.js`                                                      |
 | 3    | `src/background/index.ts` + `src/popup/index.html` + `src/options/index.html` | ES, multi-entry            | `background.js`, `src/popup/index.html`, `src/options/index.html` |
 

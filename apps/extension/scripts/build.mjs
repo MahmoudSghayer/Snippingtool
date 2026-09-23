@@ -13,6 +13,8 @@
 // service worker + popup + options page are ordinary ES modules that *can*
 // share chunks:
 //   1. adapter.js   — MAIN world,  library-mode IIFE, single entry
+//   1b. handoff.js  — ISOLATED world, document_start, IIFE: hands the
+//                     act-channel nonce to adapter.js (lib/act-auth.ts)
 //   2. content.js   — ISOLATED world, library-mode IIFE, single entry
 //   3. background.js + src/popup/index.html + src/options/index.html — ES
 //
@@ -53,7 +55,12 @@ if (template && target !== 'ledger-auto') {
   process.exit(1);
 }
 
-const outDir = path.join(root, 'dist', template ? 'ledger-auto-template' : target);
+// SL_EXT_OUT_DIR lets a test build into a scratch directory
+// (test/unit/ledger-build-adapter.test.ts) without racing a real build of
+// dist/<target>.
+const outDir = process.env.SL_EXT_OUT_DIR
+  ? path.resolve(process.env.SL_EXT_OUT_DIR)
+  : path.join(root, 'dist', template ? 'ledger-auto-template' : target);
 
 const env = {
   VITE_AUTOMATION: target === 'ledger-auto' ? '1' : '0',
@@ -161,6 +168,7 @@ function writeManifest() {
 async function main() {
   rmSync(outDir, { recursive: true, force: true });
   await buildLibEntry('src/main/adapter.ts', 'adapter.js', 'SLAdapter', true);
+  await buildLibEntry('src/content/handoff.ts', 'handoff.js', 'SLHandoff', false);
   await buildLibEntry('src/content/index.ts', 'content.js', 'SLContent', false);
   await buildEsGroup(false);
   writeManifest();

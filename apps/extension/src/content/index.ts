@@ -24,6 +24,7 @@ import { AssistEngine } from '../engine/assist.js';
 import { Governor, type GovernorState } from '../engine/governor.js';
 import { rankCandidates, type OpportunityCandidate, type ScoredOpportunity } from '../engine/ranker.js';
 import { countObservedSearches, governedSearch } from '../engine/search.js';
+import { readHandedOffNonce } from '../lib/act-auth.js';
 import { logger } from '../lib/logger.js';
 import { singleFlight } from '../lib/single-flight.js';
 import { createPanel, type Panel } from '../ui/panel.js';
@@ -81,7 +82,12 @@ function nowIso(): string {
 
 async function main(): Promise<void> {
   const panel: Panel = createPanel();
-  const adapter = createAdapterClient(window);
+  // The act-channel nonce content/handoff.ts minted at document_start.
+  // Without it every act call fails closed (assist/automation cannot buy);
+  // M1 recording does not need it.
+  const actNonce = readHandedOffNonce();
+  if (!actNonce) logger.warn('no act-channel nonce was handed off — assist/automation buys are disabled on this page', 'adapter');
+  const adapter = createAdapterClient(window, actNonce);
 
   panel.setHealth('live', 'Recording. Nothing beyond product telemetry (docs/06-extension.md) is sent.');
   send('counts').then((data) => data && panel.setTotals(data as { auctions: number; playersLast24h: number }));
@@ -170,8 +176,7 @@ async function main(): Promise<void> {
     void send('telemetry.enqueue', { kind: 'activity', items: [event] });
   }
 
-  adapter.onAuctions((raw) => {
-    const auctions = raw as TrimmedAuction[];
+  adapter.onAuctions((auctions) => {
     searches++;
     panel.setSearches(searches);
     panel.setHealth(engineHealthState(), engineHealthMessage());

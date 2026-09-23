@@ -6,11 +6,16 @@
  * `engine/assist.ts` and `engine/autobuyer.ts` ever reach the page — none of
  * them touch `window.postMessage` directly.
  */
-// See src/main/adapter.ts's equivalent comment: the zod-free subpath keeps
-// this ISOLATED-world file (bundled into content.js) from pulling in `zod`.
-import { ADAPTER_CHANNEL } from '@sl/shared/adapter-channel.js';
+// Every page -> content message is validated against `@sl/shared`'s
+// `adapterMessageSchema` before anything reads it: the channel is
+// `window.postMessage`, so any script on EA's page can post on it too.
+// (content.js already carries zod for the kill-switch message schema, so
+// this costs no extra bundle weight.)
+import { ADAPTER_CHANNEL, adapterMessageSchema } from '@sl/shared';
 
-import type { FilterCriteria } from '@sl/shared';
+import { ACT_ERROR, canonicalActMessage, createActSigner } from '../lib/act-auth.js';
+
+import type { FilterCriteria, TrimmedAuction } from '@sl/shared';
 
 const ACTION_TIMEOUT_MS = 15_000;
 
@@ -34,67 +39,97 @@ export interface AdapterClient {
   readResult(tradeId: string): Promise<ActionOutcome>;
   onProbe(cb: (status: ProbeStatus) => void): () => void;
   onShape(cb: (reason: string) => void): () => void;
-  onAuctions(cb: (auctions: unknown[]) => void): () => void;
+  onAuctions(cb: (auctions: TrimmedAuction[]) => void): () => void;
   dispose(): void;
 }
 
-export function createAdapterClient(target: Window = window): AdapterClient {
-  const pending = new Map<string, (outcome: ActionOutcome) => void>();
+type ActAction = 'search' | 'buy' | 'readResult';
+
+interface Pending {
+  action: ActAction;
+  resolve: (outcome: ActionOutcome) => void;
+}
+
+/**
+ * @param nonce this page load's act-channel nonce (content/handoff.ts ->
+ * `readHandedOffNonce`). Used only as the HMAC key for signing requests and
+ * checking replies (lib/act-auth.ts); never posted. With `null`, every act
+ * call fails closed with `adapter_unauthenticated` and nothing is sent.
+ */
+export function createAdapterClient(target: Window, nonce: string | null): AdapterClient {
+  const signer = createActSigner(nonce);
+  const pending = new Map<string, Pending>();
   const probeListeners = new Set<(status: ProbeStatus) => void>();
   const shapeListeners = new Set<(reason: string) => void>();
-  const auctionsListeners = new Set<(auctions: unknown[]) => void>();
+  const auctionsListeners = new Set<(auctions: TrimmedAuction[]) => void>();
   let probeStatus: ProbeStatus | null = null;
 
   function onMessage(event: MessageEvent): void {
     if (event.source !== target) return;
-    const msg = event.data as { channel?: string; kind?: string; data?: unknown } | null;
-    if (!msg || msg.channel !== ADAPTER_CHANNEL) return;
+    // Drop anything that is not a well-formed adapter message. This also
+    // drops this client's own `act_request`s, which arrive here too.
+    const parsed = adapterMessageSchema.safeParse(event.data);
+    if (!parsed.success) return;
+    const msg = parsed.data;
 
     if (msg.kind === 'probe') {
-      probeStatus = msg.data as ProbeStatus;
-      for (const cb of probeListeners) cb(probeStatus);
+      probeStatus = msg.data;
+      for (const cb of probeListeners) cb(msg.data);
       return;
     }
     if (msg.kind === 'shape') {
-      const data = msg.data as { reason: string };
-      for (const cb of shapeListeners) cb(data.reason);
+      for (const cb of shapeListeners) cb(msg.data.reason);
       return;
     }
     if (msg.kind === 'auctions') {
-      const data = msg.data as { auctions: unknown[] };
-      for (const cb of auctionsListeners) cb(data.auctions);
+      for (const cb of auctionsListeners) cb(msg.data.auctions);
       return;
     }
     if (msg.kind === 'action_result') {
-      const data = msg.data as {
-        requestId?: string;
-        ok: boolean;
-        error?: string;
-        stillListed?: boolean;
-        requestedAt: number;
-        completedAt: number;
-      };
-      if (!data.requestId) return;
-      const resolve = pending.get(data.requestId);
-      if (!resolve) return;
-      pending.delete(data.requestId);
-      resolve({ ok: data.ok, error: data.error, stillListed: data.stillListed, latencyMs: data.completedAt - data.requestedAt });
+      // Only a reply to a request this client issued and is still waiting
+      // on, for the same action, and signed by the adapter: a page script
+      // that saw the request go by knows its requestId, but cannot sign a
+      // fake `ok: true` for it. Unknown, duplicate or unsigned replies are
+      // dropped; the real one (or the timeout) still settles the call.
+      const data = msg.data;
+      if (!data.requestId || !signer) return;
+      const requestId = data.requestId;
+      if (pending.get(requestId)?.action !== data.action) return;
+      void signer.verify(canonicalActMessage('action_result', data), msg.mac).then((valid) => {
+        const entry = pending.get(requestId);
+        if (!valid || !entry || entry.action !== data.action) return;
+        pending.delete(requestId);
+        entry.resolve({ ok: data.ok, error: data.error, stillListed: data.stillListed, latencyMs: data.completedAt - data.requestedAt });
+      });
     }
   }
 
   target.addEventListener('message', onMessage);
 
-  function call(data: Record<string, unknown> & { action: string }): Promise<ActionOutcome> {
+  function call(data: Record<string, unknown> & { action: ActAction }): Promise<ActionOutcome> {
+    if (!signer) return Promise.resolve({ ok: false, error: ACT_ERROR.unauthenticated, latencyMs: 0 });
     const requestId = crypto.randomUUID();
+    const request = { ...data, requestId };
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         if (pending.delete(requestId)) resolve({ ok: false, error: 'timed out waiting for adapter response', latencyMs: ACTION_TIMEOUT_MS });
       }, ACTION_TIMEOUT_MS);
-      pending.set(requestId, (outcome) => {
-        clearTimeout(timer);
-        resolve(outcome);
+      pending.set(requestId, {
+        action: data.action,
+        resolve: (outcome) => {
+          clearTimeout(timer);
+          resolve(outcome);
+        },
       });
-      target.postMessage({ channel: ADAPTER_CHANNEL, kind: 'act_request', data: { ...data, requestId } }, target.location.origin);
+      signer.sign(canonicalActMessage('act_request', request)).then(
+        (mac) => target.postMessage({ channel: ADAPTER_CHANNEL, kind: 'act_request', data: request, mac }, target.location.origin),
+        () => {
+          if (pending.delete(requestId)) {
+            clearTimeout(timer);
+            resolve({ ok: false, error: ACT_ERROR.unauthenticated, latencyMs: 0 });
+          }
+        },
+      );
     });
   }
 
