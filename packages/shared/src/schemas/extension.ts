@@ -14,7 +14,7 @@ export const bootstrapRequestSchema = z
   .object({
     device: deviceFingerprintSchema,
     extensionVersion: z.string().min(1).max(30),
-    buildTarget: z.enum(['ledger', 'ledger-auto']),
+    buildTarget: z.enum(['ledger', 'ledger-auto', 'userscript']),
   })
   .strict();
 export type BootstrapRequest = z.infer<typeof bootstrapRequestSchema>;

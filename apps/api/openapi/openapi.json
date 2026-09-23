@@ -8930,7 +8930,8 @@
                     "type": "string",
                     "enum": [
                       "ledger",
-                      "ledger-auto"
+                      "ledger-auto",
+                      "userscript"
                     ]
                   }
                 },

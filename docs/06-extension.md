@@ -169,6 +169,39 @@ Verify: `grep -r autobuyer apps/extension/dist/ledger` returns nothing —
 covered by `test/e2e/extension.spec.ts`'s `ledger build contents` suite,
 which runs even without a browser (a plain filesystem scan).
 
+### The `userscript` target
+
+`pnpm --filter @sl/extension build:userscript` builds the M1–M3 code (same
+feature set as `ledger-auto`, `VITE_BUILD_TARGET=userscript`) into one
+Tampermonkey file, `dist/userscript/sniper-ledger.user.js`, plus the
+header-only `sniper-ledger.meta.js` Tampermonkey polls for updates. No
+extension code forks for it; `src/userscript/` supplies what the manifest
+and the browser would otherwise provide:
+
+| Extension                         | Userscript                                                                                                                                                                              |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `adapter.js` in the MAIN world    | The same adapter IIFE, built first and embedded as a string (`virtual:adapter-source`), injected with `GM_addElement` at `document-start` (`setup.ts`)                                  |
+| Service worker + ISOLATED content | `background/index.ts` and `content/index.ts`, imported in that order by `main.ts` and run in Tampermonkey's isolated context                                                            |
+| `webextension-polyfill`           | `browser-shim.ts` (build alias): one in-page message bus with Chrome's first-answer-wins rule and structured cloning; `storage.*` on `GM_*Value`; `alarms` on timers; `tabs` = this tab |
+| `host_permissions` for the API    | `lib/http.ts`'s transport swapped for `gm-fetch.ts` (`GM_xmlhttpRequest`, `anonymous: true` so EA's cookies never go along); the API host is the header's only `@connect`               |
+| Toolbar popup, options page       | `launcher.ts`: a button on the EA page opening a drawer that mounts `popup/app.ts` and `options/app.ts` in their own shadow roots; also in Tampermonkey's menu                          |
+
+Differences that follow from there being no extension process:
+
+- **`storage.session` persists.** It is GM storage under a `session:` prefix,
+  so the access token and saved governor state survive a browser restart. A
+  stale token is refreshed on its first 401, and resuming governor counters
+  is the conservative direction.
+- **Everything runs per tab.** Each EA tab has its own "background": its own
+  alarms, heartbeat and kill-switch listener. Alarms only tick while an EA
+  tab is open.
+- **IndexedDB is ea.com's.** The observation database lives in the EA
+  origin, so clearing ea.com's site data clears it, and EA's page code could
+  read it. It only ever holds trimmed market listings; tokens and settings
+  are in GM storage, which the page cannot reach.
+- **No minification.** People install userscripts by hand and should be able
+  to read what they are installing.
+
 ## 4. The ASSUMED SHAPE and the day-one verification checklist
 
 The live EA FC web app is unreachable while the market is locked, so

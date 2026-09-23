@@ -7,6 +7,20 @@
  */
 export const API_ORIGIN = import.meta.env.VITE_API_ORIGIN;
 
+type FetchImpl = (input: string, init: RequestInit) => Promise<Response>;
+
+let fetchImpl: FetchImpl = (input, init) => fetch(input, init);
+
+/** Swaps the transport every API call goes through. The extension builds
+ * never call this — their pages reach the API with the manifest's
+ * host_permissions. The userscript build runs on ea.com's origin, where a
+ * plain `fetch` to the API is a cross-origin request, so it installs a
+ * `GM_xmlhttpRequest`-backed implementation instead
+ * (`src/userscript/gm-fetch.ts`). */
+export function setFetchImpl(impl: FetchImpl): void {
+  fetchImpl = impl;
+}
+
 export function backoffMs(attempt: number): number {
   return Math.min(30_000, 500 * 2 ** attempt) + Math.random() * 250;
 }
@@ -37,7 +51,7 @@ export async function retryFetch(path: string, init: RequestInit = {}, opts: Ret
     if (opts.authorize) await opts.authorize(headers);
 
     try {
-      const res = await fetch(`${API_ORIGIN}${path}`, { ...init, headers });
+      const res = await fetchImpl(`${API_ORIGIN}${path}`, { ...init, headers });
       if ((res.status === 429 || res.status >= 500) && attempt < maxRetries) {
         await sleep(backoffMs(attempt));
         attempt++;

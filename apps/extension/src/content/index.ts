@@ -500,9 +500,18 @@ async function main(): Promise<void> {
   }
 }
 
-void main().catch((err) => {
-  // M1 recording is wired up synchronously at the top of main() and keeps
-  // working whatever happens below it; a failed M2/M3 bootstrap is reported,
-  // never allowed to become a silent unhandled rejection.
-  logger.error(`content bootstrap failed (recording continues): ${String(err)}`, 'content');
-});
+function start(): void {
+  void main().catch((err) => {
+    // M1 recording is wired up synchronously at the top of main() and keeps
+    // working whatever happens below it; a failed M2/M3 bootstrap is reported,
+    // never allowed to become a silent unhandled rejection.
+    logger.error(`content bootstrap failed (recording continues): ${String(err)}`, 'content');
+  });
+}
+
+// The extension injects this file at document_idle, so the first branch is
+// never taken there. The userscript build evaluates it at document-start (so
+// the MAIN-world adapter is in place before EA's first market call) and the
+// panel needs a <body> to attach to.
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
+else start();

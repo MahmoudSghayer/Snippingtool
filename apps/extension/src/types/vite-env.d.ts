@@ -16,7 +16,7 @@ interface ImportMetaEnv {
    * `src/engine/autobuyer-loader.ledger.ts` vs `.auto.ts`), not from this
    * flag alone — this flag additionally gates *invocation* at runtime. */
   readonly VITE_AUTOMATION: '0' | '1';
-  readonly VITE_BUILD_TARGET: 'ledger' | 'ledger-auto';
+  readonly VITE_BUILD_TARGET: 'ledger' | 'ledger-auto' | 'userscript';
   readonly VITE_API_ORIGIN: string;
   /** Origin of the companion dashboard. `background/welcome.ts` opens
    * `<origin>/bot` on first install so a new user lands where saved

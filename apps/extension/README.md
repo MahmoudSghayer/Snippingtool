@@ -26,11 +26,32 @@ pnpm --filter @sl/extension lint
 pnpm --filter @sl/extension test          # vitest, jsdom + fake-indexeddb
 pnpm --filter @sl/extension build:ledger  # -> dist/ledger
 pnpm --filter @sl/extension build:auto    # -> dist/ledger-auto
+pnpm --filter @sl/extension build:userscript  # -> dist/userscript/sniper-ledger.user.js
 ```
 
 `dist/ledger` and `dist/ledger-auto` are both fully self-contained,
 loadable-unpacked extensions (`chrome://extensions` → Developer mode → Load
 unpacked → pick the `dist/<target>` folder).
+
+## Userscript (Tampermonkey)
+
+The same M1–M3 code as one Tampermonkey script, for people who would rather
+not load an unpacked extension. Build it against the API it should talk to
+(the origin also goes into the script's `@connect`):
+
+```
+VITE_API_ORIGIN=https://api.example.com \
+VITE_DASHBOARD_ORIGIN=https://example.com \
+USERSCRIPT_DOWNLOAD_URL=https://example.com/sniper-ledger.user.js \
+pnpm --filter @sl/extension build:userscript
+```
+
+Host `dist/userscript/sniper-ledger.user.js` and `sniper-ledger.meta.js`
+side by side at `USERSCRIPT_DOWNLOAD_URL`; Tampermonkey polls the `.meta.js`
+and installs new versions. Without that variable the script works but never
+auto-updates. In Chrome, Tampermonkey needs "Allow User Scripts" turned on
+for it (`chrome://extensions` → Tampermonkey → Details). How it maps onto the
+extension's worlds and APIs: [`docs/06-extension.md`](../../docs/06-extension.md) §3.
 
 ## End-to-end test
 
