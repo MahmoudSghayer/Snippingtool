@@ -1,7 +1,11 @@
+import { featureToggles } from '@sl/db';
 import { resetDatabase } from '@sl/db/test-utils';
+import { entitlementBlobClaimsSchema } from '@sl/shared';
+import { decodeProtectedHeader, importSPKI, jwtVerify } from 'jose';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { buildApp } from '../../../app.js';
+import { newId } from '../../../lib/ids.js';
 
 import type { FastifyInstance } from 'fastify';
 
@@ -125,6 +129,44 @@ describe('extension module: bootstrap/heartbeat + activity batch idempotency', (
     });
     expect(second.statusCode).toBe(200);
     expect(second.json()).toEqual({ accepted: 0, deduped: 1 });
+  });
+
+  // The extension trusts a *cached* entitlement only through this blob
+  // (apps/extension/src/lib/license.ts): features, expiry and the kill
+  // switch are read from its verified claims, never from the unsigned
+  // response fields it cached alongside. So the kill switch has to be
+  // inside the signature, and has to match the live toggle.
+  it('bootstrap and heartbeat sign the kill switch into the entitlement blob', async () => {
+    const accessToken = await registerLoginVerified(app, 'blob-ks@example.com', '198.51.100.13');
+    const publicKey = await importSPKI(app.config.ENTITLEMENT_PUBLIC_KEY!, 'EdDSA');
+
+    const off = await app.inject({
+      method: 'POST',
+      url: '/api/v1/extension/bootstrap',
+      headers: { authorization: `Bearer ${accessToken}` },
+      payload: { device, extensionVersion: '0.1.0', buildTarget: 'ledger' },
+    });
+    const offBody = off.json();
+    expect(decodeProtectedHeader(offBody.entitlementBlob).alg).toBe('EdDSA');
+    const { payload: offClaims } = await jwtVerify(offBody.entitlementBlob, publicKey);
+    const parsedOff = entitlementBlobClaimsSchema.parse(offClaims);
+    expect(parsedOff.killSwitchActive).toBe(false);
+    expect(parsedOff.sub).toBe(offBody.userId);
+    expect(parsedOff.deviceId).toBe(offBody.deviceId);
+    expect(parsedOff.snapshot.features).toEqual(offBody.features);
+
+    await app.db.insert(featureToggles).values({ id: newId(), key: 'kill_switch', enabled: true });
+
+    const hb = await app.inject({
+      method: 'POST',
+      url: '/api/v1/extension/heartbeat',
+      headers: { authorization: `Bearer ${accessToken}` },
+      payload: { deviceId: offBody.deviceId, extensionVersion: '0.1.0', engineState: 'running' },
+    });
+    const hbBody = hb.json();
+    expect(hbBody.killSwitchActive).toBe(true);
+    const { payload: onClaims } = await jwtVerify(hbBody.entitlementBlob, publicKey);
+    expect(entitlementBlobClaimsSchema.parse(onClaims).killSwitchActive).toBe(true);
   });
 
   it('GET /extension/version and /extension/kill-switch are unauthenticated and return sane defaults', async () => {
