@@ -202,6 +202,32 @@ Differences that follow from there being no extension process:
 - **No minification.** People install userscripts by hand and should be able
   to read what they are installing.
 
+### The Sniping Bot page (automation builds)
+
+`ledger-auto` and `userscript` add a **Sniping Bot** page: an item under
+Transfers in EA's left navigation (`ui/ea-nav.ts`) opens a full page
+(`ui/bot-page.ts`) with the bot's settings on the left and the live session on
+the right. The in-page panel and the userscript's SL menu open it too.
+
+The bot (`engine/sniper.ts`) searches the user's saved filters in turn, buys
+every listing at or under the price cap (cheapest first), then waits a random
+delay from the user's range, with breaks every N searches and rests every N
+minutes. It ships through the same `virtual:autobuyer-loader` alias as the
+autobuyer (`loadSniper()`), so the `ledger` build never contains it, and the
+autobuyer does not buy while the bot runs.
+
+**The user sets every limit.** Its settings (`BotSettings` in
+`@sl/shared`) live in `storage.local`, never on the server, and are bounded
+by `BOT_LIMITS`, which are far wider than `GOVERNOR_ABSOLUTE_LIMITS`: presets
+go from Safe (3-5 s) to Risky (1-2 s), and the page labels the pace LOW,
+MEDIUM or HIGH RISK. The bot runs its own governor built from the page's
+Safety limits; the server kill switch and adapter probe failures stop it
+whatever those say.
+
+Not yet available: transfer list, sold and unsold counts (the adapter has no
+transfer list access yet), and the navigation and header selectors are
+ASSUMED SHAPE, like `main/adapter.ts`, until checked on the live web app.
+
 ## 4. The ASSUMED SHAPE and the day-one verification checklist
 
 The live EA FC web app is unreachable while the market is locked, so

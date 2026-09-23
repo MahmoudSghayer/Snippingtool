@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { ADAPTER_CHANNEL } from './adapter-channel.js';
 import { activityEventSchema } from './schemas/activity.js';
 import { emailSchema, passwordSchema } from './schemas/auth.js';
+import { botSettingsSchema } from './schemas/bot.js';
 import { filterCriteriaSchema, filterStatsSchema, savedFilterSchema } from './schemas/filters.js';
 import { riskBudgetEventSchema } from './schemas/risk.js';
 import { snipingAttemptSchema } from './schemas/sniping.js';
@@ -210,6 +211,14 @@ export const backgroundMessageTypeSchema = z.enum([
   /** Exports `lib/logger.ts`'s ring buffer for the options page's "Export
    * logs" button — local only, no network call. */
   'logs.export',
+  /** The Sniping Bot page's settings (`BotSettings`, `storage.local`). Local
+   * only: nothing about how a user paces their bot goes to the server. */
+  'bot.settingsGet',
+  'bot.settingsSet',
+  /** Player names for resource ids, for the bot log and search results.
+   * Background resolves them from `/api/v1/market/cards/:id` and caches
+   * them in `storage.local`. */
+  'cards.names',
 ]);
 export type BackgroundMessageType = z.infer<typeof backgroundMessageTypeSchema>;
 
@@ -319,6 +328,14 @@ export const extBackgroundLicenseHeartbeatPayloadSchema = z
 
 /** `filters.save` — the *locally-persisted* `SavedFilter[]` (id, filterHash,
  * etc. already computed), not a creation request. */
+export const extBackgroundBotSettingsSetPayloadSchema = botSettingsSchema;
+
+export const extBackgroundCardNamesPayloadSchema = z
+  .object({
+    resourceIds: z.array(z.number().int().positive()).max(50),
+  })
+  .strict();
+
 export const extBackgroundFiltersSavePayloadSchema = z
   .object({
     filters: z.array(savedFilterSchema).max(200),

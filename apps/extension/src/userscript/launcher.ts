@@ -16,6 +16,7 @@ import optionsCss from '../options/style.css?raw';
 import { mountPopup } from '../popup/app.js';
 import popupCss from '../popup/style.css?raw';
 import tokensCss from '../styles/tokens.css?raw';
+import { onBotPageAvailable, openBotPage } from '../ui/bot-opener.js';
 
 import { setOptionsPageOpener } from './browser-shim.js';
 
@@ -45,6 +46,8 @@ const LAUNCHER_CSS = `
   }
   .tabs button[aria-selected='true'] { color: var(--sl-ink); box-shadow: inset 0 -2px 0 var(--sl-gold); }
   .tabs button:focus-visible { outline: 2px solid var(--sl-gold); outline-offset: -2px; }
+  .tabs .bot { flex: none; color: #1d9bf0; }
+  .tabs .bot[hidden] { display: none; }
   .view { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
   .view[hidden] { display: none; }
 `;
@@ -123,6 +126,19 @@ export function installLauncher(): void {
     btn.addEventListener('click', () => show(tab));
     tabs.append(btn);
   }
+  // Opens the full Sniping Bot page (automation builds, once the content
+  // script has created it).
+  const botButton = document.createElement('button');
+  botButton.type = 'button';
+  botButton.className = 'bot';
+  botButton.textContent = 'Sniping Bot ▸';
+  botButton.hidden = true;
+  botButton.addEventListener('click', () => {
+    if (openBotPage()) hide();
+  });
+  tabs.append(botButton);
+  onBotPageAvailable((available) => (botButton.hidden = !available));
+
   drawer.append(tabs, account.host, settings.host);
   root.append(style, fab, drawer);
   document.body.appendChild(host);
@@ -156,4 +172,5 @@ export function installLauncher(): void {
   setOptionsPageOpener(() => show('settings'));
   GM_registerMenuCommand("Open Sniper's Ledger", () => show('account'));
   GM_registerMenuCommand("Sniper's Ledger settings", () => show('settings'));
+  GM_registerMenuCommand('Open Sniping Bot', () => void openBotPage());
 }

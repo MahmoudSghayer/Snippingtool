@@ -17,22 +17,27 @@
  * boot here used to take M1 recording down with it (docs/12-testing.md
  * "Defects found" row #10). Nothing in this file touches `lib/storage.ts`.
  */
-import { extContentKillSwitchMessageSchema } from '@sl/shared';
+import { DEFAULT_BOT_SETTINGS, extContentKillSwitchMessageSchema } from '@sl/shared';
 import browser from 'webextension-polyfill';
 
 import { AssistEngine } from '../engine/assist.js';
 import { Governor, type GovernorState } from '../engine/governor.js';
 import { rankCandidates, type OpportunityCandidate, type ScoredOpportunity } from '../engine/ranker.js';
 import { logger } from '../lib/logger.js';
+import { setBotPageOpener } from '../ui/bot-opener.js';
+import { createBotPage } from '../ui/bot-page.js';
+import { installNavItem } from '../ui/ea-nav.js';
 import { createPanel, type Panel } from '../ui/panel.js';
 
 import { createAdapterClient } from './adapter-client.js';
 
 import type { Autobuyer, StopReason } from '../engine/autobuyer.js';
+import type { Sniper } from '../engine/sniper.js';
 import type { AttemptInput, TradeInput } from '../engine/types.js';
 import type { PriceSummary } from '../model/prices.js';
 import type {
   ActivityEvent,
+  BotSettings,
   BackgroundResponse,
   BootstrapResponse,
   FeatureKey,
@@ -340,8 +345,11 @@ async function main(): Promise<void> {
   let deviceIdCache: string | null = null;
   const sessionId = crypto.randomUUID();
 
+  // Saved filters: rotated by assist, searched by the Sniping Bot, edited
+  // on the Sniping Bot page. One array so all three see the same list.
+  let filters = (await send<SavedFilter[]>('filters.list')) ?? [];
+
   if (governor && features.includes('assist.ranker')) {
-    const filters = (await send<SavedFilter[]>('filters.list')) ?? [];
     assist = new AssistEngine({
       governor,
       adapter,
@@ -383,6 +391,66 @@ async function main(): Promise<void> {
         sessionCoinBudget: settingsCache.budgets.sessionCoinBudget,
       });
     }
+  }
+
+  // ---- M3: the Sniping Bot page -------------------------------------------
+  //
+  // Automation builds only (the listable build never loads `engine/sniper.ts`
+  // — see `engine/autobuyer-loader.*.ts`). The bot runs its own governor from
+  // the page's Safety limits; the server kill switch still stops it.
+  let sniper: Sniper | null = null;
+  if (AUTOMATION_ENABLED) {
+    let botSettings: BotSettings | null = await send<BotSettings>('bot.settingsGet');
+    let unavailableReason: string | null = null;
+    if (!authStatus?.authenticated) unavailableReason = 'Sign in (SL button) to use the Sniping Bot.';
+    else if (!features.includes('automation.autobuyer')) unavailableReason = 'Your plan does not include the Sniping Bot.';
+    else if (!botSettings) unavailableReason = 'The extension could not load the bot settings. Reload the page.';
+
+    if (!unavailableReason && botSettings) {
+      const { loadSniper } = await import('virtual:autobuyer-loader');
+      const mod = await loadSniper();
+      if (mod) {
+        sniper = new mod.Sniper(
+          {
+            adapter,
+            getFilters: () => filters.filter((f) => f.isActive).map((f) => ({ id: f.id, name: f.name, filter: f.filter })),
+            estimateSellPrice: async (resourceId) => {
+              const r = await send<{ summary: PriceSummary }>('summary', { resourceId, minProfit: settingsCache.targets.minProfitPerSnipe });
+              return r?.summary.median ?? null;
+            },
+            killSwitch: () => ({ active: killSwitchActive || !!governor?.isKillSwitchActive() }),
+            onChange: () => botPage.refresh(),
+            onAttempt: recordAttempt,
+            onTrade: recordTrade,
+          },
+          botSettings,
+        );
+      }
+    }
+
+    const botPage = createBotPage({
+      sniper,
+      unavailableReason: sniper ? null : (unavailableReason ?? 'The Sniping Bot is not available in this build.'),
+      getSettings: () => botSettings ?? DEFAULT_BOT_SETTINGS,
+      saveSettings: async (next) => {
+        botSettings = next;
+        await send('bot.settingsSet', next);
+      },
+      getFilters: () => filters,
+      saveFilters: async (next) => {
+        filters = next;
+        await send('filters.save', { filters: next });
+      },
+      resolveNames: async (resourceIds) => (await send<Record<string, string | null>>('cards.names', { resourceIds })) ?? {},
+    });
+    const nav = installNavItem({
+      onToggle: () => botPage.toggle(),
+      onEaNavigate: () => botPage.close(),
+      onOffset: (left, top) => botPage.setOffsets(left, top),
+    });
+    botPage.onOpenChange((open) => nav.setActive(open));
+    setBotPageOpener(() => botPage.open());
+    panel.setBotLauncher(() => botPage.open());
   }
 
   function buildCandidatesFromTracked(): OpportunityCandidate[] {
@@ -428,7 +496,8 @@ async function main(): Promise<void> {
     rankedCandidates = rankCandidates(candidates, { minEv: settingsCache.targets.minProfitPerSnipe });
     panel.setRanked(rankedCandidates);
 
-    if (autobuyer && !autobuyer.isStopped()) {
+    // The Sniping Bot buys on its own; never let two engines buy at once.
+    if (autobuyer && !autobuyer.isStopped() && !sniper?.isRunning()) {
       await autobuyer.runCycle(rankedCandidates.slice(0, 5));
       const stop = autobuyer.getStopReason();
       if (stop) reportAutobuyerStop(stop.reason, stop.detail);
