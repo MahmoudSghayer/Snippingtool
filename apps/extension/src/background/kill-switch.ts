@@ -13,16 +13,21 @@
  *     `tabs.sendMessage(tabId, { type: 'engine.killSwitch', ... })` to each
  *     EA tab (no new manifest permission — a `url`-filtered query only
  *     needs the EA host permissions the manifest already declares);
- *   - pull: `handleKillSwitchGet()` serves the cached flag from
- *     `storage.local` (no network) so the content script's engine tick can
+ *   - pull: `handleKillSwitchGet()` serves the flag signed into the cached
+ *     entitlement blob (no network) so the content script's engine tick can
  *     self-correct within one tick if a push was missed (service worker
- *     asleep, tab mid-navigation).
+ *     asleep, tab mid-navigation). The cached `killSwitchActive` field
+ *     itself is never read: `storage.local` is editable. With no signed
+ *     flag (cache missing, tampered, expired, or from before the flag was
+ *     signed) it asks `GET /extension/kill-switch`, and reports "active" if
+ *     that fails too.
  * The last pushed value is kept in `storage.session` so a restarted service
  * worker still knows whether the tabs were already told.
  */
 import browser from 'webextension-polyfill';
 
 import { EA_WEB_APP_MATCHES } from '../../ea-origins.mjs';
+import * as auth from '../lib/auth.js';
 import * as license from '../lib/license.js';
 import { logger } from '../lib/logger.js';
 import { getSession, setSession } from '../lib/storage.js';
@@ -79,9 +84,20 @@ export async function propagateKillSwitch(active: boolean, reason?: string): Pro
   return { notified };
 }
 
-/** `license.killSwitchGet`: the cached entitlement's flag, no network. */
+const UNVERIFIED_REASON = 'kill switch state could not be verified';
+
+/** `license.killSwitchGet`: the signed flag from the cached entitlement. */
 export async function handleKillSwitchGet(): Promise<{ active: boolean; reason?: string }> {
   const cached = await license.getCachedEntitlement();
-  const active = cached?.bootstrap.killSwitchActive ?? false;
-  return active ? { active, reason: DEFAULT_REASON } : { active };
+  if (!cached) {
+    // Signed out with nothing cached: there is no entitlement to switch off,
+    // and no reason to call the API every tick.
+    if (!(await license.readUnverifiedCache()) && !(await auth.isAuthenticated())) return { active: false };
+  }
+  if (cached?.killSwitchSigned) {
+    return cached.bootstrap.killSwitchActive ? { active: true, reason: DEFAULT_REASON } : { active: false };
+  }
+  const live = await license.fetchKillSwitch();
+  if (live === null) return { active: true, reason: UNVERIFIED_REASON };
+  return live ? { active: true, reason: DEFAULT_REASON } : { active: false };
 }

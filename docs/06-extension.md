@@ -301,9 +301,13 @@ overview only):
   pushed value lives in `storage.session` so a restarted service worker
   does not re-announce a deactivation.
 - **Pull** — `content/index.ts`'s engine tick (every 8 s) asks background
-  for `license.killSwitchGet`, the cached entitlement's flag from
-  `storage.local` (no network), and applies any difference. A missed push
-  is therefore corrected within one tick.
+  for `license.killSwitchGet`, the flag signed into the cached entitlement
+  blob (no network), and applies any difference. A missed push is therefore
+  corrected within one tick. The cached `killSwitchActive` field is never
+  read (anyone can edit `storage.local`); with no signed flag (cache
+  missing, tampered or expired, or a blob signed before the flag was a
+  claim) background asks `GET /extension/kill-switch`, and reports the
+  switch active if that fails too.
 
 Either path calls the content script's `applyKillSwitch()`, which sets the
 governor's switch, updates the in-page panel's status line ("Kill switch

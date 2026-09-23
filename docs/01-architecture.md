@@ -258,7 +258,7 @@ sequenceDiagram
             SW->>Local: replace cached blob
         else API unreachable (offline)
             SW->>Local: read cached blob
-            SW->>SW: verify signature + check blob.serverTime within 24h grace
+            SW->>SW: verify signature + exp, check signed iat within 24h grace
             alt within grace
                 SW-->>SW: continue operating on cached entitlement
             else grace expired

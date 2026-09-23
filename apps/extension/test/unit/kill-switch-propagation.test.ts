@@ -7,7 +7,7 @@
 // tab. These tests pin the push (every open EA tab gets an
 // `engine.killSwitch` message when the switch turns on, a deactivation is
 // broadcast exactly once, unrelated tabs are never messaged) and the pull
-// (`license.killSwitchGet` reflects the cached entitlement, no network).
+// (`license.killSwitchGet` reflects the signed cached entitlement, no network).
 //
 // `chrome.tabs.query`/`sendMessage` are replaced per test with
 // callback-convention fakes — that is what webextension-polyfill wraps
@@ -19,6 +19,7 @@ import { handleKillSwitchGet, propagateKillSwitch } from '../../src/background/k
 import { bootstrap } from '../../src/lib/license.js';
 
 import { useRealChromeStorage } from './chrome-storage-stub.js';
+import { claimsFor, signBlob } from './license-test-keys.js';
 
 import type { BootstrapResponse } from '@sl/shared';
 
@@ -138,11 +139,14 @@ describe('background/kill-switch.ts: push into open EA tabs', () => {
 describe('background/kill-switch.ts: pull from the cached entitlement', () => {
   useRealChromeStorage();
 
-  it('reports inactive with no cached entitlement, and follows the cached flag afterwards', async () => {
+  it('reports inactive with no cached entitlement, and follows the signed cached flag afterwards', async () => {
     expect(await handleKillSwitchGet()).toEqual({ active: false });
 
+    // The pull reads the kill switch from the signed blob's claims, never
+    // the cached `killSwitchActive` field (see license-bootstrap-offline.test.ts).
+    const entitlementBlob = await signBlob(claimsFor({ features: ['assist.ranker'], killSwitchActive: true, iat: Math.floor(Date.now() / 1000) }));
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify(fakeBootstrapResponse({ killSwitchActive: true })), { status: 200, headers: { 'content-type': 'application/json' } }),
+      new Response(JSON.stringify(fakeBootstrapResponse({ killSwitchActive: false, entitlementBlob })), { status: 200, headers: { 'content-type': 'application/json' } }),
     );
     try {
       await bootstrap();
