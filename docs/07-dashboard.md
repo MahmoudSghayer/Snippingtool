@@ -122,18 +122,34 @@ Admin pages and the endpoints/permissions they exercise (full detail in
   calls `GET /users/me` once (cached as a module-level promise so React 19
   Strict Mode's double-invoke and the router's `beforeLoad` share one
   request) and populates `useAuthStore`. `resetBootstrap()` clears the cache
-  after login/logout so the next guard re-fetches fresh.
+  after login/logout so the next guard re-fetches fresh. A 401 here goes
+  through the same silent-refresh middleware as every other call (below), so
+  a page load that lands just after `sl_at` expired still bootstraps
+  successfully rather than bouncing straight to `/login`.
 - **CSRF**: `src/api/client.ts`'s `onRequest` middleware reads the
   non-httpOnly `sl_csrf` cookie and sets `x-csrf-token` on every
   `POST`/`PUT`/`PATCH`/`DELETE` (never on `GET`) — the exact double-submit
   contract `docs/04-auth.md` §10 describes. Covered by
   `test/apiClient.test.ts`.
-- **401 handling**: the same client's `onResponse` middleware calls a
-  handler registered by `router.tsx` (`setUnauthorizedHandler`) on any 401,
-  which navigates to `/login?returnTo=<current path>` — except for the
-  auth-exempt routes (`/auth/login`, `/auth/refresh`, `/auth/logout`,
-  `/auth/mfa/verify`), which legitimately 401 as part of their own flow and
-  must not trigger a redirect loop.
+- **Silent token refresh**: `sl_at` expires after 15 minutes; `sl_rt` lasts
+  30 days. `src/api/client.ts`'s `onResponse` middleware treats a 401 whose
+  `code` is `AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` (access token
+  expired or missing — not `AUTH_SESSION_REVOKED`/`AUTH_TOKEN_REUSED`, which
+  mean the session itself is gone) as recoverable: it calls
+  `POST /auth/refresh` once (no CSRF header needed — that route reads only
+  the `sl_rt` cookie) and retries the original request exactly once.
+  Concurrent 401s single-flight onto the same in-flight refresh rather than
+  each rotating `sl_rt` themselves (which the API would treat as reuse and
+  revoke the whole session). This is why a dashboard tab can now stay open
+  past 15 minutes instead of forcing a re-login every time. Covered by
+  `test/apiClient.test.ts`'s "silent token refresh" suite.
+- **401 handling**: if the refresh above doesn't apply or fails, the same
+  client's `onResponse` middleware calls a handler registered by
+  `router.tsx` (`setUnauthorizedHandler`) on any 401, which navigates to
+  `/login?returnTo=<current path>` — except for the auth-exempt routes
+  (`/auth/login`, `/auth/refresh`, `/auth/logout`, `/auth/mfa/verify`),
+  which legitimately 401 as part of their own flow and must not trigger a
+  redirect loop (or, for `/auth/refresh` itself, another refresh attempt).
 - **Login → MFA**: `LoginPage` posts credentials, and on `mfa_required`
   cannot know in advance whether the ticket is `'verify'` mode (normal
   step-up) or `'enroll'` mode (an admin's very first login ever — see
@@ -148,7 +164,10 @@ Admin pages and the endpoints/permissions they exercise (full detail in
   by the authenticated shell. `POST /ws/ticket` → connect to `/ws?ticket=`
   (unprefixed, per `docs/03-api.md` §ws) → reconnect with exponential
   backoff (1s → 30s cap) on close. Every `@sl/shared` `WsEvent` is handled:
-  `session.revoked` clears the session and redirects to `/login`;
+  `session.revoked` clears the session (auth store **and** the TanStack
+  Query cache — `src/lib/session.ts#clearLocalSession()` — so a force-logout
+  doesn't leave this account's cached data behind for the next person on
+  this tab) and redirects to `/login`;
   `subscription.changed` invalidates the `['subscription']` query and
   toasts; `notification.new` invalidates `['notifications']` and toasts;
   `feature_toggles.changed`/`kill_switch` invalidate/toast for admins only;
