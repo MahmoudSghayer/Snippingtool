@@ -612,6 +612,35 @@ async function buildStaticCatalog(): Promise<Catalog | null> {
   return { players: parsePlayersFile(playersFile), ...lists, capturedAt: Date.now(), notes };
 }
 
+/** When the page has no `fut_*` globals to find the data files with: an
+ * empty catalog for the web app's own lists to fill, once the web app has
+ * started (players from its own player-list path). Null until then. */
+async function emptyLiveCatalog(): Promise<Catalog | null> {
+  const A = ea.AssetLocationUtils;
+  if (!(window as unknown as PageGlobals).factories?.DataProvider || !A) return null;
+  let players: Catalog['players'] = [];
+  const notes: string[] = [];
+  try {
+    players = parsePlayersFile(await getJson(A.getPlayerSearchFileUri()));
+  } catch (err) {
+    notes.push(
+      `could not load the player list: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  return {
+    players,
+    levels: [],
+    rarities: [],
+    positions: [],
+    playStyles: [],
+    nations: [],
+    leagues: [],
+    clubs: {},
+    capturedAt: Date.now(),
+    notes,
+  };
+}
+
 /** Replaces each list with the web app's own, where that list builds cleanly. */
 function applyLiveLists(c: Catalog): boolean {
   const dp = (window as unknown as PageGlobals).factories?.DataProvider;
@@ -706,7 +735,7 @@ async function refreshCatalog(): Promise<void> {
   if (building) return;
   building = true;
   try {
-    if (!catalog) catalog = await buildStaticCatalog();
+    if (!catalog) catalog = (await buildStaticCatalog()) ?? (await emptyLiveCatalog());
     if (catalog && !liveApplied) liveApplied = applyLiveLists(catalog);
     if (catalog) post('catalog', catalog);
   } catch (err) {
@@ -717,7 +746,10 @@ async function refreshCatalog(): Promise<void> {
 }
 
 window.addEventListener('message', (event: MessageEvent) => {
-  if (event.source !== window) return;
+  // Same-origin only. Not `event.source === window`: a userscript posts
+  // from its own (sandboxed) context, so the source is not always this
+  // exact window object even though the message comes from this page.
+  if (event.origin !== window.location.origin) return;
   const msg = event.data as { channel?: string; kind?: string; data?: unknown } | null;
   if (!msg || msg.channel !== ADAPTER_CHANNEL || msg.kind !== 'act_request') return;
   const data = msg.data as AdapterActRequestMessage['data'] | undefined;

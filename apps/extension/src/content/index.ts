@@ -85,7 +85,7 @@ function nowIso(): string {
 
 async function main(): Promise<void> {
   const panel: Panel = createPanel();
-  const adapter = createAdapterClient(window);
+  const adapter = createAdapterClient();
 
   // The Snipe Targets form's choices, built by the adapter with the web
   // app's own lists once it has started (model/catalog.ts). Asked for now

@@ -44,7 +44,20 @@ export interface AdapterClient {
   dispose(): void;
 }
 
-export function createAdapterClient(target: Window = window): AdapterClient {
+/**
+ * The page's own window. In the extension's ISOLATED world `window` already
+ * is it. In the userscript, Tampermonkey hands the script a sandboxed
+ * `window` stand-in, and messages the page posts come from the real window
+ * (`unsafeWindow`): comparing them against the stand-in would drop every
+ * one. The real window is what this client listens and posts on.
+ */
+export function pageWindow(): Window {
+  // Tampermonkey provides `unsafeWindow` as a variable in the script's
+  // scope, not as a property of its global object: it has to be named.
+  return typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
+}
+
+export function createAdapterClient(target: Window = pageWindow()): AdapterClient {
   const pending = new Map<string, (outcome: ActionOutcome) => void>();
   const probeListeners = new Set<(status: ProbeStatus) => void>();
   const shapeListeners = new Set<(reason: string) => void>();

@@ -37,3 +37,7 @@ declare function GM_addElement(
 ): HTMLElement;
 declare function GM_openInTab(url: string, options?: { active?: boolean }): void;
 declare function GM_registerMenuCommand(caption: string, onClick: () => void): unknown;
+
+/** The page's real window (userscript builds only; undefined elsewhere,
+ * so always check `typeof unsafeWindow` first). */
+declare const unsafeWindow: Window | undefined;

@@ -15,6 +15,9 @@ const GRANTS = [
   'GM_addElement',
   'GM_openInTab',
   'GM_registerMenuCommand',
+  // The page's real window: the adapter channel runs over its postMessage
+  // (see src/content/adapter-client.ts `pageWindow`).
+  'unsafeWindow',
 ];
 
 /**
