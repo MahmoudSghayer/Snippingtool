@@ -31,9 +31,14 @@ import {
 import type { Sniper, SniperLogEntry, SniperPhase, SniperSearchResult } from '../engine/sniper.js';
 
 export interface BotPageDeps {
-  sniper: Sniper | null;
-  /** Why the bot cannot run, when `sniper` is null (signed out, no plan...). */
-  unavailableReason: string | null;
+  /** The bot, once it can run; null while signed out or on a plan without it. */
+  getSniper: () => Sniper | null;
+  /** Why the bot cannot run, when `getSniper()` is null. */
+  getUnavailableReason: () => string | null;
+  /** Re-checks sign-in and plan (creating the bot if they now allow it).
+   * Called whenever the page opens, so signing in from the SL drawer does
+   * not need a page reload. */
+  prepare: () => Promise<void>;
   getSettings: () => BotSettings;
   saveSettings: (settings: BotSettings) => Promise<void>;
   getFilters: () => SavedFilter[];
@@ -467,7 +472,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
 
   function commit(next: BotSettings, rerender: boolean): void {
     settings = next;
-    deps.sniper?.setSettings(next);
+    deps.getSniper()?.setSettings(next);
     if (rerender) renderSettings();
     else renderRisk();
     if (saveTimer) clearTimeout(saveTimer);
@@ -583,7 +588,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   }
 
   function renderDash(): void {
-    const sniper = deps.sniper;
+    const sniper = deps.getSniper();
     const stats = sniper?.getStats();
     const top = stats?.topSnipes ?? [];
     wantNames(top.map((t) => t.resourceId));
@@ -615,7 +620,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   function renderRing(): void {
     const box = root.getElementById('ringbox');
     if (!box) return;
-    const sniper = deps.sniper;
+    const sniper = deps.getSniper();
     const state = sniper?.state;
     const now = Date.now();
     const endsAt = state?.phaseEndsAt ?? null;
@@ -675,7 +680,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   }
 
   function renderFeeds(): void {
-    const sniper = deps.sniper;
+    const sniper = deps.getSniper();
     const log = sniper?.getLog() ?? [];
     const results = sniper?.getSearchResults() ?? [];
     wantNames([...log.map((e) => e.resourceId), ...results.flatMap((r) => r.matches.map((m) => m.resourceId))]);
@@ -684,7 +689,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   }
 
   function renderTop(): void {
-    const sniper = deps.sniper;
+    const sniper = deps.getSniper();
     const state = sniper?.state;
     const running = sniper?.isRunning() ?? false;
     const phase = $('phase');
@@ -697,7 +702,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     $<HTMLButtonElement>('reset').disabled = !sniper || running;
     const notice = $('notice');
     notice.hidden = !!sniper;
-    notice.textContent = deps.unavailableReason ?? '';
+    notice.textContent = deps.getUnavailableReason() ?? '';
   }
 
   function refreshLive(): void {
@@ -716,7 +721,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   }
 
   $('start').addEventListener('click', () => {
-    const sniper = deps.sniper;
+    const sniper = deps.getSniper();
     if (!sniper) return;
     if (sniper.isRunning()) sniper.stop('manual');
     else {
@@ -728,7 +733,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     refreshLive();
   });
   $('reset').addEventListener('click', () => {
-    deps.sniper?.reset();
+    deps.getSniper()?.reset();
     refreshLive();
   });
   $('close').addEventListener('click', () => api.close());
@@ -743,9 +748,12 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       renderSettings();
       page.hidden = false;
       refreshLive();
+      void deps.prepare().then(() => {
+        if (!page.hidden) refreshLive();
+      });
       tick = setInterval(() => {
         renderRing();
-        if (deps.sniper?.isRunning()) renderTop();
+        if (deps.getSniper()?.isRunning()) renderTop();
       }, 250);
       openListeners.forEach((cb) => cb(true));
     },

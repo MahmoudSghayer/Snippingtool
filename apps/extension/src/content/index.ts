@@ -402,35 +402,57 @@ async function main(): Promise<void> {
   if (AUTOMATION_ENABLED) {
     let botSettings: BotSettings | null = await send<BotSettings>('bot.settingsGet');
     let unavailableReason: string | null = null;
-    if (!authStatus?.authenticated) unavailableReason = 'Sign in (SL button) to use the Sniping Bot.';
-    else if (!features.includes('automation.autobuyer')) unavailableReason = 'Your plan does not include the Sniping Bot.';
-    else if (!botSettings) unavailableReason = 'The extension could not load the bot settings. Reload the page.';
 
-    if (!unavailableReason && botSettings) {
+    // Called at load and whenever the page opens: a user who signs in from
+    // the SL drawer after the page loaded gets the bot without a reload.
+    const prepareSniper = async (fresh: boolean): Promise<void> => {
+      if (sniper) return;
+      let signedIn = !!authStatus?.authenticated;
+      let allowed = features.includes('automation.autobuyer');
+      if (fresh) {
+        signedIn = !!(await send<{ authenticated: boolean }>('auth.status'))?.authenticated;
+        const boot = signedIn ? await send<BootstrapResponse>('license.bootstrap') : null;
+        allowed = !!boot?.features.includes('automation.autobuyer');
+        if (boot) {
+          killSwitchActive = killSwitchActive || boot.killSwitchActive;
+          deviceIdCache = deviceIdCache ?? boot.deviceId;
+        }
+      }
+      botSettings = botSettings ?? (await send<BotSettings>('bot.settingsGet'));
+      if (!signedIn) unavailableReason = 'Sign in (SL button) to use the Sniping Bot.';
+      else if (!allowed) unavailableReason = 'Your plan does not include the Sniping Bot.';
+      else if (!botSettings) unavailableReason = 'The extension could not load the bot settings. Reload the page.';
+      else unavailableReason = null;
+      if (unavailableReason || !botSettings) return;
+
       const { loadSniper } = await import('virtual:autobuyer-loader');
       const mod = await loadSniper();
-      if (mod) {
-        sniper = new mod.Sniper(
-          {
-            adapter,
-            getFilters: () => filters.filter((f) => f.isActive).map((f) => ({ id: f.id, name: f.name, filter: f.filter })),
-            estimateSellPrice: async (resourceId) => {
-              const r = await send<{ summary: PriceSummary }>('summary', { resourceId, minProfit: settingsCache.targets.minProfitPerSnipe });
-              return r?.summary.median ?? null;
-            },
-            killSwitch: () => ({ active: killSwitchActive || !!governor?.isKillSwitchActive() }),
-            onChange: () => botPage.refresh(),
-            onAttempt: recordAttempt,
-            onTrade: recordTrade,
-          },
-          botSettings,
-        );
+      if (!mod) {
+        unavailableReason = 'The Sniping Bot is not available in this build.';
+        return;
       }
-    }
+      sniper = new mod.Sniper(
+        {
+          adapter,
+          getFilters: () => filters.filter((f) => f.isActive).map((f) => ({ id: f.id, name: f.name, filter: f.filter })),
+          estimateSellPrice: async (resourceId) => {
+            const r = await send<{ summary: PriceSummary }>('summary', { resourceId, minProfit: settingsCache.targets.minProfitPerSnipe });
+            return r?.summary.median ?? null;
+          },
+          killSwitch: () => ({ active: killSwitchActive || !!governor?.isKillSwitchActive() }),
+          onChange: () => botPage.refresh(),
+          onAttempt: recordAttempt,
+          onTrade: recordTrade,
+        },
+        botSettings,
+      );
+    };
+    await prepareSniper(false);
 
     const botPage = createBotPage({
-      sniper,
-      unavailableReason: sniper ? null : (unavailableReason ?? 'The Sniping Bot is not available in this build.'),
+      getSniper: () => sniper,
+      getUnavailableReason: () => (sniper ? null : unavailableReason),
+      prepare: () => prepareSniper(true),
       getSettings: () => botSettings ?? DEFAULT_BOT_SETTINGS,
       saveSettings: async (next) => {
         botSettings = next;
