@@ -88,6 +88,7 @@ describe('api client CSRF + 401 handling', () => {
 describe('api client silent token refresh', () => {
   afterEach(() => {
     setUnauthorizedHandler(() => {});
+    document.cookie = 'sl_csrf=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
   });
 
   function jsonResponse(body: unknown, status: number): Response {
@@ -116,6 +117,63 @@ describe('api client silent token refresh', () => {
     expect(data).toEqual({ id: 'user-1' });
     expect(meCalls).toBe(2);
     expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('calls the unauthorized handler if the retry after a successful refresh still 401s', async () => {
+    // Fix round 1: a retry that still 401s (e.g. the session was revoked in
+    // the gap between the refresh and the retry) must not be handed back to
+    // the caller as a bare, unactioned 401 — it should redirect to login
+    // like any other unrecoverable 401.
+    let meCalls = 0;
+    const fetchMock = vi.fn(async (input: Request) => {
+      if (input.url.includes('/auth/refresh')) {
+        return jsonResponse({ accessToken: 'a', refreshToken: 'b', expiresIn: 900 }, 200);
+      }
+      meCalls += 1;
+      if (meCalls === 1) return jsonResponse({ code: 'AUTH_TOKEN_EXPIRED', message: 'expired' }, 401);
+      return jsonResponse({ code: 'AUTH_SESSION_REVOKED', message: 'revoked' }, 401);
+    });
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+
+    const { error } = await api.GET('/api/v1/users/me', { fetch: fetchMock });
+
+    expect(meCalls).toBe(2);
+    expect(handler).toHaveBeenCalledOnce();
+    // The *retried* response's error, not the original request's — proves
+    // the handler/return value both reflect the retry, not stale state.
+    expect(error).toEqual({ code: 'AUTH_SESSION_REVOKED', message: 'revoked' });
+  });
+
+  it('re-attaches the CSRF header on the retried request from the current cookie', async () => {
+    // Fix round 1: on a fresh browser session there's no `sl_csrf` cookie
+    // yet, so the original (mutating) request carries no CSRF header. The
+    // CSRF plugin mints the cookie server-side while handling that very
+    // request, and its `Set-Cookie` lands on the 401 response — a real
+    // browser applies it to `document.cookie` before this code runs. The
+    // retried request must pick up that newly-minted cookie, not replay the
+    // original (headerless) clone verbatim.
+    document.cookie = 'sl_csrf=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+    let enrollCalls = 0;
+    const fetchMock = vi.fn(async (input: Request) => {
+      if (input.url.includes('/auth/refresh')) {
+        return jsonResponse({ accessToken: 'a', refreshToken: 'b', expiresIn: 900 }, 200);
+      }
+      enrollCalls += 1;
+      if (enrollCalls === 1) {
+        document.cookie = 'sl_csrf=fresh-token; path=/';
+        return jsonResponse({ code: 'AUTH_TOKEN_EXPIRED', message: 'expired' }, 401);
+      }
+      return jsonResponse({ secret: 's', otpauthUrl: 'o', recoveryCodes: [] }, 200);
+    });
+    setUnauthorizedHandler(vi.fn());
+
+    await api.POST('/api/v1/auth/totp/enroll', { body: {}, fetch: fetchMock });
+
+    const originalRequest = fetchMock.mock.calls[0]![0] as Request;
+    const retryRequest = fetchMock.mock.calls[2]![0] as Request;
+    expect(originalRequest.headers.get('x-csrf-token')).toBeNull();
+    expect(retryRequest.headers.get('x-csrf-token')).toBe('fresh-token');
   });
 
   it('single-flights the refresh across two concurrent 401s and retries both', async () => {

@@ -135,7 +135,29 @@ const csrfAndCredentialsMiddleware: Middleware = {
       const body = await readErrorBody(response);
       if (isApiErrorBody(body) && REFRESHABLE_AUTH_CODES.has(body.code)) {
         const refreshed = await silentRefresh(options.fetch);
-        if (refreshed) return options.fetch(clonedRequest);
+        if (refreshed) {
+          // Re-read the CSRF cookie right before replaying, rather than
+          // reusing whatever `onRequest` captured on the original clone: on
+          // a fresh browser session (no `sl_csrf` cookie yet), the *first*
+          // request carries no CSRF header, and the CSRF plugin's own
+          // `onRequest` hook mints the cookie on the server while handling
+          // that very request — its `Set-Cookie` lands on this 401 response
+          // and the browser applies it before this code runs. Replaying
+          // with the original (missing/stale) header would needlessly fail
+          // `verifyCsrf` on the retry.
+          if (MUTATING_METHODS.has(clonedRequest.method)) {
+            const csrfToken = readCsrfCookie();
+            if (csrfToken) clonedRequest.headers.set('x-csrf-token', csrfToken);
+          }
+          const retryResponse = await options.fetch(clonedRequest);
+          if (retryResponse.status !== 401) return retryResponse;
+          // Still unauthorized even after a successful refresh (e.g. the
+          // session was revoked in the gap between refresh and retry) —
+          // don't hand the caller a bare 401; fall through to the same
+          // "clear auth state and redirect to login" path below, against
+          // *this* response rather than the original one.
+          response = retryResponse;
+        }
         // Refresh failed (refresh token also expired/invalid/reused) — fall
         // through to the same "clear auth state and redirect to login"
         // behaviour as any other unrecoverable 401, below.
