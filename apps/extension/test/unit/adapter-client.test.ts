@@ -100,11 +100,40 @@ describe('act requests', () => {
     expect(sent).toHaveLength(0);
   });
 
-  it('fail fast when the adapter reports it has no act key, instead of waiting for the timeout', async () => {
+  it('an unsigned actReady:false probe (forgeable by any page script) does not fail a pending buy', async () => {
     const promise = client.buy('t1', 1000);
-    await lastRequest();
+    const req = await lastRequest();
+    let settled: unknown = null;
+    void promise.then((o) => (settled = o));
+    for (let i = 0; i < 3; i++) deliver({ channel: ADAPTER_CHANNEL, kind: 'probe', data: { ok: true, checkedAt: 1, actReady: false } });
+    await flush();
+    expect(settled).toBeNull();
+
+    deliver(await signedResult({ action: 'buy', requestId: req.data.requestId, ok: true, requestedAt: 1, completedAt: 4 }));
+    await expect(promise).resolves.toMatchObject({ ok: true, latencyMs: 3 });
+  });
+
+  it('a timeout after an actReady:false probe is reported as adapter_unauthenticated (non-retryable)', async () => {
+    client.dispose();
+    client = createAdapterClient(window, NONCE, { timeoutMs: 50 });
+    const plain = await client.buy('t1', 1000);
+    expect(plain).toMatchObject({ ok: false, error: 'timed out waiting for adapter response' });
+
     deliver({ channel: ADAPTER_CHANNEL, kind: 'probe', data: { ok: true, checkedAt: 1, actReady: false } });
-    await expect(promise).resolves.toMatchObject({ ok: false, error: 'adapter_unauthenticated' });
+    await flush();
+    await expect(client.buy('t1', 1000)).resolves.toMatchObject({ ok: false, error: 'adapter_unauthenticated' });
+  });
+
+  it('a verified action_result clears the unready flag, so later timeouts are ordinary again', async () => {
+    client.dispose();
+    client = createAdapterClient(window, NONCE, { timeoutMs: 200 });
+    deliver({ channel: ADAPTER_CHANNEL, kind: 'probe', data: { ok: true, checkedAt: 1, actReady: false } });
+    await flush();
+    const first = client.buy('t1', 1000);
+    const req = await lastRequest();
+    deliver(await signedResult({ action: 'buy', requestId: req.data.requestId, ok: true, requestedAt: 1, completedAt: 2 }));
+    await expect(first).resolves.toMatchObject({ ok: true });
+    await expect(client.buy('t1', 1000)).resolves.toMatchObject({ ok: false, error: 'timed out waiting for adapter response' });
   });
 
   it('fail closed without a nonce, posting nothing', async () => {

@@ -230,8 +230,9 @@ function postResult(data: ActionResult): void {
 function runProbeAndReport(): ProbeResult {
   const result = probe();
   // `actReady: false` means no nonce reached this adapter, so no act request
-  // can ever be authenticated; content fails its calls fast on seeing it
-  // rather than waiting out the timeout (content/adapter-client.ts).
+  // can ever be authenticated. Unsigned, so content treats it only as a
+  // hint: a call that then times out is reported as adapter_unauthenticated
+  // (not retried) rather than as a plain timeout (content/adapter-client.ts).
   post('probe', { ...result, checkedAt: Date.now(), actReady: signer !== null });
   return result;
 }
@@ -636,7 +637,7 @@ async function handleActRequest(data: unknown, mac: unknown): Promise<void> {
   const s = signer;
   if (!s) {
     // No key: nothing can be authenticated. Say so (unsigned — there is
-    // nothing to sign with), so content fails fast instead of timing out.
+    // nothing to sign with), so content does not retry the timeout.
     runProbeAndReport();
     return;
   }

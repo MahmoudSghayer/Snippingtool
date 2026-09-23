@@ -56,8 +56,17 @@ interface Pending {
  * checking replies (lib/act-auth.ts); never posted. With `null`, every act
  * call fails closed with `adapter_unauthenticated` and nothing is sent.
  */
-export function createAdapterClient(target: Window, nonce: string | null): AdapterClient {
+export function createAdapterClient(target: Window, nonce: string | null, options: { timeoutMs?: number } = {}): AdapterClient {
   const signer = createActSigner(nonce);
+  const timeoutMs = options.timeoutMs ?? ACTION_TIMEOUT_MS;
+  // Set by a probe saying `actReady: false`. Probes are unsigned, so any
+  // page script can send one: the flag must never fail a call by itself. It
+  // only changes how a call that times out anyway is reported —
+  // `adapter_unauthenticated` (which the autobuyer does not retry) instead
+  // of a retryable timeout. Worst case for a forged probe: one genuine
+  // timeout is not retried. Cleared by any MAC-verified result, which only
+  // an adapter holding the key can produce.
+  let adapterReportedUnready = false;
   const pending = new Map<string, Pending>();
   const probeListeners = new Set<(status: ProbeStatus) => void>();
   const shapeListeners = new Set<(reason: string) => void>();
@@ -74,11 +83,7 @@ export function createAdapterClient(target: Window, nonce: string | null): Adapt
 
     if (msg.kind === 'probe') {
       probeStatus = msg.data;
-      // The adapter has no act key (the nonce never reached it): every
-      // pending call would only time out, so fail them now. A page script
-      // could forge this too, but that only fails calls — it cannot make
-      // one succeed.
-      if (msg.data.actReady === false) failAllPending(ACT_ERROR.unauthenticated);
+      if (msg.data.actReady === false) adapterReportedUnready = true;
       for (const cb of probeListeners) cb(msg.data);
       return;
     }
@@ -102,17 +107,12 @@ export function createAdapterClient(target: Window, nonce: string | null): Adapt
       if (pending.get(requestId)?.action !== data.action) return;
       void signer.verify(canonicalActMessage('action_result', data), msg.mac).then((valid) => {
         const entry = pending.get(requestId);
-        if (!valid || !entry || entry.action !== data.action) return;
+        if (!valid) return;
+        adapterReportedUnready = false;
+        if (!entry || entry.action !== data.action) return;
         pending.delete(requestId);
         entry.resolve({ ok: data.ok, error: data.error, stillListed: data.stillListed, latencyMs: data.completedAt - data.requestedAt });
       });
-    }
-  }
-
-  function failAllPending(error: string): void {
-    for (const [requestId, entry] of pending) {
-      pending.delete(requestId);
-      entry.resolve({ ok: false, error, latencyMs: 0 });
     }
   }
 
@@ -124,8 +124,13 @@ export function createAdapterClient(target: Window, nonce: string | null): Adapt
     const request = { ...data, requestId };
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
-        if (pending.delete(requestId)) resolve({ ok: false, error: 'timed out waiting for adapter response', latencyMs: ACTION_TIMEOUT_MS });
-      }, ACTION_TIMEOUT_MS);
+        if (!pending.delete(requestId)) return;
+        resolve({
+          ok: false,
+          error: adapterReportedUnready ? ACT_ERROR.unauthenticated : 'timed out waiting for adapter response',
+          latencyMs: timeoutMs,
+        });
+      }, timeoutMs);
       pending.set(requestId, {
         action: data.action,
         resolve: (outcome) => {

@@ -54,8 +54,10 @@ export const adapterProbeMessageSchema = z.object({
     checkedAt: z.number(),
     reason: z.string().optional(),
     /** `false` when the adapter never received this page load's act-channel
-     * nonce, so it can authenticate no act request; content fails pending
-     * calls fast instead of waiting for their timeout. */
+     * nonce, so it can authenticate no act request. Unsigned, so only a
+     * hint: content reports a call that then times out as
+     * `adapter_unauthenticated` (not retried), and never fails a call on
+     * this flag alone. */
     actReady: z.boolean().optional(),
   }),
 });
