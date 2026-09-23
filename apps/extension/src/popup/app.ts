@@ -33,6 +33,12 @@ const coins = (n: number): string => Math.round(n).toLocaleString('en-US');
 
 let app: HTMLElement;
 
+/** False on a web page (the userscript's drawer on ea.com): the browser's
+ * password manager would offer that site's saved login — the user's EA
+ * password — for these fields. The extension popup has its own origin, where
+ * autofill of the Sniper's Ledger login is exactly what the user wants. */
+let allowAutofill = true;
+
 /** Looks up an element inside whatever root the page was mounted into:
  * `#app` in the extension's popup/options page, or a shadow root on the EA
  * page in the userscript build (`src/userscript/launcher.ts`). */
@@ -48,19 +54,27 @@ function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 }
 
-async function renderLoggedOut(error?: string): Promise<void> {
+async function renderLoggedOut(error?: string, email = ''): Promise<void> {
+  const [emailAc, passwordAc] = allowAutofill ? ['username', 'current-password'] : ['off', 'new-password'];
   h(`
     <h1><span class="dot"></span> Sniper's Ledger</h1>
-    ${error ? `<div class="error">${esc(error)}</div>` : ''}
-    <input id="email" type="email" placeholder="Email" autocomplete="username" />
-    <input id="password" type="password" placeholder="Password" autocomplete="current-password" />
-    <button id="login">Sign in</button>
+    ${error ? `<div class="error" role="alert">${esc(error)}</div>` : ''}
+    <form id="login-form" novalidate>
+      <input id="email" type="email" placeholder="Email" autocomplete="${emailAc}" value="${esc(email)}" />
+      <input id="password" type="password" placeholder="Sniper's Ledger password" autocomplete="${passwordAc}" />
+      <button id="login" type="submit">Sign in</button>
+    </form>
+    ${allowAutofill ? '' : '<p class="hint">Use your Sniper\'s Ledger (dashboard) password, not your EA password.</p>'}
     <p style="text-align:center;margin-top:10px;">
       <button class="link" id="register-link">Create an account</button>
     </p>
   `);
-  byId('login')?.addEventListener('click', onLoginSubmit);
+  byId('login-form')?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    void onLoginSubmit();
+  });
   byId('register-link')?.addEventListener('click', () => void renderRegister());
+  (byId(email ? 'password' : 'email') as HTMLInputElement | null)?.focus();
 }
 
 async function renderRegister(error?: string): Promise<void> {
@@ -172,12 +186,20 @@ function renderMfa(mfaTicket: string): void {
 async function onLoginSubmit(): Promise<void> {
   const email = (byId('email') as HTMLInputElement).value.trim();
   const password = (byId('password') as HTMLInputElement).value;
+  if (!email || !password) {
+    await renderLoggedOut('Enter your email and password.', email);
+    return;
+  }
+  const button = byId('login') as HTMLButtonElement;
+  button.disabled = true;
+  button.textContent = 'Signing in…';
   try {
     const result = await send<LoginResponse>('auth.login', { email, password });
-    if (result?.status === 'mfa_required') renderMfa(result.mfaTicket);
+    if (result == null) await renderLoggedOut("Couldn't reach the extension's background — reload the page and try again.", email);
+    else if (result.status === 'mfa_required') renderMfa(result.mfaTicket);
     else await renderLoggedIn();
   } catch (err) {
-    await renderLoggedOut(err instanceof Error ? err.message : 'Sign-in failed');
+    await renderLoggedOut(err instanceof Error ? err.message : 'Sign-in failed', email);
   }
 }
 
@@ -243,7 +265,8 @@ async function boot(): Promise<void> {
   else await renderLoggedOut();
 }
 
-export function mountPopup(root: HTMLElement): void {
+export function mountPopup(root: HTMLElement, opts: { allowAutofill?: boolean } = {}): void {
   app = root;
+  allowAutofill = opts.allowAutofill ?? true;
   void boot();
 }

@@ -152,7 +152,7 @@ export function installLauncher(): void {
       tabButtons[t].setAttribute('aria-selected', String(t === tab));
       views[t].host.hidden = t !== tab;
     }
-    if (tab === 'account') mountPopup(account.app);
+    if (tab === 'account') mountPopup(account.app, { allowAutofill: false });
     else mountOptions(settings.app);
   }
 

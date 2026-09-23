@@ -153,8 +153,18 @@ button.secondary:hover {
 
 .error {
   color: var(--sl-negative);
-  font-size: 12px;
-  margin: -4px 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--sl-negative);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--sl-negative) 12%, transparent);
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: progress;
 }
 
 .meter {
