@@ -34,6 +34,7 @@ import { createAdapterClient } from './adapter-client.js';
 import type { Autobuyer, StopReason } from '../engine/autobuyer.js';
 import type { Sniper } from '../engine/sniper.js';
 import type { AttemptInput, TradeInput } from '../engine/types.js';
+import type { Catalog } from '../model/catalog.js';
 import type { PriceSummary } from '../model/prices.js';
 import type {
   ActivityEvent,
@@ -85,6 +86,14 @@ function nowIso(): string {
 async function main(): Promise<void> {
   const panel: Panel = createPanel();
   const adapter = createAdapterClient(window);
+
+  // EA's own player list and club/league/nation names, for the Snipe
+  // Targets form: saved whenever the web app loads them, and asked for once
+  // now in case it already did before this script was listening.
+  adapter.onCatalog((catalog) => {
+    void send('catalog.save', catalog);
+  });
+  adapter.requestCatalog();
 
   panel.setHealth('live', 'Recording. Nothing beyond product telemetry (docs/06-extension.md) is sent.');
   send('counts').then((data) => data && panel.setTotals(data as { auctions: number; playersLast24h: number }));
@@ -464,6 +473,7 @@ async function main(): Promise<void> {
         await send('filters.save', { filters: next });
       },
       resolveNames: async (resourceIds) => (await send<Record<string, string | null>>('cards.names', { resourceIds })) ?? {},
+      getCatalog: () => send<Catalog | null>('catalog.get'),
     });
     const nav = installNavItem({
       onToggle: () => botPage.toggle(),

@@ -224,9 +224,23 @@ MEDIUM or HIGH RISK. The bot runs its own governor built from the page's
 Safety limits; the server kill switch and adapter probe failures stop it
 whatever those say.
 
+**Snipe targets are built like EA's own search.** A target is a player
+(search-as-you-type by name, with rating), and/or quality, position,
+nationality, league and club, plus a rating range and a max buy now price.
+The names come from EA's own search data: `main/adapter.ts` keeps a parsed
+copy of the web app's `players.json` and localisation file as the app loads
+them (`model/catalog.ts`), and background stores it in `storage.local`
+(`catalog.get` / `catalog.save`), so the ids a target stores are EA's own.
+Until the web app has loaded those files once, the form takes ids instead.
+`mapFilterToSearchCriteria` sends them under the search-criteria names the
+web app uses (`maskedDefId`, `level`, `nation`, `league`, `club`,
+`position`, `minBuy`/`maxBuy`); rating is filtered after the results come
+back, since the market search has no rating field.
+
 Not yet available: transfer list, sold and unsold counts (the adapter has no
 transfer list access yet), and the navigation and header selectors are
-ASSUMED SHAPE, like `main/adapter.ts`, until checked on the live web app.
+ASSUMED SHAPE, like `main/adapter.ts`, until checked on the live web app —
+as are the players.json and localisation formats and the search field names.
 
 ## 4. The ASSUMED SHAPE and the day-one verification checklist
 

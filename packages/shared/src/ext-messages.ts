@@ -130,6 +130,12 @@ export const adapterActRequestMessageSchema = z.object({
       requestId: z.string().min(1),
       tradeId: z.string().min(1),
     }),
+    /** Re-send EA's player list and names if the adapter has seen them
+     * (they may have loaded before the content script was listening). */
+    z.object({
+      action: z.literal('catalog'),
+      requestId: z.string().min(1),
+    }),
   ]),
 });
 export type AdapterActRequestMessage = z.infer<typeof adapterActRequestMessageSchema>;
@@ -219,6 +225,11 @@ export const backgroundMessageTypeSchema = z.enum([
    * Background resolves them from `/api/v1/market/cards/:id` and caches
    * them in `storage.local`. */
   'cards.names',
+  /** EA's own player list and club/league/nation names, captured from the
+   * web app's search data (`apps/extension` `model/catalog.ts`) and kept in
+   * `storage.local` for the Snipe Targets form. */
+  'catalog.get',
+  'catalog.save',
 ]);
 export type BackgroundMessageType = z.infer<typeof backgroundMessageTypeSchema>;
 
@@ -331,6 +342,31 @@ export const extBackgroundLicenseHeartbeatPayloadSchema = z
 /** `filters.save` — the *locally-persisted* `SavedFilter[]` (id, filterHash,
  * etc. already computed), not a creation request. */
 export const extBackgroundBotSettingsSetPayloadSchema = botSettingsSchema;
+
+const catalogEntrySchema = z.object({ id: z.number().int().positive(), name: z.string().min(1).max(80) }).strict();
+
+/** `catalog.save`: either half may arrive on its own (the web app loads its
+ * player list and its localisation separately). */
+export const extBackgroundCatalogSavePayloadSchema = z
+  .object({
+    players: z
+      .array(
+        z
+          .object({ id: z.number().int().positive(), name: z.string().min(1).max(80), rating: z.number().int().min(0).max(99).nullable() })
+          .strict(),
+      )
+      .max(100_000)
+      .optional(),
+    names: z
+      .object({
+        clubs: z.array(catalogEntrySchema).max(20_000),
+        leagues: z.array(catalogEntrySchema).max(2_000),
+        nations: z.array(catalogEntrySchema).max(1_000),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
 
 export const extBackgroundCardNamesPayloadSchema = z
   .object({

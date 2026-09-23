@@ -9,7 +9,11 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { Sniper, type SniperDeps, type SniperFilter } from '../../src/engine/sniper.js';
 
-function auction(tradeId: string, buyNow: number, extra: Partial<TrimmedAuction> = {}): TrimmedAuction {
+function auction(
+  tradeId: string,
+  buyNow: number,
+  extra: Partial<TrimmedAuction> = {},
+): TrimmedAuction {
   return {
     tradeId,
     resourceId: 100,
@@ -48,10 +52,16 @@ function setup(opts: {
 }): Harness {
   // Ratio 1 so a buy on the very first search is allowed; the ratio itself
   // is the governor's concern and is covered in governor.test.ts.
-  const settings: BotSettings = { ...DEFAULT_BOT_SETTINGS, safety: { ...DEFAULT_BOT_SETTINGS.safety, buyToSearchRatio: 1 }, ...opts.settings };
+  const settings: BotSettings = {
+    ...DEFAULT_BOT_SETTINGS,
+    safety: { ...DEFAULT_BOT_SETTINGS.safety, buyToSearchRatio: 1 },
+    ...opts.settings,
+  };
   const clock = { t: 1_000_000 };
   const auctionsListeners = new Set<(a: unknown[]) => void>();
-  const probeListeners = new Set<(s: { ok: boolean; checkedAt: number; reason?: string }) => void>();
+  const probeListeners = new Set<
+    (s: { ok: boolean; checkedAt: number; reason?: string }) => void
+  >();
   const searches: unknown[] = [];
   const buys: string[] = [];
   const waits: { phase: string; ms: number }[] = [];
@@ -83,9 +93,13 @@ function setup(opts: {
       },
       onShape: () => () => undefined,
     },
-    getFilters: () => opts.filters ?? [{ id: 'f1', name: 'Target', filter: { resourceId: 100, maxPrice: 10_000 } }],
+    getFilters: () =>
+      opts.filters ?? [{ id: 'f1', name: 'Target', filter: { resourceId: 100, maxPrice: 10_000 } }],
     estimateSellPrice: async () => (opts.sellPrice === undefined ? 20_000 : opts.sellPrice),
-    killSwitch: () => ({ active: killSwitch.active, reason: killSwitch.active ? 'test kill switch' : undefined }),
+    killSwitch: () => ({
+      active: killSwitch.active,
+      reason: killSwitch.active ? 'test kill switch' : undefined,
+    }),
     onChange: () => {
       if (sniper.state.phase === 'stopped') finished();
     },
@@ -96,7 +110,12 @@ function setup(opts: {
       clock.t += ms;
       // Stop at the first wait after the last wanted search, so that
       // search's buys have all run.
-      if (opts.maxSearches != null && searches.length >= opts.maxSearches && sniper.state.phase === 'waiting') sniper.stop('manual');
+      if (
+        opts.maxSearches != null &&
+        searches.length >= opts.maxSearches &&
+        sniper.state.phase === 'waiting'
+      )
+        sniper.stop('manual');
       await Promise.resolve();
     },
   };
@@ -108,7 +127,10 @@ function setup(opts: {
     buys,
     waits,
     killSwitch,
-    probe: (ok) => probeListeners.forEach((cb) => cb({ ok, checkedAt: 0, reason: ok ? undefined : 'services missing' })),
+    probe: (ok) =>
+      probeListeners.forEach((cb) =>
+        cb({ ok, checkedAt: 0, reason: ok ? undefined : 'services missing' }),
+      ),
     done: () => finishedPromise,
   };
 }
@@ -117,7 +139,15 @@ describe('Sniper — search and buy', () => {
   it('buys listings at or under the price cap, cheapest first, and skips the rest', async () => {
     const h = setup({
       // An empty first search keeps two buys within the buy/search ratio of 1.
-      results: [[], [auction('t-expensive', 12_000), auction('t-b', 9_000), auction('t-a', 8_000), auction('t-other', 5_000, { resourceId: 999 })]],
+      results: [
+        [],
+        [
+          auction('t-expensive', 12_000),
+          auction('t-b', 9_000),
+          auction('t-a', 8_000),
+          auction('t-other', 5_000, { resourceId: 999, assetId: 999 }),
+        ],
+      ],
       maxSearches: 2,
     });
     h.sniper.start();
@@ -133,6 +163,17 @@ describe('Sniper — search and buy', () => {
     expect(h.sniper.getSearchResults()[0]!.matches.map((m) => m.tradeId)).toEqual(['t-a', 't-b']);
   });
 
+  it('buys a special version of the target player (same base id, different resourceId)', async () => {
+    const h = setup({
+      results: [[auction('t-special', 9_000, { resourceId: 50_331_748, assetId: 100 })]],
+      maxSearches: 1,
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.buys).toEqual(['t-special']);
+    expect(h.sniper.getLog().find((e) => e.kind === 'bought')?.assetId).toBe(100);
+  });
+
   it('searches with the lower of the filter max price and the page max buy price', async () => {
     const h = setup({
       settings: { thresholds: { ...DEFAULT_BOT_SETTINGS.thresholds, maxBuyPrice: 7_000 } },
@@ -146,19 +187,32 @@ describe('Sniper — search and buy', () => {
   });
 
   it('skips a listing whose known profit is below the minimum, but buys unknown-profit ones', async () => {
-    const low = setup({ settings: { thresholds: { ...DEFAULT_BOT_SETTINGS.thresholds, minProfit: 15_000 } }, results: [[auction('t-a', 8_000)]], maxSearches: 1 });
+    const low = setup({
+      settings: { thresholds: { ...DEFAULT_BOT_SETTINGS.thresholds, minProfit: 15_000 } },
+      results: [[auction('t-a', 8_000)]],
+      maxSearches: 1,
+    });
     low.sniper.start();
     await low.done();
     expect(low.buys).toEqual([]);
 
-    const unknown = setup({ settings: { thresholds: { ...DEFAULT_BOT_SETTINGS.thresholds, minProfit: 15_000 } }, results: [[auction('t-a', 8_000)]], sellPrice: null, maxSearches: 1 });
+    const unknown = setup({
+      settings: { thresholds: { ...DEFAULT_BOT_SETTINGS.thresholds, minProfit: 15_000 } },
+      results: [[auction('t-a', 8_000)]],
+      sellPrice: null,
+      maxSearches: 1,
+    });
     unknown.sniper.start();
     await unknown.done();
     expect(unknown.buys).toEqual(['t-a']);
   });
 
   it('counts failed buys and keeps going', async () => {
-    const h = setup({ results: [[], [auction('t-a', 8_000), auction('t-b', 9_000)]], buyOk: (id) => id === 't-b', maxSearches: 2 });
+    const h = setup({
+      results: [[], [auction('t-a', 8_000), auction('t-b', 9_000)]],
+      buyOk: (id) => id === 't-b',
+      maxSearches: 2,
+    });
     h.sniper.start();
     await h.done();
     expect(h.sniper.getStats()).toMatchObject({ purchases: 1, failures: 1 });
@@ -178,7 +232,12 @@ describe('Sniper — pacing', () => {
     h.sniper.start();
     await h.done();
     // random() = 0 -> the low end of each range
-    expect(h.waits.map((w) => `${w.phase}:${w.ms}`)).toEqual(['waiting:2000', 'waiting:2000', 'break:30000', 'waiting:2000']);
+    expect(h.waits.map((w) => `${w.phase}:${w.ms}`)).toEqual([
+      'waiting:2000',
+      'waiting:2000',
+      'break:30000',
+      'waiting:2000',
+    ]);
   });
 
   it('rests once the rest interval has passed', async () => {
@@ -192,7 +251,13 @@ describe('Sniper — pacing', () => {
     });
     h.sniper.start();
     await h.done();
-    expect(h.waits.map((w) => w.phase)).toEqual(['waiting', 'waiting', 'rest', 'waiting', 'waiting']);
+    expect(h.waits.map((w) => w.phase)).toEqual([
+      'waiting',
+      'waiting',
+      'rest',
+      'waiting',
+      'waiting',
+    ]);
     expect(h.waits.find((w) => w.phase === 'rest')!.ms).toBe(5 * 60_000);
   });
 
@@ -202,7 +267,12 @@ describe('Sniper — pacing', () => {
         searchDelay: { min: 1, max: 1 },
         breaks: { ...DEFAULT_BOT_SETTINGS.breaks, enabled: false },
         rest: { ...DEFAULT_BOT_SETTINGS.rest, enabled: false },
-        safety: { ...DEFAULT_BOT_SETTINGS.safety, buyToSearchRatio: 1, actionsPerHour: 2, cooldownSeconds: 600 },
+        safety: {
+          ...DEFAULT_BOT_SETTINGS.safety,
+          buyToSearchRatio: 1,
+          actionsPerHour: 2,
+          cooldownSeconds: 600,
+        },
       },
       maxSearches: 3,
     });

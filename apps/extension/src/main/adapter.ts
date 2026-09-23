@@ -29,6 +29,8 @@
 // packages/shared/src/adapter-channel.ts).
 import { ADAPTER_CHANNEL } from '@sl/shared/adapter-channel.js';
 
+import { LOC_FILE, PLAYERS_FILE, parseLocFile, parsePlayersFile, type CatalogNames, type CatalogPlayer } from '../model/catalog.js';
+
 import type { AdapterActRequestMessage, FilterCriteria, TrimmedAuction } from '@sl/shared';
 
 /* ------------------------------------------------------------------------ *
@@ -154,6 +156,7 @@ function post(
     stillListed?: boolean;
   },
 ): void;
+function post(kind: 'catalog', data: { players?: CatalogPlayer[]; names?: CatalogNames }): void;
 function post(kind: string, data: unknown): void {
   try {
     window.postMessage({ channel: ADAPTER_CHANNEL, kind, data }, window.location.origin);
@@ -243,6 +246,47 @@ function isMarket(url: unknown): url is string {
   return typeof url === 'string' && MARKET_PATH.test(url);
 }
 
+// ---- EA's own search data (model/catalog.ts) -------------------------------
+//
+// The web app downloads its player list and its localisation (club, league
+// and nation names) for its own search form. Keeping a parsed copy is what
+// lets the Snipe Targets form offer the same choices. Kept here too, because
+// the web app may load them before the content script is listening: the
+// content script asks for them again with an `act_request` of `catalog`.
+
+let catalogPlayers: CatalogPlayer[] | null = null;
+let catalogNames: CatalogNames | null = null;
+
+function isCatalogFile(url: unknown): url is string {
+  return typeof url === 'string' && (PLAYERS_FILE.test(url) || LOC_FILE.test(url));
+}
+
+function handleCatalogBody(url: string, body: unknown): void {
+  let json: unknown;
+  try {
+    json = typeof body === 'string' ? JSON.parse(body) : body;
+  } catch {
+    return;
+  }
+  if (PLAYERS_FILE.test(url)) {
+    const players = parsePlayersFile(json);
+    if (players.length === 0) return;
+    catalogPlayers = players;
+    post('catalog', { players });
+  } else {
+    const names = parseLocFile(json);
+    if (names.clubs.length + names.leagues.length + names.nations.length === 0) return;
+    catalogNames = names;
+    post('catalog', { names });
+  }
+}
+
+function postCatalog(): void {
+  if (catalogPlayers || catalogNames) {
+    post('catalog', { ...(catalogPlayers ? { players: catalogPlayers } : {}), ...(catalogNames ? { names: catalogNames } : {}) });
+  }
+}
+
 // ---- XMLHttpRequest --------------------------------------------------------
 const proto = XMLHttpRequest.prototype;
 const nativeOpen = proto.open;
@@ -260,6 +304,17 @@ proto.open = function (this: XMLHttpRequest & { __ledgerUrl?: string }, method: 
 
 proto.send = function (this: XMLHttpRequest & { __ledgerUrl?: string }, ...args: unknown[]) {
   try {
+    if (isCatalogFile(this.__ledgerUrl)) {
+      this.addEventListener('load', () => {
+        try {
+          const type = this.responseType;
+          if (type === '' || type === 'text') handleCatalogBody(this.__ledgerUrl as string, this.responseText);
+          else if (type === 'json') handleCatalogBody(this.__ledgerUrl as string, this.response);
+        } catch {
+          /* a catalog we cannot read just leaves the form asking for ids */
+        }
+      });
+    }
     if (isMarket(this.__ledgerUrl)) {
       stats.seen++;
       this.addEventListener('load', () => {
@@ -297,6 +352,22 @@ if (typeof nativeFetch === 'function') {
     }
 
     const promise = nativeFetch.call(window, input, init);
+    if (isCatalogFile(url)) {
+      return promise.then((res) => {
+        try {
+          res
+            .clone()
+            .text()
+            .then(
+              (body) => handleCatalogBody(url, body),
+              () => undefined,
+            );
+        } catch {
+          /* never break the app's own request */
+        }
+        return res;
+      });
+    }
     if (!isMarket(url)) return promise;
 
     stats.seen++;
@@ -328,17 +399,20 @@ if (typeof nativeFetch === 'function') {
  * differ. Every field is optional both sides, so an empty filter just maps
  * to an empty criteria object (the app's own "browse everything" search). */
 function mapFilterToSearchCriteria(filter: FilterCriteria): Record<string, unknown> {
-  const criteria: Record<string, unknown> = {};
-  if (filter.resourceId != null) criteria.resourceId = filter.resourceId;
+  // Field names follow the web app's own search-criteria object
+  // (UTSearchCriteriaDTO) as other FUT tools drive it: a player search is by
+  // base definition id (`maskedDefId`, the id EA's players.json lists), and
+  // quality is `level`. Rating is not a market search field: engine/sniper.ts
+  // filters on it after the results come back.
+  const criteria: Record<string, unknown> = { type: 'player' };
+  if (filter.resourceId != null) criteria.maskedDefId = filter.resourceId;
   if (filter.minPrice != null) criteria.minBuy = filter.minPrice;
   if (filter.maxPrice != null) criteria.maxBuy = filter.maxPrice;
-  if (filter.minRating != null) criteria.minRating = filter.minRating;
-  if (filter.maxRating != null) criteria.maxRating = filter.maxRating;
   if (filter.position != null) criteria.position = filter.position;
   if (filter.nationality != null) criteria.nation = filter.nationality;
-  if (filter.league != null) criteria.leagueId = filter.league;
-  if (filter.club != null) criteria.teamId = filter.club;
-  if (filter.quality != null) criteria.type = filter.quality;
+  if (filter.league != null) criteria.league = filter.league;
+  if (filter.club != null) criteria.club = filter.club;
+  if (filter.quality != null) criteria.level = filter.quality === 'special' ? 'SP' : filter.quality;
   return criteria;
 }
 
@@ -451,6 +525,7 @@ window.addEventListener('message', (event: MessageEvent) => {
   if (data.action === 'search') void actSearch(data.requestId, data.filter);
   else if (data.action === 'buy') void actBuy(data.requestId, data.tradeId);
   else if (data.action === 'readResult') void actReadResult(data.requestId, data.tradeId);
+  else if (data.action === 'catalog') postCatalog();
 });
 
 post('ready', { channel: ADAPTER_CHANNEL });

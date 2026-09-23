@@ -1,9 +1,12 @@
 /*
  * bot.ts — background handlers for the Sniping Bot page: its settings
  * (`bot.settingsGet` / `bot.settingsSet`, `storage.local`, never sent to the
- * server) and player names for the log (`cards.names`).
+ * server), EA's player/club/league/nation lists for the Snipe Targets form
+ * (`catalog.get` / `catalog.save`, see `model/catalog.ts`), and player names
+ * for the log (`cards.names`).
  *
- * Names come from `/api/v1/market/cards/:resourceId`. A resolved name is
+ * Names come from EA's player list when it has been captured, otherwise
+ * from `/api/v1/market/cards/:resourceId`. A resolved name is
  * cached for good (a card's name does not change); an id the API has no name
  * for is cached as `null` for a day so a busy bot does not ask again on every
  * search.
@@ -15,8 +18,11 @@ import { isAuthenticated } from '../lib/auth.js';
 import { logger } from '../lib/logger.js';
 import { getLocal, setLocal } from '../lib/storage.js';
 
+import type { Catalog, CatalogNames, CatalogPlayer } from '../model/catalog.js';
+
 const SETTINGS_KEY = 'sl.bot.settings.v1';
 const NAMES_KEY = 'sl.cards.names.v1';
+const CATALOG_KEY = 'sl.catalog.v1';
 const MISS_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_LOOKUPS_PER_CALL = 10;
 
@@ -41,6 +47,35 @@ export async function handleBotSettingsSet(settings: BotSettings): Promise<BotSe
   return settings;
 }
 
+export async function handleCatalogGet(): Promise<Catalog | null> {
+  return getLocal<Catalog | null>(CATALOG_KEY, null);
+}
+
+/** Merges whichever half arrived (players, or names) into what is stored. */
+export async function handleCatalogSave(payload: { players?: CatalogPlayer[]; names?: CatalogNames }): Promise<{ ok: true }> {
+  const current = (await handleCatalogGet()) ?? { players: [], clubs: [], leagues: [], nations: [], capturedAt: 0 };
+  const next: Catalog = {
+    players: payload.players ?? current.players,
+    clubs: payload.names?.clubs ?? current.clubs,
+    leagues: payload.names?.leagues ?? current.leagues,
+    nations: payload.names?.nations ?? current.nations,
+    capturedAt: Date.now(),
+  };
+  await setLocal(CATALOG_KEY, next);
+  playerNames = null;
+  return { ok: true };
+}
+
+let playerNames: Map<number, string> | null = null;
+
+async function catalogName(id: number): Promise<string | null> {
+  if (!playerNames) {
+    const catalog = await handleCatalogGet();
+    playerNames = new Map((catalog?.players ?? []).map((p) => [p.id, p.name]));
+  }
+  return playerNames.get(id) ?? null;
+}
+
 export async function handleCardNames(resourceIds: number[]): Promise<Record<string, string | null>> {
   const cache = await getLocal<Record<string, NameEntry>>(NAMES_KEY, {});
   const now = Date.now();
@@ -48,6 +83,11 @@ export async function handleCardNames(resourceIds: number[]): Promise<Record<str
   const missing: number[] = [];
 
   for (const id of new Set(resourceIds)) {
+    const fromCatalog = await catalogName(id);
+    if (fromCatalog) {
+      out[id] = fromCatalog;
+      continue;
+    }
     const hit = cache[id];
     if (hit && (hit.name != null || now - hit.at < MISS_TTL_MS)) out[id] = hit.name;
     else missing.push(id);

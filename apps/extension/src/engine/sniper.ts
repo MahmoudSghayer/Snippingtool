@@ -41,7 +41,8 @@ export interface SniperFilter {
   filter: FilterCriteria;
 }
 
-export type SniperPhase = 'idle' | 'searching' | 'buying' | 'waiting' | 'break' | 'rest' | 'blocked' | 'stopped';
+export type SniperPhase =
+  'idle' | 'searching' | 'buying' | 'waiting' | 'break' | 'rest' | 'blocked' | 'stopped';
 
 export type SniperStopReason =
   | 'manual'
@@ -59,6 +60,7 @@ export interface SniperLogEntry {
   at: number;
   kind: 'bought' | 'failed' | 'blocked' | 'info';
   resourceId?: number;
+  assetId?: number;
   rating?: number;
   price?: number;
   /** Estimated resale price, when the ledger has one. */
@@ -71,6 +73,9 @@ export interface SniperLogEntry {
 export interface SniperMatch {
   tradeId: string;
   resourceId: number;
+  /** The card's base player id: what EA's player list (and so the player
+   * names) are keyed on. Equal to `resourceId` for most cards. */
+  assetId: number;
   rating: number;
   buyNow: number;
   expiresAt: number | null;
@@ -133,7 +138,15 @@ function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 function emptyStats(): SniperStats {
-  return { startedAt: null, searches: 0, purchases: 0, failures: 0, coinsSpent: 0, profit: 0, topSnipes: [] };
+  return {
+    startedAt: null,
+    searches: 0,
+    purchases: 0,
+    failures: 0,
+    coinsSpent: 0,
+    profit: 0,
+    topSnipes: [],
+  };
 }
 
 export class Sniper {
@@ -141,7 +154,12 @@ export class Sniper {
   private governor: Governor | null = null;
   private abort: AbortController | null = null;
   private stats: SniperStats = emptyStats();
-  private stateValue: SniperState = { phase: 'idle', phaseEndsAt: null, stopReason: null, stopDetail: null };
+  private stateValue: SniperState = {
+    phase: 'idle',
+    phaseEndsAt: null,
+    stopReason: null,
+    stopDetail: null,
+  };
   private readonly log: SniperLogEntry[] = [];
   private readonly results: SniperSearchResult[] = [];
   private nextId = 1;
@@ -160,7 +178,8 @@ export class Sniper {
     this.random = deps.random ?? Math.random;
     this.sleep = deps.sleep ?? abortableSleep;
     deps.adapter.onProbe((status) => {
-      if (!status.ok && this.isRunning()) this.stop('probe_failure', status.reason ?? 'EA app check failed');
+      if (!status.ok && this.isRunning())
+        this.stop('probe_failure', status.reason ?? 'EA app check failed');
     });
     deps.adapter.onShape((reason) => {
       if (this.isRunning()) this.stop('shape_mismatch', reason);
@@ -204,7 +223,12 @@ export class Sniper {
     if (this.isRunning()) return;
     const filters = this.deps.getFilters();
     if (filters.length === 0) {
-      this.setState({ phase: 'stopped', phaseEndsAt: null, stopReason: 'no_filters', stopDetail: 'Add a filter to snipe first.' });
+      this.setState({
+        phase: 'stopped',
+        phaseEndsAt: null,
+        stopReason: 'no_filters',
+        stopDetail: 'Add a filter to snipe first.',
+      });
       return;
     }
     this.abort = new AbortController();
@@ -266,8 +290,15 @@ export class Sniper {
         if (decision.reason === 'kill_switch') return this.stop('kill_switch', decision.detail);
         if (decision.detail?.startsWith('session_length')) return this.stop('session_length');
         const snapshot = this.governor!.snapshot();
-        this.addLog({ kind: 'blocked', message: `Search paused by safety limits (${decision.detail ?? decision.reason})` });
-        await this.wait('blocked', Math.max(snapshot.cooldownRemainingMs, MIN_BLOCKED_WAIT_MS), signal);
+        this.addLog({
+          kind: 'blocked',
+          message: `Search paused by safety limits (${decision.detail ?? decision.reason})`,
+        });
+        await this.wait(
+          'blocked',
+          Math.max(snapshot.cooldownRemainingMs, MIN_BLOCKED_WAIT_MS),
+          signal,
+        );
         continue;
       }
 
@@ -277,7 +308,8 @@ export class Sniper {
       const off = this.deps.adapter.onAuctions((raw) => {
         for (const a of raw as TrimmedAuction[]) collected.set(a.tradeId, a);
       });
-      const searchFilter: FilterCriteria = cap == null ? target.filter : { ...target.filter, maxPrice: cap };
+      const searchFilter: FilterCriteria =
+        cap == null ? target.filter : { ...target.filter, maxPrice: cap };
       const outcome = await this.deps.adapter.search(searchFilter);
       off();
       if (signal.aborted) return;
@@ -286,14 +318,24 @@ export class Sniper {
       searchesSinceBreak++;
       if (!outcome.ok) {
         failuresInRow++;
-        this.addLog({ kind: 'failed', message: `Search "${target.name}" failed: ${outcome.error ?? 'unknown error'}` });
+        this.addLog({
+          kind: 'failed',
+          message: `Search "${target.name}" failed: ${outcome.error ?? 'unknown error'}`,
+        });
         if (failuresInRow >= MAX_SEARCH_FAILURES_IN_A_ROW) return this.stop('search_failing');
       } else {
         failuresInRow = 0;
         const matches = [...collected.values()]
           .filter((a) => this.matches(a, target.filter, cap))
           .sort((a, b) => a.buyNow - b.buyNow)
-          .map((a) => ({ tradeId: a.tradeId, resourceId: a.resourceId, rating: a.rating, buyNow: a.buyNow, expiresAt: a.expiresAt }));
+          .map((a) => ({
+            tradeId: a.tradeId,
+            resourceId: a.resourceId,
+            assetId: a.assetId,
+            rating: a.rating,
+            buyNow: a.buyNow,
+            expiresAt: a.expiresAt,
+          }));
         this.addSearchResult(target.name, matches);
         if (matches.length > 0) {
           this.setState({ phase: 'buying', phaseEndsAt: null, stopReason: null, stopDetail: null });
@@ -330,8 +372,20 @@ export class Sniper {
       if (this.applyKillSwitch()) return true;
       const decision = this.governor!.allow({ kind: 'buy', coins: m.buyNow });
       if (!decision.allowed) {
-        this.deps.onAttempt?.({ ...this.attemptBase(m), outcome: 'blocked', latencyMs: null, errorCode: decision.reason ?? 'blocked' });
-        this.addLog({ kind: 'blocked', resourceId: m.resourceId, rating: m.rating, price: m.buyNow, message: `Buy blocked by safety limits (${decision.detail ?? decision.reason})` });
+        this.deps.onAttempt?.({
+          ...this.attemptBase(m),
+          outcome: 'blocked',
+          latencyMs: null,
+          errorCode: decision.reason ?? 'blocked',
+        });
+        this.addLog({
+          kind: 'blocked',
+          resourceId: m.resourceId,
+          assetId: m.assetId,
+          rating: m.rating,
+          price: m.buyNow,
+          message: `Buy blocked by safety limits (${decision.detail ?? decision.reason})`,
+        });
         if (decision.reason === 'kill_switch') {
           this.stop('kill_switch', decision.detail);
           return true;
@@ -346,9 +400,23 @@ export class Sniper {
         this.stats.purchases++;
         this.stats.coinsSpent += m.buyNow;
         if (profit != null) this.stats.profit += profit;
-        const entry = this.addLog({ kind: 'bought', resourceId: m.resourceId, rating: m.rating, price: m.buyNow, sellPrice, profit, message: 'bought' });
+        const entry = this.addLog({
+          kind: 'bought',
+          resourceId: m.resourceId,
+          assetId: m.assetId,
+          rating: m.rating,
+          price: m.buyNow,
+          sellPrice,
+          profit,
+          message: 'bought',
+        });
         this.recordTopSnipe(entry);
-        this.deps.onAttempt?.({ ...this.attemptBase(m), outcome: 'success', latencyMs: result.latencyMs, errorCode: null });
+        this.deps.onAttempt?.({
+          ...this.attemptBase(m),
+          outcome: 'success',
+          latencyMs: result.latencyMs,
+          errorCode: null,
+        });
         this.deps.onTrade?.({ tradeId: m.tradeId, resourceId: m.resourceId, buyPrice: m.buyNow });
         if (t.stopAfterPurchases > 0 && this.stats.purchases >= t.stopAfterPurchases) {
           this.stop('purchase_limit');
@@ -356,8 +424,20 @@ export class Sniper {
         }
       } else {
         this.stats.failures++;
-        this.addLog({ kind: 'failed', resourceId: m.resourceId, rating: m.rating, price: m.buyNow, message: result.error ?? 'buy failed' });
-        this.deps.onAttempt?.({ ...this.attemptBase(m), outcome: 'failed', latencyMs: result.latencyMs, errorCode: result.error ?? 'unknown_error' });
+        this.addLog({
+          kind: 'failed',
+          resourceId: m.resourceId,
+          assetId: m.assetId,
+          rating: m.rating,
+          price: m.buyNow,
+          message: result.error ?? 'buy failed',
+        });
+        this.deps.onAttempt?.({
+          ...this.attemptBase(m),
+          outcome: 'failed',
+          latencyMs: result.latencyMs,
+          errorCode: result.error ?? 'unknown_error',
+        });
       }
       this.deps.onChange();
     }
@@ -366,13 +446,22 @@ export class Sniper {
 
   // ---- helpers --------------------------------------------------------------
 
-  private attemptBase(m: SniperMatch): Pick<AttemptInput, 'resourceId' | 'tradeId' | 'targetPrice' | 'listedPrice'> {
-    return { resourceId: m.resourceId, tradeId: m.tradeId, targetPrice: m.buyNow, listedPrice: m.buyNow };
+  private attemptBase(
+    m: SniperMatch,
+  ): Pick<AttemptInput, 'resourceId' | 'tradeId' | 'targetPrice' | 'listedPrice'> {
+    return {
+      resourceId: m.resourceId,
+      tradeId: m.tradeId,
+      targetPrice: m.buyNow,
+      listedPrice: m.buyNow,
+    };
   }
 
   /** The lower of the filter's max price and the page's max buy price. */
   private priceCap(filter: FilterCriteria): number | null {
-    const caps = [filter.maxPrice, this.settings.thresholds.maxBuyPrice || undefined].filter((n): n is number => n != null && n > 0);
+    const caps = [filter.maxPrice, this.settings.thresholds.maxBuyPrice || undefined].filter(
+      (n): n is number => n != null && n > 0,
+    );
     return caps.length > 0 ? Math.min(...caps) : null;
   }
 
@@ -381,7 +470,10 @@ export class Sniper {
   private matches(a: TrimmedAuction, f: FilterCriteria, cap: number | null): boolean {
     if (a.buyNow <= 0) return false;
     if (cap != null && a.buyNow > cap) return false;
-    if (f.resourceId != null && a.resourceId !== f.resourceId) return false;
+    // A player target holds EA's base player id; a special version of that
+    // player has its own resourceId but the same assetId.
+    if (f.resourceId != null && a.resourceId !== f.resourceId && a.assetId !== f.resourceId)
+      return false;
     if (f.minRating != null && a.rating < f.minRating) return false;
     if (f.maxRating != null && a.rating > f.maxRating) return false;
     if (a.expiresAt != null && a.expiresAt <= this.now()) return false;

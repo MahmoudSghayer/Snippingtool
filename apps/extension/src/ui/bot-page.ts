@@ -28,6 +28,15 @@ import {
   type SavedFilter,
 } from '@sl/shared';
 
+import {
+  POSITIONS,
+  QUALITIES,
+  searchPlayers,
+  type Catalog,
+  type CatalogEntry,
+  type CatalogPlayer,
+} from '../model/catalog.js';
+
 import type { Sniper, SniperLogEntry, SniperPhase, SniperSearchResult } from '../engine/sniper.js';
 
 export interface BotPageDeps {
@@ -44,6 +53,9 @@ export interface BotPageDeps {
   getFilters: () => SavedFilter[];
   saveFilters: (filters: SavedFilter[]) => Promise<void>;
   resolveNames: (resourceIds: number[]) => Promise<Record<string, string | null>>;
+  /** EA's player/club/league/nation lists, if the web app has loaded them
+   * since the extension was installed (model/catalog.ts). */
+  getCatalog: () => Promise<Catalog | null>;
 }
 
 export interface BotPage {
@@ -61,7 +73,10 @@ export interface BotPage {
 const COIN = `<svg class="coin" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7" fill="#f5c542"/><circle cx="8" cy="8" r="4.6" fill="none" stroke="#b8860b" stroke-width="1.4"/></svg>`;
 
 function esc(s: unknown): string {
-  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
+  return String(s).replace(
+    /[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string,
+  );
 }
 
 const fmt = (n: number): string => Math.round(n).toLocaleString('en-US');
@@ -71,11 +86,17 @@ function clock(ms: number): string {
   const h = Math.floor(total / 3600);
   const m = Math.floor((total % 3600) / 60);
   const s = total % 60;
-  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`;
+  return h > 0
+    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+    : `${m}:${String(s).padStart(2, '0')}`;
 }
 
 function timeOfDay(at: number): string {
-  return new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  return new Date(at).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
 }
 
 function rangeText(r: { min: number; max: number }): string {
@@ -180,7 +201,22 @@ const CSS = `
   .addf { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding-top: 8px; }
   .addf input { width: 100%; padding: 7px 9px; border-radius: 8px; border: 1px solid #333844; background: #181b22; color: #e8eaed; }
   .addf .full { grid-column: 1 / -1; }
-  .addf button { grid-column: 1 / -1; border: 0; border-radius: 8px; padding: 8px; background: #262a33; font-weight: 600; }
+  .addf select { width: 100%; padding: 7px 9px; border-radius: 8px; border: 1px solid #333844; background: #181b22; color: #e8eaed; }
+  .addf input[aria-invalid='true'] { border-color: #f87171; }
+  .addf button.add { grid-column: 1 / -1; border: 0; border-radius: 8px; padding: 9px; background: #1d9bf0; color: #fff; font-weight: 700; }
+  .addf .lbl { grid-column: 1 / -1; color: #8b919c; font-size: 11px; font-weight: 700; letter-spacing: .4px; margin-top: 4px; }
+  .combo { position: relative; }
+  .suggest { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 5; max-height: 260px; overflow-y: auto;
+    background: #20242d; border: 1px solid #333844; border-radius: 8px; box-shadow: 0 10px 24px rgba(0,0,0,.5); }
+  .suggest[hidden] { display: none; }
+  .suggest button { display: flex; width: 100%; align-items: center; gap: 10px; padding: 8px 10px; border: 0; background: none; text-align: left; }
+  .suggest button:hover, .suggest button.active { background: #2a2f3a; }
+  .suggest .r { min-width: 26px; font-weight: 800; color: #f5c542; }
+  .picked { display: flex; align-items: center; gap: 8px; padding: 7px 9px; border-radius: 8px; background: rgba(29,155,240,.12); border: 1px solid #1d9bf0; }
+  .picked b { flex: 1; }
+  .picked button { border: 0; background: none; color: #8b919c; }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+  .chips span { padding: 1px 6px; border-radius: 4px; background: #262a33; color: #aab0bb; font-size: 11px; }
 
   .dash { display: grid; grid-template-columns: 1fr 0.9fr 1.3fr 1.2fr; grid-template-rows: auto auto; gap: 10px; }
   .tile { border-radius: 12px; padding: 12px; display: flex; flex-direction: column; justify-content: center; }
@@ -257,6 +293,9 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   let tick: ReturnType<typeof setInterval> | null = null;
   let refreshQueued = false;
+  let catalog: Catalog | null = null;
+  let picked: CatalogPlayer | null = null;
+  let suggestions: CatalogPlayer[] = [];
 
   page.innerHTML = `
     <div class="top">
@@ -271,7 +310,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     </div>
     <div class="notice" id="notice" hidden></div>
     <div class="body">
-      <div class="settings" id="settings"></div>
+      <div class="settings" id="settings"><div id="targets"></div><div id="knobs"></div></div>
       <div class="live">
         <div class="dash" id="dash"></div>
         <div class="feeds">
@@ -302,42 +341,30 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   }
 
   function renderSettings(): void {
-    const s = settings;
-    const delayPreset = SEARCH_DELAY_PRESETS.find((p) => p.min === s.searchDelay.min && p.max === s.searchDelay.max)?.key;
-    const safetyPreset = (Object.keys(SAFETY_PRESETS) as SafetyPresetKey[]).find((k) =>
-      Object.entries(SAFETY_PRESETS[k]).every(([f, v]) => s.safety[f as keyof BotSettings['safety']] === v),
-    );
-    const filters = deps.getFilters();
+    renderTargets();
+    renderKnobs();
+  }
 
-    $('settings').innerHTML =
-      section(
-        'Snipe Targets',
-        `<div class="filters">${
-          filters.length === 0
-            ? '<div class="hint">No targets yet. Add what the bot should search for below.</div>'
-            : filters
-                .map(
-                  (f) => `<div class="filter"><span class="name">${esc(f.name)}</span>
-                    <span class="meta">${f.filter.maxPrice != null ? `max ${fmt(f.filter.maxPrice)}${COIN}` : 'no max price'}</span>
-                    <button type="button" data-remove="${esc(f.id)}" aria-label="Remove ${esc(f.name)}">✕</button></div>`,
-                )
-                .join('')
-        }</div>
-        <div class="addf">
-          <input class="full" id="nf-name" placeholder="Name, e.g. Mbappé under 80k" maxlength="80" />
-          <input id="nf-player" placeholder="Player id (optional)" inputmode="numeric" />
-          <input id="nf-max" placeholder="Max buy price" inputmode="numeric" />
-          <input id="nf-minr" placeholder="Min rating" inputmode="numeric" />
-          <input id="nf-maxr" placeholder="Max rating" inputmode="numeric" />
-          <button type="button" id="nf-add">Add target</button>
-        </div>`,
-      ) +
+  function renderKnobs(): void {
+    const s = settings;
+    const delayPreset = SEARCH_DELAY_PRESETS.find(
+      (p) => p.min === s.searchDelay.min && p.max === s.searchDelay.max,
+    )?.key;
+    const safetyPreset = (Object.keys(SAFETY_PRESETS) as SafetyPresetKey[]).find((k) =>
+      Object.entries(SAFETY_PRESETS[k]).every(
+        ([f, v]) => s.safety[f as keyof BotSettings['safety']] === v,
+      ),
+    );
+
+    $('knobs').innerHTML =
       section(
         'Delay Settings',
         `<div class="row"><div class="label"><b>Search Delay Time</b><span>Delay between searches (seconds)</span></div>
           ${stepper('delay', rangeText(s.searchDelay), 'secs')}</div>
         <div class="presets">${SEARCH_DELAY_PRESETS.map(
-          (p) => `<button type="button" class="preset" data-delay="${p.key}" aria-pressed="${delayPreset === p.key}">
+          (
+            p,
+          ) => `<button type="button" class="preset" data-delay="${p.key}" aria-pressed="${delayPreset === p.key}">
             <b>${p.min}-${p.max}</b><small class="tag-${p.key}">${p.label.toUpperCase()}</small></button>`,
         ).join('')}</div>`,
       ) +
@@ -373,9 +400,13 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       ) +
       section(
         'Safety Limits',
-        `<div class="presets" style="justify-content:flex-start;padding:0 0 6px">${(['low', 'medium', 'high'] as const)
+        `<div class="presets" style="justify-content:flex-start;padding:0 0 6px">${(
+          ['low', 'medium', 'high'] as const
+        )
           .map(
-            (k) => `<button type="button" class="preset" data-safety="${k}" aria-pressed="${safetyPreset === k}">
+            (
+              k,
+            ) => `<button type="button" class="preset" data-safety="${k}" aria-pressed="${safetyPreset === k}">
               <b>${k === 'low' ? 'Low' : k === 'medium' ? 'Medium' : 'High'}</b><small class="tag-${k === 'low' ? 'safe' : k === 'medium' ? 'medium' : 'risky'}">${k.toUpperCase()} RISK</small></button>`,
           )
           .join('')}</div>
@@ -395,6 +426,159 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       );
     renderRisk();
   }
+
+  // ---- Snipe Targets: EA-style search ---------------------------------------
+
+  const byId = (list: CatalogEntry[]) => new Map(list.map((e) => [e.id, e.name]));
+
+  function describeFilter(f: FilterCriteria): string[] {
+    const names = {
+      club: byId(catalog?.clubs ?? []),
+      league: byId(catalog?.leagues ?? []),
+      nation: byId(catalog?.nations ?? []),
+    };
+    const chips: string[] = [];
+    if (f.resourceId != null) {
+      const p = catalog?.players.find((x) => x.id === f.resourceId);
+      chips.push(p ? `${p.rating ?? ''} ${p.name}`.trim() : `Player #${f.resourceId}`);
+    }
+    if (f.quality) chips.push(QUALITIES.find((q) => q.key === f.quality)?.label ?? f.quality);
+    if (f.position) chips.push(f.position);
+    if (f.nationality != null)
+      chips.push(names.nation.get(f.nationality) ?? `Nation #${f.nationality}`);
+    if (f.league != null) chips.push(names.league.get(f.league) ?? `League #${f.league}`);
+    if (f.club != null) chips.push(names.club.get(f.club) ?? `Club #${f.club}`);
+    if (f.minRating != null || f.maxRating != null)
+      chips.push(`Rating ${f.minRating ?? 0}–${f.maxRating ?? 99}`);
+    chips.push(f.maxPrice != null ? `max ${fmt(f.maxPrice)}` : 'no max price');
+    return chips;
+  }
+
+  function datalist(id: string, list: CatalogEntry[]): string {
+    return `<datalist id="${id}">${list.map((e) => `<option value="${esc(e.name)}"></option>`).join('')}</datalist>`;
+  }
+
+  function renderTargets(): void {
+    const wasOpen = root.querySelector('#targets details')?.hasAttribute('open') ?? true;
+    const filters = deps.getFilters();
+    const hasPlayers = (catalog?.players.length ?? 0) > 0;
+    const hasNames =
+      (catalog?.leagues.length ?? 0) +
+        (catalog?.nations.length ?? 0) +
+        (catalog?.clubs.length ?? 0) >
+      0;
+    const catalogHint = hasPlayers
+      ? `${fmt(catalog!.players.length)} players from EA's player list.`
+      : "EA's player list isn't saved yet: open the web app's Transfer Market search once and it will be. Until then, type a player id.";
+
+    $('targets').innerHTML = section(
+      'Snipe Targets',
+      `<div class="filters">${
+        filters.length === 0
+          ? '<div class="hint">No targets yet. Build a search below, like in the Transfer Market.</div>'
+          : filters
+              .map(
+                (
+                  f,
+                ) => `<div class="filter"><div class="name" style="flex:1;min-width:0">${esc(f.name)}
+                  <div class="chips">${describeFilter(f.filter)
+                    .map((c) => `<span>${esc(c)}</span>`)
+                    .join('')}</div></div>
+                  <button type="button" data-remove="${esc(f.id)}" aria-label="Remove ${esc(f.name)}">✕</button></div>`,
+              )
+              .join('')
+      }</div>
+      <div class="addf" id="addf">
+        <div class="lbl">PLAYER</div>
+        <div class="full combo">${
+          picked
+            ? `<div class="picked"><span class="r">${picked.rating ?? ''}</span><b>${esc(picked.name)}</b>
+                <button type="button" id="nf-unpick" aria-label="Clear player">✕</button></div>`
+            : `<input id="nf-player" placeholder="${hasPlayers ? 'Search a player by name…' : 'Player id (optional)'}" autocomplete="off"
+                role="combobox" aria-expanded="false" aria-controls="nf-suggest" aria-autocomplete="list" />
+               <div class="suggest" id="nf-suggest" role="listbox" hidden></div>`
+        }</div>
+        <div class="lbl">FILTERS</div>
+        <select id="nf-quality" aria-label="Quality"><option value="">Any quality</option>${QUALITIES.map((q) => `<option value="${q.key}">${q.label}</option>`).join('')}</select>
+        <select id="nf-position" aria-label="Position"><option value="">Any position</option>${POSITIONS.map((p) => `<option>${p}</option>`).join('')}</select>
+        <input id="nf-nation" list="dl-nations" placeholder="Nationality" autocomplete="off" aria-label="Nationality" />
+        <input id="nf-league" list="dl-leagues" placeholder="League" autocomplete="off" aria-label="League" />
+        <input class="full" id="nf-club" list="dl-clubs" placeholder="Club" autocomplete="off" aria-label="Club" />
+        <input id="nf-minr" placeholder="Min rating" inputmode="numeric" aria-label="Min rating" />
+        <input id="nf-maxr" placeholder="Max rating" inputmode="numeric" aria-label="Max rating" />
+        <div class="lbl">PRICE</div>
+        <input class="full" id="nf-max" placeholder="Max buy now price" inputmode="numeric" aria-label="Max buy now price" />
+        <input class="full" id="nf-name" placeholder="Target name (optional)" maxlength="80" aria-label="Target name" />
+        <button type="button" class="add" id="nf-add">Add target</button>
+      </div>
+      <div class="hint">${esc(catalogHint)}${hasNames ? '' : " Nationality, league and club need EA's names too, or type their EA id."}</div>
+      ${datalist('dl-nations', catalog?.nations ?? [])}${datalist('dl-leagues', catalog?.leagues ?? [])}${datalist('dl-clubs', catalog?.clubs ?? [])}`,
+      '',
+      wasOpen,
+    );
+  }
+
+  function showSuggestions(query: string): void {
+    const box = root.getElementById('nf-suggest');
+    const input = root.getElementById('nf-player');
+    if (!box || !input) return;
+    suggestions = catalog ? searchPlayers(catalog.players, query) : [];
+    box.hidden = suggestions.length === 0;
+    input.setAttribute('aria-expanded', String(!box.hidden));
+    box.innerHTML = suggestions
+      .map(
+        (p, i) =>
+          `<button type="button" role="option" data-pick="${i}"><span class="r">${p.rating ?? ''}</span>${esc(p.name)}</button>`,
+      )
+      .join('');
+  }
+
+  function pick(p: CatalogPlayer): void {
+    picked = p;
+    suggestions = [];
+    const keep = readForm();
+    renderTargets();
+    restoreForm(keep);
+  }
+
+  /** The add-target form's own fields, so re-rendering keeps what was typed. */
+  function readForm(): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const id of [
+      'nf-quality',
+      'nf-position',
+      'nf-nation',
+      'nf-league',
+      'nf-club',
+      'nf-minr',
+      'nf-maxr',
+      'nf-max',
+      'nf-name',
+    ]) {
+      const el = root.getElementById(id) as HTMLInputElement | null;
+      if (el) out[id] = el.value;
+    }
+    return out;
+  }
+
+  function restoreForm(values: Record<string, string>): void {
+    for (const [id, v] of Object.entries(values)) {
+      const el = root.getElementById(id) as HTMLInputElement | null;
+      if (el) el.value = v;
+    }
+  }
+
+  $('targets').addEventListener('input', (e) => {
+    const t = e.target as HTMLInputElement;
+    if (t.id === 'nf-player') showSuggestions(t.value);
+  });
+  $('targets').addEventListener('keydown', (e) => {
+    const t = e.target as HTMLInputElement;
+    if (t.id === 'nf-player' && e.key === 'Enter' && suggestions[0]) {
+      e.preventDefault();
+      pick(suggestions[0]);
+    }
+  });
 
   function renderRisk(): void {
     const level = botRiskLevel(settings);
@@ -437,8 +621,16 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     const s = settings;
     const next: BotSettings = {
       searchDelay: rng('delay', false, s.searchDelay),
-      breaks: { enabled: s.breaks.enabled, searches: rng('b-searches', true, s.breaks.searches), seconds: rng('b-seconds', true, s.breaks.seconds) },
-      rest: { enabled: s.rest.enabled, afterMinutes: rng('r-after', true, s.rest.afterMinutes), minutes: rng('r-minutes', true, s.rest.minutes) },
+      breaks: {
+        enabled: s.breaks.enabled,
+        searches: rng('b-searches', true, s.breaks.searches),
+        seconds: rng('b-seconds', true, s.breaks.seconds),
+      },
+      rest: {
+        enabled: s.rest.enabled,
+        afterMinutes: rng('r-after', true, s.rest.afterMinutes),
+        minutes: rng('r-minutes', true, s.rest.minutes),
+      },
       thresholds: {
         maxBuyPrice: n('t-max', s.thresholds.maxBuyPrice),
         minProfit: n('t-profit', s.thresholds.minProfit),
@@ -457,13 +649,26 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     if (!parsed.success) {
       const path = parsed.error.issues[0]?.path.join('.') ?? '';
       const byPath: Record<string, string> = {
-        searchDelay: 'delay', 'breaks.searches': 'b-searches', 'breaks.seconds': 'b-seconds', 'rest.afterMinutes': 'r-after', 'rest.minutes': 'r-minutes',
-        'thresholds.maxBuyPrice': 't-max', 'thresholds.minProfit': 't-profit', 'thresholds.stopAfterPurchases': 't-buys', 'thresholds.sessionCoinBudget': 't-budget',
-        'safety.actionsPerHour': 's-aph', 'safety.sessionLengthMinutes': 's-session', 'safety.buyToSearchRatio': 's-ratio', 'safety.cooldownSeconds': 's-cooldown', 'safety.maxCoinFlowPerHour': 's-flow',
+        searchDelay: 'delay',
+        'breaks.searches': 'b-searches',
+        'breaks.seconds': 'b-seconds',
+        'rest.afterMinutes': 'r-after',
+        'rest.minutes': 'r-minutes',
+        'thresholds.maxBuyPrice': 't-max',
+        'thresholds.minProfit': 't-profit',
+        'thresholds.stopAfterPurchases': 't-buys',
+        'thresholds.sessionCoinBudget': 't-budget',
+        'safety.actionsPerHour': 's-aph',
+        'safety.sessionLengthMinutes': 's-session',
+        'safety.buyToSearchRatio': 's-ratio',
+        'safety.cooldownSeconds': 's-cooldown',
+        'safety.maxCoinFlowPerHour': 's-flow',
       };
       const key = Object.keys(byPath).find((k) => path.startsWith(k));
       if (key) mark(byPath[key]!, false);
-      $('saved').textContent = parsed.error.issues[0]?.message ? `Not saved: ${parsed.error.issues[0].message}` : 'Not saved';
+      $('saved').textContent = parsed.error.issues[0]?.message
+        ? `Not saved: ${parsed.error.issues[0].message}`
+        : 'Not saved';
       $('saved').style.color = '#f87171';
       return null;
     }
@@ -473,7 +678,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   function commit(next: BotSettings, rerender: boolean): void {
     settings = next;
     deps.getSniper()?.setSettings(next);
-    if (rerender) renderSettings();
+    if (rerender) renderKnobs();
     else renderRisk();
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
@@ -486,8 +691,20 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   }
 
   const STEPS: Record<string, number> = {
-    delay: 0.5, 'b-searches': 1, 'b-seconds': 5, 'r-after': 5, 'r-minutes': 5, 't-max': 1000, 't-profit': 500, 't-buys': 1, 't-budget': 10_000,
-    's-aph': 50, 's-session': 15, 's-ratio': 0.05, 's-cooldown': 15, 's-flow': 100_000,
+    delay: 0.5,
+    'b-searches': 1,
+    'b-seconds': 5,
+    'r-after': 5,
+    'r-minutes': 5,
+    't-max': 1000,
+    't-profit': 500,
+    't-buys': 1,
+    't-budget': 10_000,
+    's-aph': 50,
+    's-session': 15,
+    's-ratio': 0.05,
+    's-cooldown': 15,
+    's-flow': 100_000,
   };
 
   $('settings').addEventListener('click', (e) => {
@@ -499,20 +716,43 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       const r = parseRange(input.value.replace(/[,\s]/g, ''), false);
       if (!r) return;
       const round = (v: number) => Math.max(0, Math.round(v * 100) / 100);
-      input.value = r.min === r.max ? String(round(r.min + step)) : `${round(r.min + step)}-${round(r.max + step)}`;
+      input.value =
+        r.min === r.max
+          ? String(round(r.min + step))
+          : `${round(r.min + step)}-${round(r.max + step)}`;
       const next = readSettings();
       if (next) commit(next, false);
     } else if (el.dataset.delay) {
       const p = SEARCH_DELAY_PRESETS.find((x) => x.key === el.dataset.delay)!;
       commit({ ...settings, searchDelay: { min: p.min, max: p.max } }, true);
     } else if (el.dataset.safety) {
-      commit({ ...settings, safety: { ...SAFETY_PRESETS[el.dataset.safety as SafetyPresetKey] } }, true);
+      commit(
+        { ...settings, safety: { ...SAFETY_PRESETS[el.dataset.safety as SafetyPresetKey] } },
+        true,
+      );
     } else if (el.id === 'b-on') {
-      commit({ ...settings, breaks: { ...settings.breaks, enabled: !settings.breaks.enabled } }, true);
+      commit(
+        { ...settings, breaks: { ...settings.breaks, enabled: !settings.breaks.enabled } },
+        true,
+      );
     } else if (el.id === 'r-on') {
       commit({ ...settings, rest: { ...settings.rest, enabled: !settings.rest.enabled } }, true);
     } else if (el.dataset.remove) {
-      void deps.saveFilters(deps.getFilters().filter((f) => f.id !== el.dataset.remove)).then(renderSettings);
+      const keep = readForm();
+      void deps
+        .saveFilters(deps.getFilters().filter((f) => f.id !== el.dataset.remove))
+        .then(() => {
+          renderTargets();
+          restoreForm(keep);
+        });
+    } else if (el.dataset.pick) {
+      const p = suggestions[Number(el.dataset.pick)];
+      if (p) pick(p);
+    } else if (el.id === 'nf-unpick') {
+      picked = null;
+      const keep = readForm();
+      renderTargets();
+      restoreForm(keep);
     } else if (el.id === 'nf-add') {
       void addFilter();
     }
@@ -528,26 +768,81 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   });
 
   async function addFilter(): Promise<void> {
-    const v = (id: string) => (root.getElementById(id) as HTMLInputElement).value.trim();
-    const num = (id: string) => (v(id) === '' ? undefined : Number(v(id).replace(/[,\s]/g, '')));
-    const name = v('nf-name');
+    const field = (id: string) => root.getElementById(id) as HTMLInputElement | null;
+    const v = (id: string) => field(id)?.value.trim() ?? '';
+    let ok = true;
+    const mark = (id: string, valid: boolean) => {
+      field(id)?.setAttribute('aria-invalid', String(!valid));
+      if (!valid) ok = false;
+    };
+    const int = (id: string, max?: number): number | undefined => {
+      const raw = v(id).replace(/[,\s]/g, '');
+      if (raw === '') return undefined;
+      const n = Number(raw);
+      const valid = Number.isInteger(n) && n >= 0 && (max == null || n <= max);
+      mark(id, valid);
+      return valid ? n : undefined;
+    };
+    /** A name picked from EA's list, or an EA id typed as a number. */
+    const entry = (id: string, list: CatalogEntry[]): number | undefined => {
+      const text = v(id);
+      if (!text) return undefined;
+      const hit = list.find((e) => e.name.toLowerCase() === text.toLowerCase());
+      if (hit) return hit.id;
+      const n = Number(text);
+      const valid = Number.isInteger(n) && n > 0;
+      mark(id, valid);
+      return valid ? n : undefined;
+    };
+
     const filter: FilterCriteria = {};
-    const player = num('nf-player');
-    const max = num('nf-max');
-    const minR = num('nf-minr');
-    const maxR = num('nf-maxr');
-    const bad = [player, max, minR, maxR].some((n) => n != null && (!Number.isInteger(n) || n < 0));
-    if (!name || bad || (minR != null && minR > 99) || (maxR != null && maxR > 99)) {
-      $('saved').style.color = '#f87171';
-      $('saved').textContent = !name ? 'Give the target a name' : 'Check the numbers';
-      return;
+    if (picked) filter.resourceId = picked.id;
+    else {
+      const typed = v('nf-player');
+      if (typed) {
+        const n = Number(typed);
+        if (Number.isInteger(n) && n > 0) filter.resourceId = n;
+        else mark('nf-player', false);
+      }
     }
-    if (player) filter.resourceId = player;
-    if (max != null) filter.maxPrice = max;
+    const quality = v('nf-quality');
+    if (quality) filter.quality = quality as FilterCriteria['quality'];
+    const position = v('nf-position');
+    if (position) filter.position = position;
+    const nation = entry('nf-nation', catalog?.nations ?? []);
+    if (nation != null) filter.nationality = nation;
+    const league = entry('nf-league', catalog?.leagues ?? []);
+    if (league != null) filter.league = league;
+    const club = entry('nf-club', catalog?.clubs ?? []);
+    if (club != null) filter.club = club;
+    const minR = int('nf-minr', 99);
+    const maxR = int('nf-maxr', 99);
     if (minR != null) filter.minRating = minR;
     if (maxR != null) filter.maxRating = maxR;
-    const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(filter)))), (b) =>
-      b.toString(16).padStart(2, '0'),
+    const max = int('nf-max');
+    if (max != null) filter.maxPrice = max;
+
+    const say = (text: string) => {
+      $('saved').style.color = '#f87171';
+      $('saved').textContent = text;
+    };
+    if (!ok) return say('Check the highlighted fields');
+    if (Object.keys(filter).length === 0) return say('Pick a player or at least one filter');
+    if (
+      filter.minRating != null &&
+      filter.maxRating != null &&
+      filter.minRating > filter.maxRating
+    ) {
+      mark('nf-minr', false);
+      return say('Min rating is above max rating');
+    }
+
+    const name = (v('nf-name') || describeFilter(filter).join(' · ')).slice(0, 80);
+    const hash = Array.from(
+      new Uint8Array(
+        await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(filter))),
+      ),
+      (b) => b.toString(16).padStart(2, '0'),
     ).join('');
     const existing = deps.getFilters();
     const saved: SavedFilter = {
@@ -560,7 +855,10 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       createdAt: new Date().toISOString(),
     };
     await deps.saveFilters([...existing, saved]);
-    renderSettings();
+    picked = null;
+    renderTargets();
+    $('saved').style.color = '';
+    $('saved').textContent = 'Target added';
   }
 
   // ---- live side ----------------------------------------------------------
@@ -591,14 +889,19 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     const sniper = deps.getSniper();
     const stats = sniper?.getStats();
     const top = stats?.topSnipes ?? [];
-    wantNames(top.map((t) => t.resourceId));
+    wantNames(top.map((t) => t.assetId ?? t.resourceId));
     $('dash').innerHTML = `
       <div class="tile profit"><div class="v">${fmt(stats?.profit ?? 0)}${COIN}</div><div class="k">Profit</div></div>
       <div class="tile searches"><div class="v">${fmt(stats?.searches ?? 0)}</div><div class="k">Searches</div></div>
       <div class="panelbox top-snipes"><h3>TOP SNIPES</h3>${
         top.length === 0
           ? '<div class="empty" style="padding:6px">No snipes yet</div>'
-          : top.map((t) => `<div class="ts-row"><span>${esc(nameOf(t.resourceId))}</span><span>${fmt(t.profit ?? 0)}${COIN}</span></div>`).join('')
+          : top
+              .map(
+                (t) =>
+                  `<div class="ts-row"><span>${esc(nameOf(t.assetId ?? t.resourceId))}</span><span>${fmt(t.profit ?? 0)}${COIN}</span></div>`,
+              )
+              .join('')
       }</div>
       <div class="counters">
         <div class="counter c-green"><span>Successful Purchases</span><span class="n">${fmt(stats?.purchases ?? 0)}</span></div>
@@ -627,7 +930,9 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     const remaining = endsAt ? Math.max(0, endsAt - now) : 0;
     let fraction = 0;
     if (endsAt && remaining > 0) {
-      const started = (box.dataset.endsAt === String(endsAt) ? Number(box.dataset.total) : remaining) || remaining;
+      const started =
+        (box.dataset.endsAt === String(endsAt) ? Number(box.dataset.total) : remaining) ||
+        remaining;
       box.dataset.endsAt = String(endsAt);
       box.dataset.total = String(started);
       fraction = remaining / started;
@@ -649,8 +954,9 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
 
   function logHtml(e: SniperLogEntry): string {
     const when = timeOfDay(e.at);
-    if (e.kind === 'info') return `<div class="log"><div class="main">${esc(e.message)}<div class="sub">${when}</div></div></div>`;
-    const who = `${e.rating ?? ''} ${esc(nameOf(e.resourceId))}`.trim();
+    if (e.kind === 'info')
+      return `<div class="log"><div class="main">${esc(e.message)}<div class="sub">${when}</div></div></div>`;
+    const who = `${e.rating ?? ''} ${esc(nameOf(e.assetId ?? e.resourceId))}`.trim();
     if (e.kind === 'bought') {
       const pill =
         e.profit == null
@@ -668,12 +974,14 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
 
   function resultHtml(r: SniperSearchResult): string {
     const when = timeOfDay(r.at);
-    if (r.matches.length === 0) return `<div class="res"><span class="when">${when}</span>No matches · ${esc(r.filterName)}</div>`;
+    if (r.matches.length === 0)
+      return `<div class="res"><span class="when">${when}</span>No matches · ${esc(r.filterName)}</div>`;
     const rows = r.matches
       .map(
-        (m) => `<div class="res item"><span>${m.rating} ${esc(nameOf(m.resourceId))}</span><span>${fmt(m.buyNow)}${COIN}${
-          m.expiresAt ? ` · ${clock(m.expiresAt - r.at)}` : ''
-        }</span></div>`,
+        (m) =>
+          `<div class="res item"><span>${m.rating} ${esc(nameOf(m.assetId))}</span><span>${fmt(m.buyNow)}${COIN}${
+            m.expiresAt ? ` · ${clock(m.expiresAt - r.at)}` : ''
+          }</span></div>`,
       )
       .join('');
     return `<div class="res"><span class="when">${when}</span>Found ${r.matches.length} match${r.matches.length === 1 ? '' : 'es'}</div>${rows}`;
@@ -683,9 +991,18 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     const sniper = deps.getSniper();
     const log = sniper?.getLog() ?? [];
     const results = sniper?.getSearchResults() ?? [];
-    wantNames([...log.map((e) => e.resourceId), ...results.flatMap((r) => r.matches.map((m) => m.resourceId))]);
-    $('log').innerHTML = log.length === 0 ? '<div class="empty">Purchases and events show up here.</div>' : log.map(logHtml).join('');
-    $('results').innerHTML = results.length === 0 ? '<div class="empty">Each search shows up here.</div>' : results.map(resultHtml).join('');
+    wantNames([
+      ...log.map((e) => e.assetId ?? e.resourceId),
+      ...results.flatMap((r) => r.matches.map((m) => m.assetId)),
+    ]);
+    $('log').innerHTML =
+      log.length === 0
+        ? '<div class="empty">Purchases and events show up here.</div>'
+        : log.map(logHtml).join('');
+    $('results').innerHTML =
+      results.length === 0
+        ? '<div class="empty">Each search shows up here.</div>'
+        : results.map(resultHtml).join('');
   }
 
   function renderTop(): void {
@@ -693,7 +1010,10 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     const state = sniper?.state;
     const running = sniper?.isRunning() ?? false;
     const phase = $('phase');
-    phase.textContent = state?.phase === 'stopped' && state.stopDetail ? `Stopped: ${state.stopDetail}` : PHASE_LABEL[state?.phase ?? 'idle'];
+    phase.textContent =
+      state?.phase === 'stopped' && state.stopDetail
+        ? `Stopped: ${state.stopDetail}`
+        : PHASE_LABEL[state?.phase ?? 'idle'];
     phase.className = `chip ${running ? 'running' : state?.phase === 'stopped' ? 'stopped' : ''}`;
     const start = $<HTMLButtonElement>('start');
     start.textContent = running ? 'Stop' : 'Start';
@@ -750,6 +1070,13 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       refreshLive();
       void deps.prepare().then(() => {
         if (!page.hidden) refreshLive();
+      });
+      void deps.getCatalog().then((c) => {
+        if (!c || page.hidden) return;
+        catalog = c;
+        const keep = readForm();
+        renderTargets();
+        restoreForm(keep);
       });
       tick = setInterval(() => {
         renderRing();
