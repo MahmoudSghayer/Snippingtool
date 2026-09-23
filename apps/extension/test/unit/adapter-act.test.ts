@@ -21,6 +21,15 @@ const buyNow = vi.fn(async (_tradeId: string) => ({ success: true }));
 const search = vi.fn(async (_criteria: Record<string, unknown>): Promise<unknown> => ({ auctionInfo: [] }));
 const nativeFetch = vi.fn(async (_input: unknown) => new Response('{}'));
 
+/** A Response as the network would hand it back: with its final URL set.
+ * `new Response()` always has `url === ''`, so beforeAll swaps the url
+ * getter adapter.ts captures for one that reads this test-only field. */
+function networkResponse(body: unknown, url: string): Response {
+  const res = new Response(JSON.stringify(body));
+  (res as unknown as { __testUrl: string }).__testUrl = url;
+  return res;
+}
+
 function rawAuction(tradeId: number, buyNowPrice: number) {
   return { tradeId, buyNowPrice, startingBid: 150, currentBid: 0, offers: 0, expires: 3600, itemData: { resourceId: 42, assetId: 42, rating: 85 } };
 }
@@ -67,6 +76,12 @@ beforeAll(async () => {
   // adapter.ts captures `fetch` at import; this stub stands in for the
   // network so the passive-observation tests below never leave the process.
   window.fetch = nativeFetch as unknown as typeof window.fetch;
+  Object.defineProperty(Response.prototype, 'url', {
+    configurable: true,
+    get(this: { __testUrl?: string }) {
+      return this.__testUrl ?? '';
+    },
+  });
   // Likewise for XHR: the adapter forwards to whatever `send` it captured.
   XMLHttpRequest.prototype.send = function () {};
   window.addEventListener('message', (e) => {
@@ -158,6 +173,16 @@ describe('buy price re-check', () => {
     expect(buyNow).toHaveBeenCalledWith('5002');
   });
 
+  it('never buys a listing with no buy-now price, and drops a zero-price buy request', async () => {
+    await seeListing(5004, 0);
+    deliver(await signedRequest({ action: 'buy', requestId: 'buy-zero', tradeId: '5004', price: 0 }));
+    await settle();
+    expect(results().find((r) => r.data.requestId === 'buy-zero')).toBeUndefined();
+    deliver(await signedRequest({ action: 'buy', requestId: 'buy-nobin', tradeId: '5004', price: 100 }));
+    expect((await resultFor('buy-nobin')).data).toMatchObject({ ok: false, error: 'price_mismatch' });
+    expect(buyNow).not.toHaveBeenCalled();
+  });
+
   it('uses the latest price seen for a tradeId', async () => {
     await seeListing(5003, 12_000);
     await seeListing(5003, 15_000);
@@ -178,9 +203,27 @@ describe('passive observation only trusts real EA market responses', () => {
   });
 
   it('records a response from an EA host', async () => {
-    nativeFetch.mockResolvedValueOnce(new Response(JSON.stringify({ auctionInfo: [rawAuction(6002, 100)] })));
-    await window.fetch('https://utas.mob.v4.prd.futc-ext.gcp.ea.com/ut/game/fc25/transfermarket?num=21');
+    const url = 'https://utas.mob.v4.prd.futc-ext.gcp.ea.com/ut/game/fc25/transfermarket?num=21';
+    nativeFetch.mockResolvedValueOnce(networkResponse({ auctionInfo: [rawAuction(6002, 100)] }, url));
+    await window.fetch(url);
     await vi.waitFor(() => expect(posted.filter((m) => m.kind === 'auctions')).toHaveLength(1));
+  });
+
+  it('does not record a Response with no final URL (one built in script, not by the network)', async () => {
+    nativeFetch.mockResolvedValueOnce(new Response(JSON.stringify({ auctionInfo: [rawAuction(6004, 100)] })));
+    await window.fetch('https://utas.mob.v4.prd.futc-ext.gcp.ea.com/ut/game/fc25/transfermarket');
+    await settle();
+    expect(posted.filter((m) => m.kind === 'auctions')).toHaveLength(0);
+
+    deliver(await signedRequest({ action: 'buy', requestId: 'buy-scripted', tradeId: '6004', price: 100 }));
+    expect((await resultFor('buy-scripted')).data).toMatchObject({ ok: false, error: 'listing_unknown' });
+  });
+
+  it('does not record a market response redirected off EA', async () => {
+    nativeFetch.mockResolvedValueOnce(networkResponse({ auctionInfo: [rawAuction(6005, 100)] }, 'https://evil.example/ut/game/fc25/transfermarket'));
+    await window.fetch('https://utas.mob.v4.prd.futc-ext.gcp.ea.com/ut/game/fc25/transfermarket');
+    await settle();
+    expect(posted.filter((m) => m.kind === 'auctions')).toHaveLength(0);
   });
 
   it('ignores a synthetic XHR load event carrying a forged body', async () => {

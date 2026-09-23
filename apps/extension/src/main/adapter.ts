@@ -69,6 +69,7 @@ const mapSet = Map.prototype.set;
 const mapClear = Map.prototype.clear;
 const setHas = Set.prototype.has;
 const setAdd = Set.prototype.add;
+const promiseThen = Promise.prototype.then;
 function protoGetter(proto: object | undefined, name: string): ((this: unknown) => unknown) | undefined {
   return proto ? (Object.getOwnPropertyDescriptor(proto, name)?.get as ((this: unknown) => unknown) | undefined) : undefined;
 }
@@ -183,7 +184,7 @@ const EA_HOST = /(^|\.)ea\.com$/i;
 const stats = { seen: 0, parsed: 0, failed: 0 };
 
 function post(kind: 'ready', data: { channel: string }): void;
-function post(kind: 'probe', data: { ok: boolean; checkedAt: number; reason?: string }): void;
+function post(kind: 'probe', data: { ok: boolean; checkedAt: number; reason?: string; actReady: boolean }): void;
 function post(kind: 'shape', data: { seen: number; parsed: number; failed: number; reason: string }): void;
 function post(
   kind: 'auctions',
@@ -228,7 +229,10 @@ function postResult(data: ActionResult): void {
 
 function runProbeAndReport(): ProbeResult {
   const result = probe();
-  post('probe', { ...result, checkedAt: Date.now() });
+  // `actReady: false` means no nonce reached this adapter, so no act request
+  // can ever be authenticated; content fails its calls fast on seeing it
+  // rather than waiting out the timeout (content/adapter-client.ts).
+  post('probe', { ...result, checkedAt: Date.now(), actReady: signer !== null });
   return result;
 }
 
@@ -425,30 +429,38 @@ if (typeof nativeFetch === 'function' && responseClone && responseText) {
       /* ignore */
     }
 
-    const promise = nativeFetch.call(window, input, init);
+    // Called and observed through captured `Reflect.apply` and
+    // `Promise.prototype.then`, so a page script that later hooks
+    // `Function.prototype.call` or `Promise.prototype.then` cannot slip a
+    // Response of its own into what the adapter records. The page gets the
+    // native promise back untouched.
+    const promise = apply(nativeFetch, window, [input, init]) as Promise<Response>;
     if (!isMarket(url)) return promise;
 
     stats.seen++;
-    return promise.then((res) => {
-      try {
-        // The final URL after redirects, read with the captured getter: a
-        // market-looking request can still be answered from elsewhere.
-        // (Empty only for a Response built in script, never one the network
-        // returned; the request URL was already checked above.)
-        const finalUrl = responseUrl ? apply(responseUrl, res, []) : '';
-        if (finalUrl && !isMarket(finalUrl)) return res;
-        (apply(responseText, apply(responseClone, res, []) as Response, []) as Promise<string>)
-          .then(
-            (body) => handleBody(url, body),
+    apply(promiseThen, promise, [
+      (res: Response) => {
+        try {
+          // The final URL after redirects, read with the captured getter: a
+          // market-looking request can still be answered from elsewhere, and
+          // a Response built in script has no URL at all. Either way, not
+          // recorded (fail closed).
+          const finalUrl = responseUrl ? apply(responseUrl, res, []) : '';
+          if (!isMarket(finalUrl)) return;
+          const body = apply(responseText, apply(responseClone, res, []) as Response, []) as Promise<string>;
+          apply(promiseThen, body, [
+            (text: string) => handleBody(url, text),
             () => {
               stats.failed++;
             },
-          );
-      } catch {
-        stats.failed++;
-      }
-      return res;
-    });
+          ]);
+        } catch {
+          stats.failed++;
+        }
+      },
+      () => undefined,
+    ]);
+    return promise;
   };
 }
 
@@ -518,7 +530,8 @@ async function actSearch(requestId: string, filter: FilterCriteria): Promise<voi
 function priceCheck(tradeId: string, price: number, at: number): string | null {
   const listing = apply(mapGet, lastSeenListings, [tradeId]) as SeenListing | undefined;
   if (!listing || (listing.expiresAt != null && listing.expiresAt <= at)) return ACT_ERROR.listingUnknown;
-  if (listing.buyNow !== price) return ACT_ERROR.priceMismatch;
+  // buyNow 0 means the listing has no buy-now price: nothing to match.
+  if (listing.buyNow <= 0 || listing.buyNow !== price) return ACT_ERROR.priceMismatch;
   return null;
 }
 
@@ -606,19 +619,27 @@ type ActRequest =
   | { action: 'buy'; requestId: string; tradeId: string; price: number }
   | { action: 'readResult'; requestId: string; tradeId: string };
 
+// Keep in sync with `adapterActRequestMessageSchema` (packages/shared/src/
+// ext-messages.ts): this file stays zod-free, so it re-checks the same shape
+// by hand.
 function asActRequest(value: unknown): ActRequest | null {
   const d = value as Record<string, unknown> | null;
   if (!d || typeof d !== 'object' || typeof d.requestId !== 'string' || d.requestId === '') return null;
   if (d.action === 'search') return d.filter && typeof d.filter === 'object' ? (d as unknown as ActRequest) : null;
   if (typeof d.tradeId !== 'string' || d.tradeId === '') return null;
   if (d.action === 'readResult') return d as unknown as ActRequest;
-  if (d.action === 'buy') return isInteger(d.price) && (d.price as number) >= 0 ? (d as unknown as ActRequest) : null;
+  if (d.action === 'buy') return isInteger(d.price) && (d.price as number) > 0 ? (d as unknown as ActRequest) : null;
   return null;
 }
 
 async function handleActRequest(data: unknown, mac: unknown): Promise<void> {
   const s = signer;
-  if (!s) return;
+  if (!s) {
+    // No key: nothing can be authenticated. Say so (unsigned — there is
+    // nothing to sign with), so content fails fast instead of timing out.
+    runProbeAndReport();
+    return;
+  }
   if (!(await s.verify(canonicalActMessage('act_request', data), mac))) return;
   const request = asActRequest(data);
   if (!request || apply(setHas, consumedRequestIds, [request.requestId])) return;

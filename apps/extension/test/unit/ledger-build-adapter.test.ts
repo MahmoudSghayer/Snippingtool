@@ -47,12 +47,13 @@ interface Page {
   dom: JSDOM;
   buyNow: ReturnType<typeof vi.fn>;
   posted: { kind: string; data: Record<string, unknown> }[];
+  search: ReturnType<typeof vi.fn>;
   deliver(message: unknown): void;
 }
 
 /** A fresh EA-like page with the built adapter.js injected at
  * document_start, after the ISOLATED-world handoff put `nonce` on the DOM. */
-function loadPage(nonce: string): Page {
+function loadPage(nonce: string | null): Page {
   const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
     url: 'https://www.ea.com/en/ultimate-team/web-app/index.html',
     runScripts: 'outside-only',
@@ -75,7 +76,7 @@ function loadPage(nonce: string): Page {
     if (m?.channel === ADAPTER_CHANNEL) posted.push(m);
   });
 
-  win.document.documentElement.setAttribute(HANDOFF_ATTRIBUTE, nonce);
+  if (nonce) win.document.documentElement.setAttribute(HANDOFF_ATTRIBUTE, nonce);
   // Evaluating our own freshly built adapter.js inside an isolated jsdom
   // page is the point of this test (it is how Chrome runs a MAIN-world
   // content script); nothing untrusted is evaluated.
@@ -84,6 +85,7 @@ function loadPage(nonce: string): Page {
   return {
     dom,
     buyNow,
+    search,
     posted,
     deliver: (message) => win.dispatchEvent(new win.MessageEvent('message', { data: message, source: win })),
   };
@@ -142,5 +144,16 @@ describe('dist/ledger/adapter.js act channel', () => {
 
     await send({ action: 'buy', requestId: 'c-3', tradeId: '777', price: 50_000 });
     await vi.waitFor(() => expect(page.buyNow).toHaveBeenCalledWith('777'));
+  });
+
+  it('with no nonce handed off, tells content it cannot act instead of leaving it to time out', async () => {
+    const page = loadPage(null);
+    const signer = createActSigner(generateNonce())!;
+    const data = { action: 'buy', requestId: 'nokey-1', tradeId: '777', price: 50_000 };
+    page.posted.length = 0;
+    page.deliver({ channel: ADAPTER_CHANNEL, kind: 'act_request', data, mac: await signer.sign(canonicalActMessage('act_request', data)) });
+    await vi.waitFor(() => expect(page.posted.find((m) => m.kind === 'probe')?.data).toMatchObject({ actReady: false }));
+    expect(page.buyNow).not.toHaveBeenCalled();
+    expect(page.search).not.toHaveBeenCalled();
   });
 });

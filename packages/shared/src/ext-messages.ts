@@ -53,6 +53,10 @@ export const adapterProbeMessageSchema = z.object({
     ok: z.boolean(),
     checkedAt: z.number(),
     reason: z.string().optional(),
+    /** `false` when the adapter never received this page load's act-channel
+     * nonce, so it can authenticate no act request; content fails pending
+     * calls fast instead of waiting for their timeout. */
+    actReady: z.boolean().optional(),
   }),
 });
 
@@ -133,8 +137,10 @@ export const adapterActRequestMessageSchema = z.object({
       tradeId: z.string().min(1),
       /** The buy-now price content expects to pay. The adapter refuses
        * (`price_mismatch` / `listing_unknown`) unless it equals the price
-       * it last saw listed for `tradeId`. */
-      price: z.number().int().min(0),
+       * it last saw listed for `tradeId`; a listing with no buy-now price
+       * (0) never matches. `main/adapter.ts`'s zod-free `asActRequest`
+       * re-checks this shape by hand — keep the two in sync. */
+      price: z.number().int().positive(),
     }),
     z.object({
       action: z.literal('readResult'),

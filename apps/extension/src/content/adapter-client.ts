@@ -74,6 +74,11 @@ export function createAdapterClient(target: Window, nonce: string | null): Adapt
 
     if (msg.kind === 'probe') {
       probeStatus = msg.data;
+      // The adapter has no act key (the nonce never reached it): every
+      // pending call would only time out, so fail them now. A page script
+      // could forge this too, but that only fails calls — it cannot make
+      // one succeed.
+      if (msg.data.actReady === false) failAllPending(ACT_ERROR.unauthenticated);
       for (const cb of probeListeners) cb(msg.data);
       return;
     }
@@ -101,6 +106,13 @@ export function createAdapterClient(target: Window, nonce: string | null): Adapt
         pending.delete(requestId);
         entry.resolve({ ok: data.ok, error: data.error, stillListed: data.stillListed, latencyMs: data.completedAt - data.requestedAt });
       });
+    }
+  }
+
+  function failAllPending(error: string): void {
+    for (const [requestId, entry] of pending) {
+      pending.delete(requestId);
+      entry.resolve({ ok: false, error, latencyMs: 0 });
     }
   }
 
@@ -138,7 +150,10 @@ export function createAdapterClient(target: Window, nonce: string | null): Adapt
       return probeStatus;
     },
     search: (filter) => call({ action: 'search', filter }),
-    buy: (tradeId, price) => call({ action: 'buy', tradeId, price }),
+    // A listing with no buy-now price (0) can never match; the adapter would
+    // drop the request anyway, so refuse here rather than time out.
+    buy: (tradeId, price) =>
+      price > 0 ? call({ action: 'buy', tradeId, price }) : Promise.resolve({ ok: false, error: ACT_ERROR.priceMismatch, latencyMs: 0 }),
     readResult: (tradeId) => call({ action: 'readResult', tradeId }),
     onProbe: (cb) => {
       probeListeners.add(cb);

@@ -95,6 +95,18 @@ describe('act requests', () => {
     expect(JSON.stringify(req)).not.toContain(NONCE);
   });
 
+  it('refuse a zero or negative price without posting (no buy-now price to match)', async () => {
+    await expect(client.buy('t1', 0)).resolves.toMatchObject({ ok: false, error: 'price_mismatch' });
+    expect(sent).toHaveLength(0);
+  });
+
+  it('fail fast when the adapter reports it has no act key, instead of waiting for the timeout', async () => {
+    const promise = client.buy('t1', 1000);
+    await lastRequest();
+    deliver({ channel: ADAPTER_CHANNEL, kind: 'probe', data: { ok: true, checkedAt: 1, actReady: false } });
+    await expect(promise).resolves.toMatchObject({ ok: false, error: 'adapter_unauthenticated' });
+  });
+
   it('fail closed without a nonce, posting nothing', async () => {
     client.dispose();
     client = createAdapterClient(window, null);

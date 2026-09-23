@@ -145,6 +145,15 @@ describe('adapterActRequestMessageSchema', () => {
     expect(result.success).toBe(true);
   });
 
+  it('rejects a buy at price 0 (a listing with no buy-now price)', () => {
+    const result = adapterActRequestMessageSchema.safeParse({
+      channel: 'ledger:v2',
+      kind: 'act_request',
+      data: { action: 'buy', requestId: 'r4', tradeId: 't1', price: 0 },
+    });
+    expect(result.success).toBe(false);
+  });
+
   it('rejects an unknown action', () => {
     const result = adapterActRequestMessageSchema.safeParse({
       channel: 'ledger:v2',
@@ -210,6 +219,15 @@ describe('adapterActionResultMessageSchema', () => {
 });
 
 describe('adapterProbeMessageSchema', () => {
+  it('accepts the actReady flag', () => {
+    const result = adapterProbeMessageSchema.safeParse({
+      channel: 'ledger:v2',
+      kind: 'probe',
+      data: { ok: true, checkedAt: 1, actReady: false },
+    });
+    expect(result.success && result.data.data.actReady).toBe(false);
+  });
+
   it('accepts a failing probe with a reason', () => {
     const result = adapterProbeMessageSchema.safeParse({
       channel: 'ledger:v2',
