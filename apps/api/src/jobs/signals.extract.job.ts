@@ -105,11 +105,12 @@ export default defineJob<SignalsExtractData>({
           cardId = resolved?.cardId ?? null;
         }
 
-        // The DB enforces exactly one target. An unresolved player name has
-        // no card and no cohort, so it is recorded as a cohort predicate on
-        // the name itself — which is honestly what it is: "whatever cards
-        // this name refers to".
-        const cohort = signal.cohort ?? (cardId ? null : { club: signal.playerName ?? 'unknown' });
+        // The DB enforces exactly one target. An unresolved player name
+        // becomes a cohort keyed on the name — honestly "whatever cards this
+        // name refers to". It used `club` at first, which put Thierry Henry
+        // in a club field and made club queries return people.
+        const cohort =
+          signal.cohort ?? (cardId ? null : { playerName: signal.playerName ?? 'unknown' });
 
         await db.insert(newsSignals).values({
           newsItemId: article.id,
@@ -137,6 +138,7 @@ export default defineJob<SignalsExtractData>({
         {
           newsItemId: article.id,
           signals: outcome.signals.length,
+          rejected: outcome.rejected.length,
           inputTokens: outcome.usage.inputTokens,
           cacheReadTokens: outcome.usage.cacheReadTokens,
         },

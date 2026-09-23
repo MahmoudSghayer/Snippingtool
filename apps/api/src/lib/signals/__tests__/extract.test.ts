@@ -168,6 +168,26 @@ describe('extractSignals — refusing untrustworthy output', () => {
     await expect(extractSignals(ARTICLE, client)).rejects.toBeInstanceOf(SignalExtractionError);
   });
 
+  it('rejects a cohort that excludes nothing despite looking specific', async () => {
+    // Taken from a real extraction: {ratingMin: 0, ratingMax: 99} is the
+    // whole game wearing the shape of a constraint, and unlike {} it reads as
+    // specific enough to survive review.
+    const { client } = stub(
+      reply({ signals: [{ ...COHORT_SIGNAL, cohort: { ratingMin: 0, ratingMax: 99 } }] }),
+    );
+
+    await expect(extractSignals(ARTICLE, client)).rejects.toBeInstanceOf(SignalExtractionError);
+  });
+
+  it('accepts a rating cohort that genuinely narrows the field', async () => {
+    const { client } = stub(
+      reply({ signals: [{ ...COHORT_SIGNAL, cohort: { ratingMin: 84, ratingMax: 99 } }] }),
+    );
+
+    const out = await extractSignals(ARTICLE, client);
+    expect(out.signals).toHaveLength(1);
+  });
+
   it('rejects an out-of-range confidence', async () => {
     const { client } = stub(reply({ signals: [{ ...COHORT_SIGNAL, confidence: 1.4 }] }));
     await expect(extractSignals(ARTICLE, client)).rejects.toBeInstanceOf(SignalExtractionError);

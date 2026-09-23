@@ -22,8 +22,10 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 
+import { z } from 'zod';
+
 import {
-  extractionResultSchema,
+  extractedSignalSchema,
   EXTRACTION_JSON_SCHEMA,
   PROMPT_VERSION,
   type ExtractedSignal,
@@ -66,6 +68,9 @@ export interface ExtractionInput {
 
 export interface ExtractionOutcome {
   signals: ExtractedSignal[];
+  /** Signals that failed validation and were dropped, with the reason — so a
+   * degrading extractor shows up as a rising count rather than as silence. */
+  rejected: string[];
   model: string;
   promptVersion: string;
   usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number };
@@ -163,18 +168,38 @@ export async function extractSignals(
     throw new SignalExtractionError(`response was not valid JSON: ${String(err)}`);
   }
 
-  // Second validation pass. The JSON Schema constrains generation; this
-  // catches anything that still does not satisfy the invariants we rely on
-  // downstream (notably the exactly-one-target rule).
-  const result = extractionResultSchema.safeParse(parsed);
-  if (!result.success) {
-    throw new SignalExtractionError(
-      `response failed schema validation: ${result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`,
-    );
+  // Second validation pass, per signal rather than per response.
+  //
+  // Validating the whole array at once threw away an entire article's
+  // extraction because one of its six signals had a vacuous cohort — which
+  // is what happened on 7 of the first 50 articles. A bad signal is not
+  // evidence that its neighbours are bad, so each is judged alone and the
+  // rejects are counted rather than silently dropped.
+  const outer = z.object({ signals: z.array(z.unknown()) }).safeParse(parsed);
+  if (!outer.success) {
+    throw new SignalExtractionError('response had no signals array');
+  }
+
+  const signals: ExtractedSignal[] = [];
+  const rejected: string[] = [];
+  for (const [index, raw] of outer.data.signals.entries()) {
+    const one = extractedSignalSchema.safeParse(raw);
+    if (one.success) {
+      signals.push(one.data);
+    } else {
+      rejected.push(`#${index}: ${one.error.issues.map((i) => i.message).join(', ')}`);
+    }
+  }
+
+  // Every signal rejected is a different situation from a mixed response: it
+  // suggests the contract itself has drifted, which should be loud.
+  if (signals.length === 0 && rejected.length > 0) {
+    throw new SignalExtractionError(`every signal failed validation: ${rejected.join('; ')}`);
   }
 
   return {
-    signals: result.data.signals,
+    signals,
+    rejected,
     model: EXTRACTION_MODEL,
     promptVersion: PROMPT_VERSION,
     usage: {

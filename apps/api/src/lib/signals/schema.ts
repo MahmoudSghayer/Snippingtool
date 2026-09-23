@@ -19,7 +19,7 @@ import { z } from 'zod';
 /** Bump when the prompt or this schema changes in a way that could alter
  * output. Precision is only meaningful per model + prompt, so every stored
  * signal records which pair produced it. */
-export const PROMPT_VERSION = 'v1';
+export const PROMPT_VERSION = 'v2';
 
 export const signalDirectionSchema = z.enum(['up', 'down', 'unclear']);
 
@@ -40,6 +40,12 @@ export const signalMagnitudeSchema = z.enum(['small', 'moderate', 'large', 'uncl
  */
 export const cohortPredicateSchema = z
   .object({
+    /** An unresolved player name — honestly "whatever cards this name refers
+     * to". Present because resolution legitimately fails (a name the card
+     * table has never seen), and the alternative tried first was worse: the
+     * name was stuffed into `club`, so a cohort query for a club returned
+     * Thierry Henry. A wrong field is not a smaller bug than a missing one. */
+    playerName: z.string().min(1).max(120).optional(),
     playstyle: z.string().min(1).max(60).optional(),
     position: z.string().min(1).max(10).optional(),
     league: z.string().min(1).max(80).optional(),
@@ -52,7 +58,35 @@ export const cohortPredicateSchema = z
   .strict()
   .refine((v) => Object.keys(v).length > 0, {
     message: 'a cohort must constrain at least one attribute',
+  })
+  // Rejecting `{}` is not enough: a real extraction returned
+  // `{ratingMin: 0, ratingMax: 99}`, which is the whole game wearing the
+  // shape of a constraint. A cohort that excludes nothing is a signal about
+  // everything, which is a signal about nothing — and unlike `{}` it looks
+  // specific enough to pass review.
+  .refine((v) => !isVacuous(v), {
+    message: 'a cohort must actually exclude something',
   });
+
+/** Words that name no subset — a real extraction produced
+ * `{cardVersion: "Any"}`, which constrains exactly nothing. */
+const VACUOUS_VALUES = new Set(['any', 'all', 'every', 'various', 'multiple', 'n/a', 'none']);
+
+/** True when a predicate matches every card despite having fields set. */
+function isVacuous(v: Record<string, unknown>): boolean {
+  const named = Object.entries(v).filter(
+    ([k, value]) =>
+      k !== 'ratingMin' &&
+      k !== 'ratingMax' &&
+      !(typeof value === 'string' && VACUOUS_VALUES.has(value.trim().toLowerCase())),
+  );
+  if (named.length > 0) return false; // some real attribute is constrained
+
+  // Rating-only cohort: vacuous when the span covers the whole scale.
+  const min = typeof v.ratingMin === 'number' ? v.ratingMin : 0;
+  const max = typeof v.ratingMax === 'number' ? v.ratingMax : 99;
+  return min <= 0 && max >= 99;
+}
 
 export const extractedSignalSchema = z
   .object({
@@ -102,6 +136,14 @@ export type ExtractionResult = z.infer<typeof extractionResultSchema>;
  * model is told and what we validate are both visible in one file — and
  * because the wire format needs `additionalProperties: false` at every level,
  * which is easy to lose in a converter.
+ *
+ * **Structured output accepts a subset of JSON Schema.** Validation keywords
+ * are rejected outright with a 400, not ignored — `maxItems` on an array and
+ * `minimum`/`maximum` on a number both fail. So bounds live in `description`
+ * (which the model reads) and are enforced by the Zod schema above on the way
+ * back in, which is the side that actually protects the database. Keep this
+ * file to: type, enum, properties, required, additionalProperties,
+ * description.
  */
 export const EXTRACTION_JSON_SCHEMA = {
   type: 'object',
@@ -110,7 +152,6 @@ export const EXTRACTION_JSON_SCHEMA = {
   properties: {
     signals: {
       type: 'array',
-      maxItems: 20,
       items: {
         type: 'object',
         additionalProperties: false,
@@ -137,10 +178,8 @@ export const EXTRACTION_JSON_SCHEMA = {
           },
           confidence: {
             type: 'number',
-            minimum: 0,
-            maximum: 1,
             description:
-              'How confident you are that this signal is genuinely stated or clearly implied by the article. Be conservative.',
+              'Between 0 and 1: how confident you are that this signal is genuinely stated or clearly implied by the article. Be conservative.',
           },
           playerName: {
             type: ['string', 'null'],
@@ -153,14 +192,15 @@ export const EXTRACTION_JSON_SCHEMA = {
             description:
               'A group of cards affected together, e.g. every card with a given playstyle. Exactly one of playerName or cohort must be non-null.',
             properties: {
+              playerName: { type: 'string' },
               playstyle: { type: 'string' },
               position: { type: 'string' },
               league: { type: 'string' },
               nation: { type: 'string' },
               club: { type: 'string' },
               cardVersion: { type: 'string' },
-              ratingMin: { type: 'integer', minimum: 0, maximum: 99 },
-              ratingMax: { type: 'integer', minimum: 0, maximum: 99 },
+              ratingMin: { type: 'integer', description: 'Lowest rating in the cohort, 0-99.' },
+              ratingMax: { type: 'integer', description: 'Highest rating in the cohort, 0-99.' },
             },
           },
           evidence: {
