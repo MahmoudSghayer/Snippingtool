@@ -207,7 +207,10 @@ async function buildUserscript() {
   });
 
   const header = buildUserscriptHeader({
-    version: pkg.version,
+    // Tampermonkey only installs an update when `@version` goes up, so every
+    // build gets its own: the package version plus a UTC build stamp
+    // (0.1.0.202609230830 > 0.1.0.202609221900). USERSCRIPT_VERSION pins it.
+    version: process.env.USERSCRIPT_VERSION || `${pkg.version}.${new Date().toISOString().replace(/\D/g, '').slice(0, 12)}`,
     apiOrigin: env.VITE_API_ORIGIN,
     // Where the published file will live, if known — Tampermonkey then
     // checks the small .meta.js for new versions and installs updates.
