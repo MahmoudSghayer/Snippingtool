@@ -187,7 +187,8 @@ browser.runtime.onMessage.addListener((message: unknown, sender: Runtime.Message
     .then((data): BackgroundResponse => ({ ok: true, data }))
     .catch((err): BackgroundResponse => {
       logger.error(`handler '${type}' threw: ${String(err)}`, 'background');
-      return { ok: false, error: String((err as Error)?.message ?? err) };
+      const code = (err as { code?: unknown })?.code;
+      return { ok: false, error: String((err as Error)?.message ?? err), ...(typeof code === 'string' ? { code } : {}) };
     });
 });
 

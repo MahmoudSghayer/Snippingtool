@@ -66,7 +66,12 @@ export async function retryFetch(path: string, init: RequestInit = {}, opts: Ret
   }
 }
 
+/** `apps/api` sends `{ code, message, requestId }` at the top level; the
+ * nested `{ error: { code, message } }` form is still read for any older
+ * endpoint that used it. */
 export interface ApiErrorBody {
+  code?: string;
+  message?: string;
   error?: { code?: string; message?: string };
 }
 
@@ -86,8 +91,10 @@ export async function toApiError(res: Response): Promise<ApiError> {
   const requestId = res.headers.get('x-request-id') ?? undefined;
   try {
     const body = (await res.json()) as ApiErrorBody;
-    return new ApiError(res.status, body.error?.code ?? 'INTERNAL', body.error?.message ?? res.statusText, requestId);
+    const code = body.code ?? body.error?.code ?? 'INTERNAL';
+    const message = body.message ?? body.error?.message ?? (res.statusText || `Request failed (HTTP ${res.status})`);
+    return new ApiError(res.status, code, message, requestId);
   } catch {
-    return new ApiError(res.status, 'INTERNAL', res.statusText, requestId);
+    return new ApiError(res.status, 'INTERNAL', res.statusText || `Request failed (HTTP ${res.status})`, requestId);
   }
 }

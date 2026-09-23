@@ -7,6 +7,18 @@ import browser from 'webextension-polyfill';
 
 import type { BackgroundResponse } from '@sl/shared';
 
+/** A handler's `{ ok: false }` reply; `code` is the API error code when the
+ * failure came from `apps/api`. */
+export class BackgroundError extends Error {
+  constructor(
+    message: string,
+    public readonly code?: string,
+  ) {
+    super(message);
+    this.name = 'BackgroundError';
+  }
+}
+
 /** Throws on an explicit `{ ok: false }` response (the caller decides what
  * to show, e.g. "wrong password") but returns `null` for a dead/unreachable
  * service worker rather than throwing, since that is a transient condition
@@ -19,6 +31,6 @@ export async function send<T = unknown>(type: string, payload?: unknown): Promis
     return null;
   }
   if (!res) return null;
-  if (!res.ok) throw new Error(res.error);
+  if (!res.ok) throw new BackgroundError(res.error, res.code);
   return res.data as T;
 }

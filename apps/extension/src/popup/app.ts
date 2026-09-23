@@ -19,7 +19,7 @@
  */
 import browser from 'webextension-polyfill';
 
-import { send } from '../lib/bg-client.js';
+import { BackgroundError, send } from '../lib/bg-client.js';
 
 import type { RiskSnapshot } from '../engine/governor.js';
 import type { BootstrapResponse, LoginResponse, RegisterResponse, UserSettings } from '@sl/shared';
@@ -51,11 +51,47 @@ function h(html: string): void {
 }
 
 function esc(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
+  return s.replace(
+    /[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string,
+  );
+}
+
+/** What went wrong with a sign-in step, in words that say what to do next.
+ * Keyed on the API's error codes (`@sl/shared` ERROR_CODES); anything else
+ * falls back to the server's own message. */
+function authErrorMessage(err: unknown, fallback: string): string {
+  const code = err instanceof BackgroundError ? err.code : undefined;
+  const message = err instanceof Error && err.message ? err.message : '';
+  switch (code) {
+    case 'AUTH_INVALID_CREDENTIALS':
+      return "Wrong email or password. Use your Sniper's Ledger password (the one for the dashboard), not your EA password. After 5 wrong tries the account locks for 15 minutes.";
+    case 'AUTH_ACCOUNT_LOCKED':
+      return 'Your account is locked after too many wrong passwords. Wait 15 minutes, or reset your password on the dashboard.';
+    case 'RATE_LIMITED':
+      return 'Too many sign-in attempts. Wait 15 minutes, then try again.';
+    case 'AUTH_EMAIL_NOT_VERIFIED':
+      return 'Verify your email first: open the link we emailed you, then sign in.';
+    case 'AUTH_MFA_INVALID':
+      return "That code didn't work. Enter the current 6-digit code from your authenticator app.";
+    case 'AUTH_TOKEN_INVALID':
+    case 'AUTH_TOKEN_EXPIRED':
+      return 'Your sign-in expired. Enter your password again.';
+    case 'DEVICE_LIMIT_REACHED':
+      return 'Your plan’s device limit is reached. Remove a device on the dashboard (Settings → Devices), then sign in.';
+    case 'AUTH_SESSION_REVOKED':
+      return 'This session was signed out. Sign in again.';
+  }
+  if (/network error|timed out|aborted|failed to fetch/i.test(message)) {
+    return "Can't reach the Sniper's Ledger server. Check your connection and try again.";
+  }
+  return message || fallback;
 }
 
 async function renderLoggedOut(error?: string, email = ''): Promise<void> {
-  const [emailAc, passwordAc] = allowAutofill ? ['username', 'current-password'] : ['off', 'new-password'];
+  const [emailAc, passwordAc] = allowAutofill
+    ? ['username', 'current-password']
+    : ['off', 'new-password'];
   h(`
     <h1><span class="dot"></span> Sniper's Ledger</h1>
     ${error ? `<div class="error" role="alert">${esc(error)}</div>` : ''}
@@ -64,7 +100,7 @@ async function renderLoggedOut(error?: string, email = ''): Promise<void> {
       <input id="password" type="password" placeholder="Sniper's Ledger password" autocomplete="${passwordAc}" />
       <button id="login" type="submit">Sign in</button>
     </form>
-    ${allowAutofill ? '' : '<p class="hint">Use your Sniper\'s Ledger (dashboard) password, not your EA password.</p>'}
+    ${allowAutofill || error ? '' : '<p class="hint">Use your Sniper\'s Ledger (dashboard) password, not your EA password.</p>'}
     <p style="text-align:center;margin-top:10px;">
       <button class="link" id="register-link">Create an account</button>
     </p>
@@ -116,7 +152,10 @@ function renderCheckEmail(email: string, notice?: string): void {
       await send('auth.resendVerification', { email });
       renderCheckEmail(email, 'Verification email sent.');
     } catch (err) {
-      renderCheckEmail(email, err instanceof Error ? err.message : 'Could not resend — try again shortly.');
+      renderCheckEmail(
+        email,
+        err instanceof Error ? err.message : 'Could not resend — try again shortly.',
+      );
     }
   });
   byId('to-login')?.addEventListener('click', () => void renderLoggedOut());
@@ -161,24 +200,40 @@ function riskGaugeHtml(snapshot: RiskSnapshot | null, killSwitch: boolean): stri
   `;
 }
 
-function renderMfa(mfaTicket: string): void {
+function renderMfa(mfaTicket: string, error?: string, email = ''): void {
   h(`
     <h1><span class="dot warn"></span> Verify it's you</h1>
+    ${error ? `<div class="error" role="alert">${esc(error)}</div>` : ''}
     <p style="color:var(--muted)">Enter the 6-digit code from your authenticator app.</p>
-    <input id="code" inputmode="numeric" placeholder="123456" />
-    <button id="verify">Verify</button>
+    <form id="mfa-form" novalidate>
+      <input id="code" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" />
+      <button id="verify" type="submit">Verify</button>
+    </form>
   `);
-  byId('verify')?.addEventListener('click', async () => {
+  (byId('code') as HTMLInputElement | null)?.focus();
+  byId('mfa-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
     const code = (byId('code') as HTMLInputElement).value.trim();
+    if (!code) return renderMfa(mfaTicket, 'Enter the 6-digit code.', email);
+    const button = byId('verify') as HTMLButtonElement;
+    button.disabled = true;
+    button.textContent = 'Verifying…';
     try {
       await send<LoginResponse>('auth.mfa', { mfaTicket, code });
       await renderLoggedIn();
     } catch (err) {
-      renderMfa(mfaTicket);
-      const el = document.createElement('div');
-      el.className = 'error';
-      el.textContent = err instanceof Error ? err.message : 'Verification failed';
-      app.prepend(el);
+      const message = authErrorMessage(err, 'Verification failed');
+      const code = err instanceof BackgroundError ? err.code : undefined;
+      // A used or expired ticket cannot be retried: back to the password step.
+      if (
+        code === 'AUTH_TOKEN_INVALID' ||
+        code === 'AUTH_TOKEN_EXPIRED' ||
+        code === 'DEVICE_LIMIT_REACHED'
+      ) {
+        await renderLoggedOut(message, email);
+      } else {
+        renderMfa(mfaTicket, message, email);
+      }
     }
   });
 }
@@ -195,11 +250,15 @@ async function onLoginSubmit(): Promise<void> {
   button.textContent = 'Signing in…';
   try {
     const result = await send<LoginResponse>('auth.login', { email, password });
-    if (result == null) await renderLoggedOut("Couldn't reach the extension's background — reload the page and try again.", email);
-    else if (result.status === 'mfa_required') renderMfa(result.mfaTicket);
+    if (result == null)
+      await renderLoggedOut(
+        "Couldn't reach the extension's background — reload the page and try again.",
+        email,
+      );
+    else if (result.status === 'mfa_required') renderMfa(result.mfaTicket, undefined, email);
     else await renderLoggedIn();
   } catch (err) {
-    await renderLoggedOut(err instanceof Error ? err.message : 'Sign-in failed', email);
+    await renderLoggedOut(authErrorMessage(err, 'Sign-in failed'), email);
   }
 }
 
@@ -212,7 +271,7 @@ async function onRegisterSubmit(): Promise<void> {
     // state instead of assuming a session exists (defect #3).
     renderCheckEmail(email);
   } catch (err) {
-    await renderRegister(err instanceof Error ? err.message : 'Registration failed');
+    await renderRegister(authErrorMessage(err, 'Registration failed'));
   }
 }
 

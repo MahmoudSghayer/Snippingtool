@@ -235,7 +235,9 @@ export type BackgroundMessageEnvelope = z.infer<typeof backgroundMessageEnvelope
 
 export const backgroundResponseSchema = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(true), data: z.unknown() }),
-  z.object({ ok: z.literal(false), error: z.string() }),
+  /** `code` is the API's error code when the failure came from `apps/api`
+   * (`AUTH_INVALID_CREDENTIALS`, `RATE_LIMITED`...), so a UI can explain it. */
+  z.object({ ok: z.literal(false), error: z.string(), code: z.string().optional() }),
 ]);
 export type BackgroundResponse = z.infer<typeof backgroundResponseSchema>;
 
