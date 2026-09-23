@@ -29,6 +29,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 
 import { api } from '@/api/client.js';
+import { EventsTimeline } from '@/pages/user/EventsTimeline.js';
 
 type MarketWindow = '1h' | '24h' | '7d' | '30d';
 type MarketScope = 'mine' | 'market';
@@ -229,6 +230,8 @@ export function MarketPanel() {
           Refresh
         </Button>
       </div>
+
+      <EventsTimeline />
 
       <Card>
         <CardContent className="pt-5">

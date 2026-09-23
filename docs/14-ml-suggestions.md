@@ -5,11 +5,24 @@ learn what moves player prices, and surface buy/sell suggestions with an
 honest hit rate attached. Plus the global chat that carries filter sharing
 between users.
 
-This is a **scoping document, not an implementation record** — nothing here
-is built yet. It exists so the sequencing and the data model get argued
-about before code, because the expensive mistakes in this feature are all
-made in the first two weeks (entity resolution, what gets stored, what
-"correct" means) and are painful to undo later.
+This started as a **scoping document**, written before any code so the
+sequencing and the data model got argued about first — the expensive
+mistakes in this feature are all made early (entity resolution, what gets
+stored, what "correct" means) and are painful to undo later.
+
+**Phases A, B and C are now built** (§13 has the per-phase detail); D, E, F
+and the chat are not. Two things the build changed, recorded here because
+they invalidate assumptions this document was written under:
+
+- The third-party price sources in §4a refuse automated access from this
+  infrastructure, and EA's FC Community API — launched 27 July, covering
+  account data rather than prices — is limited to those same three sites and
+  is "not accepting requests at this time". There is no sanctioned route to
+  third-party market data, so Phase B reads first-party observed listings
+  instead and `price_observations` stays empty for now.
+- EA's promo posts do not state machine-readable start/end times, so the
+  calendar records when an announcement was _published_ and leaves event
+  windows null rather than inventing them.
 
 See [`01-architecture.md`](./01-architecture.md) for the system this plugs
 into, [`08-analytics.md`](./08-analytics.md) for the existing rollups, and

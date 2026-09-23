@@ -11,7 +11,7 @@
 //      quiet market, no contributors, and a suppression, and the quiet-market
 //      reading is exactly how a broken pipeline looks (docs/14 §14).
 
-import { snipingActivity } from '@sl/db';
+import { marketEvents, newsItems, snipingActivity } from '@sl/db';
 import { resetDatabase } from '@sl/db/test-utils';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -266,6 +266,105 @@ describe('market intelligence (Phase B)', () => {
 
       expect(body.points).toHaveLength(0);
       expect(body.meta.emptyReason).toBeTruthy();
+    });
+  });
+
+  describe('events (Phase C calendar)', () => {
+    async function announce(opts: {
+      slug: string;
+      title: string;
+      kind?: 'content' | 'season' | 'pitch_notes';
+      daysAgo?: number;
+      summary?: string;
+      startsAt?: Date;
+    }) {
+      const [item] = await app.db
+        .insert(newsItems)
+        .values({
+          source: 'ea',
+          kind: opts.kind === 'pitch_notes' ? 'pitch_notes' : 'news',
+          url: `https://www.ea.com/x/${opts.slug}`,
+          slug: opts.slug,
+          title: opts.title,
+          summary: opts.summary ?? null,
+        })
+        .returning({ id: newsItems.id });
+
+      await app.db.insert(marketEvents).values({
+        newsItemId: item!.id,
+        kind: opts.kind ?? 'content',
+        title: opts.title,
+        slug: opts.slug,
+        sourceUrl: `https://www.ea.com/x/${opts.slug}`,
+        announcedAt: new Date(Date.now() - (opts.daysAgo ?? 1) * 86400_000),
+        startsAt: opts.startsAt ?? null,
+        dateConfidence: opts.startsAt ? 'stated' : 'announced',
+      });
+    }
+
+    it('returns the calendar newest first', async () => {
+      const me = await createUserSession(app, 'market-o@test.dev', 'fp-market-o-000000000000');
+      await announce({ slug: 'fc-26-older', title: 'Older promo', daysAgo: 10 });
+      await announce({ slug: 'fc-26-newer', title: 'Newer promo', daysAgo: 1 });
+
+      const body = await get('/api/v1/market/events', me.accessToken);
+
+      expect(body.events).toHaveLength(2);
+      expect(body.events[0].title).toBe('Newer promo');
+      expect(body.events[1].title).toBe('Older promo');
+    });
+
+    it('filters by kind', async () => {
+      const me = await createUserSession(app, 'market-p@test.dev', 'fp-market-p-000000000000');
+      await announce({ slug: 'fc-26-promo', title: 'A promo', kind: 'content' });
+      await announce({
+        slug: 'pitch-notes-fc26-tu5',
+        title: 'Title Update 5',
+        kind: 'pitch_notes',
+      });
+
+      const body = await get('/api/v1/market/events?kind=pitch_notes', me.accessToken);
+
+      expect(body.events).toHaveLength(1);
+      expect(body.events[0].kind).toBe('pitch_notes');
+    });
+
+    it('reports dateConfidence so a publication date is not read as a start time', async () => {
+      // The whole point of Phase C's date handling: EA rarely states when
+      // content goes live, and a UI that renders both identically would be
+      // asserting something nobody established.
+      const me = await createUserSession(app, 'market-q@test.dev', 'fp-market-q-000000000000');
+      await announce({ slug: 'fc-26-announced-only', title: 'Announced only' });
+      await announce({
+        slug: 'fc-26-with-window',
+        title: 'With window',
+        startsAt: new Date(Date.now() + 86400_000),
+      });
+
+      const body = await get('/api/v1/market/events', me.accessToken);
+      const bySlug = Object.fromEntries(body.events.map((e: { slug: string }) => [e.slug, e]));
+
+      expect(bySlug['fc-26-announced-only'].dateConfidence).toBe('announced');
+      expect(bySlug['fc-26-announced-only'].startsAt).toBeNull();
+      expect(bySlug['fc-26-with-window'].dateConfidence).toBe('stated');
+      expect(bySlug['fc-26-with-window'].startsAt).not.toBeNull();
+    });
+
+    it('carries the news summary alongside the event', async () => {
+      const me = await createUserSession(app, 'market-r@test.dev', 'fp-market-r-000000000000');
+      await announce({ slug: 'fc-26-summary', title: 'Has summary', summary: 'The blurb.' });
+
+      const body = await get('/api/v1/market/events', me.accessToken);
+      expect(body.events[0].summary).toBe('The blurb.');
+    });
+
+    it('distinguishes an empty calendar from a collector that never ran', async () => {
+      // Both look like "no events" to a client, and only one is a problem.
+      const me = await createUserSession(app, 'market-s@test.dev', 'fp-market-s-000000000000');
+      const body = await get('/api/v1/market/events', me.accessToken);
+
+      expect(body.events).toHaveLength(0);
+      expect(body.lastCollectedAt).toBeNull();
     });
   });
 
