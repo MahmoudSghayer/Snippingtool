@@ -26,6 +26,9 @@ import {
   eventDateConfidenceEnum,
   marketEventKindEnum,
   newsKindEnum,
+  signalDirectionEnum,
+  signalMagnitudeEnum,
+  signalReviewDecisionEnum,
   marketPlatformEnum,
   marketSourceEnum,
   priceKindEnum,
@@ -241,6 +244,11 @@ export const newsItems = pgTable(
      * edited article shows up as a change rather than a silent overwrite. */
     contentHash: text('content_hash'),
 
+    /** Set once extraction has run, even when it found nothing — otherwise a
+     * signal-free article is re-extracted on every run, forever, at cost. */
+    signalsExtractedAt: timestamptz('signals_extracted_at'),
+    signalsModel: text('signals_model'),
+
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -292,4 +300,62 @@ export const marketEvents = pgTable(
 
 export const marketEventsRelations = relations(marketEvents, ({ one }) => ({
   newsItem: one(newsItems, { fields: [marketEvents.newsItemId], references: [newsItems.id] }),
+}));
+
+// ---------------------------------------------------------------------------
+// news_signals — structured price signals extracted from article text (0029).
+//
+// `reviewedAt IS NULL` is the human review queue, and nothing user-facing may
+// read a row in that state. The accept/reject record is also what makes the
+// extractor's precision measurable per model + prompt version.
+//
+// A signal targets a card *or* a cohort predicate, never only a card: a
+// gameplay change reprices every card carrying the affected trait, which a
+// card-only model cannot express.
+// ---------------------------------------------------------------------------
+
+export const newsSignals = pgTable(
+  'news_signals',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+
+    newsItemId: uuid('news_item_id')
+      .notNull()
+      .references(() => newsItems.id, { onDelete: 'cascade' }),
+
+    direction: signalDirectionEnum('direction').notNull(),
+    magnitude: signalMagnitudeEnum('magnitude').notNull(),
+    /** The extractor's own confidence, distinct from the reviewer's verdict —
+     * a confidently wrong signal is the failure mode worth counting. */
+    confidence: numeric('confidence').notNull(),
+
+    cardId: uuid('card_id').references(() => cards.id, { onDelete: 'set null' }),
+    /** Predicate form of a target, e.g. {"playstyle":"Rapid"}. */
+    cohort: jsonb('cohort'),
+    /** The raw phrase the extractor keyed on, so a reviewer can check the
+     * extraction without re-reading the whole article. */
+    evidence: text('evidence'),
+    /** For a reviewer judging the extraction. Never shown to users as advice. */
+    rationale: text('rationale'),
+
+    model: text('model').notNull(),
+    promptVersion: text('prompt_version').notNull(),
+    extractedAt: timestamptz('extracted_at').notNull().defaultNow(),
+
+    reviewedAt: timestamptz('reviewed_at'),
+    reviewDecision: signalReviewDecisionEnum('review_decision'),
+    reviewedBy: uuid('reviewed_by'),
+
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index('news_signals_news_item_idx').on(t.newsItemId),
+    index('news_signals_card_idx').on(t.cardId),
+  ],
+);
+
+export const newsSignalsRelations = relations(newsSignals, ({ one }) => ({
+  newsItem: one(newsItems, { fields: [newsSignals.newsItemId], references: [newsItems.id] }),
+  card: one(cards, { fields: [newsSignals.cardId], references: [cards.id] }),
 }));

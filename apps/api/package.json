@@ -27,6 +27,7 @@
     "analytics:backfill": "tsx src/lib/analytics/backfill.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "0.120.0",
     "@fastify/autoload": "^6.0.3",
     "@fastify/cookie": "^11.0.2",
     "@fastify/cors": "^10.0.2",

@@ -57,6 +57,20 @@ export const priceKindEnum = pgEnum('price_kind', [
   'average',
 ]);
 export const newsKindEnum = pgEnum('news_kind', ['news', 'pitch_notes']);
+export const signalDirectionEnum = pgEnum('signal_direction', ['up', 'down', 'unclear']);
+// Buckets, not percentages: an article says "buffed", not "-14%". A number
+// here would be false precision that later evaluation would score against.
+export const signalMagnitudeEnum = pgEnum('signal_magnitude', [
+  'small',
+  'moderate',
+  'large',
+  'unclear',
+]);
+export const signalReviewDecisionEnum = pgEnum('signal_review_decision', [
+  'accepted',
+  'rejected',
+  'unsure',
+]);
 // `content` is the honest catch-all for "EA announced something that puts
 // items into the game" — promo, campaign, SBC event — without claiming to
 // know which. Phase D's extraction is what narrows it.

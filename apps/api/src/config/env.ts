@@ -116,10 +116,7 @@ const envSchema = z.object({
   // `.optional()` that tolerates ''; normalise '' to undefined so this
   // one behaves the same while keeping the non-empty guarantee for
   // callers that do set it.
-  TEST_DATABASE_URL: z.preprocess(
-    (v) => (v === '' ? undefined : v),
-    z.string().min(1).optional(),
-  ),
+  TEST_DATABASE_URL: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(1).optional()),
   REDIS_URL: z.string().min(1).default('redis://127.0.0.1:6379'),
   // PEM bundle used to verify the Redis server certificate when REDIS_URL
   // is `rediss://`. Needed by the single-VM compose topology, where Redis
@@ -128,10 +125,7 @@ const envSchema = z.object({
   // public root Node already trusts. Leave unset against a managed Redis
   // with a publicly-trusted cert — the system trust store is then used, and
   // verification stays on either way (plugins/redis.ts).
-  REDIS_TLS_CA_FILE: z.preprocess(
-    (v) => (v === '' ? undefined : v),
-    z.string().min(1).optional(),
-  ),
+  REDIS_TLS_CA_FILE: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(1).optional()),
   // Logical Redis DB index used only under NODE_ENV=test (plugins/redis.ts,
   // src/test/global-setup.ts) — see the SKELETON_READY note on why this is a
   // dedicated DB index rather than a key prefix. Configurable so two test
@@ -154,6 +148,15 @@ const envSchema = z.object({
   // deployment — e.g. the Vercel host alongside the self-hosted
   // docker-compose.prod.yml one (docs/11-devops.md 6).
   EXTRA_CORS_ORIGINS: z.string().default(''),
+
+  // --- Signal extraction (docs/14-ml-suggestions.md Phase D) ---------------
+  // Optional. Unset disables signal extraction entirely rather than failing
+  // the process: it is one capability of this deployment, and a worker that
+  // refuses to start without it would take the backups, rollups and licence
+  // heartbeats down with it. The SDK reads this variable itself, so it is
+  // declared here only to document the dependency and keep check-env.mjs
+  // honest about what a full deployment needs.
+  ANTHROPIC_API_KEY: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(1).optional()),
 
   // --- Cookies / CSRF ---
   COOKIE_SECRET: z.string().min(16).default('dev-cookie-secret-change-me-32-bytes-min'),
