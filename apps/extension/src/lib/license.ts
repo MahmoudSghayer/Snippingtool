@@ -111,8 +111,9 @@ function decodeJson(part: string): unknown {
 }
 
 /** The blob's claims if its signature verifies against the built-in key,
- * the header is `EdDSA`, and the signed `exp` is still ahead of `now`;
- * otherwise `null` (never throws). */
+ * the header is `EdDSA`, the signed `exp` is still ahead of `now` and the
+ * signed `iat` is not more than 5 minutes after it; otherwise `null` (never
+ * throws). */
 export async function verifyEntitlementClaims(blob: string, now: number = Date.now()): Promise<EntitlementBlobClaims | null> {
   const parts = typeof blob === 'string' ? blob.split('.') : [];
   if (parts.length !== 3 || parts.some((p) => p.length === 0)) return null;
@@ -131,6 +132,9 @@ export async function verifyEntitlementClaims(blob: string, now: number = Date.n
     const parsed = entitlementBlobClaimsSchema.safeParse(decodeJson(claimsB64));
     if (!parsed.success) return null;
     if (parsed.data.exp * 1000 <= now) return null;
+    // Issued "in the future" means the local clock was wound back, which would
+    // otherwise stretch the grace (measured from `iat`) indefinitely.
+    if (parsed.data.iat * 1000 > now + CACHE_CLOCK_SKEW_MS) return null;
     return parsed.data;
   } catch (err) {
     logger.warn(`entitlement blob verification failed: ${String(err)}`, 'license');

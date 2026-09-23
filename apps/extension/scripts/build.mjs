@@ -30,6 +30,7 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
 
 import { buildManifest } from './generate-manifest.mjs';
+import { licenseKeyProblem } from './license-key.mjs';
 import { TEMPLATE_PLACEHOLDERS } from './template-placeholders.mjs';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -76,6 +77,31 @@ const env = {
   VITE_EXTENSION_VERSION: pkg.version,
   VITE_LICENSE_PUBLIC_KEY: template ? TEMPLATE_PLACEHOLDERS.licensePublicKey : process.env.VITE_LICENSE_PUBLIC_KEY || '',
 };
+
+// The licence key gate. Without a usable key nothing verifies: no offline
+// grace, and every open EA tab polls GET /extension/kill-switch every 8 s,
+// where a rate-limit 429 reads as "kill switch active" and halts the engine.
+// So a release build must have one. `--watch` (pnpm dev) only warns, and
+// SL_ALLOW_NO_LICENSE_KEY=1 lets a non-shipping build (CI checks, tests) go
+// without a key. A key that is set but unusable fails too, except under
+// `--watch`. A `--template` build is exempt: its key is the placeholder the
+// API replaces with its own ENTITLEMENT_PUBLIC_KEY at download time
+// (apps/api/src/lib/extension-download.ts), so the key it ships with is
+// checked there, not here.
+const keyProblem = template ? null : licenseKeyProblem(env.VITE_LICENSE_PUBLIC_KEY);
+if (keyProblem) {
+  const optedOut = !env.VITE_LICENSE_PUBLIC_KEY && process.env.SL_ALLOW_NO_LICENSE_KEY === '1';
+  if (watch || optedOut) {
+    console.warn(`[build] WARNING: ${keyProblem} — this build cannot verify licences (no offline grace; kill switch polled). Never ship it.`);
+  } else {
+    console.error(
+      `[build] ${keyProblem}.\n` +
+        '  Set it to the API\'s ENTITLEMENT_PUBLIC_KEY (the PEM as-is). For a build that will not ship,\n' +
+        '  set SL_ALLOW_NO_LICENSE_KEY=1 instead. See docs/06-extension.md, "Build targets".',
+    );
+    process.exit(1);
+  }
+}
 
 const define = Object.fromEntries(Object.entries(env).map(([k, v]) => [`import.meta.env.${k}`, JSON.stringify(v)]));
 

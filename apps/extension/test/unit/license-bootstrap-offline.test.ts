@@ -108,6 +108,14 @@ describe('background: licence answers from the verified cache', () => {
     expect(await handleLicenseBootstrap()).toBeNull();
   }, 15_000);
 
+  it('a local failure after the API answered is not "offline": no grace', async () => {
+    vi.setSystemTime(IAT_MS + 3 * HOUR);
+    await cacheSigned(['automation.autobuyer'], false, IAT_MS);
+    vi.mocked(globalThis.fetch).mockImplementation(async () => new Response('<html>not json</html>', { status: 200 }));
+
+    expect(await handleLicenseBootstrap()).toBeNull();
+  });
+
   it('the API refusing (403) is not "offline": no grace', async () => {
     vi.setSystemTime(IAT_MS + 3 * HOUR);
     await cacheSigned(['automation.autobuyer'], false, IAT_MS);
@@ -139,6 +147,14 @@ describe('background: kill-switch pull never trusts an unsigned "off"', () => {
     await cacheSigned(['assist.ranker'], true, IAT_MS, { killSwitchActive: false });
     expect((await handleKillSwitchGet()).active).toBe(true);
     expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('a signed "off" within grace holds while the live endpoint is rate-limited: no false halt', async () => {
+    await cacheSigned(['assist.ranker'], false, IAT_MS);
+    vi.mocked(globalThis.fetch).mockImplementation(async () => new Response('{}', { status: 429 }));
+
+    expect(await handleKillSwitchGet()).toEqual({ active: false });
+    expect(globalThis.fetch).not.toHaveBeenCalled(); // a signed claim is never second-guessed by a poll
   });
 
   it('a tampered cache, API unreachable: fails closed', async () => {

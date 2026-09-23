@@ -23,6 +23,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { HANDOFF_ATTRIBUTE, canonicalActMessage, createActSigner, generateNonce } from '../../src/lib/act-auth.js';
 
+import { TEST_PUBLIC_KEY_PEM } from './license-test-keys.js';
+
 const extensionRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 let outDir: string;
 let adapterSource: string;
@@ -32,7 +34,10 @@ beforeAll(() => {
   outDir = mkdtempSync(path.join(tmpdir(), 'sl-ledger-build-'));
   execFileSync(process.execPath, ['scripts/build.mjs', 'ledger'], {
     cwd: extensionRoot,
-    env: { ...process.env, SL_EXT_OUT_DIR: outDir },
+    // The test licence key, in the `\n`-escaped PEM form `.env` files use
+    // for ENTITLEMENT_PUBLIC_KEY: build.mjs refuses a release build without
+    // a usable key (build-license-key.test.ts).
+    env: { ...process.env, SL_EXT_OUT_DIR: outDir, VITE_LICENSE_PUBLIC_KEY: TEST_PUBLIC_KEY_PEM.replace(/\n/g, '\\n') },
     stdio: 'pipe',
   });
   adapterSource = readFileSync(path.join(outDir, 'adapter.js'), 'utf8');

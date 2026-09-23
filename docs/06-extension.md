@@ -142,6 +142,18 @@ modules that benefit from shared chunks:
 `scripts/generate-manifest.mjs` then writes `manifest.json` from the two
 targets' env (`VITE_API_ORIGIN`, `VITE_UPDATE_URL`, the package version).
 
+**Licence key (required for a release build).** `VITE_LICENSE_PUBLIC_KEY`
+must be the API's `ENTITLEMENT_PUBLIC_KEY`, pasted as-is (SPKI PEM; the
+`\n`-escaped one-line form from `.env` works). `lib/license.ts` verifies
+the cached entitlement blob with it. A build without it can verify nothing:
+no offline grace, and every open EA tab polls `GET /extension/kill-switch`
+every 8 s, where a rate-limit 429 reads as "kill switch active". So
+`scripts/build.mjs` fails when the key is missing or is not an Ed25519
+public key. Exceptions: `pnpm dev` (`--watch`) only warns, and
+`SL_ALLOW_NO_LICENSE_KEY=1` allows a keyless build that will not ship (CI
+checks and tests use it). The release workflow reads the key from the
+repository variable `ENTITLEMENT_PUBLIC_KEY`.
+
 ```
 pnpm --filter @sl/extension build:ledger    # dist/ledger      — listable
 pnpm --filter @sl/extension build:auto      # dist/ledger-auto — self-hosted
@@ -319,6 +331,13 @@ not lost. Worst-case latency from an admin flipping the toggle to an open
 tab halting is therefore one heartbeat period (10 min) plus one engine
 tick; the cross-app e2e journey (b) asserts the open EA tab reports the
 switch after the heartbeat with no reload.
+
+**Known limit — features in an open tab.** Features (`assist.ranker`,
+`automation.autobuyer`) are read once, from `license.bootstrap` at page
+load; there is no features push. So when the 24h offline grace runs out, an
+EA tab that is already open keeps its features until it reloads (every new
+`license.bootstrap` answer has them off). The kill switch is not affected:
+it still reaches that tab by push and pull as above.
 
 `Governor.snapshot()` is the always-on "current utilization" read the risk
 meter (`ui/panel.ts`'s "Risk budget" section, and the popup) displays; it

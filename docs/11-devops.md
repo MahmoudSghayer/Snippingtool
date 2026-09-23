@@ -185,7 +185,11 @@ in the Security tab as well.
 
 `.github/workflows/release.yml`: builds+pushes all five images (§3) on
 every push to `main` and on `vX.Y.Z` tags; on a tag, also zips both
-extension build targets (`ledger`, `ledger-auto`) as GitHub Release assets;
+extension build targets (`ledger`, `ledger-auto`) as GitHub Release assets
+(built with `VITE_LICENSE_PUBLIC_KEY` from the repository variable
+`ENTITLEMENT_PUBLIC_KEY`, which must match production's
+`ENTITLEMENT_PUBLIC_KEY`; the extension build fails without it —
+`docs/06-extension.md` §3);
 migrates the target database (a direct connection from the runner, no SSH —
 see that job's own comment for the two supported network shapes); deploys
 over SSH (`appleboy/ssh-action`) running
@@ -889,6 +893,10 @@ time or regenerate them per host, but don't try to hold them as env vars.
       `COOKIE_SAME_SITE=none` + `COOKIE_SECURE=true` are set on the API
       and both `APP_ORIGIN`/`DASHBOARD_ORIGIN` are `https://` (§6 —
       enforced at boot in production either way).
+- [ ] GitHub repository variable `ENTITLEMENT_PUBLIC_KEY` set to this
+      environment's `ENTITLEMENT_PUBLIC_KEY` before tagging a release: the
+      extension zips embed it to verify licences offline, and the release
+      build fails without it (`docs/06-extension.md` §3).
 - [ ] STRIPE\_\* set to **live** keys (not test) with the live webhook
       endpoint registered, if billing is going live alongside this deploy
       (`docs/05-subscriptions.md`).

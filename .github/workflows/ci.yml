@@ -175,7 +175,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/setup-pnpm
+      # Not a shipping build: allowed without the licence key (build.mjs
+      # refuses a keyless build otherwise — docs/06-extension.md §3).
       - run: pnpm exec turbo run build --filter=@sl/extension...
+        env:
+          SL_ALLOW_NO_LICENSE_KEY: '1'
       - name: ledger (listable) build must never contain "autobuyer"
         run: |
           if grep -rIl "autobuyer" apps/extension/dist/ledger; then
@@ -387,6 +391,8 @@ jobs:
           workspace-filter: '@sl/extension'
       - name: build the ledger (listable) target — the e2e suite loads dist/ledger
         run: pnpm exec turbo run build --filter=@sl/extension...
+        env:
+          SL_ALLOW_NO_LICENSE_KEY: '1' # test build, never shipped
       - name: playwright e2e (xvfb)
         run: xvfb-run -a pnpm --filter @sl/extension test:e2e
         env:

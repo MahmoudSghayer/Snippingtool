@@ -45,10 +45,22 @@ export async function retryFetch(path: string, init: RequestInit = {}, opts: Ret
       }
       return res;
     } catch (err) {
-      if (attempt >= maxRetries) throw err;
+      if (attempt >= maxRetries) throw new NetworkError(err);
       await sleep(backoffMs(attempt));
       attempt++;
     }
+  }
+}
+
+/** The request never got a response: `fetch` itself rejected (offline, DNS,
+ * connection refused, CORS/TLS failure, abort) on every attempt. Distinct
+ * from `ApiError` (the API answered) and from anything thrown locally after
+ * a response arrived, so callers can tell "unreachable" apart. Keeps the
+ * original message, which is what the popup shows. */
+export class NetworkError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+    this.name = 'NetworkError';
   }
 }
 

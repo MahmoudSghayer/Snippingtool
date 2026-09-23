@@ -94,6 +94,11 @@ describe('lib/license.ts: verifying the entitlement blob', () => {
     await expect(verifyEntitlementClaims(API_SIGNED_BLOB, API_SIGNED_EXP * 1000 + 1)).resolves.toBeNull();
   });
 
+  it('rejects a blob issued more than 5 minutes after now (clock rolled back), and allows ordinary skew', async () => {
+    await expect(verifyEntitlementClaims(API_SIGNED_BLOB, IAT_MS - 6 * 60 * 1000)).resolves.toBeNull();
+    await expect(verifyEntitlementClaims(API_SIGNED_BLOB, IAT_MS - 4 * 60 * 1000)).resolves.not.toBeNull();
+  });
+
   it('rejects claims edited after signing (features added, signature kept)', async () => {
     const [header, , sig] = API_SIGNED_BLOB.split('.');
     const forged = claimsFor({ features: ['assist.ranker', 'automation.autobuyer'], killSwitchActive: false, iat: API_SIGNED_IAT, exp: API_SIGNED_EXP });

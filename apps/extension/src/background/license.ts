@@ -16,7 +16,7 @@
  */
 import browser from 'webextension-polyfill';
 
-import { ApiError } from '../lib/api.js';
+import { ApiError, NetworkError } from '../lib/api.js';
 import * as auth from '../lib/auth.js';
 import * as license from '../lib/license.js';
 import { logger } from '../lib/logger.js';
@@ -45,11 +45,13 @@ async function applyEntitlement(data: BootstrapResponse): Promise<void> {
 type BootstrapOutcome = { kind: 'ok'; data: BootstrapResponse } | { kind: 'offline' } | { kind: 'refused' };
 
 /** "Offline" is what the grace exists for: the request never got an answer
- * (fetch threw) or the API is down/overloaded. Anything else is the API
- * speaking, and it said no. */
+ * (`NetworkError`: fetch itself failed) or the API is down/overloaded
+ * (5xx/429). A refusal (4xx), or anything that went wrong locally after a
+ * response arrived (bad JSON, storage), is not offline and gets no grace. */
 function isUnreachable(err: unknown): boolean {
+  if (err instanceof NetworkError) return true;
   if (err instanceof ApiError) return err.status >= 500 || err.status === 429;
-  return true;
+  return false;
 }
 
 async function bootstrapOutcome(): Promise<BootstrapOutcome> {
