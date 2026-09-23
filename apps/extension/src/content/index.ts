@@ -23,6 +23,7 @@ import browser from 'webextension-polyfill';
 import { AssistEngine } from '../engine/assist.js';
 import { Governor, type GovernorState } from '../engine/governor.js';
 import { rankCandidates, type OpportunityCandidate, type ScoredOpportunity } from '../engine/ranker.js';
+import { countObservedSearches, governedSearch } from '../engine/search.js';
 import { logger } from '../lib/logger.js';
 import { singleFlight } from '../lib/single-flight.js';
 import { createPanel, type Panel } from '../ui/panel.js';
@@ -197,6 +198,12 @@ async function main(): Promise<void> {
     }
   });
 
+  // Every observed search response counts toward the governor's
+  // buy/search ratio and actionsPerHour — the human searching in EA's own UI
+  // is what keeps assist-mode buys allowed (engine/search.ts). A no-op until
+  // the bootstrap below has created a governor.
+  countObservedSearches(adapter, () => governor);
+
   let probeOk = true;
   adapter.onProbe((status) => {
     probeOk = status.ok;
@@ -350,8 +357,14 @@ async function main(): Promise<void> {
       getRanked: () => rankedCandidates,
       onFilterSelected: (handle) => {
         const filter = filters.find((f) => f.id === handle.id);
-        if (!filter) return;
-        void adapter.search(filter.filter);
+        if (!filter || !governor) return;
+        // Engine-issued, so gated: a denied search is skipped (the denial is
+        // already reported as a risk event by the `allow` wrapper below).
+        void governedSearch(governor, adapter, filter.filter)
+          .then((result) => {
+            if (!result.searched) logger.warn(`filter search skipped by the governor: ${result.decision.reason ?? 'denied'}`, 'governor');
+          })
+          .catch((err) => logger.error(`filter search failed: ${String(err)}`, 'adapter.search'));
         const event: ActivityEvent = {
           type: 'filter_change',
           occurredAt: nowIso(),

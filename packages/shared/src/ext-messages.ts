@@ -430,6 +430,9 @@ export const extBackgroundEngineStateSetPayloadSchema = z
     buyCount: z.number().int().min(0),
     coinFlow: z.array(z.object({ at: z.number().min(0), coins: z.number() }).strict()).max(10_000),
     cooldownUntil: z.number().min(0),
+    // Optional: state persisted by a build without the session-reset flag
+    // still validates (engine/governor.ts's `GovernorState`).
+    sessionExpired: z.boolean().optional(),
     killSwitchActive: z.boolean(),
     killSwitchReason: z.string().max(500).optional(),
   })
