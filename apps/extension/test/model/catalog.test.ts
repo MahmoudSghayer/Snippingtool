@@ -1,86 +1,65 @@
-// EA's own search data (model/catalog.ts): the web app's players.json and its
-// localisation file, parsed into the lists the Snipe Targets form searches.
+// The Snipe Targets form's choices (model/catalog.ts). The lists themselves
+// come from the EA web app's own helpers at runtime (main/adapter.ts); what
+// is tested here is what this code does with them: players.json parsing,
+// EA's quality -> rarity narrowing, portraits, price steps, and search.
 
 import { describe, expect, it } from 'vitest';
 
 import {
-  LOC_FILE,
-  parseLocFile,
+  fold,
   parsePlayersFile,
-  PLAYERS_FILE,
+  portraitUrl,
   priceStep,
+  raritiesForLevel,
   searchPlayers,
+  type Catalog,
+  type CatalogOption,
 } from '../../src/model/catalog.js';
 
-describe('catalog files', () => {
-  it('recognises the players and localisation URLs', () => {
-    expect(
-      PLAYERS_FILE.test(
-        'https://www.ea.com/ea-sports-fc/ultimate-team/web-app/content/abc/2026/fut/items/web/players.json?_=1',
-      ),
-    ).toBe(true);
-    expect(
-      LOC_FILE.test('https://www.ea.com/ea-sports-fc/ultimate-team/web-app/loc/en_GB.json'),
-    ).toBe(true);
-    expect(PLAYERS_FILE.test('https://www.ea.com/ut/game/fc26/transfermarket')).toBe(false);
-  });
-
-  it('parses players, preferring the common name, and skips junk and duplicates', () => {
+describe('players.json', () => {
+  it('parses the real file shape, preferring the common name, and skips junk and duplicates', () => {
+    // First entries of the FC 27 web app's players.json (2026-09-23).
     const players = parsePlayersFile({
+      LegendsPlayers: [{ c: 'Iniesta', f: 'Andrés', id: 41, l: 'Iniesta Luján', r: 92 }],
       Players: [
-        { id: 231747, f: 'Kylian', l: 'Mbappé Lottin', c: 'Mbappé', r: 91 },
-        { id: 158023, f: 'Lionel', l: 'Messi', r: 88 },
-        { id: 158023, f: 'Dup', l: 'Licate', r: 50 },
+        { f: 'Joe', id: 27, l: 'Cole', r: 87 },
+        { f: 'Robbie', id: 330, l: 'Keane', r: 86 },
+        { f: 'Dup', id: 27, l: 'Licate', r: 50 },
         { id: 'x', f: 'Bad' },
         { id: 5, f: '', l: '' },
       ],
-      LegendsPlayers: [{ id: 190042, f: 'Ronaldo', l: 'Nazário', c: 'R9', r: 95 }],
     });
     expect(players).toEqual([
-      { id: 231747, name: 'Mbappé', rating: 91 },
-      { id: 158023, name: 'Lionel Messi', rating: 88 },
-      { id: 190042, name: 'R9', rating: 95 },
+      { id: 27, name: 'Joe Cole', rating: 87 },
+      { id: 330, name: 'Robbie Keane', rating: 86 },
+      { id: 41, name: 'Iniesta', rating: 92 },
     ]);
     expect(parsePlayersFile(null)).toEqual([]);
-    expect(parsePlayersFile({ nothing: [] })).toEqual([]);
+  });
+});
+
+describe('EA list behaviour', () => {
+  const rarities: CatalogOption[] = [
+    { id: 0, value: '0', label: 'Common', levels: true },
+    { id: 1, value: '1', label: 'Rare', levels: true },
+    { id: 12, value: '12', label: 'Base Icon', levels: false },
+    { id: 3, value: '3', label: 'Team of the Week', levels: false },
+  ];
+
+  it('narrows rarities by quality the way the web app does', () => {
+    expect(raritiesForLevel(rarities, null).map((r) => r.id)).toEqual([0, 1, 12, 3]);
+    expect(raritiesForLevel(rarities, 'gold').map((r) => r.id)).toEqual([0, 1]);
+    expect(raritiesForLevel(rarities, 'SP').map((r) => r.id)).toEqual([12, 3]);
   });
 
-  it('pulls club, league and nation names out of the localisation keys', () => {
-    const names = parseLocFile({
-      'global.teamFull.2026.team241': 'FC Barcelona',
-      'global.teamFull.2026.team10': 'Manchester City',
-      'global.leagueFull.2026.league13': 'Premier League',
-      'search.nationName.nation14': 'England',
-      'some.other.key': 'Ignored',
-    });
-    expect(names.clubs).toEqual([
-      { id: 241, name: 'FC Barcelona' },
-      { id: 10, name: 'Manchester City' },
-    ]);
-    expect(names.leagues).toEqual([{ id: 13, name: 'Premier League' }]);
-    expect(names.nations).toEqual([{ id: 14, name: 'England' }]);
+  it('builds portrait URLs from the web app template', () => {
+    const catalog = { portrait: 'https://www.ea.com/x/portraits/{id}.png' } as Catalog;
+    expect(portraitUrl(catalog, 158023)).toBe('https://www.ea.com/x/portraits/158023.png');
+    expect(portraitUrl(null, 1)).toBeNull();
   });
+});
 
-  it('searches names ignoring case and accents, word starts first, then rating', () => {
-    const players = [
-      { id: 1, name: 'Mbappé', rating: 91 },
-      { id: 2, name: 'Ethan Mbappe', rating: 70 },
-      { id: 3, name: 'Kombappez', rating: 99 },
-      { id: 4, name: 'Messi', rating: 88 },
-    ];
-    expect(searchPlayers(players, 'mbappe').map((p) => p.id)).toEqual([1, 2, 3]);
-    expect(searchPlayers(players, 'm')).toEqual([]);
-  });
-
-  it('reads card-design (rarity) names when the localisation has them', () => {
-    expect(
-      parseLocFile({ 'item.raretype3': 'Team of the Week', 'item.raretype1': 'Rare' }).rarities,
-    ).toEqual([
-      { id: 1, name: 'Rare' },
-      { id: 3, name: 'Team of the Week' },
-    ]);
-  });
-
+describe('form helpers', () => {
   it("steps prices the way EA's price fields do", () => {
     expect(priceStep(0, 1)).toBe(50);
     expect(priceStep(950, 1)).toBe(1_000);
@@ -92,5 +71,17 @@ describe('catalog files', () => {
     expect(priceStep(100_000, 1)).toBe(101_000);
     expect(priceStep(12_345, 1)).toBe(12_500);
     expect(priceStep(50, -1)).toBe(0);
+  });
+
+  it('searches names ignoring case and accents, word starts first, then rating', () => {
+    const players = [
+      { id: 1, name: 'Mbappé', rating: 91 },
+      { id: 2, name: 'Ethan Mbappe', rating: 70 },
+      { id: 3, name: 'Kombappez', rating: 99 },
+      { id: 4, name: 'Messi', rating: 88 },
+    ];
+    expect(searchPlayers(players, 'mbappe').map((p) => p.id)).toEqual([1, 2, 3]);
+    expect(searchPlayers(players, 'm')).toEqual([]);
+    expect(fold('Nazário')).toBe('nazario');
   });
 });

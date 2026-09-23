@@ -10,7 +10,7 @@
 // this ISOLATED-world file (bundled into content.js) from pulling in `zod`.
 import { ADAPTER_CHANNEL } from '@sl/shared/adapter-channel.js';
 
-import type { CatalogNames, CatalogPlayer } from '../model/catalog.js';
+import type { Catalog } from '../model/catalog.js';
 import type { FilterCriteria } from '@sl/shared';
 
 const ACTION_TIMEOUT_MS = 15_000;
@@ -36,10 +36,10 @@ export interface AdapterClient {
   onProbe(cb: (status: ProbeStatus) => void): () => void;
   onShape(cb: (reason: string) => void): () => void;
   onAuctions(cb: (auctions: unknown[]) => void): () => void;
-  /** EA's player list and/or club, league and nation names, as the web app
-   * loads them (model/catalog.ts). */
-  onCatalog(cb: (catalog: { players?: CatalogPlayer[]; assetBase?: string; names?: CatalogNames }) => void): () => void;
-  /** Asks the adapter to resend whatever of those it has already seen. */
+  /** The Snipe Targets form's choices, built with the web app's own lists
+   * (model/catalog.ts). */
+  onCatalog(cb: (catalog: Catalog) => void): () => void;
+  /** Asks the adapter for them (it sends them once the web app is ready). */
   requestCatalog(): void;
   dispose(): void;
 }
@@ -50,7 +50,7 @@ export function createAdapterClient(target: Window = window): AdapterClient {
   const shapeListeners = new Set<(reason: string) => void>();
   const auctionsListeners = new Set<(auctions: unknown[]) => void>();
   const catalogListeners = new Set<
-    (catalog: { players?: CatalogPlayer[]; assetBase?: string; names?: CatalogNames }) => void
+    (catalog: Catalog) => void
   >();
   let probeStatus: ProbeStatus | null = null;
 
@@ -70,7 +70,7 @@ export function createAdapterClient(target: Window = window): AdapterClient {
       return;
     }
     if (msg.kind === 'catalog') {
-      const data = msg.data as { players?: CatalogPlayer[]; assetBase?: string; names?: CatalogNames };
+      const data = msg.data as Catalog;
       for (const cb of catalogListeners) cb(data);
       return;
     }

@@ -177,20 +177,24 @@ describe('adapterProbeMessageSchema', () => {
   });
 });
 
+
 describe('catalog.save payload', () => {
-  it('accepts a names file whose rarities start at id 0 (Common)', async () => {
+  it("accepts EA's filter lists, including rarity id 0 (Common) and clubs keyed by league id", async () => {
     const { extBackgroundCatalogSavePayloadSchema } = await import('../src/ext-messages.js');
+    const option = (id: number, label: string) => ({ id, value: String(id), label, img: `https://www.ea.com/x/${id}.png` });
     const payload = {
-      names: {
-        clubs: [{ id: 243, name: 'Real Madrid' }],
-        leagues: [{ id: 16, name: 'Ligue 1' }],
-        nations: [{ id: 18, name: 'France' }],
-        rarities: [
-          { id: 0, name: 'Common' },
-          { id: 1, name: 'Rare' },
-        ],
-      },
+      players: [{ id: 158023, name: 'Messi', rating: 88 }],
+      portrait: 'https://www.ea.com/x/portraits/{id}.png',
+      levels: [{ id: 2, value: 'gold', label: 'Gold' }],
+      rarities: [{ ...option(0, 'Common'), levels: true }],
+      positions: [{ id: 130, value: '130', label: 'Defenders' }],
+      playStyles: [option(250, 'Basic')],
+      nations: [option(18, 'France')],
+      leagues: [option(16, 'Ligue 1 (FRA 1)')],
+      clubs: { '16': [option(73, 'Paris SG')] },
+      capturedAt: 1,
     };
     expect(extBackgroundCatalogSavePayloadSchema.safeParse(payload).success).toBe(true);
+    expect(extBackgroundCatalogSavePayloadSchema.safeParse({ ...payload, clubs: { x: [] } }).success).toBe(false);
   });
 });

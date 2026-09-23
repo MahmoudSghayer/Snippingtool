@@ -224,31 +224,38 @@ MEDIUM or HIGH RISK. The bot runs its own governor built from the page's
 Safety limits; the server kill switch and adapter probe failures stop it
 whatever those say.
 
-**Snipe targets are built like EA's own search panel**: an OVR range slider
-with Min/Max OVR, "Type Player Name", and expandable Quality, Rarity,
-Position, Chemistry Style, Country/Region, League and Club rows whose lists
-show flags, league/club logos and card shapes, then Buy Now Min/Max with
-EA's price steps. Flags and logos load from the web app's own image folder
-next to `players.json` (`imageUrl` in `model/catalog.ts`, ASSUMED SHAPE);
-a missing image falls back to initials.
+**Snipe targets are built like EA's own search panel**: OVR range slider
+with Min/Max OVR, "Type Player Name" (with EA portraits), and Quality,
+Rarity, Position, Chemistry Style, Country/Region, League and Club rows.
+The lists are the web app's own: `main/adapter.ts` calls its
+`UTDataProviderFactory` (`getRareItemLevelDP`, `getItemRarityDP`,
+`getPlayerPositionDP`, `getPlayStyleDP`, `getNationDP`, `getLeagueDP`,
+`getTeamDP` per league) and takes every picture from its
+`AssetLocationUtils.getFilterImage`, so entries, order, labels and images
+match EA's panel, in the user's web-app language. Like EA's panel, Club is
+disabled until a league is chosen, and choosing a quality clears the rarity
+and narrows the rarity list. Players come from the web app's `players.json`
+(`AssetLocationUtils.getPlayerSearchFileUri()`). Stored in `storage.local`
+(`catalog.get` / `catalog.save`, `model/catalog.ts`).
 
-**Snipe targets are built like EA's own search.** A target is a player
-(search-as-you-type by name, with rating), and/or quality, position,
-nationality, league and club, plus a rating range and a max buy now price.
-The names come from EA's own search data: `main/adapter.ts` keeps a parsed
-copy of the web app's `players.json` and localisation file as the app loads
-them (`model/catalog.ts`), and background stores it in `storage.local`
-(`catalog.get` / `catalog.save`), so the ids a target stores are EA's own.
-Until the web app has loaded those files once, the form takes ids instead.
-`mapFilterToSearchCriteria` sends them under the search-criteria names the
-web app uses (`maskedDefId`, `level`, `nation`, `league`, `club`,
-`position`, `minBuy`/`maxBuy`); rating is filtered after the results come
-back, since the market search has no rating field.
+### Web app shape (verified 2026-09-23)
+
+`main/adapter.ts` was checked against the FC 27 web app's own code
+(`js/compiled_1-4.js`, `ocompiled.js`) and public data files:
+
+| What       | The web app's own                                                                                                                                                                                    |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Search     | `services.Item.clearTransferMarketCache()` then `services.Item.searchTransferMarket(new UTSearchCriteriaDTO(), page)` -> observable; `res.data.items`                                                |
+| Buy now    | `services.Item.bid(item, auction.buyNowPrice)`                                                                                                                                                       |
+| Criteria   | `type` (set first), `maskedDefId`, `level` (`bronze`/`silver`/`gold`/`SP`), `rarities`, `position` / `zone` (130-132), `playStyle`, `nation`, `league`, `club`, `minBuy`/`maxBuy`, `ovrMin`/`ovrMax` |
+| Items      | `definitionId`, `databaseId` (base player id), `rating`, `getAuctionData()` -> `tradeId`, `buyNowPrice`, `expires`                                                                                   |
+| Navigation | `.ut-tab-bar-item` buttons, Transfers has `icon-transfer`; top bar `.ut-navigation-bar-view`                                                                                                         |
+
+The adapter waits for the web app to start (and log in) before its first
+probe, and builds the catalog then.
 
 Not yet available: transfer list, sold and unsold counts (the adapter has no
-transfer list access yet), and the navigation and header selectors are
-ASSUMED SHAPE, like `main/adapter.ts`, until checked on the live web app —
-as are the players.json and localisation formats and the search field names.
+transfer list access yet).
 
 ## 4. The ASSUMED SHAPE and the day-one verification checklist
 

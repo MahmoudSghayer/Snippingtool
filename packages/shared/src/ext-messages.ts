@@ -343,10 +343,18 @@ export const extBackgroundLicenseHeartbeatPayloadSchema = z
  * etc. already computed), not a creation request. */
 export const extBackgroundBotSettingsSetPayloadSchema = botSettingsSchema;
 
-const catalogEntrySchema = z.object({ id: z.number().int().positive(), name: z.string().min(1).max(80) }).strict();
+const catalogOptionSchema = z
+  .object({
+    id: z.number().int(),
+    value: z.string().max(40),
+    label: z.string().min(1).max(120),
+    img: z.string().max(600).optional(),
+    levels: z.boolean().optional(),
+  })
+  .strict();
 
-/** `catalog.save`: either half may arrive on its own (the web app loads its
- * player list and its localisation separately). */
+/** `catalog.save`: the Snipe Targets form's choices, as the EA web app's own
+ * search panel lists them (apps/extension `model/catalog.ts`). */
 export const extBackgroundCatalogSavePayloadSchema = z
   .object({
     players: z
@@ -355,27 +363,16 @@ export const extBackgroundCatalogSavePayloadSchema = z
           .object({ id: z.number().int().positive(), name: z.string().min(1).max(80), rating: z.number().int().min(0).max(99).nullable() })
           .strict(),
       )
-      .max(100_000)
-      .optional(),
-    /** The web app's item-image folder (flags, league logos, club badges). */
-    assetBase: z
-      .string()
-      .max(500)
-      .regex(/^https?:\/\/[^\s]+\/$/)
-      .optional(),
-    names: z
-      .object({
-        clubs: z.array(catalogEntrySchema).max(20_000),
-        leagues: z.array(catalogEntrySchema).max(2_000),
-        nations: z.array(catalogEntrySchema).max(1_000),
-        // Rarity ids start at 0 (Common), unlike every other EA id here.
-        rarities: z
-          .array(z.object({ id: z.number().int().min(0), name: z.string().min(1).max(80) }).strict())
-          .max(1_000)
-          .optional(),
-      })
-      .strict()
-      .optional(),
+      .max(100_000),
+    portrait: z.string().max(600).optional(),
+    levels: z.array(catalogOptionSchema).max(20),
+    rarities: z.array(catalogOptionSchema).max(1_000),
+    positions: z.array(catalogOptionSchema).max(50),
+    playStyles: z.array(catalogOptionSchema).max(100),
+    nations: z.array(catalogOptionSchema).max(1_000),
+    leagues: z.array(catalogOptionSchema).max(1_000),
+    clubs: z.record(z.string().regex(/^\d+$/), z.array(catalogOptionSchema).max(500)),
+    capturedAt: z.number().int(),
   })
   .strict();
 

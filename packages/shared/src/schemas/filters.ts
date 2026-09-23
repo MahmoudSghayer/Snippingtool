@@ -11,6 +11,9 @@ export const filterCriteriaSchema = z
     minRating: z.number().int().min(0).max(99).optional(),
     maxRating: z.number().int().min(0).max(99).optional(),
     position: z.string().min(1).max(10).optional(),
+    /** EA's position group (130 defenders, 131 midfielders, 132 attackers),
+     * searched instead of a single position. */
+    zone: z.number().int().min(0).max(1_000).optional(),
     nationality: z.number().int().positive().optional(),
     league: z.number().int().positive().optional(),
     club: z.number().int().positive().optional(),

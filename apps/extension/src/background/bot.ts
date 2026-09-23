@@ -18,7 +18,7 @@ import { isAuthenticated } from '../lib/auth.js';
 import { logger } from '../lib/logger.js';
 import { getLocal, setLocal } from '../lib/storage.js';
 
-import type { Catalog, CatalogNames, CatalogPlayer } from '../model/catalog.js';
+import type { Catalog } from '../model/catalog.js';
 
 const SETTINGS_KEY = 'sl.bot.settings.v1';
 const NAMES_KEY = 'sl.cards.names.v1';
@@ -51,19 +51,10 @@ export async function handleCatalogGet(): Promise<Catalog | null> {
   return getLocal<Catalog | null>(CATALOG_KEY, null);
 }
 
-/** Merges whichever half arrived (players, or names) into what is stored. */
-export async function handleCatalogSave(payload: { players?: CatalogPlayer[]; assetBase?: string; names?: CatalogNames }): Promise<{ ok: true }> {
-  const current = (await handleCatalogGet()) ?? { players: [], clubs: [], leagues: [], nations: [], capturedAt: 0 };
-  const next: Catalog = {
-    players: payload.players ?? current.players,
-    assetBase: payload.assetBase ?? current.assetBase,
-    clubs: payload.names?.clubs ?? current.clubs,
-    leagues: payload.names?.leagues ?? current.leagues,
-    nations: payload.names?.nations ?? current.nations,
-    rarities: payload.names?.rarities ?? current.rarities,
-    capturedAt: Date.now(),
-  };
-  await setLocal(CATALOG_KEY, next);
+/** The adapter sends the whole catalog at once, built from the web app's
+ * own lists (model/catalog.ts). */
+export async function handleCatalogSave(catalog: Catalog): Promise<{ ok: true }> {
+  await setLocal(CATALOG_KEY, catalog);
   playerNames = null;
   return { ok: true };
 }

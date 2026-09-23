@@ -29,16 +29,14 @@ import {
 } from '@sl/shared';
 
 import {
-  BASIC_RARITIES,
-  CHEMISTRY_STYLES,
-  POSITIONS,
-  QUALITIES,
+  SPECIAL_LEVEL,
   fold,
-  imageUrl,
+  portraitUrl,
   priceStep,
+  raritiesForLevel,
   searchPlayers,
   type Catalog,
-  type CatalogEntry,
+  type CatalogOption,
   type CatalogPlayer,
 } from '../model/catalog.js';
 
@@ -260,16 +258,20 @@ const CSS = `
   .dd-opt:hover { background: #2d3a55; }
   .dd-opt[aria-selected='true'] { background: #3a5185; font-weight: 700; }
   .dd-opt:focus-visible { outline: none; background: #2d3a55; }
-  .mini-card { flex: none; width: 26px; height: 34px; border-radius: 3px;
-    clip-path: polygon(50% 0, 100% 9%, 100% 88%, 50% 100%, 0 88%, 0 9%); box-shadow: inset 0 0 0 1px rgba(255,255,255,.25); }
-  .opt-flag { flex: none; width: 34px; height: 22px; border-radius: 2px; overflow: hidden; background: #3a4760; display: flex; align-items: center; justify-content: center; }
-  .opt-logo { flex: none; width: 30px; height: 30px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
-  .opt-flag img, .opt-logo img { width: 100%; height: 100%; object-fit: contain; }
-  .opt-flag.noimg::after, .opt-logo.noimg::after { content: attr(data-initials); font-size: 10px; font-weight: 800; color: #c7cfdb; }
-  .opt-logo.noimg { border-radius: 50%; background: #3a4760; }
-  .dd-icon .mini-card { width: 20px; height: 26px; }
-  .dd-icon .opt-flag { width: 28px; height: 18px; }
-  .dd-icon .opt-logo { width: 24px; height: 24px; }
+  .opt-img { flex: none; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  .opt-img img { width: 100%; height: 100%; object-fit: contain; }
+  .opt-img.noimg { border-radius: 4px; background: #3a4760; }
+  .opt-img.noimg::after { content: attr(data-initials); font-size: 10px; font-weight: 800; color: #c7cfdb; }
+  .img-level, .img-pos, .img-chem { width: 30px; height: 30px; }
+  .img-card { width: 30px; height: 40px; }
+  .img-flag { width: 36px; height: 24px; }
+  .img-logo { width: 32px; height: 32px; }
+  .dd-icon .opt-img { transform: scale(.8); }
+  .dd.disabled .dd-row { opacity: .45; cursor: not-allowed; }
+  .dd.disabled .dd-row:hover { background: #243049; }
+  .sg-face { flex: none; width: 34px; height: 34px; border-radius: 50%; overflow: hidden; background: #2d3a55; }
+  .sg-face img { width: 100%; height: 100%; object-fit: cover; object-position: top; }
+  .suggest button { gap: 10px; }
   .dd-empty { color: #aeb7c4; font-size: 12px; padding: 6px; }
   .dd-idrow { display: flex; gap: 6px; padding: 0 6px 6px; }
   .dd-idrow input { flex: 1; padding: 8px 10px; border-radius: 6px; border: 1px solid #394660; background: #111823; color: #fff; }
@@ -587,24 +589,32 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     club: svg('<path d="M12 2l8 3v6c0 5-3.5 9-8 11-4.5-2-8-6-8-11V5z" fill="#fff"/>'),
   };
 
-  function ddOptions(dd: Dd): { value: string; label: string }[] {
-    const list = (entries: CatalogEntry[]) =>
-      entries.map((e) => ({ value: String(e.id), label: e.name }));
+  /** Used only until the web app has started and the adapter has built
+   * the catalog from EA's own lists (they need no id to be meaningful). */
+  const FALLBACK_LEVELS: CatalogOption[] = [
+    { id: 0, value: 'bronze', label: 'Bronze' },
+    { id: 1, value: 'silver', label: 'Silver' },
+    { id: 2, value: 'gold', label: 'Gold' },
+    { id: 3, value: SPECIAL_LEVEL, label: 'Special' },
+  ];
+
+  /** EA's list for a row, exactly as the web app's search panel shows it. */
+  function ddOptions(dd: Dd): CatalogOption[] {
     switch (dd) {
       case 'quality':
-        return QUALITIES.map((q) => ({ value: q.key, label: q.label }));
+        return catalog?.levels.length ? catalog.levels : FALLBACK_LEVELS;
       case 'rarity':
-        return list(catalog?.rarities?.length ? catalog.rarities : BASIC_RARITIES);
+        return raritiesForLevel(catalog?.rarities ?? [], form.quality);
       case 'position':
-        return POSITIONS.map((p) => ({ value: p, label: p }));
+        return catalog?.positions ?? [];
       case 'chem':
-        return list(CHEMISTRY_STYLES);
+        return catalog?.playStyles ?? [];
       case 'nation':
-        return list(catalog?.nations ?? []);
+        return catalog?.nations ?? [];
       case 'league':
-        return list(catalog?.leagues ?? []);
+        return catalog?.leagues ?? [];
       case 'club':
-        return list(catalog?.clubs ?? []);
+        return form.league == null ? [] : (catalog?.clubs[String(form.league)] ?? []);
     }
   }
 
@@ -621,104 +631,98 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     return v == null ? null : String(v);
   }
 
+  /** The chosen entry of a row (by EA value for quality/position, by id otherwise). */
+  function ddChosen(dd: Dd): CatalogOption | null {
+    const v = ddValue(dd);
+    if (v == null) return null;
+    const byValue = dd === 'quality' || dd === 'position';
+    return ddOptions(dd).find((o) => (byValue ? o.value : String(o.id)) === v) ?? null;
+  }
+
   function ddLabel(dd: Dd): string | null {
     const v = ddValue(dd);
     if (v == null) return null;
-    return ddOptions(dd).find((o) => o.value === v)?.label ?? `#${v}`;
+    return ddChosen(dd)?.label ?? `#${v}`;
   }
 
+  /** Mirrors the web app's search panel: picking a quality clears the
+   * rarity (its `LEVEL` filter sets `rarities = []`), and a new league
+   * clears the club (a club belongs to one league). */
   function setDd(dd: Dd, value: string | null): void {
     const n = value == null ? null : Number(value);
-    if (dd === 'quality') form.quality = value;
-    else if (dd === 'position') form.position = value;
+    if (dd === 'quality') {
+      form.quality = value;
+      form.rarity = null;
+    } else if (dd === 'position') form.position = value;
     else if (dd === 'rarity') form.rarity = n;
     else if (dd === 'chem') form.chem = n;
     else if (dd === 'nation') form.nation = n;
-    else if (dd === 'league') form.league = n;
-    else form.club = n;
+    else if (dd === 'league') {
+      if (form.league !== n) form.club = null;
+      form.league = n;
+    } else form.club = n;
   }
 
-  /** A small FUT-card shape, coloured like the design it stands for; used for
-   * qualities and rarities (EA's lists show card art there). */
-  function miniCard(label: string, id: string): string {
-    const n = label.toLowerCase();
-    const [a, b] =
-      n === 'bronze'
-        ? ['#e0a16a', '#8a5427']
-        : n === 'silver'
-          ? ['#eef1f4', '#8e979f']
-          : n === 'common' || n === 'gold'
-            ? ['#f6dd8a', '#c9a227']
-            : n === 'rare'
-              ? ['#ffe89a', '#d9a520']
-              : /icon/.test(n)
-                ? ['#f7f1e3', '#c9b98f']
-                : /hero/.test(n)
-                  ? ['#b07ae8', '#3b1a6b']
-                  : /hall of fut|legend/.test(n)
-                    ? ['#5b5f6b', '#15171c']
-                    : /week|totw|in-?form/.test(n)
-                      ? ['#3a3a3a', '#0d0d0d']
-                      : /toty|year/.test(n)
-                        ? ['#2c6fe0', '#0b1f55']
-                        : /tots|season/.test(n)
-                          ? ['#3cc6e8', '#0b3a57']
-                          : n === 'special'
-                            ? ['#8e5cf0', '#23124d']
-                            : [
-                                `hsl(${(Number(id) * 47) % 360} 70% 60%)`,
-                                `hsl(${(Number(id) * 47) % 360} 70% 22%)`,
-                              ];
-    return `<span class="mini-card" style="background:linear-gradient(160deg,${a},${b})"></span>`;
-  }
+  const IMG_CLASS: Record<Dd, string> = {
+    quality: 'img-level',
+    rarity: 'img-card',
+    position: 'img-pos',
+    chem: 'img-chem',
+    nation: 'img-flag',
+    league: 'img-logo',
+    club: 'img-logo',
+  };
 
-  /** The picture shown before an option: flag, league/club logo, or card. */
-  function optVisual(dd: Dd, value: string, label: string): string {
-    if (dd === 'quality' || dd === 'rarity') return miniCard(label, value);
-    if (dd === 'nation' || dd === 'league' || dd === 'club') {
-      const url = imageUrl(catalog?.assetBase, dd, Number(value));
-      const cls = dd === 'nation' ? 'opt-flag' : 'opt-logo';
-      const initials = esc(
-        label
-          .replace(/[^\p{L}\p{N} ]/gu, '')
-          .split(/\s+/)
-          .filter(Boolean)
-          .slice(0, 2)
-          .map((w) => w[0])
-          .join('')
-          .toUpperCase(),
-      );
-      return `<span class="${cls}${url ? '' : ' noimg'}" data-initials="${initials}">${url ? `<img src="${esc(url)}" alt="" loading="lazy" />` : ''}</span>`;
-    }
-    return '';
+  /** EA's picture for an entry, with the name's initials if it will not load. */
+  function optVisual(dd: Dd, o: CatalogOption): string {
+    const initials = esc(
+      o.label
+        .replace(/\(.*?\)/g, '')
+        .replace(/[^\p{L}\p{N} ]/gu, '')
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((w) => w[0])
+        .join('')
+        .toUpperCase(),
+    );
+    return `<span class="opt-img ${IMG_CLASS[dd]}${o.img ? '' : ' noimg'}" data-initials="${initials}">${
+      o.img ? `<img src="${esc(o.img)}" alt="" loading="lazy" referrerpolicy="no-referrer" />` : ''
+    }</span>`;
   }
 
   function ddOptionsHtml(dd: Dd): string {
-    const current = ddValue(dd);
+    const current = ddChosen(dd);
     return ddOptions(dd)
-      .map(
-        (o) =>
-          `<button type="button" class="dd-opt" role="option" aria-selected="${o.value === current}" data-opt="${dd}" data-val="${esc(o.value)}">${optVisual(dd, o.value, o.label)}<span>${esc(o.label)}</span></button>`,
-      )
+      .map((o) => {
+        const val = dd === 'quality' || dd === 'position' ? o.value : String(o.id);
+        return `<button type="button" class="dd-opt" role="option" aria-selected="${o === current}" data-opt="${dd}" data-val="${esc(val)}">${optVisual(dd, o)}<span>${esc(o.label)}</span></button>`;
+      })
       .join('');
   }
 
   function ddHtml(dd: Dd): string {
     const label = ddLabel(dd);
-    const open = openDd === dd;
+    const chosen = ddChosen(dd);
+    // Like EA's panel: Club stays disabled until a league is chosen.
+    const disabled = dd === 'club' && form.league == null;
+    const open = openDd === dd && !disabled;
     const options = ddOptions(dd);
     let panel = '';
     if (open) {
       panel =
         options.length === 0
-          ? `<div class="dd-panel"><div class="dd-empty">EA's ${esc(DD_LABEL[dd].toLowerCase())} names aren't saved yet (open the web app's Transfer Market search once). Or enter the EA id:</div>
-              <div class="dd-idrow"><input id="nf-dd-id" inputmode="numeric" placeholder="EA id" /><button type="button" class="dd-use" data-useid="${dd}">Use</button></div></div>`
+          ? `<div class="dd-panel"><div class="dd-empty">${
+              catalog
+                ? 'Nothing to choose here.'
+                : "EA's lists load once you're logged in to the web app. Keep this tab open, then reopen the Sniping Bot page. Or enter the EA id:"
+            }</div>
+              ${catalog ? '' : `<div class="dd-idrow"><input id="nf-dd-id" inputmode="numeric" placeholder="EA id" /><button type="button" class="dd-use" data-useid="${dd}">Use</button></div>`}</div>`
           : `<div class="dd-panel"><div class="dd-opts" id="dd-opts" role="listbox" aria-label="${esc(DD_LABEL[dd])}">${ddOptionsHtml(dd)}</div></div>`;
     }
-    const value = ddValue(dd);
-    return `<div class="dd${open ? ' open' : ''}${label ? ' set' : ''}">
-      <button type="button" class="dd-row" data-dd="${dd}" aria-expanded="${open}">
-        <span class="dd-icon">${label && value != null && optVisual(dd, value, label) ? optVisual(dd, value, label) : DD_ICON[dd]}</span>
+    return `<div class="dd${open ? ' open' : ''}${label ? ' set' : ''}${disabled ? ' disabled' : ''}">
+      <button type="button" class="dd-row" data-dd="${dd}" aria-expanded="${open}" ${disabled ? 'disabled aria-disabled="true"' : ''}>
+        <span class="dd-icon">${chosen ? optVisual(dd, chosen) : DD_ICON[dd]}</span>
         <span class="dd-label">${label ? `<small>${esc(DD_LABEL[dd])}</small>${esc(label)}` : esc(DD_LABEL[dd])}</span>
         ${label ? `<span class="dd-clear" data-clear="${dd}" role="button" aria-label="Clear ${esc(DD_LABEL[dd])}">✕</span>` : ''}
         <span class="dd-caret">${open ? '▲' : '▼'}</span>
@@ -726,8 +730,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   }
 
   function describeFilter(f: FilterCriteria): string[] {
-    const find = (list: CatalogEntry[] | undefined, id: number) =>
-      list?.find((e) => e.id === id)?.name;
+    const byId = (list: CatalogOption[] | undefined, id: number) =>
+      list?.find((e) => e.id === id)?.label;
     const chips: string[] = [];
     if (f.resourceId != null) {
       const p = catalog?.players.find((x) => x.id === f.resourceId);
@@ -735,19 +739,29 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     }
     if (f.minRating != null || f.maxRating != null)
       chips.push(`OVR ${f.minRating ?? OVR_MIN}-${f.maxRating ?? OVR_MAX}`);
-    if (f.quality) chips.push(QUALITIES.find((q) => q.key === f.quality)?.label ?? f.quality);
-    if (f.rarity != null)
+    if (f.quality) {
+      const v = f.quality === 'special' ? SPECIAL_LEVEL : f.quality;
       chips.push(
-        find(catalog?.rarities?.length ? catalog.rarities : BASIC_RARITIES, f.rarity) ??
-          `Rarity #${f.rarity}`,
+        (catalog?.levels.length ? catalog.levels : FALLBACK_LEVELS).find((l) => l.value === v)
+          ?.label ?? f.quality,
       );
-    if (f.position) chips.push(f.position);
+    }
+    if (f.rarity != null) chips.push(byId(catalog?.rarities, f.rarity) ?? `Rarity #${f.rarity}`);
+    if (f.zone != null) chips.push(byId(catalog?.positions, f.zone) ?? `Zone #${f.zone}`);
+    else if (f.position)
+      chips.push(catalog?.positions.find((p) => p.value === f.position)?.label ?? f.position);
     if (f.chemistryStyle != null)
-      chips.push(find(CHEMISTRY_STYLES, f.chemistryStyle) ?? `Chem #${f.chemistryStyle}`);
+      chips.push(byId(catalog?.playStyles, f.chemistryStyle) ?? `Chem #${f.chemistryStyle}`);
     if (f.nationality != null)
-      chips.push(find(catalog?.nations, f.nationality) ?? `Nation #${f.nationality}`);
-    if (f.league != null) chips.push(find(catalog?.leagues, f.league) ?? `League #${f.league}`);
-    if (f.club != null) chips.push(find(catalog?.clubs, f.club) ?? `Club #${f.club}`);
+      chips.push(byId(catalog?.nations, f.nationality) ?? `Nation #${f.nationality}`);
+    if (f.league != null) chips.push(byId(catalog?.leagues, f.league) ?? `League #${f.league}`);
+    if (f.club != null) {
+      const clubs =
+        f.league != null
+          ? catalog?.clubs[String(f.league)]
+          : Object.values(catalog?.clubs ?? {}).flat();
+      chips.push(byId(clubs, f.club) ?? `Club #${f.club}`);
+    }
     if (f.minPrice != null) chips.push(`min ${fmt(f.minPrice)}`);
     chips.push(f.maxPrice != null ? `max ${fmt(f.maxPrice)}` : 'no max price');
     return chips;
@@ -807,7 +821,11 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         </div>
         <div class="ea-player combo">${
           form.player
-            ? `<div class="picked"><span class="r">${form.player.rating ?? ''}</span><b>${esc(form.player.name)}</b>
+            ? `<div class="picked">${
+                portraitUrl(catalog, form.player.id)
+                  ? `<span class="sg-face"><img src="${esc(portraitUrl(catalog, form.player.id)!)}" alt="" referrerpolicy="no-referrer" /></span>`
+                  : ''
+              }<span class="r">${form.player.rating ?? ''}</span><b>${esc(form.player.name)}</b>
                 <button type="button" id="nf-unpick" aria-label="Clear player">✕</button></div>`
             : `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="10" cy="10" r="6.5" fill="none" stroke="#fff" stroke-width="2.4"/><path d="M15 15l6 6" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/></svg>
                <input id="nf-player" placeholder="${players > 0 ? 'Type Player Name' : 'Type Player Name or id'}" autocomplete="off" value="${esc(form.playerQuery)}"
@@ -845,10 +863,14 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     box.hidden = suggestions.length === 0;
     input.setAttribute('aria-expanded', String(!box.hidden));
     box.innerHTML = suggestions
-      .map(
-        (p, i) =>
-          `<button type="button" role="option" data-pick="${i}"><span class="r">${p.rating ?? ''}</span>${esc(p.name)}</button>`,
-      )
+      .map((p, i) => {
+        const face = portraitUrl(catalog, p.id);
+        return `<button type="button" role="option" data-pick="${i}">${
+          face
+            ? `<span class="sg-face"><img src="${esc(face)}" alt="" loading="lazy" referrerpolicy="no-referrer" /></span>`
+            : ''
+        }<span class="r">${p.rating ?? ''}</span>${esc(p.name)}</button>`;
+      })
       .join('');
   }
 
@@ -1017,9 +1039,16 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     }
     if (form.minOvr > OVR_MIN) filter.minRating = form.minOvr;
     if (form.maxOvr < OVR_MAX) filter.maxRating = form.maxOvr;
-    if (form.quality) filter.quality = form.quality as FilterCriteria['quality'];
+    if (form.quality)
+      filter.quality = (
+        form.quality === SPECIAL_LEVEL ? 'special' : form.quality
+      ) as FilterCriteria['quality'];
     if (form.rarity != null) filter.rarity = form.rarity;
-    if (form.position) filter.position = form.position;
+    if (form.position) {
+      // EA's position groups (Defenders, Midfielders, Attackers) search as a zone.
+      if (/^\d+$/.test(form.position)) filter.zone = Number(form.position);
+      else filter.position = form.position;
+    }
     if (form.chem != null) filter.chemistryStyle = form.chem;
     if (form.nation != null) filter.nationality = form.nation;
     if (form.league != null) filter.league = form.league;

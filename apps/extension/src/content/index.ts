@@ -87,17 +87,11 @@ async function main(): Promise<void> {
   const panel: Panel = createPanel();
   const adapter = createAdapterClient(window);
 
-  // EA's own player list and club/league/nation names, for the Snipe
-  // Targets form: saved whenever the web app loads them, and asked for once
-  // now in case it already did before this script was listening.
-  // Saved in parts so a part the background rejects (a malformed image
-  // folder, say) cannot take the rest down with it.
-  adapter.onCatalog(async ({ players, assetBase, names }) => {
-    if (names) void send('catalog.save', { names });
-    if (players) {
-      const saved = await send('catalog.save', assetBase ? { players, assetBase } : { players });
-      if (!saved && assetBase) void send('catalog.save', { players });
-    }
+  // The Snipe Targets form's choices, built by the adapter with the web
+  // app's own lists once it has started (model/catalog.ts). Asked for now
+  // too, in case it was ready before this script was listening.
+  adapter.onCatalog((catalog) => {
+    void send('catalog.save', catalog);
   });
   adapter.requestCatalog();
 
