@@ -52,13 +52,15 @@ export async function handleCatalogGet(): Promise<Catalog | null> {
 }
 
 /** Merges whichever half arrived (players, or names) into what is stored. */
-export async function handleCatalogSave(payload: { players?: CatalogPlayer[]; names?: CatalogNames }): Promise<{ ok: true }> {
+export async function handleCatalogSave(payload: { players?: CatalogPlayer[]; assetBase?: string; names?: CatalogNames }): Promise<{ ok: true }> {
   const current = (await handleCatalogGet()) ?? { players: [], clubs: [], leagues: [], nations: [], capturedAt: 0 };
   const next: Catalog = {
     players: payload.players ?? current.players,
+    assetBase: payload.assetBase ?? current.assetBase,
     clubs: payload.names?.clubs ?? current.clubs,
     leagues: payload.names?.leagues ?? current.leagues,
     nations: payload.names?.nations ?? current.nations,
+    rarities: payload.names?.rarities ?? current.rarities,
     capturedAt: Date.now(),
   };
   await setLocal(CATALOG_KEY, next);

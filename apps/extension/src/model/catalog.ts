@@ -15,7 +15,8 @@
  *     name, rating.
  *   the localisation file — a flat `{ key: text }` JSON under a `/loc/` path,
  *     with keys like `global.teamFull.<year>.team<id>`,
- *     `global.leagueFull.<year>.league<id>` and `search.nationName.nation<id>`.
+ *     `global.leagueFull.<year>.league<id>`, `search.nationName.nation<id>` and
+ *     `item.raretype<id>` (card designs).
  * A file that does not look like this parses to nothing: the form then asks
  * for a player id instead of offering names.
  */
@@ -36,10 +37,15 @@ export interface CatalogNames {
   clubs: CatalogEntry[];
   leagues: CatalogEntry[];
   nations: CatalogEntry[];
+  /** Card designs (Rare, Team of the Week...), when the file has them. */
+  rarities?: CatalogEntry[];
 }
 
 export interface Catalog extends CatalogNames {
   players: CatalogPlayer[];
+  /** Where the web app's item images live, next to its players.json
+   * (`imageUrls`). Absent until the player list has been seen. */
+  assetBase?: string;
   capturedAt: number;
 }
 
@@ -64,6 +70,49 @@ export const POSITIONS = [
   'CF',
   'ST',
 ] as const;
+
+/** Used when EA's localisation has no card-design names. */
+export const BASIC_RARITIES: CatalogEntry[] = [
+  { id: 0, name: 'Common' },
+  { id: 1, name: 'Rare' },
+];
+
+/** EA's chemistry styles and their ids, unchanged since they were introduced. */
+export const CHEMISTRY_STYLES: CatalogEntry[] = [
+  { id: 250, name: 'Basic' },
+  { id: 251, name: 'Sniper' },
+  { id: 252, name: 'Finisher' },
+  { id: 253, name: 'Deadeye' },
+  { id: 254, name: 'Marksman' },
+  { id: 255, name: 'Hawk' },
+  { id: 256, name: 'Artist' },
+  { id: 257, name: 'Architect' },
+  { id: 258, name: 'Powerhouse' },
+  { id: 259, name: 'Maestro' },
+  { id: 260, name: 'Engine' },
+  { id: 261, name: 'Sentinel' },
+  { id: 262, name: 'Guardian' },
+  { id: 263, name: 'Gladiator' },
+  { id: 264, name: 'Backbone' },
+  { id: 265, name: 'Anchor' },
+  { id: 266, name: 'Hunter' },
+  { id: 267, name: 'Catalyst' },
+  { id: 268, name: 'Shadow' },
+  { id: 269, name: 'Wall' },
+  { id: 270, name: 'Shield' },
+  { id: 271, name: 'Cat' },
+  { id: 272, name: 'Glove' },
+  { id: 273, name: 'GK Basic' },
+];
+
+/** The next price up or down, in the steps EA's price fields use. */
+export function priceStep(price: number, dir: 1 | -1): number {
+  const at = dir === 1 ? price : price - 1;
+  const step = at < 1_000 ? 50 : at < 10_000 ? 100 : at < 50_000 ? 250 : at < 100_000 ? 500 : 1_000;
+  const next =
+    dir === 1 ? Math.floor(price / step) * step + step : Math.ceil(price / step) * step - step;
+  return Math.max(0, Math.min(15_000_000, next));
+}
 
 export const QUALITIES = [
   { key: 'bronze', label: 'Bronze' },
@@ -107,6 +156,7 @@ export function parsePlayersFile(json: unknown): CatalogPlayer[] {
 const CLUB_KEY = /^global\.teamFull\.\d{4}\.team(\d+)$/;
 const LEAGUE_KEY = /^global\.leagueFull\.\d{4}\.league(\d+)$/;
 const NATION_KEY = /^search\.nationName\.nation(\d+)$/;
+const RARITY_KEY = /^item\.raretype(\d+)$/;
 
 function byName(map: Map<number, string>): CatalogEntry[] {
   return [...map.entries()]
@@ -118,6 +168,7 @@ export function parseLocFile(json: unknown): CatalogNames {
   const clubs = new Map<number, string>();
   const leagues = new Map<number, string>();
   const nations = new Map<number, string>();
+  const rarities = new Map<number, string>();
   if (json && typeof json === 'object' && !Array.isArray(json)) {
     for (const [key, value] of Object.entries(json as Record<string, unknown>)) {
       const name = str(value).slice(0, MAX_NAME);
@@ -133,10 +184,46 @@ export function parseLocFile(json: unknown): CatalogNames {
         continue;
       }
       m = NATION_KEY.exec(key);
-      if (m) nations.set(Number(m[1]), name);
+      if (m) {
+        nations.set(Number(m[1]), name);
+        continue;
+      }
+      m = RARITY_KEY.exec(key);
+      if (m) rarities.set(Number(m[1]), name);
     }
   }
-  return { clubs: byName(clubs), leagues: byName(leagues), nations: byName(nations) };
+  return {
+    clubs: byName(clubs),
+    leagues: byName(leagues),
+    nations: byName(nations),
+    rarities: [...rarities.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.id - b.id),
+  };
+}
+
+/** The web app's image folder for the build whose players.json this is:
+ * `.../fut/items/web/players.json` -> `.../fut/items/images/mobile/`.
+ * ASSUMED SHAPE, like the rest of this file. */
+export function assetBaseFromPlayersUrl(url: string): string | null {
+  const i = url.search(/\/fut\/items\/web\/players\.json/i);
+  if (i < 0) return null;
+  try {
+    return new URL(`${url.slice(0, i)}/fut/items/images/mobile/`, 'https://www.ea.com/').toString();
+  } catch {
+    return null;
+  }
+}
+
+/** Flag, league logo and club badge images, as the web app's own lists use. */
+export function imageUrl(
+  assetBase: string | undefined,
+  kind: 'nation' | 'league' | 'club',
+  id: number,
+): string | null {
+  if (!assetBase) return null;
+  const path = { nation: 'flags/list', league: 'leagueLogos/dark', club: 'clubs/dark' }[kind];
+  return `${assetBase}${path}/${id}.png`;
 }
 
 /** Case- and accent-insensitive form for matching what a user types. */

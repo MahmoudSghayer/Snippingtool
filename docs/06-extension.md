@@ -224,6 +224,14 @@ MEDIUM or HIGH RISK. The bot runs its own governor built from the page's
 Safety limits; the server kill switch and adapter probe failures stop it
 whatever those say.
 
+**Snipe targets are built like EA's own search panel**: an OVR range slider
+with Min/Max OVR, "Type Player Name", and expandable Quality, Rarity,
+Position, Chemistry Style, Country/Region, League and Club rows whose lists
+show flags, league/club logos and card shapes, then Buy Now Min/Max with
+EA's price steps. Flags and logos load from the web app's own image folder
+next to `players.json` (`imageUrl` in `model/catalog.ts`, ASSUMED SHAPE);
+a missing image falls back to initials.
+
 **Snipe targets are built like EA's own search.** A target is a player
 (search-as-you-type by name, with rating), and/or quality, position,
 nationality, league and club, plus a rating range and a max buy now price.

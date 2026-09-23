@@ -357,11 +357,22 @@ export const extBackgroundCatalogSavePayloadSchema = z
       )
       .max(100_000)
       .optional(),
+    /** The web app's item-image folder (flags, league logos, club badges). */
+    assetBase: z
+      .string()
+      .max(500)
+      .regex(/^https?:\/\/[^\s]+\/$/)
+      .optional(),
     names: z
       .object({
         clubs: z.array(catalogEntrySchema).max(20_000),
         leagues: z.array(catalogEntrySchema).max(2_000),
         nations: z.array(catalogEntrySchema).max(1_000),
+        // Rarity ids start at 0 (Common), unlike every other EA id here.
+        rarities: z
+          .array(z.object({ id: z.number().int().min(0), name: z.string().min(1).max(80) }).strict())
+          .max(1_000)
+          .optional(),
       })
       .strict()
       .optional(),

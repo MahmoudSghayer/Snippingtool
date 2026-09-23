@@ -176,3 +176,21 @@ describe('adapterProbeMessageSchema', () => {
     expect(result.success).toBe(true);
   });
 });
+
+describe('catalog.save payload', () => {
+  it('accepts a names file whose rarities start at id 0 (Common)', async () => {
+    const { extBackgroundCatalogSavePayloadSchema } = await import('../src/ext-messages.js');
+    const payload = {
+      names: {
+        clubs: [{ id: 243, name: 'Real Madrid' }],
+        leagues: [{ id: 16, name: 'Ligue 1' }],
+        nations: [{ id: 18, name: 'France' }],
+        rarities: [
+          { id: 0, name: 'Common' },
+          { id: 1, name: 'Rare' },
+        ],
+      },
+    };
+    expect(extBackgroundCatalogSavePayloadSchema.safeParse(payload).success).toBe(true);
+  });
+});

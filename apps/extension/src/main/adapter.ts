@@ -29,7 +29,15 @@
 // packages/shared/src/adapter-channel.ts).
 import { ADAPTER_CHANNEL } from '@sl/shared/adapter-channel.js';
 
-import { LOC_FILE, PLAYERS_FILE, parseLocFile, parsePlayersFile, type CatalogNames, type CatalogPlayer } from '../model/catalog.js';
+import {
+  LOC_FILE,
+  PLAYERS_FILE,
+  assetBaseFromPlayersUrl,
+  parseLocFile,
+  parsePlayersFile,
+  type CatalogNames,
+  type CatalogPlayer,
+} from '../model/catalog.js';
 
 import type { AdapterActRequestMessage, FilterCriteria, TrimmedAuction } from '@sl/shared';
 
@@ -139,10 +147,18 @@ const stats = { seen: 0, parsed: 0, failed: 0 };
 
 function post(kind: 'ready', data: { channel: string }): void;
 function post(kind: 'probe', data: { ok: boolean; checkedAt: number; reason?: string }): void;
-function post(kind: 'shape', data: { seen: number; parsed: number; failed: number; reason: string }): void;
+function post(
+  kind: 'shape',
+  data: { seen: number; parsed: number; failed: number; reason: string },
+): void;
 function post(
   kind: 'auctions',
-  data: { url: string; seenAt: number; auctions: TrimmedAuction[]; stats: { seen: number; parsed: number; failed: number } },
+  data: {
+    url: string;
+    seenAt: number;
+    auctions: TrimmedAuction[];
+    stats: { seen: number; parsed: number; failed: number };
+  },
 ): void;
 function post(
   kind: 'action_result',
@@ -156,7 +172,10 @@ function post(
     stillListed?: boolean;
   },
 ): void;
-function post(kind: 'catalog', data: { players?: CatalogPlayer[]; names?: CatalogNames }): void;
+function post(
+  kind: 'catalog',
+  data: { players?: CatalogPlayer[]; assetBase?: string; names?: CatalogNames },
+): void;
 function post(kind: string, data: unknown): void {
   try {
     window.postMessage({ channel: ADAPTER_CHANNEL, kind, data }, window.location.origin);
@@ -255,6 +274,7 @@ function isMarket(url: unknown): url is string {
 // content script asks for them again with an `act_request` of `catalog`.
 
 let catalogPlayers: CatalogPlayer[] | null = null;
+let catalogAssetBase: string | undefined;
 let catalogNames: CatalogNames | null = null;
 
 function isCatalogFile(url: unknown): url is string {
@@ -272,7 +292,8 @@ function handleCatalogBody(url: string, body: unknown): void {
     const players = parsePlayersFile(json);
     if (players.length === 0) return;
     catalogPlayers = players;
-    post('catalog', { players });
+    catalogAssetBase = assetBaseFromPlayersUrl(new URL(url, location.href).toString()) ?? undefined;
+    post('catalog', { players, ...(catalogAssetBase ? { assetBase: catalogAssetBase } : {}) });
   } else {
     const names = parseLocFile(json);
     if (names.clubs.length + names.leagues.length + names.nations.length === 0) return;
@@ -283,7 +304,11 @@ function handleCatalogBody(url: string, body: unknown): void {
 
 function postCatalog(): void {
   if (catalogPlayers || catalogNames) {
-    post('catalog', { ...(catalogPlayers ? { players: catalogPlayers } : {}), ...(catalogNames ? { names: catalogNames } : {}) });
+    post('catalog', {
+      ...(catalogPlayers ? { players: catalogPlayers } : {}),
+      ...(catalogAssetBase ? { assetBase: catalogAssetBase } : {}),
+      ...(catalogNames ? { names: catalogNames } : {}),
+    });
   }
 }
 
@@ -292,7 +317,12 @@ const proto = XMLHttpRequest.prototype;
 const nativeOpen = proto.open;
 const nativeSend = proto.send;
 
-proto.open = function (this: XMLHttpRequest & { __ledgerUrl?: string }, method: string, url: string | URL, ...rest: unknown[]) {
+proto.open = function (
+  this: XMLHttpRequest & { __ledgerUrl?: string },
+  method: string,
+  url: string | URL,
+  ...rest: unknown[]
+) {
   try {
     this.__ledgerUrl = typeof url === 'string' ? url : String(url);
   } catch {
@@ -308,7 +338,8 @@ proto.send = function (this: XMLHttpRequest & { __ledgerUrl?: string }, ...args:
       this.addEventListener('load', () => {
         try {
           const type = this.responseType;
-          if (type === '' || type === 'text') handleCatalogBody(this.__ledgerUrl as string, this.responseText);
+          if (type === '' || type === 'text')
+            handleCatalogBody(this.__ledgerUrl as string, this.responseText);
           else if (type === 'json') handleCatalogBody(this.__ledgerUrl as string, this.response);
         } catch {
           /* a catalog we cannot read just leaves the form asking for ids */
@@ -346,7 +377,14 @@ if (typeof nativeFetch === 'function') {
   window.fetch = function (input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
     let url = '';
     try {
-      url = typeof input === 'string' ? input : input instanceof Request ? input.url : input instanceof URL ? input.toString() : '';
+      url =
+        typeof input === 'string'
+          ? input
+          : input instanceof Request
+            ? input.url
+            : input instanceof URL
+              ? input.toString()
+              : '';
     } catch {
       /* ignore */
     }
@@ -413,6 +451,8 @@ function mapFilterToSearchCriteria(filter: FilterCriteria): Record<string, unkno
   if (filter.league != null) criteria.league = filter.league;
   if (filter.club != null) criteria.club = filter.club;
   if (filter.quality != null) criteria.level = filter.quality === 'special' ? 'SP' : filter.quality;
+  if (filter.rarity != null) criteria.rarities = [filter.rarity];
+  if (filter.chemistryStyle != null) criteria.playStyle = filter.chemistryStyle;
   return criteria;
 }
 
@@ -431,17 +471,31 @@ async function actSearch(requestId: string, filter: FilterCriteria): Promise<voi
   const requestedAt = Date.now();
   const probeResult = runProbeAndReport();
   if (!probeResult.ok) {
-    post('action_result', { action: 'search', requestId, ok: false, requestedAt, completedAt: Date.now(), error: probeResult.reason });
+    post('action_result', {
+      action: 'search',
+      requestId,
+      ok: false,
+      requestedAt,
+      completedAt: Date.now(),
+      error: probeResult.reason,
+    });
     return;
   }
   try {
     const services = assumedServices();
     const search = services?.Item?.repository?.search;
-    if (typeof search !== 'function') throw new Error('services.Item.repository.search vanished after probe() passed');
+    if (typeof search !== 'function')
+      throw new Error('services.Item.repository.search vanished after probe() passed');
     const criteria = mapFilterToSearchCriteria(filter);
     const result = await search(criteria);
     emitAuctionInfo('act:search', extractAuctionInfo(result));
-    post('action_result', { action: 'search', requestId, ok: true, requestedAt, completedAt: Date.now() });
+    post('action_result', {
+      action: 'search',
+      requestId,
+      ok: true,
+      requestedAt,
+      completedAt: Date.now(),
+    });
   } catch (err) {
     post('action_result', {
       action: 'search',
@@ -458,15 +512,26 @@ async function actBuy(requestId: string, tradeId: string): Promise<void> {
   const requestedAt = Date.now();
   const probeResult = runProbeAndReport();
   if (!probeResult.ok) {
-    post('action_result', { action: 'buy', requestId, ok: false, requestedAt, completedAt: Date.now(), error: probeResult.reason });
+    post('action_result', {
+      action: 'buy',
+      requestId,
+      ok: false,
+      requestedAt,
+      completedAt: Date.now(),
+      error: probeResult.reason,
+    });
     return;
   }
   try {
     const services = assumedServices();
     const buyNow = services?.Transfer?.repository?.buyNow;
-    if (typeof buyNow !== 'function') throw new Error('services.Transfer.repository.buyNow vanished after probe() passed');
+    if (typeof buyNow !== 'function')
+      throw new Error('services.Transfer.repository.buyNow vanished after probe() passed');
     const result = await buyNow(tradeId);
-    const failed = !!result && typeof result === 'object' && (result as Record<string, unknown>).success === false;
+    const failed =
+      !!result &&
+      typeof result === 'object' &&
+      (result as Record<string, unknown>).success === false;
     post('action_result', {
       action: 'buy',
       requestId,
@@ -491,18 +556,36 @@ async function actReadResult(requestId: string, tradeId: string): Promise<void> 
   const requestedAt = Date.now();
   const probeResult = runProbeAndReport();
   if (!probeResult.ok) {
-    post('action_result', { action: 'readResult', requestId, ok: false, requestedAt, completedAt: Date.now(), error: probeResult.reason });
+    post('action_result', {
+      action: 'readResult',
+      requestId,
+      ok: false,
+      requestedAt,
+      completedAt: Date.now(),
+      error: probeResult.reason,
+    });
     return;
   }
   try {
     const services = assumedServices();
     const search = services?.Item?.repository?.search;
-    if (typeof search !== 'function') throw new Error('services.Item.repository.search vanished after probe() passed');
+    if (typeof search !== 'function')
+      throw new Error('services.Item.repository.search vanished after probe() passed');
     const result = await search({ tradeIds: [tradeId] });
     const stillListed = extractAuctionInfo(result).some(
-      (a) => a && typeof a === 'object' && String((a as Record<string, unknown>).tradeId) === String(tradeId),
+      (a) =>
+        a &&
+        typeof a === 'object' &&
+        String((a as Record<string, unknown>).tradeId) === String(tradeId),
     );
-    post('action_result', { action: 'readResult', requestId, ok: true, requestedAt, completedAt: Date.now(), stillListed });
+    post('action_result', {
+      action: 'readResult',
+      requestId,
+      ok: true,
+      requestedAt,
+      completedAt: Date.now(),
+      stillListed,
+    });
   } catch (err) {
     post('action_result', {
       action: 'readResult',

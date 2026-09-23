@@ -38,7 +38,7 @@ export interface AdapterClient {
   onAuctions(cb: (auctions: unknown[]) => void): () => void;
   /** EA's player list and/or club, league and nation names, as the web app
    * loads them (model/catalog.ts). */
-  onCatalog(cb: (catalog: { players?: CatalogPlayer[]; names?: CatalogNames }) => void): () => void;
+  onCatalog(cb: (catalog: { players?: CatalogPlayer[]; assetBase?: string; names?: CatalogNames }) => void): () => void;
   /** Asks the adapter to resend whatever of those it has already seen. */
   requestCatalog(): void;
   dispose(): void;
@@ -50,7 +50,7 @@ export function createAdapterClient(target: Window = window): AdapterClient {
   const shapeListeners = new Set<(reason: string) => void>();
   const auctionsListeners = new Set<(auctions: unknown[]) => void>();
   const catalogListeners = new Set<
-    (catalog: { players?: CatalogPlayer[]; names?: CatalogNames }) => void
+    (catalog: { players?: CatalogPlayer[]; assetBase?: string; names?: CatalogNames }) => void
   >();
   let probeStatus: ProbeStatus | null = null;
 
@@ -70,7 +70,7 @@ export function createAdapterClient(target: Window = window): AdapterClient {
       return;
     }
     if (msg.kind === 'catalog') {
-      const data = msg.data as { players?: CatalogPlayer[]; names?: CatalogNames };
+      const data = msg.data as { players?: CatalogPlayer[]; assetBase?: string; names?: CatalogNames };
       for (const cb of catalogListeners) cb(data);
       return;
     }

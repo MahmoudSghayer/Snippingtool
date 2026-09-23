@@ -90,8 +90,14 @@ async function main(): Promise<void> {
   // EA's own player list and club/league/nation names, for the Snipe
   // Targets form: saved whenever the web app loads them, and asked for once
   // now in case it already did before this script was listening.
-  adapter.onCatalog((catalog) => {
-    void send('catalog.save', catalog);
+  // Saved in parts so a part the background rejects (a malformed image
+  // folder, say) cannot take the rest down with it.
+  adapter.onCatalog(async ({ players, assetBase, names }) => {
+    if (names) void send('catalog.save', { names });
+    if (players) {
+      const saved = await send('catalog.save', assetBase ? { players, assetBase } : { players });
+      if (!saved && assetBase) void send('catalog.save', { players });
+    }
   });
   adapter.requestCatalog();
 

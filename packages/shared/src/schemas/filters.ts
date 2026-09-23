@@ -15,6 +15,10 @@ export const filterCriteriaSchema = z
     league: z.number().int().positive().optional(),
     club: z.number().int().positive().optional(),
     quality: z.enum(['bronze', 'silver', 'gold', 'special']).optional(),
+    /** EA's rarity id (0 common, 1 rare, higher ids are promo designs). */
+    rarity: z.number().int().min(0).max(1_000).optional(),
+    /** EA's chemistry style id (250 Basic ... 273 GK Basic). */
+    chemistryStyle: z.number().int().positive().max(1_000).optional(),
   })
   .strict();
 export type FilterCriteria = z.infer<typeof filterCriteriaSchema>;

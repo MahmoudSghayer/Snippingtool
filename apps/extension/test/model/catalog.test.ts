@@ -5,9 +5,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   LOC_FILE,
-  PLAYERS_FILE,
   parseLocFile,
   parsePlayersFile,
+  PLAYERS_FILE,
+  priceStep,
   searchPlayers,
 } from '../../src/model/catalog.js';
 
@@ -69,5 +70,27 @@ describe('catalog files', () => {
     ];
     expect(searchPlayers(players, 'mbappe').map((p) => p.id)).toEqual([1, 2, 3]);
     expect(searchPlayers(players, 'm')).toEqual([]);
+  });
+
+  it('reads card-design (rarity) names when the localisation has them', () => {
+    expect(
+      parseLocFile({ 'item.raretype3': 'Team of the Week', 'item.raretype1': 'Rare' }).rarities,
+    ).toEqual([
+      { id: 1, name: 'Rare' },
+      { id: 3, name: 'Team of the Week' },
+    ]);
+  });
+
+  it("steps prices the way EA's price fields do", () => {
+    expect(priceStep(0, 1)).toBe(50);
+    expect(priceStep(950, 1)).toBe(1_000);
+    expect(priceStep(1_000, 1)).toBe(1_100);
+    expect(priceStep(1_000, -1)).toBe(950);
+    expect(priceStep(10_000, 1)).toBe(10_250);
+    expect(priceStep(10_000, -1)).toBe(9_900);
+    expect(priceStep(99_500, 1)).toBe(100_000);
+    expect(priceStep(100_000, 1)).toBe(101_000);
+    expect(priceStep(12_345, 1)).toBe(12_500);
+    expect(priceStep(50, -1)).toBe(0);
   });
 });

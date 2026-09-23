@@ -29,8 +29,13 @@ import {
 } from '@sl/shared';
 
 import {
+  BASIC_RARITIES,
+  CHEMISTRY_STYLES,
   POSITIONS,
   QUALITIES,
+  fold,
+  imageUrl,
+  priceStep,
   searchPlayers,
   type Catalog,
   type CatalogEntry,
@@ -215,6 +220,74 @@ const CSS = `
   .picked { display: flex; align-items: center; gap: 8px; padding: 7px 9px; border-radius: 8px; background: rgba(29,155,240,.12); border: 1px solid #1d9bf0; }
   .picked b { flex: 1; }
   .picked button { border: 0; background: none; color: #8b919c; }
+  .ea { margin-top: 12px; padding: 14px 12px 12px; border-radius: 12px; background: #1b2433; color: #fff;
+    font-family: "Segoe UI", system-ui, sans-serif; }
+  .ea-title { margin: 0 0 12px; text-align: center; font-size: 22px; font-weight: 700; }
+  .ea-lbl { color: #c7cfdb; font-size: 15px; margin: 4px 2px 4px; }
+  .ea-sub { color: #fff; font-size: 12px; margin: 0 2px 8px; }
+  .range2 { position: relative; height: 26px; margin: 0 8px 10px; }
+  .range2 .track { position: absolute; left: 0; right: 0; top: 11px; height: 4px; border-radius: 2px; background: #5b6679; }
+  .range2 .track i { position: absolute; top: 0; bottom: 0; background: #d9dee6; border-radius: 2px; }
+  .range2 input[type=range] { position: absolute; left: -8px; right: -8px; width: calc(100% + 16px); top: 0; height: 26px; margin: 0;
+    background: none; pointer-events: none; -webkit-appearance: none; appearance: none; }
+  .range2 input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; pointer-events: auto; width: 20px; height: 20px; border-radius: 50%;
+    background: #fff; border: 0; box-shadow: 0 1px 4px rgba(0,0,0,.5); cursor: pointer; }
+  .range2 input[type=range]::-moz-range-thumb { pointer-events: auto; width: 20px; height: 20px; border-radius: 50%; background: #fff; border: 0; cursor: pointer; }
+  .ovr-boxes { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+  .ovr-boxes label span { display: block; color: #c7cfdb; font-size: 15px; margin: 0 2px 8px; }
+  .ovr-boxes input { width: 100%; padding: 13px 14px; border-radius: 8px; border: 1px solid #3b4862; background: #243046; color: #fff; font-size: 17px; }
+  .ea-player { display: flex; align-items: center; gap: 10px; padding: 0 12px; margin-bottom: 10px; border-radius: 8px;
+    border: 1px solid #394660; background: #111823; }
+  .ea-player input { flex: 1; min-width: 0; padding: 13px 0; border: 0; background: none; color: #fff; font-size: 17px; outline: none; }
+  .ea-player input::placeholder { color: #aeb7c4; }
+  .ea-player:focus-within { border-color: #fff; }
+  .ea-player .picked { flex: 1; margin: 6px -6px; }
+  .dd { margin-bottom: 8px; }
+  .dd-row { display: flex; align-items: center; gap: 14px; width: 100%; min-height: 48px; padding: 6px 14px; border-radius: 7px;
+    border: 1px solid #34425c; background: #243049; color: #fff; text-align: left; }
+  .dd-row:hover { background: #2a3754; }
+  .dd.open .dd-row { border-color: #fff; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+  .dd.set .dd-row { border-color: #4e8ff7; }
+  .dd-icon { width: 26px; display: flex; justify-content: center; }
+  .dd-label { flex: 1; font-size: 15px; font-weight: 700; line-height: 1.2; }
+  .dd-label small { display: block; font-size: 11px; font-weight: 600; color: #aeb7c4; }
+  .dd-clear { padding: 2px 6px; color: #aeb7c4; font-size: 14px; }
+  .dd-clear:hover { color: #fff; }
+  .dd-caret { font-size: 13px; }
+  .dd-panel { border: 1px solid #c9d0da; border-top: 0; border-radius: 0 0 7px 7px; background: #1b2536; padding: 4px 0; }
+  .dd-opts { max-height: 270px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #c9d0da #1b2536; }
+  .dd-opt { display: flex; align-items: center; gap: 16px; width: 100%; min-height: 48px; padding: 8px 14px; border: 0; border-radius: 0; background: none; color: #fff; text-align: left; font-size: 16px; }
+  .dd-opt:hover { background: #2d3a55; }
+  .dd-opt[aria-selected='true'] { background: #3a5185; font-weight: 700; }
+  .dd-opt:focus-visible { outline: none; background: #2d3a55; }
+  .mini-card { flex: none; width: 26px; height: 34px; border-radius: 3px;
+    clip-path: polygon(50% 0, 100% 9%, 100% 88%, 50% 100%, 0 88%, 0 9%); box-shadow: inset 0 0 0 1px rgba(255,255,255,.25); }
+  .opt-flag { flex: none; width: 34px; height: 22px; border-radius: 2px; overflow: hidden; background: #3a4760; display: flex; align-items: center; justify-content: center; }
+  .opt-logo { flex: none; width: 30px; height: 30px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+  .opt-flag img, .opt-logo img { width: 100%; height: 100%; object-fit: contain; }
+  .opt-flag.noimg::after, .opt-logo.noimg::after { content: attr(data-initials); font-size: 10px; font-weight: 800; color: #c7cfdb; }
+  .opt-logo.noimg { border-radius: 50%; background: #3a4760; }
+  .dd-icon .mini-card { width: 20px; height: 26px; }
+  .dd-icon .opt-flag { width: 28px; height: 18px; }
+  .dd-icon .opt-logo { width: 24px; height: 24px; }
+  .dd-empty { color: #aeb7c4; font-size: 12px; padding: 6px; }
+  .dd-idrow { display: flex; gap: 6px; padding: 0 6px 6px; }
+  .dd-idrow input { flex: 1; padding: 8px 10px; border-radius: 6px; border: 1px solid #394660; background: #111823; color: #fff; }
+  .dd-use { border: 0; border-radius: 6px; padding: 0 14px; background: #4e8ff7; color: #fff; font-weight: 700; }
+  .price { display: grid; grid-template-columns: 44px 40px 1fr 40px; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .price-k { color: #c7cfdb; font-size: 14px; }
+  .price input { width: 100%; padding: 11px 12px; border-radius: 8px; border: 1px solid #3b4862; background: #243046; color: #fff;
+    font-size: 16px; text-align: center; }
+  .price .step { height: 40px; border: 0; border-radius: 8px; background: #243049; color: #fff; font-size: 20px; font-weight: 700; }
+  .price .step:hover { background: #2f3d5c; }
+  .ea-name { width: 100%; margin-top: 6px; padding: 11px 12px; border-radius: 8px; border: 1px solid #3b4862; background: #243046; color: #fff; }
+  .ea-actions { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; margin-top: 12px; }
+  .ea-reset { border: 1px solid #4a5874; border-radius: 22px; padding: 11px; background: none; color: #fff; font-weight: 700; }
+  .ea-add { border: 0; border-radius: 22px; padding: 11px; background: #25e6d0; color: #07231f; font-weight: 800; font-size: 15px; }
+  .ea-add:hover { filter: brightness(1.08); }
+  .ea-hint { color: #aeb7c4; font-size: 12px; margin-top: 10px; text-align: center; }
+  .ea .suggest { top: calc(100% + 2px); }
+  .ea .combo { position: relative; }
   .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
   .chips span { padding: 1px 6px; border-radius: 4px; background: #262a33; color: #aab0bb; font-size: 11px; }
 
@@ -294,8 +367,6 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   let tick: ReturnType<typeof setInterval> | null = null;
   let refreshQueued = false;
   let catalog: Catalog | null = null;
-  let picked: CatalogPlayer | null = null;
-  let suggestions: CatalogPlayer[] = [];
 
   page.innerHTML = `
     <div class="top">
@@ -427,49 +498,282 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     renderRisk();
   }
 
-  // ---- Snipe Targets: EA-style search ---------------------------------------
+  // ---- Snipe Targets: built like EA's own search panel ---------------------
+  //
+  // Same layout as the web app's Club / Transfer Market search: OVR range,
+  // player name search, then expandable rows (Quality, Rarity, Position,
+  // Chemistry Style, Country/Region, League, Club) and the Buy Now price.
+  // What the user has chosen lives in `form`, so re-rendering (opening a row,
+  // picking an option) never loses it.
 
-  const byId = (list: CatalogEntry[]) => new Map(list.map((e) => [e.id, e.name]));
+  type Dd = 'quality' | 'rarity' | 'position' | 'chem' | 'nation' | 'league' | 'club';
+  const DDS: Dd[] = ['quality', 'rarity', 'position', 'chem', 'nation', 'league', 'club'];
+  const OVR_MIN = 45;
+  const OVR_MAX = 99;
+
+  interface TargetForm {
+    minOvr: number;
+    maxOvr: number;
+    player: CatalogPlayer | null;
+    playerQuery: string;
+    quality: string | null;
+    rarity: number | null;
+    position: string | null;
+    chem: number | null;
+    nation: number | null;
+    league: number | null;
+    club: number | null;
+    minBuy: number | null;
+    maxBuy: number | null;
+    name: string;
+  }
+
+  const blankForm = (): TargetForm => ({
+    minOvr: OVR_MIN,
+    maxOvr: OVR_MAX,
+    player: null,
+    playerQuery: '',
+    quality: null,
+    rarity: null,
+    position: null,
+    chem: null,
+    nation: null,
+    league: null,
+    club: null,
+    minBuy: null,
+    maxBuy: null,
+    name: '',
+  });
+
+  let form = blankForm();
+  let openDd: Dd | null = null;
+  // Type-to-jump in an open list, like a native dropdown (EA's lists have
+  // no search box).
+  let typeahead = '';
+  let typeaheadTimer: ReturnType<typeof setTimeout> | null = null;
+  let suggestions: CatalogPlayer[] = [];
+
+  const DD_LABEL: Record<Dd, string> = {
+    quality: 'Quality',
+    rarity: 'Rarity',
+    position: 'Position',
+    chem: 'Chemistry Style',
+    nation: 'Country/Region',
+    league: 'League',
+    club: 'Club',
+  };
+
+  const svg = (body: string) =>
+    `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">${body}</svg>`;
+  const DD_ICON: Record<Dd, string> = {
+    quality: svg(
+      '<path d="M5 3h14v11c0 4-4 6-7 7-3-1-7-3-7-7z" fill="#fff"/><text x="12" y="12.5" text-anchor="middle" font-size="6.5" font-weight="900" font-style="italic" fill="#1b2433">FUT</text>',
+    ),
+    rarity: svg(
+      '<ellipse cx="12" cy="6" rx="7" ry="2.6" fill="#fff"/><path d="M5 6v11c0 1.5 3.1 2.7 7 2.7s7-1.2 7-2.7V6c0 1.5-3.1 2.7-7 2.7S5 7.5 5 6z" fill="#cfd6df"/>',
+    ),
+    position: svg(
+      '<circle cx="12" cy="4.5" r="2.3" fill="#fff"/><path d="M9.5 8h5l1 6-2 .5-.5 8h-2l-.5-8-2-.5z" fill="#fff"/>',
+    ),
+    chem: svg(
+      '<path d="M3 15c3 0 6-1 8-4l2 2c1 1 3 2 5 2h3v3H4c-.6 0-1-.4-1-1z" fill="#fff"/><path d="M6 19h2v1H6zm4 0h2v1h-2zm4 0h2v1h-2z" fill="#fff"/>',
+    ),
+    nation: svg(
+      '<path d="M5 3v18" stroke="#fff" stroke-width="1.6"/><path d="M5.5 4h9l-1.5 3 1.5 3h-9z" fill="#fff"/><circle cx="17" cy="16" r="3.2" fill="none" stroke="#fff" stroke-width="1.4"/>',
+    ),
+    league: svg(
+      '<path d="M4 7l4 3 4-6 4 6 4-3-2 10H6z" fill="#fff"/><rect x="6" y="18" width="12" height="2" fill="#fff"/>',
+    ),
+    club: svg('<path d="M12 2l8 3v6c0 5-3.5 9-8 11-4.5-2-8-6-8-11V5z" fill="#fff"/>'),
+  };
+
+  function ddOptions(dd: Dd): { value: string; label: string }[] {
+    const list = (entries: CatalogEntry[]) =>
+      entries.map((e) => ({ value: String(e.id), label: e.name }));
+    switch (dd) {
+      case 'quality':
+        return QUALITIES.map((q) => ({ value: q.key, label: q.label }));
+      case 'rarity':
+        return list(catalog?.rarities?.length ? catalog.rarities : BASIC_RARITIES);
+      case 'position':
+        return POSITIONS.map((p) => ({ value: p, label: p }));
+      case 'chem':
+        return list(CHEMISTRY_STYLES);
+      case 'nation':
+        return list(catalog?.nations ?? []);
+      case 'league':
+        return list(catalog?.leagues ?? []);
+      case 'club':
+        return list(catalog?.clubs ?? []);
+    }
+  }
+
+  function ddValue(dd: Dd): string | null {
+    const v = {
+      quality: form.quality,
+      rarity: form.rarity,
+      position: form.position,
+      chem: form.chem,
+      nation: form.nation,
+      league: form.league,
+      club: form.club,
+    }[dd];
+    return v == null ? null : String(v);
+  }
+
+  function ddLabel(dd: Dd): string | null {
+    const v = ddValue(dd);
+    if (v == null) return null;
+    return ddOptions(dd).find((o) => o.value === v)?.label ?? `#${v}`;
+  }
+
+  function setDd(dd: Dd, value: string | null): void {
+    const n = value == null ? null : Number(value);
+    if (dd === 'quality') form.quality = value;
+    else if (dd === 'position') form.position = value;
+    else if (dd === 'rarity') form.rarity = n;
+    else if (dd === 'chem') form.chem = n;
+    else if (dd === 'nation') form.nation = n;
+    else if (dd === 'league') form.league = n;
+    else form.club = n;
+  }
+
+  /** A small FUT-card shape, coloured like the design it stands for; used for
+   * qualities and rarities (EA's lists show card art there). */
+  function miniCard(label: string, id: string): string {
+    const n = label.toLowerCase();
+    const [a, b] =
+      n === 'bronze'
+        ? ['#e0a16a', '#8a5427']
+        : n === 'silver'
+          ? ['#eef1f4', '#8e979f']
+          : n === 'common' || n === 'gold'
+            ? ['#f6dd8a', '#c9a227']
+            : n === 'rare'
+              ? ['#ffe89a', '#d9a520']
+              : /icon/.test(n)
+                ? ['#f7f1e3', '#c9b98f']
+                : /hero/.test(n)
+                  ? ['#b07ae8', '#3b1a6b']
+                  : /hall of fut|legend/.test(n)
+                    ? ['#5b5f6b', '#15171c']
+                    : /week|totw|in-?form/.test(n)
+                      ? ['#3a3a3a', '#0d0d0d']
+                      : /toty|year/.test(n)
+                        ? ['#2c6fe0', '#0b1f55']
+                        : /tots|season/.test(n)
+                          ? ['#3cc6e8', '#0b3a57']
+                          : n === 'special'
+                            ? ['#8e5cf0', '#23124d']
+                            : [
+                                `hsl(${(Number(id) * 47) % 360} 70% 60%)`,
+                                `hsl(${(Number(id) * 47) % 360} 70% 22%)`,
+                              ];
+    return `<span class="mini-card" style="background:linear-gradient(160deg,${a},${b})"></span>`;
+  }
+
+  /** The picture shown before an option: flag, league/club logo, or card. */
+  function optVisual(dd: Dd, value: string, label: string): string {
+    if (dd === 'quality' || dd === 'rarity') return miniCard(label, value);
+    if (dd === 'nation' || dd === 'league' || dd === 'club') {
+      const url = imageUrl(catalog?.assetBase, dd, Number(value));
+      const cls = dd === 'nation' ? 'opt-flag' : 'opt-logo';
+      const initials = esc(
+        label
+          .replace(/[^\p{L}\p{N} ]/gu, '')
+          .split(/\s+/)
+          .filter(Boolean)
+          .slice(0, 2)
+          .map((w) => w[0])
+          .join('')
+          .toUpperCase(),
+      );
+      return `<span class="${cls}${url ? '' : ' noimg'}" data-initials="${initials}">${url ? `<img src="${esc(url)}" alt="" loading="lazy" />` : ''}</span>`;
+    }
+    return '';
+  }
+
+  function ddOptionsHtml(dd: Dd): string {
+    const current = ddValue(dd);
+    return ddOptions(dd)
+      .map(
+        (o) =>
+          `<button type="button" class="dd-opt" role="option" aria-selected="${o.value === current}" data-opt="${dd}" data-val="${esc(o.value)}">${optVisual(dd, o.value, o.label)}<span>${esc(o.label)}</span></button>`,
+      )
+      .join('');
+  }
+
+  function ddHtml(dd: Dd): string {
+    const label = ddLabel(dd);
+    const open = openDd === dd;
+    const options = ddOptions(dd);
+    let panel = '';
+    if (open) {
+      panel =
+        options.length === 0
+          ? `<div class="dd-panel"><div class="dd-empty">EA's ${esc(DD_LABEL[dd].toLowerCase())} names aren't saved yet (open the web app's Transfer Market search once). Or enter the EA id:</div>
+              <div class="dd-idrow"><input id="nf-dd-id" inputmode="numeric" placeholder="EA id" /><button type="button" class="dd-use" data-useid="${dd}">Use</button></div></div>`
+          : `<div class="dd-panel"><div class="dd-opts" id="dd-opts" role="listbox" aria-label="${esc(DD_LABEL[dd])}">${ddOptionsHtml(dd)}</div></div>`;
+    }
+    const value = ddValue(dd);
+    return `<div class="dd${open ? ' open' : ''}${label ? ' set' : ''}">
+      <button type="button" class="dd-row" data-dd="${dd}" aria-expanded="${open}">
+        <span class="dd-icon">${label && value != null && optVisual(dd, value, label) ? optVisual(dd, value, label) : DD_ICON[dd]}</span>
+        <span class="dd-label">${label ? `<small>${esc(DD_LABEL[dd])}</small>${esc(label)}` : esc(DD_LABEL[dd])}</span>
+        ${label ? `<span class="dd-clear" data-clear="${dd}" role="button" aria-label="Clear ${esc(DD_LABEL[dd])}">✕</span>` : ''}
+        <span class="dd-caret">${open ? '▲' : '▼'}</span>
+      </button>${panel}</div>`;
+  }
 
   function describeFilter(f: FilterCriteria): string[] {
-    const names = {
-      club: byId(catalog?.clubs ?? []),
-      league: byId(catalog?.leagues ?? []),
-      nation: byId(catalog?.nations ?? []),
-    };
+    const find = (list: CatalogEntry[] | undefined, id: number) =>
+      list?.find((e) => e.id === id)?.name;
     const chips: string[] = [];
     if (f.resourceId != null) {
       const p = catalog?.players.find((x) => x.id === f.resourceId);
       chips.push(p ? `${p.rating ?? ''} ${p.name}`.trim() : `Player #${f.resourceId}`);
     }
-    if (f.quality) chips.push(QUALITIES.find((q) => q.key === f.quality)?.label ?? f.quality);
-    if (f.position) chips.push(f.position);
-    if (f.nationality != null)
-      chips.push(names.nation.get(f.nationality) ?? `Nation #${f.nationality}`);
-    if (f.league != null) chips.push(names.league.get(f.league) ?? `League #${f.league}`);
-    if (f.club != null) chips.push(names.club.get(f.club) ?? `Club #${f.club}`);
     if (f.minRating != null || f.maxRating != null)
-      chips.push(`Rating ${f.minRating ?? 0}–${f.maxRating ?? 99}`);
+      chips.push(`OVR ${f.minRating ?? OVR_MIN}-${f.maxRating ?? OVR_MAX}`);
+    if (f.quality) chips.push(QUALITIES.find((q) => q.key === f.quality)?.label ?? f.quality);
+    if (f.rarity != null)
+      chips.push(
+        find(catalog?.rarities?.length ? catalog.rarities : BASIC_RARITIES, f.rarity) ??
+          `Rarity #${f.rarity}`,
+      );
+    if (f.position) chips.push(f.position);
+    if (f.chemistryStyle != null)
+      chips.push(find(CHEMISTRY_STYLES, f.chemistryStyle) ?? `Chem #${f.chemistryStyle}`);
+    if (f.nationality != null)
+      chips.push(find(catalog?.nations, f.nationality) ?? `Nation #${f.nationality}`);
+    if (f.league != null) chips.push(find(catalog?.leagues, f.league) ?? `League #${f.league}`);
+    if (f.club != null) chips.push(find(catalog?.clubs, f.club) ?? `Club #${f.club}`);
+    if (f.minPrice != null) chips.push(`min ${fmt(f.minPrice)}`);
     chips.push(f.maxPrice != null ? `max ${fmt(f.maxPrice)}` : 'no max price');
     return chips;
   }
 
-  function datalist(id: string, list: CatalogEntry[]): string {
-    return `<datalist id="${id}">${list.map((e) => `<option value="${esc(e.name)}"></option>`).join('')}</datalist>`;
+  function ovrFill(): string {
+    const span = OVR_MAX - OVR_MIN;
+    return `left:${((form.minOvr - OVR_MIN) / span) * 100}%;right:${((OVR_MAX - form.maxOvr) / span) * 100}%`;
+  }
+
+  function priceHtml(key: 'minBuy' | 'maxBuy', label: string): string {
+    const v = form[key];
+    return `<div class="price"><span class="price-k">${label}:</span>
+      <button type="button" class="step" data-price="${key}" data-dir="-1" aria-label="Lower ${label.toLowerCase()} price">−</button>
+      <input id="nf-${key}" inputmode="numeric" placeholder="Any" value="${v == null ? '' : fmt(v)}" aria-label="${label} buy now price" />
+      <button type="button" class="step" data-price="${key}" data-dir="1" aria-label="Raise ${label.toLowerCase()} price">+</button></div>`;
   }
 
   function renderTargets(): void {
     const wasOpen = root.querySelector('#targets details')?.hasAttribute('open') ?? true;
     const filters = deps.getFilters();
-    const hasPlayers = (catalog?.players.length ?? 0) > 0;
-    const hasNames =
-      (catalog?.leagues.length ?? 0) +
-        (catalog?.nations.length ?? 0) +
-        (catalog?.clubs.length ?? 0) >
-      0;
-    const catalogHint = hasPlayers
-      ? `${fmt(catalog!.players.length)} players from EA's player list.`
-      : "EA's player list isn't saved yet: open the web app's Transfer Market search once and it will be. Until then, type a player id.";
+    const players = catalog?.players.length ?? 0;
+    const hint =
+      players > 0
+        ? `${fmt(players)} players from EA's player list.`
+        : "EA's player list isn't saved yet: open the web app's Transfer Market search once and it will be. Until then, type a player id.";
 
     $('targets').innerHTML = section(
       'Snipe Targets',
@@ -488,34 +792,49 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
               )
               .join('')
       }</div>
-      <div class="addf" id="addf">
-        <div class="lbl">PLAYER</div>
-        <div class="full combo">${
-          picked
-            ? `<div class="picked"><span class="r">${picked.rating ?? ''}</span><b>${esc(picked.name)}</b>
+      <div class="ea" id="ea-search">
+        <h3 class="ea-title">Snipe Search</h3>
+        <div class="ea-lbl">OVR Range</div>
+        <div class="ea-sub">The OVR ranges from ${OVR_MIN}-${OVR_MAX}</div>
+        <div class="range2">
+          <div class="track"><i id="ovr-fill" style="${ovrFill()}"></i></div>
+          <input type="range" id="nf-ovr-lo" min="${OVR_MIN}" max="${OVR_MAX}" value="${form.minOvr}" aria-label="Min OVR" />
+          <input type="range" id="nf-ovr-hi" min="${OVR_MIN}" max="${OVR_MAX}" value="${form.maxOvr}" aria-label="Max OVR" />
+        </div>
+        <div class="ovr-boxes">
+          <label><span>Min OVR</span><input id="nf-minovr" inputmode="numeric" value="${form.minOvr}" /></label>
+          <label><span>Max OVR</span><input id="nf-maxovr" inputmode="numeric" value="${form.maxOvr}" /></label>
+        </div>
+        <div class="ea-player combo">${
+          form.player
+            ? `<div class="picked"><span class="r">${form.player.rating ?? ''}</span><b>${esc(form.player.name)}</b>
                 <button type="button" id="nf-unpick" aria-label="Clear player">✕</button></div>`
-            : `<input id="nf-player" placeholder="${hasPlayers ? 'Search a player by name…' : 'Player id (optional)'}" autocomplete="off"
+            : `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="10" cy="10" r="6.5" fill="none" stroke="#fff" stroke-width="2.4"/><path d="M15 15l6 6" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/></svg>
+               <input id="nf-player" placeholder="${players > 0 ? 'Type Player Name' : 'Type Player Name or id'}" autocomplete="off" value="${esc(form.playerQuery)}"
                 role="combobox" aria-expanded="false" aria-controls="nf-suggest" aria-autocomplete="list" />
                <div class="suggest" id="nf-suggest" role="listbox" hidden></div>`
         }</div>
-        <div class="lbl">FILTERS</div>
-        <select id="nf-quality" aria-label="Quality"><option value="">Any quality</option>${QUALITIES.map((q) => `<option value="${q.key}">${q.label}</option>`).join('')}</select>
-        <select id="nf-position" aria-label="Position"><option value="">Any position</option>${POSITIONS.map((p) => `<option>${p}</option>`).join('')}</select>
-        <input id="nf-nation" list="dl-nations" placeholder="Nationality" autocomplete="off" aria-label="Nationality" />
-        <input id="nf-league" list="dl-leagues" placeholder="League" autocomplete="off" aria-label="League" />
-        <input class="full" id="nf-club" list="dl-clubs" placeholder="Club" autocomplete="off" aria-label="Club" />
-        <input id="nf-minr" placeholder="Min rating" inputmode="numeric" aria-label="Min rating" />
-        <input id="nf-maxr" placeholder="Max rating" inputmode="numeric" aria-label="Max rating" />
-        <div class="lbl">PRICE</div>
-        <input class="full" id="nf-max" placeholder="Max buy now price" inputmode="numeric" aria-label="Max buy now price" />
-        <input class="full" id="nf-name" placeholder="Target name (optional)" maxlength="80" aria-label="Target name" />
-        <button type="button" class="add" id="nf-add">Add target</button>
-      </div>
-      <div class="hint">${esc(catalogHint)}${hasNames ? '' : " Nationality, league and club need EA's names too, or type their EA id."}</div>
-      ${datalist('dl-nations', catalog?.nations ?? [])}${datalist('dl-leagues', catalog?.leagues ?? [])}${datalist('dl-clubs', catalog?.clubs ?? [])}`,
+        ${DDS.map(ddHtml).join('')}
+        <div class="ea-lbl" style="margin-top:14px">Buy Now Price</div>
+        ${priceHtml('minBuy', 'Min')}
+        ${priceHtml('maxBuy', 'Max')}
+        <input class="ea-name" id="nf-name" placeholder="Target name (optional)" maxlength="80" value="${esc(form.name)}" />
+        <div class="ea-actions">
+          <button type="button" class="ea-reset" id="nf-reset">Reset</button>
+          <button type="button" class="ea-add" id="nf-add">Add Target</button>
+        </div>
+        <div class="ea-hint">${esc(hint)}</div>
+      </div>`,
       '',
       wasOpen,
     );
+    if (openDd) {
+      const opt =
+        root.querySelector<HTMLElement>('.dd.open .dd-opt[aria-selected="true"]') ??
+        root.querySelector<HTMLElement>('.dd.open .dd-opt');
+      opt?.scrollIntoView({ block: 'nearest' });
+      opt?.focus({ preventScroll: true });
+    }
   }
 
   function showSuggestions(query: string): void {
@@ -533,52 +852,209 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       .join('');
   }
 
-  function pick(p: CatalogPlayer): void {
-    picked = p;
-    suggestions = [];
-    const keep = readForm();
-    renderTargets();
-    restoreForm(keep);
+  function setOvr(lo: number, hi: number): void {
+    const clamp = (n: number) => Math.min(OVR_MAX, Math.max(OVR_MIN, Math.round(n)));
+    form.minOvr = clamp(Math.min(lo, hi));
+    form.maxOvr = clamp(Math.max(lo, hi));
+    const set = (id: string, v: number) => {
+      const el = root.getElementById(id) as HTMLInputElement | null;
+      if (el && el.value !== String(v)) el.value = String(v);
+    };
+    set('nf-ovr-lo', form.minOvr);
+    set('nf-ovr-hi', form.maxOvr);
+    set('nf-minovr', form.minOvr);
+    set('nf-maxovr', form.maxOvr);
+    root.getElementById('ovr-fill')?.setAttribute('style', ovrFill());
   }
 
-  /** The add-target form's own fields, so re-rendering keeps what was typed. */
-  function readForm(): Record<string, string> {
-    const out: Record<string, string> = {};
-    for (const id of [
-      'nf-quality',
-      'nf-position',
-      'nf-nation',
-      'nf-league',
-      'nf-club',
-      'nf-minr',
-      'nf-maxr',
-      'nf-max',
-      'nf-name',
-    ]) {
-      const el = root.getElementById(id) as HTMLInputElement | null;
-      if (el) out[id] = el.value;
-    }
-    return out;
+  function parsePrice(text: string): number | null {
+    const n = Number(text.replace(/[,\s]/g, ''));
+    return text.trim() === '' || !Number.isFinite(n) ? null : Math.max(0, Math.round(n));
   }
 
-  function restoreForm(values: Record<string, string>): void {
-    for (const [id, v] of Object.entries(values)) {
-      const el = root.getElementById(id) as HTMLInputElement | null;
-      if (el) el.value = v;
+  const say = (text: string, bad = true) => {
+    $('saved').style.color = bad ? '#f87171' : '';
+    $('saved').textContent = text;
+  };
+
+  $('targets').addEventListener('click', (e) => {
+    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-clear],button');
+    if (!el) return;
+    if (el.dataset.clear) {
+      e.stopPropagation();
+      setDd(el.dataset.clear as Dd, null);
+      renderTargets();
+    } else if (el.dataset.dd) {
+      const dd = el.dataset.dd as Dd;
+      openDd = openDd === dd ? null : dd;
+      renderTargets();
+    } else if (el.dataset.opt) {
+      setDd(el.dataset.opt as Dd, el.dataset.val ?? null);
+      openDd = null;
+      renderTargets();
+    } else if (el.dataset.useid) {
+      const n = Number((root.getElementById('nf-dd-id') as HTMLInputElement | null)?.value);
+      if (!Number.isInteger(n) || n <= 0) return say('Enter a whole-number EA id');
+      setDd(el.dataset.useid as Dd, String(n));
+      openDd = null;
+      renderTargets();
+    } else if (el.dataset.pick) {
+      const p = suggestions[Number(el.dataset.pick)];
+      if (!p) return;
+      form.player = p;
+      form.playerQuery = '';
+      suggestions = [];
+      renderTargets();
+    } else if (el.id === 'nf-unpick') {
+      form.player = null;
+      renderTargets();
+    } else if (el.dataset.price) {
+      const key = el.dataset.price as 'minBuy' | 'maxBuy';
+      const dir = Number(el.dataset.dir) as 1 | -1;
+      form[key] = priceStep(form[key] ?? 0, dir) || null;
+      const input = root.getElementById(`nf-${key}`) as HTMLInputElement | null;
+      if (input) input.value = form[key] == null ? '' : fmt(form[key]!);
+    } else if (el.dataset.remove) {
+      void deps
+        .saveFilters(deps.getFilters().filter((f) => f.id !== el.dataset.remove))
+        .then(renderTargets);
+    } else if (el.id === 'nf-reset') {
+      form = blankForm();
+      openDd = null;
+      renderTargets();
+    } else if (el.id === 'nf-add') {
+      void addFilter();
     }
-  }
+  });
+
+  // A flag or logo EA does not have (or a guessed image path that is wrong)
+  // falls back to the name's initials. `error` does not bubble: capture it.
+  $('targets').addEventListener(
+    'error',
+    (e) => {
+      const img = e.target as HTMLElement;
+      if (img.tagName !== 'IMG') return;
+      img.parentElement?.classList.add('noimg');
+      img.remove();
+    },
+    true,
+  );
 
   $('targets').addEventListener('input', (e) => {
     const t = e.target as HTMLInputElement;
-    if (t.id === 'nf-player') showSuggestions(t.value);
+    if (t.id === 'nf-player') {
+      form.playerQuery = t.value;
+      showSuggestions(t.value);
+    } else if (t.id === 'nf-ovr-lo')
+      setOvr(Number(t.value), Math.max(Number(t.value), form.maxOvr));
+    else if (t.id === 'nf-ovr-hi') setOvr(Math.min(Number(t.value), form.minOvr), Number(t.value));
+    else if (t.id === 'nf-name') form.name = t.value;
   });
+
+  $('targets').addEventListener('change', (e) => {
+    const t = e.target as HTMLInputElement;
+    if (t.id === 'nf-minovr' || t.id === 'nf-maxovr') {
+      const n = Number(t.value);
+      if (!Number.isFinite(n)) return setOvr(form.minOvr, form.maxOvr);
+      if (t.id === 'nf-minovr') setOvr(n, Math.max(n, form.maxOvr));
+      else setOvr(Math.min(n, form.minOvr), n);
+    } else if (t.id === 'nf-minBuy' || t.id === 'nf-maxBuy') {
+      const key = t.id === 'nf-minBuy' ? 'minBuy' : 'maxBuy';
+      form[key] = parsePrice(t.value);
+      t.value = form[key] == null ? '' : fmt(form[key]!);
+    }
+  });
+
   $('targets').addEventListener('keydown', (e) => {
     const t = e.target as HTMLInputElement;
     if (t.id === 'nf-player' && e.key === 'Enter' && suggestions[0]) {
       e.preventDefault();
-      pick(suggestions[0]);
+      form.player = suggestions[0];
+      form.playerQuery = '';
+      suggestions = [];
+      renderTargets();
+    } else if (
+      openDd &&
+      t.classList?.contains('dd-opt') &&
+      (e.key === 'ArrowDown' || e.key === 'ArrowUp')
+    ) {
+      e.preventDefault();
+      const next = (
+        e.key === 'ArrowDown' ? t.nextElementSibling : t.previousElementSibling
+      ) as HTMLElement | null;
+      next?.focus();
+    } else if (
+      openDd &&
+      e.key.length === 1 &&
+      /\p{L}|\p{N}/u.test(e.key) &&
+      !(t instanceof HTMLInputElement)
+    ) {
+      typeahead += fold(e.key);
+      if (typeaheadTimer) clearTimeout(typeaheadTimer);
+      typeaheadTimer = setTimeout(() => (typeahead = ''), 700);
+      const hit = [...root.querySelectorAll<HTMLElement>('.dd.open .dd-opt')].find((b) =>
+        fold(b.textContent ?? '')
+          .trim()
+          .startsWith(typeahead),
+      );
+      hit?.scrollIntoView({ block: 'nearest' });
+      hit?.focus({ preventScroll: true });
+    } else if (e.key === 'Escape' && openDd) {
+      e.stopPropagation();
+      openDd = null;
+      renderTargets();
     }
   });
+
+  async function addFilter(): Promise<void> {
+    const filter: FilterCriteria = {};
+    if (form.player) filter.resourceId = form.player.id;
+    else if (form.playerQuery.trim()) {
+      const n = Number(form.playerQuery.trim());
+      if (!Number.isInteger(n) || n <= 0)
+        return say('Pick a player from the list, or type their id');
+      filter.resourceId = n;
+    }
+    if (form.minOvr > OVR_MIN) filter.minRating = form.minOvr;
+    if (form.maxOvr < OVR_MAX) filter.maxRating = form.maxOvr;
+    if (form.quality) filter.quality = form.quality as FilterCriteria['quality'];
+    if (form.rarity != null) filter.rarity = form.rarity;
+    if (form.position) filter.position = form.position;
+    if (form.chem != null) filter.chemistryStyle = form.chem;
+    if (form.nation != null) filter.nationality = form.nation;
+    if (form.league != null) filter.league = form.league;
+    if (form.club != null) filter.club = form.club;
+    if (form.minBuy != null) filter.minPrice = form.minBuy;
+    if (form.maxBuy != null) filter.maxPrice = form.maxBuy;
+
+    if (Object.keys(filter).length === 0) return say('Pick a player or at least one filter');
+    if (filter.minPrice != null && filter.maxPrice != null && filter.minPrice > filter.maxPrice) {
+      return say('Min price is above max price');
+    }
+
+    const name = (form.name.trim() || describeFilter(filter).join(' · ')).slice(0, 80);
+    const hash = Array.from(
+      new Uint8Array(
+        await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(filter))),
+      ),
+      (b) => b.toString(16).padStart(2, '0'),
+    ).join('');
+    const existing = deps.getFilters();
+    const saved: SavedFilter = {
+      id: crypto.randomUUID(),
+      name,
+      filter,
+      filterHash: hash,
+      isActive: true,
+      sortOrder: existing.length,
+      createdAt: new Date().toISOString(),
+    };
+    await deps.saveFilters([...existing, saved]);
+    form = blankForm();
+    openDd = null;
+    renderTargets();
+    say('Target added', false);
+  }
 
   function renderRisk(): void {
     const level = botRiskLevel(settings);
@@ -737,24 +1213,6 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       );
     } else if (el.id === 'r-on') {
       commit({ ...settings, rest: { ...settings.rest, enabled: !settings.rest.enabled } }, true);
-    } else if (el.dataset.remove) {
-      const keep = readForm();
-      void deps
-        .saveFilters(deps.getFilters().filter((f) => f.id !== el.dataset.remove))
-        .then(() => {
-          renderTargets();
-          restoreForm(keep);
-        });
-    } else if (el.dataset.pick) {
-      const p = suggestions[Number(el.dataset.pick)];
-      if (p) pick(p);
-    } else if (el.id === 'nf-unpick') {
-      picked = null;
-      const keep = readForm();
-      renderTargets();
-      restoreForm(keep);
-    } else if (el.id === 'nf-add') {
-      void addFilter();
     }
     // A toggle or preset inside <summary> must not also fold the card.
     if (el.closest('summary')) e.preventDefault();
@@ -766,100 +1224,6 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     const next = readSettings();
     if (next) commit(next, false);
   });
-
-  async function addFilter(): Promise<void> {
-    const field = (id: string) => root.getElementById(id) as HTMLInputElement | null;
-    const v = (id: string) => field(id)?.value.trim() ?? '';
-    let ok = true;
-    const mark = (id: string, valid: boolean) => {
-      field(id)?.setAttribute('aria-invalid', String(!valid));
-      if (!valid) ok = false;
-    };
-    const int = (id: string, max?: number): number | undefined => {
-      const raw = v(id).replace(/[,\s]/g, '');
-      if (raw === '') return undefined;
-      const n = Number(raw);
-      const valid = Number.isInteger(n) && n >= 0 && (max == null || n <= max);
-      mark(id, valid);
-      return valid ? n : undefined;
-    };
-    /** A name picked from EA's list, or an EA id typed as a number. */
-    const entry = (id: string, list: CatalogEntry[]): number | undefined => {
-      const text = v(id);
-      if (!text) return undefined;
-      const hit = list.find((e) => e.name.toLowerCase() === text.toLowerCase());
-      if (hit) return hit.id;
-      const n = Number(text);
-      const valid = Number.isInteger(n) && n > 0;
-      mark(id, valid);
-      return valid ? n : undefined;
-    };
-
-    const filter: FilterCriteria = {};
-    if (picked) filter.resourceId = picked.id;
-    else {
-      const typed = v('nf-player');
-      if (typed) {
-        const n = Number(typed);
-        if (Number.isInteger(n) && n > 0) filter.resourceId = n;
-        else mark('nf-player', false);
-      }
-    }
-    const quality = v('nf-quality');
-    if (quality) filter.quality = quality as FilterCriteria['quality'];
-    const position = v('nf-position');
-    if (position) filter.position = position;
-    const nation = entry('nf-nation', catalog?.nations ?? []);
-    if (nation != null) filter.nationality = nation;
-    const league = entry('nf-league', catalog?.leagues ?? []);
-    if (league != null) filter.league = league;
-    const club = entry('nf-club', catalog?.clubs ?? []);
-    if (club != null) filter.club = club;
-    const minR = int('nf-minr', 99);
-    const maxR = int('nf-maxr', 99);
-    if (minR != null) filter.minRating = minR;
-    if (maxR != null) filter.maxRating = maxR;
-    const max = int('nf-max');
-    if (max != null) filter.maxPrice = max;
-
-    const say = (text: string) => {
-      $('saved').style.color = '#f87171';
-      $('saved').textContent = text;
-    };
-    if (!ok) return say('Check the highlighted fields');
-    if (Object.keys(filter).length === 0) return say('Pick a player or at least one filter');
-    if (
-      filter.minRating != null &&
-      filter.maxRating != null &&
-      filter.minRating > filter.maxRating
-    ) {
-      mark('nf-minr', false);
-      return say('Min rating is above max rating');
-    }
-
-    const name = (v('nf-name') || describeFilter(filter).join(' · ')).slice(0, 80);
-    const hash = Array.from(
-      new Uint8Array(
-        await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(filter))),
-      ),
-      (b) => b.toString(16).padStart(2, '0'),
-    ).join('');
-    const existing = deps.getFilters();
-    const saved: SavedFilter = {
-      id: crypto.randomUUID(),
-      name,
-      filter,
-      filterHash: hash,
-      isActive: true,
-      sortOrder: existing.length,
-      createdAt: new Date().toISOString(),
-    };
-    await deps.saveFilters([...existing, saved]);
-    picked = null;
-    renderTargets();
-    $('saved').style.color = '';
-    $('saved').textContent = 'Target added';
-  }
 
   // ---- live side ----------------------------------------------------------
 
@@ -1074,9 +1438,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       void deps.getCatalog().then((c) => {
         if (!c || page.hidden) return;
         catalog = c;
-        const keep = readForm();
         renderTargets();
-        restoreForm(keep);
       });
       tick = setInterval(() => {
         renderRing();
