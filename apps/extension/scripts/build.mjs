@@ -47,6 +47,15 @@ if (target === 'userscript' && watch) {
 // The userscript carries the autobuyer, like `ledger-auto` (it is never
 // listed in a store). Every automated action still goes through the governor.
 const automation = target === 'ledger-auto' || target === 'userscript';
+// Tampermonkey only installs an update when `@version` goes up, so every
+// userscript build gets its own: the package version plus a UTC build stamp
+// (0.1.0.202609230830 > 0.1.0.202609221900). USERSCRIPT_VERSION pins it.
+// The same version is compiled in, so the page can show which one runs.
+const version =
+  target === 'userscript'
+    ? process.env.USERSCRIPT_VERSION ||
+      `${pkg.version}.${new Date().toISOString().replace(/\D/g, '').slice(0, 12)}`
+    : pkg.version;
 
 const outDir = path.join(root, 'dist', target);
 
@@ -58,15 +67,23 @@ const env = {
   // (background/welcome.ts). Same override story as VITE_API_ORIGIN:
   // set it in the environment to point a build at a self-hosted stack.
   VITE_DASHBOARD_ORIGIN: process.env.VITE_DASHBOARD_ORIGIN || 'https://snipersledger.app',
-  VITE_UPDATE_URL: target === 'ledger-auto' ? process.env.VITE_UPDATE_URL || 'https://updates.snipersledger.app/ledger-auto/update.xml' : '',
-  VITE_EXTENSION_VERSION: pkg.version,
+  VITE_UPDATE_URL:
+    target === 'ledger-auto'
+      ? process.env.VITE_UPDATE_URL || 'https://updates.snipersledger.app/ledger-auto/update.xml'
+      : '',
+  VITE_EXTENSION_VERSION: version,
   VITE_LICENSE_PUBLIC_KEY: process.env.VITE_LICENSE_PUBLIC_KEY || '',
 };
 
-const define = Object.fromEntries(Object.entries(env).map(([k, v]) => [`import.meta.env.${k}`, JSON.stringify(v)]));
+const define = Object.fromEntries(
+  Object.entries(env).map(([k, v]) => [`import.meta.env.${k}`, JSON.stringify(v)]),
+);
 
 const sharedAlias = {
-  '@sl/shared/adapter-channel.js': path.resolve(root, '../../packages/shared/src/adapter-channel.ts'),
+  '@sl/shared/adapter-channel.js': path.resolve(
+    root,
+    '../../packages/shared/src/adapter-channel.ts',
+  ),
   '@sl/shared': path.resolve(root, '../../packages/shared/src/index.ts'),
   'virtual:autobuyer-loader': path.resolve(
     root,
@@ -117,7 +134,12 @@ async function buildLibEntry(entry, fileName, globalName, first) {
     ...baseConfig(first),
     build: {
       ...baseConfig(first).build,
-      lib: { entry: path.join(root, entry), formats: ['iife'], name: globalName, fileName: () => fileName },
+      lib: {
+        entry: path.join(root, entry),
+        formats: ['iife'],
+        name: globalName,
+        fileName: () => fileName,
+      },
       rollupOptions: { treeshake: TREESHAKE, output: { extend: true } },
     },
   });
@@ -146,7 +168,11 @@ async function buildEsGroup(first) {
 }
 
 function writeManifest() {
-  const manifest = buildManifest(target, { version: pkg.version, apiOrigin: env.VITE_API_ORIGIN, updateUrl: env.VITE_UPDATE_URL });
+  const manifest = buildManifest(target, {
+    version: pkg.version,
+    apiOrigin: env.VITE_API_ORIGIN,
+    updateUrl: env.VITE_UPDATE_URL,
+  });
   mkdirSync(outDir, { recursive: true });
   writeFileSync(path.join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
 }
@@ -164,14 +190,17 @@ function writeManifest() {
 // entry is a list of side-effect imports (setup, background, content), so it
 // keeps side effects for this app's own modules; @sl/shared and zod stay
 // pure, which is what that comment is about.
-const USERSCRIPT_TREESHAKE = { moduleSideEffects: (id) => id.startsWith(path.join(root, 'src') + path.sep) };
+const USERSCRIPT_TREESHAKE = {
+  moduleSideEffects: (id) => id.startsWith(path.join(root, 'src') + path.sep),
+};
 
 function adapterSourcePlugin(source) {
   const id = 'virtual:adapter-source';
   return {
     name: 'sl-adapter-source',
     resolveId: (spec) => (spec === id ? `\0${id}` : null),
-    load: (resolved) => (resolved === `\0${id}` ? `export default ${JSON.stringify(source)};` : null),
+    load: (resolved) =>
+      resolved === `\0${id}` ? `export default ${JSON.stringify(source)};` : null,
   };
 }
 
@@ -187,7 +216,12 @@ async function buildIifeInMemory(entry, globalName, extra = {}) {
       ...base.build,
       write: false,
       minify: extra.minify ?? true,
-      lib: { entry: path.join(root, entry), formats: ['iife'], name: globalName, fileName: () => 'out.js' },
+      lib: {
+        entry: path.join(root, entry),
+        formats: ['iife'],
+        name: globalName,
+        fileName: () => 'out.js',
+      },
       rollupOptions: { treeshake: extra.treeshake ?? TREESHAKE, output: { extend: true } },
     },
   });
@@ -207,10 +241,7 @@ async function buildUserscript() {
   });
 
   const header = buildUserscriptHeader({
-    // Tampermonkey only installs an update when `@version` goes up, so every
-    // build gets its own: the package version plus a UTC build stamp
-    // (0.1.0.202609230830 > 0.1.0.202609221900). USERSCRIPT_VERSION pins it.
-    version: process.env.USERSCRIPT_VERSION || `${pkg.version}.${new Date().toISOString().replace(/\D/g, '').slice(0, 12)}`,
+    version,
     apiOrigin: env.VITE_API_ORIGIN,
     // Where the published file will live, if known — Tampermonkey then
     // checks the small .meta.js for new versions and installs updates.

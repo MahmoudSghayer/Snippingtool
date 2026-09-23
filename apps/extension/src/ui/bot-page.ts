@@ -141,6 +141,7 @@ const CSS = `
   button:focus-visible, input:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
 
   .top { display: flex; align-items: center; gap: 12px; padding: 12px 18px; border-bottom: 1px solid #262a33; }
+  .ver { color: #6b7280; font-size: 11px; }
   .top h1 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: .2px; }
   .chip { padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #262a33; color: #aab0bb; }
   .chip.running { background: rgba(34,197,94,.15); color: #4ade80; }
@@ -384,6 +385,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   page.innerHTML = `
     <div class="top">
       <h1>Sniping Bot</h1>
+      <span class="ver" title="Sniper's Ledger version">v${esc(import.meta.env.VITE_EXTENSION_VERSION)}</span>
       <span class="chip" id="phase">Ready</span>
       <span class="risk" id="risk"></span>
       <span class="spacer"></span>
