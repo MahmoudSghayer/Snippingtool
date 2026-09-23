@@ -2,12 +2,13 @@
  * catalog.ts — the choices the Snipe Targets form offers, exactly as the EA
  * web app's own search panel offers them.
  *
- * `main/adapter.ts` builds this inside the page once the web app has
- * started, by asking the web app itself:
+ * `main/adapter.ts` builds this inside the page in two layers: first from
+ * the web app's public data files (`catalog-static.ts`, no login needed),
+ * then, once the web app has started, list by list from the web app itself:
  *
  *   - each filter list (quality, rarity, position, chemistry style,
  *     country/region, league, and each league's clubs) comes from the web
- *     app's own `UTDataProviderFactory`, so the entries, their order and
+ *     app's own `factories.DataProvider`, so the entries, their order and
  *     their labels are the ones EA shows;
  *   - each entry's picture comes from the web app's own
  *     `AssetLocationUtils.getFilterImage`, so it is the same flag, badge,
@@ -55,6 +56,8 @@ export interface Catalog {
   /** Clubs per league id, as EA's Club list shows them once a league is picked. */
   clubs: Record<string, CatalogOption[]>;
   capturedAt: number;
+  /** What could not be loaded or built, shown on the page. */
+  notes?: string[];
 }
 
 /** EA's position-group values (`ZONE_*_VALUE`): searched as `zone`, not `position`. */
@@ -89,7 +92,11 @@ export function parsePlayersFile(json: unknown): CatalogPlayer[] {
       if (!name) continue;
       const rating = Number(r.r);
       seen.add(id);
-      out.push({ id, name, rating: Number.isInteger(rating) && rating >= 0 && rating <= 99 ? rating : null });
+      out.push({
+        id,
+        name,
+        rating: Number.isInteger(rating) && rating >= 0 && rating <= 99 ? rating : null,
+      });
     }
   }
   return out;
@@ -113,7 +120,8 @@ export function portraitUrl(catalog: Catalog | null | undefined, id: number): st
 export function priceStep(price: number, dir: 1 | -1): number {
   const at = dir === 1 ? price : price - 1;
   const step = at < 1_000 ? 50 : at < 10_000 ? 100 : at < 50_000 ? 250 : at < 100_000 ? 500 : 1_000;
-  const next = dir === 1 ? Math.floor(price / step) * step + step : Math.ceil(price / step) * step - step;
+  const next =
+    dir === 1 ? Math.floor(price / step) * step + step : Math.ceil(price / step) * step - step;
   return Math.max(0, Math.min(15_000_000, next));
 }
 
@@ -124,7 +132,11 @@ export function fold(s: string): string {
 
 /** Players whose name contains `query`, names starting with it first, then
  * highest rated. */
-export function searchPlayers(players: CatalogPlayer[], query: string, limit = 12): CatalogPlayer[] {
+export function searchPlayers(
+  players: CatalogPlayer[],
+  query: string,
+  limit = 12,
+): CatalogPlayer[] {
   const q = fold(query.trim());
   if (q.length < 2) return [];
   const hits: { p: CatalogPlayer; starts: boolean }[] = [];

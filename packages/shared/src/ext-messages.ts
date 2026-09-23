@@ -373,6 +373,7 @@ export const extBackgroundCatalogSavePayloadSchema = z
     leagues: z.array(catalogOptionSchema).max(1_000),
     clubs: z.record(z.string().regex(/^\d+$/), z.array(catalogOptionSchema).max(500)),
     capturedAt: z.number().int(),
+    notes: z.array(z.string().max(500)).max(50).optional(),
   })
   .strict();
 

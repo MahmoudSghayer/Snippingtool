@@ -369,6 +369,17 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   let tick: ReturnType<typeof setInterval> | null = null;
   let refreshQueued = false;
   let catalog: Catalog | null = null;
+  let catalogPoll: ReturnType<typeof setInterval> | null = null;
+
+  /** Takes the latest catalog; re-renders only when it changed, and never
+   * while a list is open (the user may be scrolling it). */
+  function loadCatalog(): void {
+    void deps.getCatalog().then((c) => {
+      if (!c || page.hidden || c.capturedAt === catalog?.capturedAt || openDd) return;
+      catalog = c;
+      renderTargets();
+    });
+  }
 
   page.innerHTML = `
     <div class="top">
@@ -591,11 +602,13 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
 
   /** Used only until the web app has started and the adapter has built
    * the catalog from EA's own lists (they need no id to be meaningful). */
+  const LEVEL_IMG =
+    'https://www.ea.com/ea-sports-fc/ultimate-team/web-app/images/SearchFilters/level/';
   const FALLBACK_LEVELS: CatalogOption[] = [
-    { id: 0, value: 'bronze', label: 'Bronze' },
-    { id: 1, value: 'silver', label: 'Silver' },
-    { id: 2, value: 'gold', label: 'Gold' },
-    { id: 3, value: SPECIAL_LEVEL, label: 'Special' },
+    { id: 0, value: 'bronze', label: 'Bronze', img: `${LEVEL_IMG}bronze.png` },
+    { id: 1, value: 'silver', label: 'Silver', img: `${LEVEL_IMG}silver.png` },
+    { id: 2, value: 'gold', label: 'Gold', img: `${LEVEL_IMG}gold.png` },
+    { id: 3, value: SPECIAL_LEVEL, label: 'Special', img: `${LEVEL_IMG}SP.png` },
   ];
 
   /** EA's list for a row, exactly as the web app's search panel shows it. */
@@ -715,9 +728,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
           ? `<div class="dd-panel"><div class="dd-empty">${
               catalog
                 ? 'Nothing to choose here.'
-                : "EA's lists load once you're logged in to the web app. Keep this tab open, then reopen the Sniping Bot page. Or enter the EA id:"
-            }</div>
-              ${catalog ? '' : `<div class="dd-idrow"><input id="nf-dd-id" inputmode="numeric" placeholder="EA id" /><button type="button" class="dd-use" data-useid="${dd}">Use</button></div>`}</div>`
+                : "Loading EA's lists… keep the web app open and logged in; they appear here by themselves."
+            }</div></div>`
           : `<div class="dd-panel"><div class="dd-opts" id="dd-opts" role="listbox" aria-label="${esc(DD_LABEL[dd])}">${ddOptionsHtml(dd)}</div></div>`;
     }
     return `<div class="dd${open ? ' open' : ''}${label ? ' set' : ''}${disabled ? ' disabled' : ''}">
@@ -784,10 +796,9 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     const wasOpen = root.querySelector('#targets details')?.hasAttribute('open') ?? true;
     const filters = deps.getFilters();
     const players = catalog?.players.length ?? 0;
-    const hint =
-      players > 0
-        ? `${fmt(players)} players from EA's player list.`
-        : "EA's player list isn't saved yet: open the web app's Transfer Market search once and it will be. Until then, type a player id.";
+    const hint = !catalog
+      ? "Loading EA's lists and players… keep the web app open; they appear here by themselves."
+      : `${fmt(players)} players from EA's player list.${catalog.notes?.length ? ` Problems: ${catalog.notes.join(' · ')}` : ''}`;
 
     $('targets').innerHTML = section(
       'Snipe Targets',
@@ -912,12 +923,6 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       renderTargets();
     } else if (el.dataset.opt) {
       setDd(el.dataset.opt as Dd, el.dataset.val ?? null);
-      openDd = null;
-      renderTargets();
-    } else if (el.dataset.useid) {
-      const n = Number((root.getElementById('nf-dd-id') as HTMLInputElement | null)?.value);
-      if (!Number.isInteger(n) || n <= 0) return say('Enter a whole-number EA id');
-      setDd(el.dataset.useid as Dd, String(n));
       openDd = null;
       renderTargets();
     } else if (el.dataset.pick) {
@@ -1464,11 +1469,10 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       void deps.prepare().then(() => {
         if (!page.hidden) refreshLive();
       });
-      void deps.getCatalog().then((c) => {
-        if (!c || page.hidden) return;
-        catalog = c;
-        renderTargets();
-      });
+      loadCatalog();
+      // EA's lists arrive in two steps (files, then the web app's own lists
+      // once it has started); pick each one up while the page is open.
+      catalogPoll = setInterval(loadCatalog, 3_000);
       tick = setInterval(() => {
         renderRing();
         if (deps.getSniper()?.isRunning()) renderTop();
@@ -1479,6 +1483,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       if (page.hidden) return;
       page.hidden = true;
       if (tick) clearInterval(tick);
+      if (catalogPoll) clearInterval(catalogPoll);
+      catalogPoll = null;
       tick = null;
       openListeners.forEach((cb) => cb(false));
     },
