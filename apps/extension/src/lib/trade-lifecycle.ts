@@ -13,9 +13,10 @@
  *   listed/expired -> gone (missing from a full trade pile: sold unseen,
  *                          quick-sold, or moved to the club)
  *
- * Only a listing it saw listed can be a sale: a `closed` item counts only
- * when its tradeId is the card's current listing, which is never the
- * tradeId the card was bought on. The bought auction itself shows as
+ * Only a card it saw listed can have a sale: a `closed` item counts only
+ * once the card was seen listed at least once, and never on the tradeId
+ * the card was bought on (any other tradeId of the card is one of its own
+ * listings, seen or not). The bought auction itself shows as
  * `closed` at the price paid (watch list, trade status), and reading that
  * as a sale would report the purchase as a zero-profit sale.
  *
@@ -72,6 +73,9 @@ export interface LifecycleDeps {
    * queued: the sale stays unreported and `resumeUnreported` sends it
    * again. */
   reportSale: (trade: Trade) => void | Promise<void>;
+  /** Where `buysWithoutItemId` is kept, so it survives a restart (an MV3
+   * service worker stops whenever it is idle). In memory without one. */
+  counter?: { get(): Promise<number>; set(value: number): Promise<void> };
   now?: () => number;
 }
 
@@ -136,7 +140,7 @@ export class TradeLifecycle {
    * go through this instance). Bounded by pruning. */
   private cache: Map<string, LifecycleRecord> | null = null;
   private lastPruneAt = 0;
-  private buysWithoutItemId = 0;
+  private buysWithoutItemId: number | null = null;
 
   constructor(private readonly deps: LifecycleDeps) {
     this.now = deps.now ?? Date.now;
@@ -172,7 +176,9 @@ export class TradeLifecycle {
     return this.serial(async () => {
       const itemId = buy.itemId;
       if (!itemId) {
-        this.buysWithoutItemId++;
+        const count = (await this.buysWithoutItemIdCount()) + 1;
+        this.buysWithoutItemId = count;
+        await this.deps.counter?.set(count).catch(() => undefined);
         return;
       }
       const existing = (await this.records()).get(itemId);
@@ -276,10 +282,18 @@ export class TradeLifecycle {
     });
   }
 
+  private async buysWithoutItemIdCount(): Promise<number> {
+    if (this.buysWithoutItemId === null) {
+      const stored = this.deps.counter ? await this.deps.counter.get().catch(() => 0) : 0;
+      this.buysWithoutItemId = Number.isInteger(stored) && stored >= 0 ? stored : 0;
+    }
+    return this.buysWithoutItemId;
+  }
+
   /** Counters for the diagnostics report. */
   stats(): Promise<LifecycleStats> {
     return this.serial(async () => {
-      const out: LifecycleStats = { buysWithoutItemId: this.buysWithoutItemId, followed: 0, salesReported: 0 };
+      const out: LifecycleStats = { buysWithoutItemId: await this.buysWithoutItemIdCount(), followed: 0, salesReported: 0 };
       for (const r of (await this.records()).values()) {
         if (r.state === 'bought' || r.state === 'listed' || r.state === 'expired') out.followed++;
         else if (r.state === 'sold' && r.saleReported) out.salesReported++;
@@ -306,19 +320,22 @@ export class TradeLifecycle {
         if (record.state === 'expired' && record.listTradeId === item.tradeId) return null;
         return { ...record, state: 'expired', listTradeId: item.tradeId, updatedAt: at };
       case 'closed': {
-        // Only the listing it saw listed (or expired, or last saw before
-        // it left a full pile) can have sold.
+        // Only a card seen listed at least once can have sold. An itemId is
+        // one card, so any closed tradeId other than the one it was bought
+        // on is that card's own listing, even one never seen active (a
+        // "Relist all" whose response carries no auctions, sold before the
+        // pile was next opened): a relist.
         if (record.state !== 'listed' && record.state !== 'expired' && record.state !== 'gone') return null;
-        if (item.tradeId !== record.listTradeId) return null;
         const price = salePrice(item);
         if (!inCoinRange(price)) return null;
+        const relisted = record.listTradeId !== null && record.listTradeId !== item.tradeId;
         // Never before the purchase: the server rejects a sale that
         // precedes its buy, and the buy's time may come from a clock
         // slightly ahead of this one. Otherwise the time the sale was
         // seen, not when it happened (EA gives no sale time).
         const boughtAt = Date.parse(record.boughtAt);
         const soldAt = new Date(Number.isFinite(boughtAt) ? Math.max(at, boughtAt) : at).toISOString();
-        return { ...record, state: 'sold', sellPrice: price, soldAt, saleReported: false, updatedAt: at };
+        return { ...record, state: 'sold', listTradeId: item.tradeId, relists: record.relists + (relisted ? 1 : 0), sellPrice: price, soldAt, saleReported: false, updatedAt: at };
       }
       default:
         // On the pile, not listed: nothing to record.

@@ -24,6 +24,11 @@ import { ShapeError } from './ea-response.js';
 
 import type { TradePileItem } from '@sl/shared';
 
+/** `MAX_COIN_PRICE` from `@sl/shared`, restated: this file runs in the
+ * MAIN world and imports nothing from the zod-carrying barrel (see
+ * adapter.ts's header). Pinned equal by test/unit/ea-listing.test.ts. */
+export const MAX_COIN_PRICE = 15_000_000;
+
 const toNumber = Number;
 const toStr = String;
 const isFiniteNumber = Number.isFinite;
@@ -183,8 +188,10 @@ export function normalisePileItem(entry: unknown): TradePileItem | null {
   const currentBid = num(auction.currentBid, 0);
   const buyNowPrice = num(auction.buyNowPrice, 0);
   const rating = num(item.rating, NaN);
+  // Same bounds as the message schema (coinPriceSchema): one entry out of
+  // range is skipped here rather than failing the whole message.
   for (const price of [currentBid, buyNowPrice]) {
-    if (!isFiniteNumber(price) || price < 0 || !isInteger(price)) return null;
+    if (!isFiniteNumber(price) || price < 0 || price > MAX_COIN_PRICE || !isInteger(price)) return null;
   }
   const expires = num(auction.expires, NaN);
   return {

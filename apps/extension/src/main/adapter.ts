@@ -573,8 +573,13 @@ function handlePileBody(path: string, body: unknown, method: string): void {
   const list = Array.isArray(r.auctionInfo) ? r.auctionInfo : Array.isArray(r.itemData) ? r.itemData : null;
   if (!list) return failure('no auctionInfo / itemData list in response');
   let items: TradePileItem[];
+  let skipped = 0;
+  const logSkipped = skippedEntries('trade pile');
   try {
-    items = normalisePileItems(list, skippedEntries('trade pile'));
+    items = normalisePileItems(list, (count) => {
+      skipped = count;
+      logSkipped(count);
+    });
   } catch (err) {
     return failure(err instanceof Error ? err.message : String(err));
   }
@@ -582,7 +587,9 @@ function handlePileBody(path: string, body: unknown, method: string): void {
   // the lifecycle may then retire followed items missing from it. Any
   // other method, path or envelope is a partial view. Sent even when
   // empty, since an empty full pile is news too.
-  const full = loud && method.toUpperCase() === 'GET' && Array.isArray(r.auctionInfo);
+  // And only when every entry was read: an unreadable one might be a
+  // followed card, which would then be wrongly retired.
+  const full = loud && method.toUpperCase() === 'GET' && Array.isArray(r.auctionInfo) && skipped === 0;
   if (items.length > 0 || full) post('tradepile', { url: path, seenAt: now(), items, full });
 }
 

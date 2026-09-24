@@ -18,6 +18,7 @@ import { idbLifecycleStore } from '../store/lifecycle-db.js';
 import type { LifecycleBuy, LifecycleSessionPnl, LifecycleStats, TradePileItem } from '@sl/shared';
 
 const SESSION_START_KEY = 'sl.lifecycle.sessionStart.v1';
+const NO_ITEM_ID_KEY = 'sl.lifecycle.buysWithoutItemId.v1';
 
 const lifecycle = new TradeLifecycle({
   store: idbLifecycleStore,
@@ -26,6 +27,12 @@ const lifecycle = new TradeLifecycle({
     persisted: () => telemetry.whenPersisted(),
     optedOut: async () => (await getCachedSettings()).telemetryOptOut,
   }),
+  // In `storage.session`, with the session start: it survives the worker
+  // stopping, and counts per browser session.
+  counter: {
+    get: () => getSession<number>(NO_ITEM_ID_KEY, 0),
+    set: (value) => setSession(NO_ITEM_ID_KEY, value),
+  },
 });
 
 /** Re-send any sale persisted but not yet handed over: once when the

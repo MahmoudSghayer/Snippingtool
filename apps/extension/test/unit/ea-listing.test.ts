@@ -4,9 +4,10 @@
 // item entities — either becomes a list of normalised listings or an error.
 // Never an `ok` with nothing in it because the envelope was not understood.
 
+import { MAX_COIN_PRICE as SHARED_MAX_COIN_PRICE } from '@sl/shared';
 import { describe, expect, it, vi } from 'vitest';
 
-import { normaliseListing, normaliseListings, normalisePileItem, normalisePileItems } from '../../src/main/ea-listing.js';
+import { MAX_COIN_PRICE, normaliseListing, normaliseListings, normalisePileItem, normalisePileItems } from '../../src/main/ea-listing.js';
 import { ShapeError, TimeoutUnknownError, describeError, extractListingArray, settle } from '../../src/main/ea-response.js';
 import { itemEntity, observable, utasAuction } from '../fixtures/ea-shapes.js';
 
@@ -245,6 +246,13 @@ describe('normalisePileItem', () => {
     delete (noId.itemData as { id?: number }).id;
     expect(normalisePileItem(noId)).toBeNull();
     expect(normalisePileItem(pileEntry({ tradeState: 'pending' }))).toBeNull();
+  });
+
+  it('skips an entry whose prices are outside 0..MAX_COIN_PRICE (the same bound as @sl/shared)', () => {
+    expect(MAX_COIN_PRICE).toBe(SHARED_MAX_COIN_PRICE);
+    expect(normalisePileItem(pileEntry({ buyNowPrice: MAX_COIN_PRICE + 1 }))).toBeNull();
+    expect(normalisePileItem(pileEntry({ tradeState: 'closed', currentBid: MAX_COIN_PRICE + 1 }))).toBeNull();
+    expect(normalisePileItem(pileEntry({ buyNowPrice: MAX_COIN_PRICE }))).toMatchObject({ buyNowPrice: MAX_COIN_PRICE });
   });
 
   it('throws when not one entry of a non-empty pile can be read, and counts skipped ones', () => {

@@ -398,6 +398,8 @@ describe('trades module (/api/v1/trades)', () => {
       payload: { sellPrice: 30000, soldAt: closedAt },
     });
     expect(closed.statusCode).toBe(200);
+    const profitsBefore = await app.db.query.profits.findMany({ where: eq(profits.userId, userId) });
+    expect(profitsBefore.find((r) => r.day === closedAt.slice(0, 10))).toMatchObject({ netProfit: 8500, tradesClosed: 1 });
 
     // The extension then reports its own view of the sale, at another price.
     const res = await app.inject({
@@ -411,6 +413,10 @@ describe('trades module (/api/v1/trades)', () => {
     const after = await app.db.query.trades.findFirst({ where: eq(trades.id, row!.id) });
     expect(after).toMatchObject({ status: 'sold', sellPrice: 30000, netProfit: 8500 });
     expect(after!.soldAt?.toISOString()).toBe(closedAt);
+    // The rollup is untouched by the ignored report.
+    const profitsAfter = await app.db.query.profits.findMany({ where: eq(profits.userId, userId) });
+    expect(profitsAfter.find((r) => r.day === closedAt.slice(0, 10))).toMatchObject({ netProfit: 8500, tradesClosed: 1 });
+    expect(profitsAfter.reduce((sum, r) => sum + r.netProfit, 0)).toBe(8500);
   });
 
   it('batch: an expired trade can still be reported sold', async () => {

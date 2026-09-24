@@ -89,18 +89,27 @@ describe('trade lifecycle', () => {
     expect((await store.get('900001'))?.state).toBe('bought');
   });
 
-  it('only a closed listing it saw listed is a sale', async () => {
+  it('a card never seen listed has no sale: closed straight from bought is ignored', async () => {
     const { lifecycle, reported } = setup();
     await lifecycle.recordBuy(buy());
-    // Closed, but never seen listed: not trusted as this card's sale.
     await lifecycle.observePile([SOLD]);
     expect(reported).toHaveLength(0);
-    // Listed as 7001; a closed 7999 is not that listing.
     await lifecycle.observePile([LISTED]);
-    await lifecycle.observePile([pile({ tradeId: '7999', tradeState: 'closed', currentBid: 13_500 })]);
-    expect(reported).toHaveLength(0);
     await lifecycle.observePile([SOLD]);
     expect(reported).toHaveLength(1);
+  });
+
+  it('a relist never seen active still sells: any other closed tradeId of a listed card is its own later listing', async () => {
+    const { lifecycle, reported, store } = setup();
+    await lifecycle.recordBuy(buy());
+    await lifecycle.observePile([LISTED]);
+    await lifecycle.observePile([pile({ tradeState: 'expired' })]);
+    // "Relist all" (no auctionInfo in its response), then sold as 7999
+    // before the pile was next opened.
+    await lifecycle.observePile([pile({ tradeId: '7999', tradeState: 'closed', currentBid: 12_000 })]);
+    expect(reported).toHaveLength(1);
+    expect(reported[0]).toMatchObject({ tradeId: '5001', sellPrice: 12_000 });
+    expect(await store.get('900001')).toMatchObject({ listTradeId: '7999', relists: 1 });
   });
 
   it('follows an expired -> relisted -> sold chain to one sale at the final price', async () => {
@@ -202,6 +211,17 @@ describe('trade lifecycle', () => {
     await lifecycle.observePile([LISTED]);
     await lifecycle.observePile([SOLD]);
     expect(await lifecycle.stats()).toEqual({ buysWithoutItemId: 1, followed: 1, salesReported: 1 });
+  });
+
+  it('keeps the buys-without-item-id count across a restart when given a counter store', async () => {
+    let saved = 0;
+    const counter = { get: async () => saved, set: async (n: number) => void (saved = n) };
+    const store = createMemoryLifecycleStore();
+    const first = new TradeLifecycle({ store, reportSale: () => undefined, counter });
+    await first.recordBuy(buy({ itemId: null }));
+    const second = new TradeLifecycle({ store, reportSale: () => undefined, counter });
+    await second.recordBuy(buy({ itemId: null }));
+    expect((await second.stats()).buysWithoutItemId).toBe(2);
   });
 
   it('a full trade pile without a listed or expired item marks it gone: no longer listed value', async () => {

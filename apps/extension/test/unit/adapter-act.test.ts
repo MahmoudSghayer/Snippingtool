@@ -363,6 +363,16 @@ describe('passive observation of the trade pile', () => {
     expect(posted.find((m) => m.kind === 'tradepile')!.data.full).toBe(false);
   });
 
+  it('does not call a trade pile full when it skipped an unreadable entry, nor drop it for one bad price', async () => {
+    const url = EA + '/tradepile';
+    nativeFetch.mockResolvedValueOnce(networkResponse({ auctionInfo: [pileEntry(18, 'active'), { something: 'else' }, { ...pileEntry(19, 'active'), buyNowPrice: 99_000_000 }] }, url));
+    await window.fetch(url);
+    await vi.waitFor(() => expect(posted.filter((m) => m.kind === 'tradepile')).toHaveLength(1));
+    const data = posted.find((m) => m.kind === 'tradepile')!.data;
+    expect(data.full).toBe(false);
+    expect((data.items as { itemId: string }[]).map((i) => i.itemId)).toEqual(['18']);
+  });
+
   it('ignores a trade-pile-shaped response from a non-EA host', async () => {
     nativeFetch.mockResolvedValueOnce(networkResponse({ auctionInfo: [pileEntry(13, 'closed', 13_500)] }, 'https://evil.example/ut/game/fc25/tradepile'));
     await window.fetch('https://evil.example/ut/game/fc25/tradepile');
