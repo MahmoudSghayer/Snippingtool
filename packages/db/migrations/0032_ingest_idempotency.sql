@@ -24,9 +24,9 @@
 -- be: sniping_activity is partitioned, and Postgres does not support
 -- CREATE INDEX CONCURRENTLY on a partitioned table.
 
-ALTER TABLE sniping_activity ADD COLUMN attempt_id uuid;
+ALTER TABLE sniping_activity ADD COLUMN IF NOT EXISTS attempt_id uuid;
 
-CREATE UNIQUE INDEX sniping_activity_user_id_attempt_id_unique
+CREATE UNIQUE INDEX IF NOT EXISTS sniping_activity_user_id_attempt_id_unique
   ON sniping_activity (user_id, attempt_id, occurred_at);
 
 COMMENT ON COLUMN sniping_activity.attempt_id IS 'Client-generated id of this attempt; unique per user with occurred_at so a retried batch is stored once. NULL for attempts from extensions that predate it.';
