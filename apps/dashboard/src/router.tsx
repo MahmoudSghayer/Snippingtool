@@ -233,6 +233,13 @@ const adminSubscriptionsRoute = createRoute({
   beforeLoad: () => requireAdminNavPermission('admin-subscriptions'),
 });
 
+const adminPaymentsRoute = createRoute({
+  getParentRoute: () => adminLayoutRoute,
+  path: '/payments',
+  component: lazyRouteComponent(() => import('@/pages/admin/PaymentsPage.js'), 'PaymentsPage'),
+  beforeLoad: () => requireAdminNavPermission('admin-payments'),
+});
+
 const adminCouponsRoute = createRoute({
   getParentRoute: () => adminLayoutRoute,
   path: '/coupons',
@@ -313,6 +320,7 @@ const routeTree = rootRoute.addChildren([
         adminSystemRoute,
         adminAuditRoute,
         adminSubscriptionsRoute,
+        adminPaymentsRoute,
         adminCouponsRoute,
         adminPlansRoute,
         adminFlagsRoute,
@@ -365,6 +373,7 @@ const PAGE_TITLES: [string, string][] = [
   ['/admin/system', 'Admin · System'],
   ['/admin/audit', 'Admin · Audit log'],
   ['/admin/subscriptions', 'Admin · Subscriptions'],
+  ['/admin/payments', 'Admin · Payments'],
   ['/admin/coupons', 'Admin · Coupons'],
   ['/admin/plans', 'Admin · Plans'],
   ['/admin/flags', 'Admin · Flags'],
@@ -379,7 +388,7 @@ function titleForPath(pathname: string): string {
   const match = PAGE_TITLES.find(
     ([prefix]) => pathname === prefix || pathname.startsWith(`${prefix}/`),
   );
-  return match ? `${match[1]} · The Sniper's Ledger` : "The Sniper's Ledger";
+  return match ? `${match[1]} · Nova Trade` : 'Nova Trade';
 }
 
 document.title = titleForPath(window.location.pathname);

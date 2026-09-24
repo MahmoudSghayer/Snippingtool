@@ -40,6 +40,7 @@ describe('lib/auth.ts + background/auth.ts: register() never fakes a session', (
       email: 'newuser@example.com',
       password: 'correct-horse-battery-staple-1',
       device: { fingerprint: 'a'.repeat(32) },
+      acceptTerms: true,
     });
 
     expect(result).toEqual({ userId: '11111111-1111-1111-1111-111111111111' });
@@ -52,12 +53,25 @@ describe('lib/auth.ts + background/auth.ts: register() never fakes a session', (
     expect(await isAuthenticated()).toBe(false);
   });
 
-  it('background/auth.ts handleAuthRegister passes the real {userId} response through untouched (no LoginResponse coercion)', async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse(201, { userId: '22222222-2222-2222-2222-222222222222' }));
+  it('register() sends acceptTerms: true to the API', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(201, { userId: '33333333-3333-3333-3333-333333333333' }));
 
-    const result = await handleAuthRegister({ email: 'popup-user@example.com', password: 'correct-horse-battery-staple-2' });
+    await register({
+      email: 'terms@example.com',
+      password: 'correct-horse-battery-staple-4',
+      device: { fingerprint: 'c'.repeat(32) },
+      acceptTerms: true,
+    });
 
-    expect(result).toEqual({ userId: '22222222-2222-2222-2222-222222222222' });
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({ acceptTerms: true });
+  });
+
+  it('background/auth.ts handleAuthRegister refuses (the popup cannot accept the Terms) and calls no API', async () => {
+    await expect(
+      handleAuthRegister({ email: 'popup-user@example.com', password: 'correct-horse-battery-staple-2' }),
+    ).rejects.toThrow(/Terms of Service/);
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(await isAuthenticated()).toBe(false);
   });
 
@@ -89,7 +103,12 @@ describe('lib/auth.ts + background/auth.ts: register() never fakes a session', (
     );
 
     await expect(
-      register({ email: 'dup@example.com', password: 'correct-horse-battery-staple-3', device: { fingerprint: 'b'.repeat(32) } }),
+      register({
+        email: 'dup@example.com',
+        password: 'correct-horse-battery-staple-3',
+        device: { fingerprint: 'b'.repeat(32) },
+        acceptTerms: true,
+      }),
     ).rejects.toThrow();
     expect(await isAuthenticated()).toBe(false);
   });

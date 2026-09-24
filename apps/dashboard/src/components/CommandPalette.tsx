@@ -15,6 +15,7 @@ import {
   Gauge,
   Gift,
   LayoutDashboard,
+  Receipt,
   Search,
   Server,
   Settings as SettingsIcon,
@@ -115,6 +116,13 @@ const ROUTES: PaletteRoute[] = [
     label: 'Admin · Subscriptions',
     href: '/admin/subscriptions',
     icon: <CreditCard className="size-4" />,
+    adminOnly: true,
+  },
+  {
+    key: 'admin-payments',
+    label: 'Admin · Payments',
+    href: '/admin/payments',
+    icon: <Receipt className="size-4" />,
     adminOnly: true,
   },
   {

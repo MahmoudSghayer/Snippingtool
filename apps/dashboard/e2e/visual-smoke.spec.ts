@@ -163,6 +163,7 @@ test.describe('visual smoke (screenshots + no console errors)', () => {
       await visit('/admin/activity', 'admin-activity', 'Activity', vp.name);
       await visit('/admin/system', 'admin-system', 'System', vp.name);
       await visit('/admin/subscriptions', 'admin-subscriptions', 'Subscriptions', vp.name);
+      await visit('/admin/payments', 'admin-payments', 'Payments', vp.name);
       await visit('/admin/coupons', 'admin-coupons', 'Coupons', vp.name);
       await visit('/admin/plans', 'admin-plans', 'Plans', vp.name);
       await visit('/admin/flags', 'admin-flags', 'Flags', vp.name);

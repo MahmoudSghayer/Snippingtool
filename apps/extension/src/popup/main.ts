@@ -22,7 +22,7 @@ import browser from 'webextension-polyfill';
 import { send } from '../lib/bg-client.js';
 
 import type { RiskSnapshot } from '../engine/governor.js';
-import type { BootstrapResponse, LoginResponse, RegisterResponse, UserSettings } from '@sl/shared';
+import type { BootstrapResponse, LoginResponse, UserSettings } from '@sl/shared';
 // Type-only: engine/governor.ts is automation-surface code, but a `type`
 // import is fully erased at compile time (no runtime code, nothing for a
 // bundler to pull in) — see extBackgroundGovernorSnapshotPushPayloadSchema's
@@ -41,64 +41,34 @@ function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 }
 
+const DASHBOARD_ORIGIN = (import.meta.env.VITE_DASHBOARD_ORIGIN ?? '').replace(/\/$/, '');
+
 async function renderLoggedOut(error?: string): Promise<void> {
   h(`
     <h1><span class="dot"></span> Sniper's Ledger</h1>
     ${error ? `<div class="error">${esc(error)}</div>` : ''}
-    <input id="email" type="email" placeholder="Email" autocomplete="username" />
-    <input id="password" type="password" placeholder="Password" autocomplete="current-password" />
+    <input id="email" type="email" placeholder="Email" aria-label="Email" autocomplete="username" />
+    <input id="password" type="password" placeholder="Password" aria-label="Password" autocomplete="current-password" />
     <button id="login">Sign in</button>
     <p style="text-align:center;margin-top:10px;">
       <button class="link" id="register-link">Create an account</button>
     </p>
   `);
   document.getElementById('login')?.addEventListener('click', onLoginSubmit);
-  document.getElementById('register-link')?.addEventListener('click', () => void renderRegister());
+  document.getElementById('register-link')?.addEventListener('click', () => void openDashboardRegister());
 }
 
-async function renderRegister(error?: string): Promise<void> {
-  h(`
-    <h1><span class="dot"></span> Sniper's Ledger</h1>
-    ${error ? `<div class="error">${esc(error)}</div>` : ''}
-    <input id="email" type="email" placeholder="Email" autocomplete="username" />
-    <input id="password" type="password" placeholder="Password (12+ chars)" autocomplete="new-password" />
-    <button id="register">Create account</button>
-    <p style="text-align:center;margin-top:10px;">
-      <button class="link" id="back-link">Back to sign in</button>
-    </p>
-  `);
-  document.getElementById('register')?.addEventListener('click', onRegisterSubmit);
-  document.getElementById('back-link')?.addEventListener('click', () => void renderLoggedOut());
-}
-
-/** Defect #3 fix (docs/12-testing.md "Defects found"): `POST /auth/register`
- * never returns tokens — the account needs email verification before login
- * works (docs/03-api.md §"auth"). Registering used to fall straight into
- * `renderLoggedIn()`, which called `license.bootstrap` with no access token
- * and silently broke. This renders an explicit "check your email" state
- * instead, with a resend action, and a way back to the (now-usable, once
- * verified) sign-in form. */
-function renderCheckEmail(email: string, notice?: string): void {
-  h(`
-    <h1><span class="dot warn"></span> Verify your email</h1>
-    <p style="color:var(--muted)">We sent a verification link to <strong>${esc(email)}</strong>. Open it, then sign in below.</p>
-    ${notice ? `<div class="hint">${esc(notice)}</div>` : ''}
-    <button class="secondary" id="resend">Resend verification email</button>
-    <p style="text-align:center;margin-top:10px;">
-      <button class="link" id="to-login">Back to sign in</button>
-    </p>
-  `);
-  document.getElementById('resend')?.addEventListener('click', async () => {
-    const btn = document.getElementById('resend') as HTMLButtonElement;
-    btn.disabled = true;
-    try {
-      await send('auth.resendVerification', { email });
-      renderCheckEmail(email, 'Verification email sent.');
-    } catch (err) {
-      renderCheckEmail(email, err instanceof Error ? err.message : 'Could not resend — try again shortly.');
-    }
-  });
-  document.getElementById('to-login')?.addEventListener('click', () => void renderLoggedOut());
+/** Accounts are created on the website, not in the popup: registering
+ * requires accepting the Terms of Service and Refund Policy, and the website
+ * is where those are shown and accepted (`/register`). After verifying their
+ * email, the user signs in here as usual. */
+async function openDashboardRegister(): Promise<void> {
+  if (!DASHBOARD_ORIGIN) {
+    await renderLoggedOut('Create your account on the website, then sign in here.');
+    return;
+  }
+  await browser.tabs.create({ url: `${DASHBOARD_ORIGIN}/register` });
+  window.close();
 }
 
 /** Mirrors `ui/panel.ts`'s `meterClass`/`setMeter` exactly (same 80%/100%
@@ -144,7 +114,7 @@ function renderMfa(mfaTicket: string): void {
   h(`
     <h1><span class="dot warn"></span> Verify it's you</h1>
     <p style="color:var(--muted)">Enter the 6-digit code from your authenticator app.</p>
-    <input id="code" inputmode="numeric" placeholder="123456" />
+    <input id="code" inputmode="numeric" placeholder="123456" aria-label="Authentication code" />
     <button id="verify">Verify</button>
   `);
   document.getElementById('verify')?.addEventListener('click', async () => {
@@ -171,19 +141,6 @@ async function onLoginSubmit(): Promise<void> {
     else await renderLoggedIn();
   } catch (err) {
     await renderLoggedOut(err instanceof Error ? err.message : 'Sign-in failed');
-  }
-}
-
-async function onRegisterSubmit(): Promise<void> {
-  const email = (document.getElementById('email') as HTMLInputElement).value.trim();
-  const password = (document.getElementById('password') as HTMLInputElement).value;
-  try {
-    await send<RegisterResponse>('auth.register', { email, password });
-    // No tokens are issued at register time — render the verify-email
-    // state instead of assuming a session exists (defect #3).
-    renderCheckEmail(email);
-  } catch (err) {
-    await renderRegister(err instanceof Error ? err.message : 'Registration failed');
   }
 }
 

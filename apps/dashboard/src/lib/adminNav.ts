@@ -17,6 +17,9 @@ export const ADMIN_NAV_PERMISSIONS = {
   // subscriptions list/lookup — reachable to either an analyst
   // (analytics.read) or billing (subscriptions.read) admin.
   'admin-subscriptions': ['subscriptions.read', 'analytics.read'],
+  // The PayPal payment-claims queue. Approve/reject additionally need
+  // subscriptions.write; the page hides those buttons without it.
+  'admin-payments': ['subscriptions.read'],
   'admin-coupons': ['coupons.write'],
   'admin-plans': ['plans.write'],
   'admin-flags': ['users.suspend', 'users.ban'],

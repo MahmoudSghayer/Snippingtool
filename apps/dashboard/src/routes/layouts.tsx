@@ -1,4 +1,5 @@
 import { Badge, Drawer, Sidebar, Toaster } from '@sl/ui';
+import { useQuery } from '@tanstack/react-query';
 import { Link, Outlet, useMatchRoute, useNavigate } from '@tanstack/react-router';
 import {
   Activity,
@@ -16,6 +17,7 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
+  Receipt,
   Search,
   Server,
   Settings as SettingsIcon,
@@ -47,14 +49,31 @@ export function RootLayout() {
   );
 }
 
+/** The public brand: "Nova Trade" wordmark with its "AI Powered" tagline. */
+function Wordmark({ size }: { size: 'sm' | 'lg' }) {
+  return (
+    <span className="flex items-center gap-2">
+      <Shield
+        className={size === 'lg' ? 'size-6 text-gold' : 'size-5 text-gold'}
+        aria-hidden="true"
+      />
+      <span
+        className={`font-mono font-semibold tracking-tight text-ink ${size === 'lg' ? 'text-lg' : 'text-sm'}`}
+      >
+        Nova Trade
+      </span>
+      <span className="rounded-full border border-gold/30 bg-gold/10 px-1.5 py-0.5 text-[10px] font-medium uppercase leading-none tracking-wide text-gold">
+        AI Powered
+      </span>
+    </span>
+  );
+}
+
 /** Centered card shell for /login, /register, /forgot-password, etc. */
 export function PublicLayout() {
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center gap-8 bg-ground px-4 py-10">
-      <div className="flex items-center gap-2 text-ink">
-        <Shield className="size-6 text-gold" aria-hidden="true" />
-        <span className="font-mono text-lg font-semibold tracking-tight">The Sniper's Ledger</span>
-      </div>
+      <Wordmark size="lg" />
       <div className="w-full max-w-sm">
         <Outlet />
       </div>
@@ -142,6 +161,12 @@ const adminNav = [
     icon: <CreditCard className="size-4" />,
   },
   {
+    key: 'admin-payments',
+    label: 'Payments',
+    href: '/admin/payments',
+    icon: <Receipt className="size-4" />,
+  },
+  {
     key: 'admin-coupons',
     label: 'Coupons',
     href: '/admin/coupons',
@@ -207,6 +232,9 @@ export function AppLayout() {
   const visibleAdminNav = adminNav.filter((item) =>
     ADMIN_NAV_PERMISSIONS[item.key as AdminNavKey].some((p) => adminPermissions.includes(p)),
   );
+  const pendingPayments = usePendingPaymentCount(
+    isAdmin && adminPermissions.includes('subscriptions.read'),
+  );
 
   const sections = [
     {
@@ -222,6 +250,13 @@ export function AppLayout() {
             items: visibleAdminNav.map((item) => ({
               ...item,
               active: !!matchRoute({ to: item.href, fuzzy: item.href !== '/admin' }),
+              badge:
+                item.key === 'admin-payments' && pendingPayments ? (
+                  <Badge tone="warning">
+                    {pendingPayments}
+                    <span className="sr-only"> pending</span>
+                  </Badge>
+                ) : undefined,
             })),
           },
         ]
@@ -229,9 +264,8 @@ export function AppLayout() {
   ];
 
   const brand = (
-    <Link to="/dashboard" className="flex items-center gap-2 font-mono text-sm font-semibold">
-      <Shield className="size-5 text-gold" aria-hidden="true" />
-      Sniper's Ledger
+    <Link to="/dashboard" aria-label="Nova Trade, AI Powered: go to dashboard">
+      <Wordmark size="sm" />
     </Link>
   );
 
@@ -346,6 +380,29 @@ export function AppLayout() {
       </div>
     </div>
   );
+}
+
+const PENDING_COUNT_PAGE = 100;
+
+/** Pending PayPal payment claims, for the admin nav badge: one page of the
+ * same list the Payments page shows, counted client-side ("100+" past one
+ * page). Shares the `['admin', 'payment-claims']` key prefix, so approving
+ * or rejecting on that page refreshes it. */
+function usePendingPaymentCount(enabled: boolean): string | null {
+  const query = useQuery({
+    queryKey: ['admin', 'payment-claims', 'pending-count'],
+    enabled,
+    refetchInterval: 60_000,
+    queryFn: async () => {
+      const { data, error } = await api.GET('/api/v1/admin/payment-claims', {
+        params: { query: { status: 'pending', limit: PENDING_COUNT_PAGE } },
+      });
+      if (error) throw error;
+      return data;
+    },
+  });
+  if (!enabled || !query.data || query.data.items.length === 0) return null;
+  return query.data.nextCursor ? `${PENDING_COUNT_PAGE}+` : String(query.data.items.length);
 }
 
 export function AdminOnlyGate({ children }: { children: React.ReactNode }) {

@@ -11,7 +11,7 @@ import { logger } from '../lib/logger.js';
 
 import { runBootstrap } from './license.js';
 
-import type { LoginResponse, MfaVerifyRequest, RegisterRequest, RegisterResponse } from '@sl/shared';
+import type { LoginResponse, MfaVerifyRequest, RegisterResponse } from '@sl/shared';
 
 export interface AuthStatus {
   authenticated: boolean;
@@ -37,18 +37,19 @@ export async function handleAuthLogin(payload: { email: string; password: string
   return result;
 }
 
-export async function handleAuthRegister(payload: {
+/** Registration needs the user to accept the Terms of Service and Refund
+ * Policy (`registerRequestSchema.acceptTerms`), which the popup doesn't
+ * show — it opens the website's `/register` instead. This handler stays
+ * wired for the `auth.register` message type but refuses rather than
+ * claiming an acceptance the user never gave; the payload schema
+ * (`extBackgroundRegisterPayloadSchema`) has no field to carry one. */
+export async function handleAuthRegister(_payload: {
   email: string;
   password: string;
   timezone?: string;
   referralCode?: string;
 }): Promise<RegisterResponse> {
-  const body: RegisterRequest = { ...payload, device: await buildDevice() };
-  // Registration never returns tokens — email verification is required
-  // first (see lib/auth.ts's register() comment; defect #3,
-  // docs/12-testing.md). No post-register bootstrap here: there is no
-  // session to bootstrap yet.
-  return auth.register(body);
+  throw new Error('Create your account on the website: you need to accept the Terms of Service there first.');
 }
 
 export async function handleAuthResendVerification(payload: { email: string }): Promise<{ sent: true }> {
