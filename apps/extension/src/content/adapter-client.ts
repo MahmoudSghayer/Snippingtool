@@ -15,7 +15,7 @@ import { ADAPTER_CHANNEL, adapterMessageSchema } from '@sl/shared';
 
 import { ACT_ERROR, canonicalActMessage, createActSigner } from '../lib/act-auth.js';
 
-import type { FilterCriteria, TrimmedAuction } from '@sl/shared';
+import type { AdapterDiagnostics, FilterCriteria, TrimmedAuction } from '@sl/shared';
 
 const ACTION_TIMEOUT_MS = 15_000;
 
@@ -23,12 +23,16 @@ export interface ActionOutcome {
   ok: boolean;
   error?: string;
   stillListed?: boolean;
+  /** Only for `diagnostics()`. */
+  diagnostics?: AdapterDiagnostics;
   latencyMs: number;
 }
 
 export interface ProbeStatus {
   ok: boolean;
   reason?: string;
+  /** The EA service-layer shape the adapter selected (main/shapes.ts). */
+  shape?: 'promise' | 'observable';
   checkedAt: number;
 }
 
@@ -37,13 +41,16 @@ export interface AdapterClient {
   search(filter: FilterCriteria): Promise<ActionOutcome>;
   buy(tradeId: string, price: number): Promise<ActionOutcome>;
   readResult(tradeId: string): Promise<ActionOutcome>;
+  /** The adapter's read-only diagnostics report, over the same
+   * authenticated channel as every act call (docs/06-extension.md §4). */
+  diagnostics(): Promise<ActionOutcome>;
   onProbe(cb: (status: ProbeStatus) => void): () => void;
   onShape(cb: (reason: string) => void): () => void;
   onAuctions(cb: (auctions: TrimmedAuction[]) => void): () => void;
   dispose(): void;
 }
 
-type ActAction = 'search' | 'buy' | 'readResult';
+type ActAction = 'search' | 'buy' | 'readResult' | 'diagnostics';
 
 interface Pending {
   action: ActAction;
@@ -111,7 +118,13 @@ export function createAdapterClient(target: Window, nonce: string | null, option
         adapterReportedUnready = false;
         if (!entry || entry.action !== data.action) return;
         pending.delete(requestId);
-        entry.resolve({ ok: data.ok, error: data.error, stillListed: data.stillListed, latencyMs: data.completedAt - data.requestedAt });
+        entry.resolve({
+          ok: data.ok,
+          error: data.error,
+          stillListed: data.stillListed,
+          diagnostics: data.diagnostics,
+          latencyMs: data.completedAt - data.requestedAt,
+        });
       });
     }
   }
@@ -160,6 +173,7 @@ export function createAdapterClient(target: Window, nonce: string | null, option
     buy: (tradeId, price) =>
       price > 0 ? call({ action: 'buy', tradeId, price }) : Promise.resolve({ ok: false, error: ACT_ERROR.priceMismatch, latencyMs: 0 }),
     readResult: (tradeId) => call({ action: 'readResult', tradeId }),
+    diagnostics: () => call({ action: 'diagnostics' }),
     onProbe: (cb) => {
       probeListeners.add(cb);
       return () => probeListeners.delete(cb);

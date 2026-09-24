@@ -1,7 +1,8 @@
 /*
  * options/main.ts — saved filters editor, budgets/governor thresholds
  * (clamped to `GOVERNOR_ABSOLUTE_LIMITS`), devices list, telemetry opt-out +
- * "What it sends", logs export, account/license info. Vanilla TS, same
+ * "What it sends", logs export, "Copy diagnostics" (the day-one kit,
+ * docs/06-extension.md §4), account/license info. Vanilla TS, same
  * reasoning as `popup/main.ts`.
  */
 import {
@@ -14,8 +15,11 @@ import {
   type SavedFilter,
   type UserSettings,
 } from '@sl/shared';
+import browser from 'webextension-polyfill';
 
+import { EA_WEB_APP_MATCHES } from '../../ea-origins.mjs';
 import { send } from '../lib/bg-client.js';
+import { collectDiagnostics } from '../lib/diagnostics.js';
 
 /** Structural, not `import type { ZodTypeAny } from 'zod'` — `zod` is a
  * transitive dependency (via `@sl/shared`), not one this package declares
@@ -224,7 +228,10 @@ async function render(): Promise<void> {
 
     <section id="logs">
       <h2>Diagnostics</h2>
+      <p class="hint">With the EA web app open in another tab, "Copy diagnostics" copies a JSON report of what the extension sees of it: which service-layer shape it detected, key names (never values) and its recent adapter log. No tokens, emails or coin balances.</p>
+      <button class="secondary" id="copy-diagnostics">Copy diagnostics</button>
       <button class="secondary" id="export-logs">Export logs</button>
+      <textarea id="diagnostics-output" readonly hidden rows="12" aria-label="Diagnostics report"></textarea>
     </section>
   `;
 
@@ -328,6 +335,29 @@ async function render(): Promise<void> {
   document.getElementById('telemetry-optout')?.addEventListener('change', async (e) => {
     await send('settings.set', { telemetryOptOut: (e.target as HTMLInputElement).checked });
     toast('Saved.');
+  });
+
+  document.getElementById('copy-diagnostics')?.addEventListener('click', async () => {
+    const report = await collectDiagnostics({
+      version: import.meta.env.VITE_EXTENSION_VERSION,
+      buildTarget: import.meta.env.VITE_BUILD_TARGET,
+      queryTabs: () => browser.tabs.query({ url: [...EA_WEB_APP_MATCHES] }),
+      sendToTab: (tabId, message) => browser.tabs.sendMessage(tabId, message),
+    });
+    const text = JSON.stringify(report, null, 2);
+    // Shown as well as copied: something to select by hand if the
+    // clipboard write is refused, and a chance to read it before pasting.
+    const output = document.getElementById('diagnostics-output') as HTMLTextAreaElement | null;
+    if (output) {
+      output.value = text;
+      output.hidden = false;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      toast(report.adapter ? 'Diagnostics copied.' : 'Copied — but no EA tab answered (see adapterError).', report.adapter ? 'success' : 'error');
+    } catch {
+      toast('Could not copy — select the report below and copy it.', 'error');
+    }
   });
 
   document.getElementById('export-logs')?.addEventListener('click', async () => {

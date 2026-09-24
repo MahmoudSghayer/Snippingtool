@@ -59,6 +59,10 @@ export const adapterProbeMessageSchema = z.object({
      * `adapter_unauthenticated` (not retried), and never fails a call on
      * this flag alone. */
     actReady: z.boolean().optional(),
+    /** Which candidate EA service-layer shape the probe selected
+     * (`main/adapter.ts`, docs/06-extension.md §4). Absent when `ok` is
+     * false: no shape, no act. */
+    shape: z.enum(['promise', 'observable']).optional(),
   }),
 });
 
@@ -92,6 +96,48 @@ export const adapterAuctionsMessageSchema = z.object({
  * channel, and the MAC is what tells the extension's own messages apart. */
 export const adapterMessageMacSchema = z.string().regex(/^[0-9a-f]{64}$/);
 
+/** A description of an object by key names and value types only — never
+ * values (`main/diagnostics.ts`'s `describeKeys`). A leaf is a type name
+ * (`'function'`, `'number'`, `'object'` past the depth limit, ...). */
+export type DiagnosticsKeyTree = string | { [key: string]: DiagnosticsKeyTree };
+export const diagnosticsKeyTreeSchema: z.ZodType<DiagnosticsKeyTree> = z.lazy(() =>
+  z.union([z.string().max(200), z.record(z.string().max(200), diagnosticsKeyTreeSchema)]),
+);
+
+/** What the adapter knows about the page's EA service layer, for the
+ * options page's "Copy diagnostics" (docs/06-extension.md §4, day-one
+ * checklist). Read-only, and carries no values from the page: key names,
+ * types, the adapter's own counters and its own (scrubbed) log lines.
+ * Every field is spelled out, not `.passthrough()`: content verifies the
+ * MAC over the *parsed* result, so a key zod stripped would fail it. */
+export const adapterDiagnosticsSchema = z.object({
+  probe: z.object({
+    ok: z.boolean(),
+    reason: z.string().max(2000).optional(),
+    shape: z.enum(['promise', 'observable']).nullable(),
+    checkedAt: z.number(),
+  }),
+  /** Every candidate shape the probe tried, in order, and why it was not
+   * present — the first thing to read when `probe.ok` is false. */
+  candidates: z.array(
+    z.object({ shape: z.string().max(40), present: z.boolean(), reason: z.string().max(500).optional() }),
+  ).max(10),
+  /** `window.services`, key names down to depth 3. */
+  servicesKeys: diagnosticsKeyTreeSchema,
+  /** Types of the few page globals a shape relies on (e.g. the search
+   * criteria constructor). */
+  globals: z.record(z.string().max(80), z.string().max(40)),
+  /** The last market response the adapter saw (passive or act search),
+   * keys and types only. */
+  lastMarketResponse: z
+    .object({ source: z.string().max(40), at: z.number(), shape: diagnosticsKeyTreeSchema })
+    .nullable(),
+  stats: z.object({ seen: z.number(), parsed: z.number(), failed: z.number() }),
+  /** The adapter's last 50 log lines, already scrubbed. */
+  log: z.array(z.string().max(1000)).max(50),
+});
+export type AdapterDiagnostics = z.infer<typeof adapterDiagnosticsSchema>;
+
 /** Result of an `act()` call (`search`/`buy`/`readResult`) driven through
  * the web app's own service layer — never a forged request. Only present in
  * builds where M2/M3 act surface is enabled. `requestId` (added
@@ -103,7 +149,7 @@ export const adapterActionResultMessageSchema = z.object({
   channel: z.literal(ADAPTER_CHANNEL),
   kind: z.literal('action_result'),
   data: z.object({
-    action: z.enum(['search', 'buy', 'readResult']),
+    action: z.enum(['search', 'buy', 'readResult', 'diagnostics']),
     requestId: z.string().min(1).optional(),
     ok: z.boolean(),
     requestedAt: z.number(),
@@ -113,6 +159,8 @@ export const adapterActionResultMessageSchema = z.object({
      * still an open listing" read, never listing contents beyond what
      * `trimAuction` already allows out of the page. */
     stillListed: z.boolean().optional(),
+    /** Only present for `action: 'diagnostics'`. */
+    diagnostics: adapterDiagnosticsSchema.optional(),
   }),
   mac: adapterMessageMacSchema.optional(),
 });
@@ -148,6 +196,13 @@ export const adapterActRequestMessageSchema = z.object({
       action: z.literal('readResult'),
       requestId: z.string().min(1),
       tradeId: z.string().min(1),
+    }),
+    /** Read-only: the adapter's diagnostics report (options page, "Copy
+     * diagnostics"). Authenticated like every other act request, so no page
+     * script can make the adapter describe the page to it on demand. */
+    z.object({
+      action: z.literal('diagnostics'),
+      requestId: z.string().min(1),
     }),
   ]),
   mac: adapterMessageMacSchema.optional(),
@@ -442,6 +497,16 @@ export const extContentKillSwitchMessageSchema = z
   })
   .strict();
 export type ExtContentKillSwitchMessage = z.infer<typeof extContentKillSwitchMessageSchema>;
+
+/** Options page -> an EA tab's content script: collect the adapter's
+ * diagnostics report (`content/diagnostics.ts`). Answered with
+ * `extContentDiagnosticsResponseSchema`. */
+export const extContentDiagnosticsRequestSchema = z.object({ type: z.literal('diagnostics.collect') }).strict();
+export const extContentDiagnosticsResponseSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), diagnostics: adapterDiagnosticsSchema }),
+  z.object({ ok: z.literal(false), error: z.string().max(2000) }),
+]);
+export type ExtContentDiagnosticsResponse = z.infer<typeof extContentDiagnosticsResponseSchema>;
 
 export const extBackgroundEngineStateSetPayloadSchema = z
   .object({

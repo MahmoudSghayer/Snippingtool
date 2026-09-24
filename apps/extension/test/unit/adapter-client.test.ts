@@ -174,3 +174,37 @@ describe('action_result correlation', () => {
     expect(settled).toMatchObject({ ok: false, error: 'price_mismatch' });
   });
 });
+
+describe('diagnostics', () => {
+  const REPORT = {
+    probe: { ok: false, reason: 'no known service-layer shape', shape: null, checkedAt: 1 },
+    candidates: [{ shape: 'promise', present: false, reason: 'missing' }],
+    servicesKeys: 'undefined',
+    globals: { UTSearchCriteriaDTO: 'undefined' },
+    lastMarketResponse: null,
+    stats: { seen: 0, parsed: 0, failed: 0 },
+    log: ['probe failed'],
+  };
+
+  it('asks over the authenticated channel and resolves with the signed report', async () => {
+    const promise = client.diagnostics();
+    const req = await lastRequest();
+    expect(req.data).toMatchObject({ action: 'diagnostics' });
+    expect(await signer.verify(canonicalActMessage('act_request', req.data), req.mac!)).toBe(true);
+    deliver(await signedResult({ action: 'diagnostics', requestId: req.data.requestId, ok: true, requestedAt: 1, completedAt: 2, diagnostics: REPORT }));
+    await expect(promise).resolves.toMatchObject({ ok: true, diagnostics: REPORT });
+  });
+
+  it('ignores an unsigned report', async () => {
+    client.dispose();
+    client = createAdapterClient(window, NONCE, { timeoutMs: 100 });
+    const promise = client.diagnostics();
+    const req = await lastRequest();
+    deliver({
+      channel: ADAPTER_CHANNEL,
+      kind: 'action_result',
+      data: { action: 'diagnostics', requestId: req.data.requestId, ok: true, requestedAt: 1, completedAt: 2, diagnostics: REPORT },
+    });
+    await expect(promise).resolves.toMatchObject({ ok: false, error: 'timed out waiting for adapter response' });
+  });
+});

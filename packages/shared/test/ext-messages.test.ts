@@ -154,6 +154,15 @@ describe('adapterActRequestMessageSchema', () => {
     expect(result.success).toBe(false);
   });
 
+  it('accepts a diagnostics request, which carries nothing but its id', () => {
+    const ok = adapterActRequestMessageSchema.safeParse({
+      channel: 'ledger:v2',
+      kind: 'act_request',
+      data: { action: 'diagnostics', requestId: 'r5' },
+    });
+    expect(ok.success).toBe(true);
+  });
+
   it('rejects an unknown action', () => {
     const result = adapterActRequestMessageSchema.safeParse({
       channel: 'ledger:v2',
@@ -235,5 +244,46 @@ describe('adapterProbeMessageSchema', () => {
       data: { ok: false, checkedAt: Date.now(), reason: 'services.Item missing' },
     });
     expect(result.success).toBe(true);
+  });
+});
+
+describe('adapter diagnostics result', () => {
+  const diagnostics = {
+    probe: { ok: true, shape: 'observable', checkedAt: 1 },
+    candidates: [
+      { shape: 'observable', present: true },
+      { shape: 'promise', present: false, reason: 'window.services.Item.repository.search is not a function' },
+    ],
+    servicesKeys: { Item: { searchTransferMarket: 'function', bid: 'function' } },
+    globals: { UTSearchCriteriaDTO: 'undefined' },
+    lastMarketResponse: { source: 'act:search', at: 2, shape: { success: 'boolean', data: { items: { '#array': 'array(1)' } } } },
+    stats: { seen: 0, parsed: 1, failed: 0 },
+    log: ['line'],
+  };
+
+  it('keeps every key of the report, so the MAC still verifies after parsing', () => {
+    const result = adapterActionResultMessageSchema.safeParse({
+      channel: 'ledger:v2',
+      kind: 'action_result',
+      data: { action: 'diagnostics', requestId: 'r1', ok: true, requestedAt: 1, completedAt: 2, diagnostics },
+    });
+    expect(result.success).toBe(true);
+    expect(result.success && result.data.data.diagnostics).toEqual(diagnostics);
+  });
+
+  it('rejects a log longer than 50 lines', () => {
+    const result = adapterActionResultMessageSchema.safeParse({
+      channel: 'ledger:v2',
+      kind: 'action_result',
+      data: {
+        action: 'diagnostics',
+        requestId: 'r1',
+        ok: true,
+        requestedAt: 1,
+        completedAt: 2,
+        diagnostics: { ...diagnostics, log: Array.from({ length: 51 }, () => 'x') },
+      },
+    });
+    expect(result.success).toBe(false);
   });
 });

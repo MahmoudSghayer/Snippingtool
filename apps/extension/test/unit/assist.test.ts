@@ -25,6 +25,7 @@ function fakeAdapter(overrides: Partial<AdapterClient> = {}): AdapterClient {
     search: vi.fn(async () => ({ ok: true, latencyMs: 5 })),
     buy: vi.fn(async () => ({ ok: true, latencyMs: 5 })),
     readResult: vi.fn(async () => ({ ok: true, latencyMs: 5 })),
+    diagnostics: vi.fn(async () => ({ ok: false, latencyMs: 0 })),
     onProbe: () => () => undefined,
     onShape: () => () => undefined,
     onAuctions: () => () => undefined,

@@ -46,6 +46,10 @@ export const ACT_ERROR = {
   priceMismatch: 'price_mismatch',
   /** The adapter has not seen this tradeId listed (or it has expired). */
   listingUnknown: 'listing_unknown',
+  /** The selected service-layer shape buys on the item entity a search
+   * returned (main/shape-observable.ts), and the adapter's own act search
+   * never returned this tradeId — it was only seen passively. */
+  listingEntityUnknown: 'listing_entity_unknown',
   /** No nonce was handed off, so no act request can be authenticated. */
   unauthenticated: 'adapter_unauthenticated',
 } as const;

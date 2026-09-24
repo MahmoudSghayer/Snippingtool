@@ -61,7 +61,7 @@ src/
   ui/panel.ts          Shadow-DOM readout: card, sparkline, session P&L, risk meter, ranker.
   popup/               Status, login/2FA, current card, risk meter, quick toggles.
   options/              Filters editor, budgets/governor bounds, devices, telemetry opt-out,
-                          "What it sends", logs export, account/license info.
+                          "What it sends", logs export, "Copy diagnostics" (§4), account/license info.
 scripts/
   build.mjs               Programmatic Vite build, both targets — see §3.
   generate-manifest.mjs      Pure manifest-object builder, used by build.mjs.
@@ -194,44 +194,96 @@ which runs even without a browser (a plain filesystem scan).
 The live EA FC web app is unreachable while the market is locked, so
 `main/adapter.ts`'s act surface (`search`/`buy`/`readResult`, M2/M3 only —
 passive observation is unaffected and unchanged from milestone 1) is written
-against a **documented assumption**, not observed fact. The full assumption
-lives in a comment titled `ASSUMED SHAPE — verify on day one` at the top of
-`adapter.ts`; the short version:
+against **documented assumptions**, not observed fact. Rather than one guess,
+the adapter carries two candidate shapes, each in its own module under
+`src/main/` (`main/shapes.ts` lists them), and the probe selects whichever
+the page has:
 
-- `window.services.Item.repository.search(criteria) -> Promise<{ auctionInfo: [...] }>`
-- `window.services.Transfer.repository.buyNow(tradeId) -> Promise<unknown>`
-- `window.services.Transfer.repository.bid(tradeId, amount) -> Promise<unknown>`
+- **observable** (`main/shape-observable.ts`, tried first — what community
+  autobuyers describe):
+  `services.Item.searchTransferMarket(criteria, 1)` and
+  `services.Item.bid(item, price)`, each answering once through
+  `.observe(scope, (sender, response) => …)` with
+  `{ success, data: { items } }`; items are entities with
+  `getAuctionData()` or `_auction`, card id under `definitionId`,
+  `resourceId` or `maskedDefId`.
+- **promise** (`main/shape-promise.ts`, the original assumption):
+  `services.Item.repository.search(criteria) -> Promise<{ auctionInfo }>`,
+  `services.Transfer.repository.buyNow(tradeId)`, and
+  `services.Transfer.repository.bid` probed for presence only.
 
-Every single lookup is guarded (`typeof x === 'function'` before ever
-calling it) — a missing or renamed property is a clean `probe()` failure
-(`{ ok: false, reason }`), never a thrown exception. `probe()` runs once at
-load and again before every act call, so a bundle update mid-session is
-caught immediately, not just on the next page load (docs/01-architecture.md
-§3.5).
+Neither present: `probe()` fails closed with a `reason` naming what each
+candidate was missing, and act is disabled. Every lookup is guarded, so a
+renamed property is a clean probe failure, never a thrown exception.
+`probe()` runs once at load and again before every act call, so a bundle
+update mid-session is caught immediately (docs/01-architecture.md §3.5).
+
+**No silent success.** Whatever a service call returns goes through
+`main/ea-response.ts` (an observable is observed, a promise awaited, both
+with a 12 s limit) and `main/ea-listing.ts` (entities and UTAS JSON
+normalised field by field). A search whose response has no list, reports
+`success` other than `true`, or holds only unreadable entries is an error —
+never `ok` with no listings. An empty list is still a real "no results".
+
+Shape-specific limits, all to confirm on day one:
+
+- The observable shape's search criteria map only `resourceId`
+  (`maskedDefId`), `minPrice`/`maxPrice` (`minBuy`/`maxBuy`) and
+  `minRating`/`maxRating` (field names guessed). A saved filter using any
+  other field is refused (`cannot search by …`) rather than searched wider.
+  It builds the page's own `UTSearchCriteriaDTO` when one exists.
+- The observable shape buys on the item entity, so it can only buy listings
+  the extension's own search returned; one seen only passively is refused
+  with `listing_entity_unknown`. The entity's price is re-checked too, on
+  top of the Task 2 price check.
+- The observable shape has no verified trade-status call, so `readResult`
+  fails loud. (Nothing calls `readResult` today.)
+- The promise shape treats a resolved `buyNow` as success unless it says
+  `success: false`; the observable shape needs an explicit `success: true`.
 
 **Day-one checklist**, once the market unlocks and the real web app is
 reachable:
 
-1. Open the real FC web app with DevTools open, run `window.services` in the
-   console. If it exists with `Item`/`Transfer` sub-objects, check their
-   `repository` methods' names against the list above.
-2. If the names differ (near-certain — this is a documented guess), update
-   the three guarded lookups in `probe()` and the corresponding calls in
-   `actSearch`/`actBuy`/`actReadResult`. Nothing else in the codebase needs
-   to change — that is the whole point of the never-forge-a-request seam.
-3. Run a real search through the app's own UI with DevTools' Network tab
-   open, capture one `transfermarket` response, and diff it against
-   `test/fixtures/mock-ea-app/payloads.js`'s shape (`itemData.resourceId`,
-   `buyNowPrice`, `expires` as seconds-remaining, etc.) — passive
-   observation has been correct since milestone 1 and almost certainly still
-   is, but this is the cheap way to be sure before trusting `act.search`'s
-   result-shape guess (`extractAuctionInfo`'s `auctionInfo`/`items` fallback)
-   too.
-4. Call `services.Item.repository.search({})` directly in the console and
-   compare its resolved shape against what `extractAuctionInfo` expects.
-5. Only once 1–4 pass: flip a test account to a `ledger-auto`-entitled plan
+1. Load the extension, sign in, and open the real FC web app. Go to the
+   transfer market and run one search by hand in EA's own UI.
+2. Open the extension's options page (right-click the toolbar icon →
+   Options) and click **Copy diagnostics** under *Diagnostics*. It asks the
+   open EA tab's adapter for its report over the authenticated act channel
+   and copies a JSON report (also shown below the button). Paste it into
+   the team channel. It carries key names and types, never values: no
+   tokens, emails or coin balances.
+3. Read `adapter.probe` and `adapter.candidates`:
+   - **Good, observable shape:** `probe.ok: true`, `probe.shape:
+     "observable"`; `servicesKeys.Item` lists `searchTransferMarket` and
+     `bid` as `"function"`; `globals.UTSearchCriteriaDTO` is `"function"`;
+     `lastMarketResponse.shape` (after an act search) has `success:
+     "boolean"` and `data.items["[0]"]` with `getAuctionData: "function"`
+     or an `_auction` object, plus one of
+     `definitionId`/`resourceId`/`maskedDefId`.
+   - **Good, promise shape:** `probe.ok: true`, `probe.shape: "promise"`;
+     `servicesKeys.Item.repository.search` and
+     `servicesKeys.Transfer.repository.buyNow` are `"function"`.
+   - **Neither:** `probe.ok: false`, and `candidates` says what each shape
+     was missing. `servicesKeys` shows what `window.services` really has,
+     three levels deep — write (or fix) a shape module from it. Nothing
+     outside `src/main/` needs to change: that is the never-forge-a-request
+     seam.
+4. Check the passive side in the same report: `lastMarketResponse.source:
+   "passive"` with `shape.auctionInfo["[0]"]` holding `tradeId`,
+   `buyNowPrice`, `expires` and `itemData.resourceId` as numbers, and
+   `stats.failed` at 0. Diff it against
+   `test/fixtures/mock-ea-app/payloads.js` if anything differs.
+5. With a saved filter that sets only a max price, let assist run one
+   search, then **Copy diagnostics** again: the last `log` lines should read
+   `search ok (<shape>): N listings`, and `lastMarketResponse.source` should
+   be `"act:search"`. `search failed: …` there, or `N` at 0 when EA's own UI
+   shows results for the same filter, means the criteria field names are
+   wrong: fix the shape's criteria builder.
+6. Only once 1–5 pass: flip a test account to a `ledger-auto`-entitled plan
    and watch one real, human-confirmed `assist.confirmBuy()` (M2, not M3) go
-   through before trusting the automated loop at all.
+   through (`buy ok (<shape>)` in the log) before trusting the automated
+   loop at all. Confirm what a *failed* buy looks like too (outbid or
+   expired listing): it must show as `buy failed`, never `buy ok`.
 
 ## 5. Safety governor: thresholds and math
 

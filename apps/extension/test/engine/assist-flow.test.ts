@@ -34,6 +34,7 @@ function fakeAdapter(clock: { now: number }) {
     }),
     buy: vi.fn(async () => ({ ok: true, latencyMs: 5 })),
     readResult: vi.fn(async () => ({ ok: true, latencyMs: 5 })),
+    diagnostics: vi.fn(async () => ({ ok: false, latencyMs: 0 })),
     onProbe: () => () => undefined,
     onShape: () => () => undefined,
     onAuctions: (cb) => {

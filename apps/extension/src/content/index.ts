@@ -30,6 +30,7 @@ import { singleFlight } from '../lib/single-flight.js';
 import { createPanel, type Panel } from '../ui/panel.js';
 
 import { createAdapterClient } from './adapter-client.js';
+import { createDiagnosticsResponder } from './diagnostics.js';
 
 import type { Autobuyer, StopReason } from '../engine/autobuyer.js';
 import type { AttemptInput, TradeInput } from '../engine/types.js';
@@ -88,6 +89,11 @@ async function main(): Promise<void> {
   const actNonce = readHandedOffNonce();
   if (!actNonce) logger.warn('no act-channel nonce was handed off — assist/automation buys are disabled on this page', 'adapter');
   const adapter = createAdapterClient(window, actNonce);
+  // The options page's "Copy diagnostics" (content/diagnostics.ts). Wired
+  // here, before any bootstrap, so it answers even when M2/M3 never boots —
+  // which is exactly when it is needed.
+  const respondToDiagnostics = createDiagnosticsResponder(adapter, browser.runtime.id);
+  browser.runtime.onMessage.addListener((message: unknown, sender: { id?: string }) => respondToDiagnostics(message, sender));
 
   panel.setHealth('live', 'Recording. Nothing beyond product telemetry (docs/06-extension.md) is sent.');
   send('counts').then((data) => data && panel.setTotals(data as { auctions: number; playersLast24h: number }));
