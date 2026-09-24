@@ -33,6 +33,7 @@ export const ERROR_CODES = [
   'INTERNAL',
   'KILL_SWITCH_ACTIVE',
   'MAINTENANCE_MODE',
+  'SERVICE_UNAVAILABLE',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
@@ -73,6 +74,9 @@ export const ERROR_STATUS: Readonly<Record<ErrorCode, number>> = {
   INTERNAL: 500,
   KILL_SWITCH_ACTIVE: 503,
   MAINTENANCE_MODE: 503,
+  // A feature this deployment is not configured for (e.g. the extension
+  // download without a usable ENTITLEMENT_PUBLIC_KEY).
+  SERVICE_UNAVAILABLE: 503,
 };
 
 export function statusForError(code: ErrorCode): number {

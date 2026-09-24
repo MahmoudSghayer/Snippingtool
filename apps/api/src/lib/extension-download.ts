@@ -60,10 +60,34 @@ export function findTemplateDir(configured?: string): string | null {
   return null;
 }
 
+/** No usable Ed25519 ENTITLEMENT_PUBLIC_KEY: the zip would carry an empty
+ * licence key, and that extension could verify nothing. */
+export class ExtensionKeyUnavailableError extends Error {
+  constructor(reason: string) {
+    super(`extension download unavailable: ${reason}`);
+    this.name = 'ExtensionKeyUnavailableError';
+  }
+}
+
+/** The raw 32-byte Ed25519 key, base64url (its JWK `x`), which is what the
+ * extension's importLicensePublicKey reads. Throws
+ * ExtensionKeyUnavailableError when the key is missing or not Ed25519. */
 function rawEd25519PublicKey(pem: string | undefined): string {
-  if (!pem) return '';
-  const jwk = createPublicKey(pem.replace(/\\n/g, '\n')).export({ format: 'jwk' });
-  return typeof jwk.x === 'string' ? jwk.x : '';
+  if (!pem) throw new ExtensionKeyUnavailableError('ENTITLEMENT_PUBLIC_KEY is not set');
+  let key;
+  try {
+    key = createPublicKey(pem.replace(/\\n/g, '\n'));
+  } catch (err) {
+    throw new ExtensionKeyUnavailableError(`ENTITLEMENT_PUBLIC_KEY does not parse (${String(err)})`);
+  }
+  if (key.asymmetricKeyType !== 'ed25519') {
+    throw new ExtensionKeyUnavailableError(`ENTITLEMENT_PUBLIC_KEY is ${key.asymmetricKeyType ?? 'unknown'}, not Ed25519`);
+  }
+  const { x } = key.export({ format: 'jwk' });
+  if (typeof x !== 'string' || x.length !== 43) {
+    throw new ExtensionKeyUnavailableError('ENTITLEMENT_PUBLIC_KEY has no 32-byte Ed25519 key');
+  }
+  return x;
 }
 
 function stripTrailingSlash(origin: string): string {
@@ -80,7 +104,9 @@ function collectFiles(dir: string, base = dir, out: Record<string, string> = {})
 }
 
 /** Returns the zip for this deployment, or `null` when no template build is
- * present (e.g. an image built without it). */
+ * present (e.g. an image built without it). Throws
+ * ExtensionKeyUnavailableError when there is no usable licence key to put
+ * in it. */
 export function getExtensionPackage(config: ExtensionDownloadConfig): ExtensionPackage | null {
   const dir = findTemplateDir(config.templateDir);
   if (!dir) return null;

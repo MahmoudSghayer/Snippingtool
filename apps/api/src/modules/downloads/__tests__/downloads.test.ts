@@ -1,6 +1,7 @@
 // The extension download: only for a pass that includes the autobuyer, and
 // always built for this deployment's own API and dashboard origins.
 
+import { generateKeyPairSync } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -112,6 +113,34 @@ describe('downloads module (/api/v1/downloads/extension)', () => {
     expect(manifest).toContain(`${apiOrigin}/*`);
     for (const placeholder of Object.values(TEMPLATE_PLACEHOLDERS)) {
       expect(background + manifest).not.toContain(placeholder);
+    }
+  });
+
+  // Without a usable Ed25519 key the zip would carry an empty licence key,
+  // and that extension could verify nothing (no offline grace, and the kill
+  // switch polled every 8 s). Refuse instead of serving it.
+  it('refuses with 503 when ENTITLEMENT_PUBLIC_KEY is missing or not Ed25519', async () => {
+    const { userId, token } = await createUser('no-key@example.com');
+    await activateManual(app.db, app.redis, {
+      userId,
+      planCode: 'pro',
+      periodDays: 30,
+      grantedByAdminId: null,
+    });
+    const original = app.config.ENTITLEMENT_PUBLIC_KEY;
+    const { publicKey: x25519 } = generateKeyPairSync('x25519');
+    try {
+      for (const key of [undefined, x25519.export({ type: 'spki', format: 'pem' }).toString()]) {
+        (app.config as { ENTITLEMENT_PUBLIC_KEY?: string }).ENTITLEMENT_PUBLIC_KEY = key;
+        const res = await get(token, '/api/v1/downloads/extension');
+        expect(res.statusCode, String(key)).toBe(503);
+        expect(res.json().code).toBe('SERVICE_UNAVAILABLE');
+        expect((await get(token, '/api/v1/downloads/extension/info')).json()).toMatchObject({
+          available: false,
+        });
+      }
+    } finally {
+      (app.config as { ENTITLEMENT_PUBLIC_KEY?: string }).ENTITLEMENT_PUBLIC_KEY = original;
     }
   });
 
