@@ -240,7 +240,12 @@ Shape-specific limits, all to confirm on day one:
   own searches and, through a hook on `services.Item.searchTransferMarket`
   (`main/search-hook.ts`), from searches the human runs in EA's UI: the
   hook calls the original, adds one observer of its own, and hands the
-  page the original observable untouched. A listing seen only passively
+  page the original observable untouched. The hook reports no search of
+  its own (passive observation reports it, once, from the network): it
+  only keeps the entities and, if passive already reported those listings,
+  sends a `listings_buyable` upgrade that content applies without counting
+  anything. Likewise an act search and its network response are one
+  search: the adapter does not post the same result set twice within 5 s. A listing seen only passively
   (no entity) is sent to content with `buyable: false`, the ranker drops
   it, and it is never attempted; asked anyway, the adapter refuses with
   `listing_entity_unknown`. The entity's price is re-checked too, on top of
@@ -365,8 +370,10 @@ falls back to the shipped default:
   compatible).
 
 An allowed buy the adapter then *refuses* before calling EA (price
-mismatch, unknown listing, no entity, no act key) is refunded with
-`Governor.refund(decision)`: it never reached EA, so it must not use up the
+mismatch, unknown listing, no entity, no act key), in a result whose MAC
+verified, is refunded with `Governor.refund(decision)`. An unsigned outcome
+is never refunded, even one reading `adapter_unauthenticated` (content's own
+timeout after an unsigned probe hint, which a page script can forge): it never reached EA, so it must not use up the
 action, buy or coin budget. A buy EA saw, or may have seen
 (`timeout_unknown`), stays charged.
 

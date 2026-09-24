@@ -161,8 +161,11 @@ export class AssistEngine {
       });
       return;
     }
-    // A refusal never reached EA: give the governor its budget back.
-    if (isAdapterRefusal(result.error)) this.deps.governor.refund(decision);
+    // A refusal never reached EA: give the governor its budget back — but
+    // only when the adapter itself signed it. An unsigned outcome (a
+    // timeout reported as adapter_unauthenticated on an unsigned probe's
+    // hint) could be a page script's doing, and the buy may have happened.
+    if (result.signed && isAdapterRefusal(result.error)) this.deps.governor.refund(decision);
     this.deps.onAttempt({ ...this.attemptBase(top), outcome: 'failed', latencyMs: result.latencyMs, errorCode: result.error ?? 'unknown_error' });
   }
 

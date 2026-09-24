@@ -182,6 +182,15 @@ async function main(): Promise<void> {
     void send('telemetry.enqueue', { kind: 'activity', items: [event] });
   }
 
+  // Listings the adapter can now buy (it has seen their item entities).
+  // Not a search: nothing is counted, recorded or reported.
+  adapter.onBuyable((tradeIds) => {
+    for (const tradeId of tradeIds) {
+      const a = tracked.get(tradeId);
+      if (a) tracked.set(tradeId, { ...a, buyable: true });
+    }
+  });
+
   adapter.onAuctions((auctions) => {
     searches++;
     panel.setSearches(searches);

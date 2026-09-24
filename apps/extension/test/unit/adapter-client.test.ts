@@ -234,3 +234,43 @@ describe('a buy whose answer came after the adapter stopped waiting', () => {
     expect(outcome.late).toBeUndefined();
   });
 });
+
+describe('only a signed result is marked signed', () => {
+  it('marks a verified result signed, and a timeout after a forged unready probe not', async () => {
+    const promise = client.buy('t1', 1000);
+    const req = await lastRequest();
+    deliver(await signedResult({ action: 'buy', requestId: req.data.requestId, ok: false, error: 'price_mismatch', requestedAt: 1, completedAt: 2 }));
+    await expect(promise).resolves.toMatchObject({ error: 'price_mismatch', signed: true });
+
+    client.dispose();
+    client = createAdapterClient(window, NONCE, { timeoutMs: 50 });
+    deliver({ channel: ADAPTER_CHANNEL, kind: 'probe', data: { ok: true, checkedAt: 1, actReady: false } });
+    await flush();
+    const forged = await client.buy('t1', 1000);
+    expect(forged).toMatchObject({ ok: false, error: 'adapter_unauthenticated' });
+    expect(forged.signed).toBeUndefined();
+  });
+});
+
+describe('a late result that overtakes its timeout_unknown', () => {
+  it('is held briefly and picked up when the primary result arrives', async () => {
+    const promise = client.buy('t1', 1000);
+    const req = await lastRequest();
+    const requestId = req.data.requestId as string;
+    deliver(await signedResult({ action: 'buy', requestId, ok: true, late: true, requestedAt: 1, completedAt: 30 }));
+    await flush();
+    deliver(await signedResult({ action: 'buy', requestId, ok: false, error: 'timeout_unknown', requestedAt: 1, completedAt: 20 }));
+    const outcome = await promise;
+    await expect(outcome.late).resolves.toMatchObject({ ok: true, signed: true });
+  });
+
+  it('is not held for a request this client never made', async () => {
+    deliver(await signedResult({ action: 'buy', requestId: 'not-mine', ok: true, late: true, requestedAt: 1, completedAt: 30 }));
+    await flush();
+    // Nothing to assert on directly beyond "no throw"; a later unrelated buy is unaffected.
+    const promise = client.buy('t2', 1000);
+    const req = await lastRequest();
+    deliver(await signedResult({ action: 'buy', requestId: req.data.requestId, ok: true, requestedAt: 1, completedAt: 2 }));
+    await expect(promise).resolves.toMatchObject({ ok: true });
+  });
+});

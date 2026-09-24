@@ -62,6 +62,7 @@ function fakeAdapter(buyImpl: AdapterClient['buy'] = async () => ({ ok: true, la
         shapeCb = undefined;
       };
     },
+    onBuyable: () => () => undefined,
     onAuctions: () => () => undefined,
     dispose: () => undefined,
   };
@@ -212,9 +213,18 @@ describe('Autobuyer: what reaches EA, and what the governor charges', () => {
     const governor = new Governor(SETTINGS, { now: () => 0 });
     governor.allow({ kind: 'search' });
     const before = governor.snapshot();
-    const { adapter } = fakeAdapter(vi.fn(async () => ({ ok: false, error: 'price_mismatch', latencyMs: 1 })));
+    const { adapter } = fakeAdapter(vi.fn(async () => ({ ok: false, error: 'price_mismatch', latencyMs: 1, signed: true as const })));
     await new Autobuyer({ governor, adapter, onAttempt: vi.fn(), onTrade: vi.fn() }).runCycle([opportunity()]);
     expect(governor.snapshot()).toEqual(before);
+  });
+
+  it('never refunds an unsigned adapter_unauthenticated (a forged probe plus a timeout)', async () => {
+    const governor = new Governor(SETTINGS, { now: () => 0 });
+    governor.allow({ kind: 'search' });
+    const { adapter } = fakeAdapter(vi.fn(async () => ({ ok: false, error: 'adapter_unauthenticated', latencyMs: 15_000 })));
+    await new Autobuyer({ governor, adapter, onAttempt: vi.fn(), onTrade: vi.fn() }).runCycle([opportunity()]);
+    expect(governor.serialize().buyCount).toBe(1);
+    expect(governor.snapshot().coinFlowLastHour).toBe(1000);
   });
 
   it('never attempts a listing the adapter cannot buy', async () => {

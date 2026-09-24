@@ -94,6 +94,18 @@ export const adapterAuctionsMessageSchema = z.object({
   }),
 });
 
+/** Listings already reported in an `auctions` message that the adapter can
+ * now buy (the observable shape saw their item entities through its search
+ * hook, main/search-hook.ts). Not a search: content marks the tracked
+ * listings buyable and counts or records nothing. Unsigned, like
+ * `auctions`: a forged one can at worst make content try a listing the
+ * adapter then refuses with a signed `listing_entity_unknown`. */
+export const adapterListingsBuyableMessageSchema = z.object({
+  channel: z.literal(ADAPTER_CHANNEL),
+  kind: z.literal('listings_buyable'),
+  data: z.object({ tradeIds: z.array(z.string().min(1).max(40)).max(500) }),
+});
+
 /** HMAC-SHA256 (hex) of an act-channel message under the per-page-load
  * nonce (apps/extension/src/lib/act-auth.ts). Optional in these schemas so
  * the shapes stay additive, but both ends of the extension require it: the
@@ -224,6 +236,7 @@ export const adapterMessageSchema = z.discriminatedUnion('kind', [
   adapterProbeMessageSchema,
   adapterShapeMessageSchema,
   adapterAuctionsMessageSchema,
+  adapterListingsBuyableMessageSchema,
   adapterActionResultMessageSchema,
 ]);
 export type AdapterMessage = z.infer<typeof adapterMessageSchema>;

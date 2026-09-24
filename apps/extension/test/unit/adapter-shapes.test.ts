@@ -350,7 +350,10 @@ describe('observable shape: the human\'s own searches', () => {
     returned.observe({}, pageCallback);
 
     await vi.waitFor(() => expect(pageCallback).toHaveBeenCalledWith(pageObservable, { success: true, data: { items: [entity] } }));
-    await vi.waitFor(() => expect(lastAuctions()).toMatchObject([{ tradeId: '601', buyable: true }]));
+    // The hook reports no search of its own (passive observation does
+    // that): only which listings became buyable.
+    await vi.waitFor(() => expect(posted.find((m) => m.kind === 'listings_buyable')?.data).toEqual({ tradeIds: ['601'] }));
+    expect(posted.filter((m) => m.kind === 'auctions')).toHaveLength(0);
     expect(svc.searchTransferMarket).toHaveBeenCalledWith({ maxBuy: 5_000 }, 1);
 
     expect((await act({ action: 'buy', tradeId: '601', price: 4_000 })).data).toMatchObject({ ok: true });
@@ -376,6 +379,94 @@ describe('observable shape: the human\'s own searches', () => {
     await act({ action: 'diagnostics' });
     const report = (await act({ action: 'diagnostics' })).data.diagnostics as { globals: Record<string, string> };
     expect(report.globals.searchHook).toBe('installed');
+  });
+});
+
+describe('one search is one search, whichever paths saw it', () => {
+  const MARKET = 'https://utas.mob.v4.prd.futc-ext.gcp.ea.com/ut/game/fc26/transfermarket';
+
+  /** The observable-shape service as the real page would behave: the call
+   * sends the market request (seen by passive observation) and answers
+   * through the observable (seen by the hook, or by an act search). */
+  function networkBackedServices(tradeIds: number[], networkFirst: boolean) {
+    const svc = observableServices();
+    svc.searchTransferMarket.mockImplementation(() => {
+      const res = new Response(JSON.stringify({ auctionInfo: tradeIds.map((t) => utasAuction({ tradeId: t, buyNowPrice: 1_000 })) }));
+      (res as unknown as { __testUrl: string }).__testUrl = MARKET;
+      nativeFetch.mockResolvedValueOnce(res);
+      const items = tradeIds.map((t) => itemEntity({ tradeId: t, buyNowPrice: 1_000 }));
+      const obs = {
+        observe: vi.fn((scope: unknown, cb: (sender: unknown, response: unknown) => void) => {
+          setTimeout(() => cb.call(scope, obs, { success: true, data: { items } }), networkFirst ? 30 : 0);
+        }),
+        unobserve: vi.fn(),
+      };
+      setTimeout(() => void window.fetch(MARKET), networkFirst ? 0 : 30);
+      return obs;
+    });
+    return svc;
+  }
+
+  /** content's adapter client, fed every message the adapter posts. jsdom's
+   * `postMessage` leaves `event.source` unset, which the client rightly
+   * refuses, so the adapter's messages are relayed to it through a
+   * stand-in target. */
+  async function countingClient() {
+    const { createAdapterClient } = await import('../../src/content/adapter-client.js');
+    const { countObservedSearches } = await import('../../src/engine/search.js');
+    const target = Object.assign(new EventTarget(), { location: window.location, postMessage: () => undefined });
+    window.addEventListener('message', (e) => {
+      const m = e.data as Posted | null;
+      if (!m || m.channel !== ADAPTER_CHANNEL || m.kind === 'act_request') return;
+      target.dispatchEvent(Object.assign(new Event('message'), { data: m, source: target }));
+    });
+    const client = createAdapterClient(target as unknown as Window, NONCE);
+    const governor = { recordObservedSearch: vi.fn() };
+    const batches: unknown[][] = [];
+    client.onAuctions((a) => batches.push(a));
+    countObservedSearches(client, () => governor as never);
+    return { client, governor, batches };
+  }
+
+  it.each([true, false])('a human search seen by both the hook and passive observation counts once (network first: %s)', async (networkFirst) => {
+    const ids = networkFirst ? [701, 702] : [711, 712];
+    const svc = networkBackedServices(ids, networkFirst);
+    install(svc.services);
+    await act({ action: 'diagnostics' });
+    const { client, governor, batches } = await countingClient();
+    posted = [];
+
+    (svc.services.Item.searchTransferMarket as (c: unknown, p: number) => { observe: (s: unknown, cb: () => void) => void })({}, 1).observe({}, () => undefined);
+    await vi.waitFor(() => expect(posted.filter((m) => m.kind === 'auctions')).toHaveLength(1));
+    for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 10));
+
+    expect(posted.filter((m) => m.kind === 'auctions')).toHaveLength(1);
+    expect(batches).toHaveLength(1);
+    expect(governor.recordObservedSearch).toHaveBeenCalledTimes(1);
+    // ...and both listings end up buyable, one way or the other.
+    const buyable = new Set<string>();
+    for (const m of posted) {
+      if (m.kind === 'auctions') for (const a of m.data.auctions as { tradeId: string; buyable?: boolean }[]) if (a.buyable) buyable.add(a.tradeId);
+      if (m.kind === 'listings_buyable') for (const t of m.data.tradeIds as string[]) buyable.add(t);
+    }
+    expect([...buyable].sort()).toEqual(ids.map(String));
+    client.dispose();
+  });
+
+  it.each([true, false])('an act search the network also saw counts once (network first: %s)', async (networkFirst) => {
+    // Distinct tradeIds per run: the same result set within 5 s is one search.
+    const svc = networkBackedServices(networkFirst ? [801] : [811], networkFirst);
+    install(svc.services);
+    const { client, governor, batches } = await countingClient();
+    posted = [];
+
+    expect((await act({ action: 'search', filter: {} })).data.ok).toBe(true);
+    for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 10));
+
+    expect(posted.filter((m) => m.kind === 'auctions')).toHaveLength(1);
+    expect(batches).toHaveLength(1);
+    expect(governor.recordObservedSearch).toHaveBeenCalledTimes(1);
+    client.dispose();
   });
 });
 

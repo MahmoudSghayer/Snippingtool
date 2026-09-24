@@ -169,7 +169,16 @@ export async function settle(value: unknown, timeoutMs: number, onLate?: (respon
   const deadline = now() + timeoutMs;
   if (isObservable(value)) return observeOnce(value, timeoutMs, onLate);
   if (isThenable(value)) {
-    const resolved = await withDeadline(value, deadline, onLate);
+    // A promise that resolves late to an observable is observed too, so
+    // `onLate` always gets a response, never the observable itself (the
+    // shape would otherwise judge the observable as its answer).
+    const lateValue = onLate
+      ? (late: unknown): void => {
+          if (!isObservable(late)) return onLate(late);
+          observeOnce(late, timeoutMs, onLate).then(onLate, () => undefined);
+        }
+      : undefined;
+    const resolved = await withDeadline(value, deadline, lateValue);
     return isObservable(resolved) ? observeOnce(resolved, deadline - now(), onLate) : resolved;
   }
   return value;

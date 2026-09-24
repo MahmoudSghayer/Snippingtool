@@ -21,6 +21,9 @@ const ACTION_TIMEOUT_MS = 15_000;
 /** How long a `timeout_unknown` buy waits for EA's late answer before it is
  * given up as not bought. */
 const LATE_RESULT_WAIT_MS = 5 * 60_000;
+/** How long a verified late result that overtook its own `timeout_unknown`
+ * (both are verified asynchronously) is held for it. */
+const EARLY_LATE_HOLD_MS = 30_000;
 
 export interface ActionOutcome {
   ok: boolean;
@@ -32,6 +35,13 @@ export interface ActionOutcome {
    * late answer if the adapter sends one (signed, like every result), or
    * `ok: false` after a few minutes without one. */
   late?: Promise<ActionOutcome>;
+  /** Set only on an outcome taken from an adapter result whose MAC
+   * verified. Anything else — this client's own timeout, even one reported
+   * as `adapter_unauthenticated` because an unsigned probe hinted so — is
+   * unsigned, and a page script may have shaped it. Only a signed refusal
+   * may give budget back to the governor (lib/act-auth.ts's
+   * `isAdapterRefusal`). */
+  signed?: true;
   latencyMs: number;
 }
 
@@ -54,6 +64,8 @@ export interface AdapterClient {
   onProbe(cb: (status: ProbeStatus) => void): () => void;
   onShape(cb: (reason: string) => void): () => void;
   onAuctions(cb: (auctions: TrimmedAuction[]) => void): () => void;
+  /** Already-reported listings the adapter can now buy. Not a search. */
+  onBuyable(cb: (tradeIds: string[]) => void): () => void;
   dispose(): void;
 }
 
@@ -84,6 +96,9 @@ export function createAdapterClient(target: Window, nonce: string | null, option
   const pending = new Map<string, Pending>();
   // `timeout_unknown` buys still waiting for EA's late answer.
   const lateWaiting = new Map<string, (outcome: ActionOutcome) => void>();
+  // Verified late results that arrived before their `timeout_unknown`.
+  const earlyLate = new Map<string, ActionOutcome>();
+  const buyableListeners = new Set<(tradeIds: string[]) => void>();
   const probeListeners = new Set<(status: ProbeStatus) => void>();
   const shapeListeners = new Set<(reason: string) => void>();
   const auctionsListeners = new Set<(auctions: TrimmedAuction[]) => void>();
@@ -111,6 +126,10 @@ export function createAdapterClient(target: Window, nonce: string | null, option
       for (const cb of auctionsListeners) cb(msg.data.auctions);
       return;
     }
+    if (msg.kind === 'listings_buyable') {
+      for (const cb of buyableListeners) cb(msg.data.tradeIds);
+      return;
+    }
     if (msg.kind === 'action_result') {
       // Only a reply to a request this client issued and is still waiting
       // on, for the same action, and signed by the adapter: a page script
@@ -121,13 +140,21 @@ export function createAdapterClient(target: Window, nonce: string | null, option
       if (!data.requestId || !signer) return;
       const requestId = data.requestId;
       if (data.late === true) {
-        // Only for a buy this client is still waiting on, and only signed.
-        if (data.action !== 'buy' || !lateWaiting.has(requestId)) return;
+        // Only for a buy this client issued (still pending, or waiting for
+        // its late answer), and only signed.
+        if (data.action !== 'buy' || !(lateWaiting.has(requestId) || pending.get(requestId)?.action === 'buy')) return;
         void signer.verify(canonicalActMessage('action_result', data), msg.mac).then((valid) => {
+          if (!valid) return;
+          const late: ActionOutcome = { ok: data.ok, error: data.error, signed: true, latencyMs: data.completedAt - data.requestedAt };
           const settleLate = lateWaiting.get(requestId);
-          if (!valid || !settleLate) return;
-          lateWaiting.delete(requestId);
-          settleLate({ ok: data.ok, error: data.error, latencyMs: data.completedAt - data.requestedAt });
+          if (settleLate) {
+            lateWaiting.delete(requestId);
+            settleLate(late);
+            return;
+          }
+          // It overtook its own `timeout_unknown`: hold it for that.
+          earlyLate.set(requestId, late);
+          setTimeout(() => earlyLate.delete(requestId), EARLY_LATE_HOLD_MS);
         });
         return;
       }
@@ -143,6 +170,7 @@ export function createAdapterClient(target: Window, nonce: string | null, option
           error: data.error,
           stillListed: data.stillListed,
           diagnostics: data.diagnostics,
+          signed: true,
           latencyMs: data.completedAt - data.requestedAt,
         };
         if (data.action === 'buy' && !data.ok && data.error === ACT_ERROR.timeoutUnknown) outcome.late = waitForLate(requestId);
@@ -152,6 +180,11 @@ export function createAdapterClient(target: Window, nonce: string | null, option
   }
 
   function waitForLate(requestId: string): Promise<ActionOutcome> {
+    const early = earlyLate.get(requestId);
+    if (early) {
+      earlyLate.delete(requestId);
+      return Promise.resolve(early);
+    }
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         if (lateWaiting.delete(requestId)) resolve({ ok: false, error: 'no_late_answer', latencyMs: LATE_RESULT_WAIT_MS });
@@ -220,10 +253,16 @@ export function createAdapterClient(target: Window, nonce: string | null, option
       auctionsListeners.add(cb);
       return () => auctionsListeners.delete(cb);
     },
+    onBuyable: (cb) => {
+      buyableListeners.add(cb);
+      return () => buyableListeners.delete(cb);
+    },
     dispose: () => {
       target.removeEventListener('message', onMessage);
       pending.clear();
       lateWaiting.clear();
+      earlyLate.clear();
+      buyableListeners.clear();
       probeListeners.clear();
       shapeListeners.clear();
       auctionsListeners.clear();

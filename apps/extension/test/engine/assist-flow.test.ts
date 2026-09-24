@@ -37,6 +37,7 @@ function fakeAdapter(clock: { now: number }) {
     diagnostics: vi.fn(async () => ({ ok: false, latencyMs: 0 })),
     onProbe: () => () => undefined,
     onShape: () => () => undefined,
+    onBuyable: () => () => undefined,
     onAuctions: (cb) => {
       auctionListeners.add(cb);
       return () => auctionListeners.delete(cb);

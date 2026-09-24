@@ -156,6 +156,14 @@ describe('settle', () => {
     expect(late.unobserve).toHaveBeenCalled();
   });
 
+  it('observes an observable a timed-out promise resolves to late, and hands onLate its response', async () => {
+    const onLate = vi.fn();
+    const slow = new Promise((resolve) => setTimeout(() => resolve(observable({ success: false })), 20));
+    await expect(settle(slow, 5, onLate)).rejects.toBeInstanceOf(TimeoutUnknownError);
+    await vi.waitFor(() => expect(onLate).toHaveBeenCalledWith({ success: false }));
+    expect(onLate).toHaveBeenCalledTimes(1);
+  });
+
   it('passes a plain value through', async () => {
     await expect(settle({ plain: true }, 1000)).resolves.toEqual({ plain: true });
   });

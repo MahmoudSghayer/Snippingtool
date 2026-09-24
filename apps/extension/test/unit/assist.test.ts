@@ -28,6 +28,7 @@ function fakeAdapter(overrides: Partial<AdapterClient> = {}): AdapterClient {
     diagnostics: vi.fn(async () => ({ ok: false, latencyMs: 0 })),
     onProbe: () => () => undefined,
     onShape: () => () => undefined,
+    onBuyable: () => () => undefined,
     onAuctions: () => () => undefined,
     dispose: () => undefined,
     ...overrides,
@@ -176,7 +177,7 @@ describe('AssistEngine: what reaches EA, and what the governor charges', () => {
   it.each(['price_mismatch', 'listing_unknown', 'listing_entity_unknown', 'adapter_unauthenticated'])(
     'refunds the governor when the adapter refuses with %s (the buy never reached EA)',
     async (error) => {
-      const buy = vi.fn(async () => ({ ok: false, error, latencyMs: 1 }));
+      const buy = vi.fn(async () => ({ ok: false, error, latencyMs: 1, signed: true as const }));
       const { engine, governor } = makeEngine({ adapter: fakeAdapter({ buy }) });
       governor.allow({ kind: 'search' });
       const before = governor.snapshot();
@@ -184,6 +185,14 @@ describe('AssistEngine: what reaches EA, and what the governor charges', () => {
       expect(governor.snapshot()).toEqual(before);
     },
   );
+
+  it('never refunds a refusal the adapter did not sign (e.g. a timeout after a forged unready probe)', async () => {
+    const buy = vi.fn(async () => ({ ok: false, error: 'adapter_unauthenticated', latencyMs: 15_000 }));
+    const { engine, governor } = makeEngine({ adapter: fakeAdapter({ buy }) });
+    governor.allow({ kind: 'search' });
+    await engine.confirmBuy();
+    expect(governor.snapshot().coinFlowLastHour).toBe(1000);
+  });
 
   it('keeps the charge for a failure that did reach EA', async () => {
     const buy = vi.fn(async () => ({ ok: false, error: 'bid reported success: false (status 470)', latencyMs: 1 }));

@@ -159,6 +159,7 @@ const stats = { seen: 0, parsed: 0, failed: 0 };
 function post(kind: 'ready', data: { channel: string }): void;
 function post(kind: 'probe', data: { ok: boolean; checkedAt: number; reason?: string; shape?: ShapeName; actReady: boolean }): void;
 function post(kind: 'shape', data: { seen: number; parsed: number; failed: number; reason: string }): void;
+function post(kind: 'listings_buyable', data: { tradeIds: string[] }): void;
 function post(
   kind: 'auctions',
   data: { url: string; seenAt: number; auctions: TrimmedAuction[]; stats: { seen: number; parsed: number; failed: number } },
@@ -260,8 +261,44 @@ function emitListings(url: string, listings: NormalisedListing[], entities?: Map
     auctions[auctions.length] = trimmed;
   }
   stats.parsed++;
+  // One search reaches the adapter by two paths when the adapter issued it
+  // (its act search, and the network response passive observation sees),
+  // in either order. Content counts every `auctions` message as a search
+  // (governor, ledger rows, telemetry, the panel), so the second sighting
+  // of the same result set is not posted again: the listings are
+  // remembered above, and only a buyable upgrade goes out.
+  if (isRepeatBatch(auctions, seenAt)) {
+    postBuyable(auctions.filter((a) => a.buyable).map((a) => a.tradeId));
+    return auctions;
+  }
   post('auctions', { url, seenAt, auctions, stats: { ...stats } });
   return auctions;
+}
+
+/** How long a result set counts as "the same search" when seen again. */
+const REPEAT_BATCH_MS = 5000;
+let recentBatches: { key: string; at: number }[] = [];
+
+/** Whether an identical set of tradeIds was posted within the window; if
+ * not, remember this one. Two genuinely separate searches returning exactly
+ * the same listings within 5 s are merged too: that undercounts searches,
+ * which only ever tightens the governor's buy/search ratio. */
+function isRepeatBatch(auctions: TrimmedAuction[], at: number): boolean {
+  const key = auctions
+    .map((a) => a.tradeId)
+    .sort()
+    .join(',');
+  recentBatches = recentBatches.filter((b) => at - b.at < REPEAT_BATCH_MS);
+  if (recentBatches.some((b) => b.key === key)) return true;
+  recentBatches.push({ key, at });
+  return false;
+}
+
+/** Tell content these already-reported listings are now buyable (the
+ * observable shape saw their entities). Not a search: content applies it
+ * without counting or recording anything. */
+function postBuyable(tradeIds: string[]): void {
+  if (tradeIds.length > 0) post('listings_buyable', { tradeIds: tradeIds.slice(0, 500) });
 }
 
 /** The last market response the adapter read, for the diagnostics report
@@ -323,10 +360,10 @@ function skippedEntries(source: string): (count: number) => void {
 
 // ---- the observable shape's search hook (main/search-hook.ts) -------------
 
-/** A search the page itself ran, seen through the hook: record its
- * listings with their entities, so the observable shape can buy them. An
- * unreadable response is only logged; the page's search is not ours to
- * fail, and passive observation reports the network side anyway. */
+/** A search the page itself ran, seen through the hook: keep its entities,
+ * so the observable shape can buy those listings. An unreadable response
+ * is only logged; the page's search is not ours to fail, and passive
+ * observation reports the network side anyway. */
 function onHookedSearch(response: unknown): void {
   let entries: unknown[];
   let listings: NormalisedListing[];
@@ -338,7 +375,21 @@ function onHookedSearch(response: unknown): void {
     return;
   }
   lastMarketResponse = { source: 'hook:search', at: now(), value: response };
-  emitListings('hook:search', listings, entitiesByTradeId(entries));
+  // Not a search of its own: passive observation reports this search once,
+  // from the network. The hook only keeps the entities (so passive's report
+  // says buyable if it comes second) and upgrades the listings if passive
+  // already reported them.
+  const entities = entitiesByTradeId(entries);
+  const seenAt = now();
+  const upgraded: string[] = [];
+  for (let i = 0; i < listings.length; i++) {
+    const trimmed = trimAuction(listings[i]!, seenAt);
+    const entity = apply(mapGet, entities, [trimmed.tradeId]);
+    if (entity === undefined) continue;
+    rememberListing(trimmed, entity);
+    upgraded[upgraded.length] = trimmed.tradeId;
+  }
+  postBuyable(upgraded);
 }
 
 const searchHook = createSearchHook(onHookedSearch);

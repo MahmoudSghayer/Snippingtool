@@ -189,7 +189,9 @@ export class Autobuyer {
       // retry. If nothing of this candidate reached EA (a refusal on the
       // first try), the governor gets back what it charged.
       const refused = isAdapterRefusal(result.error);
-      if (refused && attempt === 0) this.deps.governor.refund(decision);
+      // Only a signed refusal: an unsigned one (content's own timeout on an
+      // unsigned probe's hint) may hide a buy that happened.
+      if (refused && attempt === 0 && result.signed) this.deps.governor.refund(decision);
       const nonRetryable = !refused && NON_RETRYABLE_PATTERN.test(result.error ?? '');
       const isLastAttempt = attempt === maxRetries || refused;
       this.deps.onAttempt({
