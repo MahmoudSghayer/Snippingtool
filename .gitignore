@@ -51,3 +51,6 @@ tests/e2e/.artifacts/
 
 # Redis dump written by a locally-run redis-server
 dump.rdb
+
+# vm-deploy.sh records the last rollback stamp here
+infra/.last-rollback-stamp
