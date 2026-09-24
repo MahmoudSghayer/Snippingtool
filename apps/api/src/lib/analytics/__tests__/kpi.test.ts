@@ -53,7 +53,7 @@ describe('lib/analytics/kpi', () => {
 
   it('getMrrArr: sums active non-lifetime subscriptions normalised to monthly, excludes trialing/canceled/lifetime', async () => {
     const proId = await planId(db, 'pro'); // 999 cents/month
-    const ultimateId = await planId(db, 'ultimate'); // 1999 cents/month
+    const ultimateId = await planId(db, 'ultimate'); // 1399 cents/month (Monthly + Mobile)
     const lifetimeId = await planId(db, 'lifetime'); // one_time, is_lifetime
 
     const u1 = await createUser(db, 'mrr-active-pro@example.com');
@@ -75,8 +75,8 @@ describe('lib/analytics/kpi', () => {
     ]);
 
     const { mrrCents, arrCents } = await getMrrArr(db);
-    expect(mrrCents).toBe(999 + 1999); // 2998
-    expect(arrCents).toBe(2998 * 12); // 35976
+    expect(mrrCents).toBe(999 + 1399); // 2398
+    expect(arrCents).toBe(2398 * 12); // 28776
   });
 
   it('getTotalRevenueCents: sums succeeded payments within [from, to], excludes other statuses and out-of-range rows', async () => {
