@@ -142,7 +142,7 @@ describe('collectDiagnostics', () => {
   it('reports the extension alone when no EA tab is open', async () => {
     const report = await collectDiagnostics({ ...base, queryTabs: async () => [], sendToTab: vi.fn() });
     expect(report).toMatchObject({
-      kind: 'sniper-ledger-diagnostics',
+      kind: 'nova-trade-diagnostics',
       extension: { version: '0.1.0', buildTarget: 'ledger-auto' },
       generatedAt: '2026-09-24T00:00:00.000Z',
       adapter: null,

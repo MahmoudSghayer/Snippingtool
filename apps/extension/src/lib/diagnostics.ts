@@ -17,7 +17,7 @@ import { extContentDiagnosticsResponseSchema, type AdapterDiagnostics } from '@s
 
 import { scrubText } from './redact.js';
 
-export const DIAGNOSTICS_REPORT_KIND = 'sniper-ledger-diagnostics';
+export const DIAGNOSTICS_REPORT_KIND = 'nova-trade-diagnostics';
 
 export interface DiagnosticsReport {
   kind: typeof DIAGNOSTICS_REPORT_KIND;
