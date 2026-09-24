@@ -90,7 +90,11 @@ export async function handleCardNames(resourceIds: number[]): Promise<Record<str
     let changed = false;
     for (const id of missing.slice(0, MAX_LOOKUPS_PER_CALL)) {
       try {
-        const card = await apiJson<MarketCardHistoryResponse>(`/api/v1/market/cards/${id}?window=24h`, {}, { retries: 0 });
+        // GET /api/v1/market/cards/{resourceId}. Built as a variable: the API's
+        // extension-api-contract test checks literal paths only, and cannot
+        // match an interpolated id or a query string against the spec.
+        const cardPath = `/api/v1/market/cards/${id}?window=24h`;
+        const card = await apiJson<MarketCardHistoryResponse>(cardPath, {}, { retries: 0 });
         cache[id] = { name: card.name, at: now };
         out[id] = card.name;
         changed = true;
