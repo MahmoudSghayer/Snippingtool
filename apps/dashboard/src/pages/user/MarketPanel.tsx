@@ -21,8 +21,9 @@ import {
   CardContent,
   DataTable,
   EmptyState,
-  Select,
+  formatCoins,
   formatDate,
+  Select,
   type ColumnDef,
 } from '@sl/ui';
 import { useQuery } from '@tanstack/react-query';
@@ -78,7 +79,7 @@ const SCOPES: { value: MarketScope; label: string }[] = [
   { value: 'market', label: 'Pooled market' },
 ];
 
-const coins = (value: number | null) => (value == null ? '—' : value.toLocaleString());
+const coins = (value: number | null) => (value == null ? '—' : formatCoins(value));
 
 function cardLabel(row: { name: string | null; rating: number | null; resourceId: string }) {
   // A card the collectors have never described still has observations, so
@@ -120,7 +121,7 @@ export function MarketPanel() {
         params: { query: { window, scope } },
       });
       if (error) throw error;
-      return data as unknown as { meta: Meta; rows: ActivityRow[] };
+      return data;
     },
   });
 
@@ -131,7 +132,7 @@ export function MarketPanel() {
         params: { query: { window, scope } },
       });
       if (error) throw error;
-      return data as unknown as { meta: Meta; rows: MoverRow[] };
+      return data;
     },
   });
 

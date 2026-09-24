@@ -194,7 +194,7 @@ export function BotPage() {
     queryFn: async () => {
       const { data, error } = await api.GET('/api/v1/filters');
       if (error) throw error;
-      return (data ?? []) as unknown as SavedFilterRow[];
+      return data ?? [];
     },
   });
 

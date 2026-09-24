@@ -17,7 +17,7 @@ import { z } from 'zod';
 import { setUnauthorizedHandler } from '@/api/client.js';
 import { permissionsFor, type AdminNavKey } from '@/lib/adminNav.js';
 import { ensureBootstrapped } from '@/lib/authBootstrap.js';
-import { ErrorPage } from '@/pages/ErrorPage.js';
+import { AppContentErrorCard, ErrorPage } from '@/pages/ErrorPage.js';
 import { NotFoundPage } from '@/pages/NotFoundPage.js';
 import { AppLayout, PublicLayout, RootLayout } from '@/routes/layouts.js';
 import { useAuthStore } from '@/stores/auth.js';
@@ -105,32 +105,46 @@ const appLayoutRoute = createRoute({
   },
 });
 
-const dashboardRoute = createRoute({
+// Pathless route nested *inside* `appLayoutRoute`, with no component of its
+// own (falls through to rendering `<Outlet />`) — its only job is owning an
+// `errorComponent`. Because it sits below `AppLayout` (sidebar/topbar) in
+// the match tree rather than replacing it, a page render error is caught
+// here: the shell stays mounted and only `<main>`'s content is swapped for
+// the error card (`AppContentErrorCard`'s `reset` retries in place). Putting
+// `errorComponent` on `appLayoutRoute` itself would instead unmount
+// `AppLayout` entirely on every page error, sidebar included.
+const appContentRoute = createRoute({
   getParentRoute: () => appLayoutRoute,
+  id: 'app-content',
+  errorComponent: AppContentErrorCard,
+});
+
+const dashboardRoute = createRoute({
+  getParentRoute: () => appContentRoute,
   path: '/dashboard',
   component: lazyRouteComponent(() => import('@/pages/user/DashboardPage.js'), 'DashboardPage'),
 });
 
 const tradesRoute = createRoute({
-  getParentRoute: () => appLayoutRoute,
+  getParentRoute: () => appContentRoute,
   path: '/trades',
   component: lazyRouteComponent(() => import('@/pages/user/TradesPage.js'), 'TradesPage'),
 });
 
 const botRoute = createRoute({
-  getParentRoute: () => appLayoutRoute,
+  getParentRoute: () => appContentRoute,
   path: '/bot',
   component: lazyRouteComponent(() => import('@/pages/user/BotPage.js'), 'BotPage'),
 });
 
 const analyticsRoute = createRoute({
-  getParentRoute: () => appLayoutRoute,
+  getParentRoute: () => appContentRoute,
   path: '/analytics',
   component: lazyRouteComponent(() => import('@/pages/user/AnalyticsPage.js'), 'AnalyticsPage'),
 });
 
 const subscriptionsRoute = createRoute({
-  getParentRoute: () => appLayoutRoute,
+  getParentRoute: () => appContentRoute,
   path: '/subscriptions',
   component: lazyRouteComponent(
     () => import('@/pages/user/SubscriptionsPage.js'),
@@ -139,7 +153,7 @@ const subscriptionsRoute = createRoute({
 });
 
 const settingsRoute = createRoute({
-  getParentRoute: () => appLayoutRoute,
+  getParentRoute: () => appContentRoute,
   path: '/settings',
   component: lazyRouteComponent(() => import('@/pages/user/SettingsPage.js'), 'SettingsPage'),
 });
@@ -153,7 +167,7 @@ const indexRoute = createRoute({
 // --- Admin (nested under the app shell, additionally role-guarded) ---------
 
 const adminLayoutRoute = createRoute({
-  getParentRoute: () => appLayoutRoute,
+  getParentRoute: () => appContentRoute,
   path: '/admin',
   beforeLoad: () => {
     if (useAuthStore.getState().admin === null) {
@@ -284,26 +298,28 @@ const routeTree = rootRoute.addChildren([
     resetPasswordRoute,
   ]),
   appLayoutRoute.addChildren([
-    dashboardRoute,
-    tradesRoute,
-    botRoute,
-    analyticsRoute,
-    subscriptionsRoute,
-    settingsRoute,
-    adminLayoutRoute.addChildren([
-      adminOverviewRoute,
-      adminUsersRoute,
-      adminProfitsRoute,
-      adminActivityRoute,
-      adminSystemRoute,
-      adminAuditRoute,
-      adminSubscriptionsRoute,
-      adminCouponsRoute,
-      adminPlansRoute,
-      adminFlagsRoute,
-      adminBansRoute,
-      adminFeatureTogglesRoute,
-      adminConfigRoute,
+    appContentRoute.addChildren([
+      dashboardRoute,
+      tradesRoute,
+      botRoute,
+      analyticsRoute,
+      subscriptionsRoute,
+      settingsRoute,
+      adminLayoutRoute.addChildren([
+        adminOverviewRoute,
+        adminUsersRoute,
+        adminProfitsRoute,
+        adminActivityRoute,
+        adminSystemRoute,
+        adminAuditRoute,
+        adminSubscriptionsRoute,
+        adminCouponsRoute,
+        adminPlansRoute,
+        adminFlagsRoute,
+        adminBansRoute,
+        adminFeatureTogglesRoute,
+        adminConfigRoute,
+      ]),
     ]),
   ]),
   devComponentsRoute,

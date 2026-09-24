@@ -1,19 +1,15 @@
 import {
   ChartCard,
-  ChartLegend,
   DateRangePicker,
   defaultDateRange,
-  DonutChart,
   formatCurrencyFromCents,
   formatPercent,
   KpiGrid,
-  LineChart,
   PageHeader,
-  seriesColor,
-  seriesLegendItems,
   StatTile,
   type DateRange,
 } from '@sl/ui';
+import { ChartLegend, DonutChart, LineChart, seriesColor, seriesLegendItems } from '@sl/ui/charts';
 import { useQuery } from '@tanstack/react-query';
 import { Activity, AlertTriangle, DollarSign, TrendingUp, Users } from 'lucide-react';
 import { useState } from 'react';

@@ -56,7 +56,7 @@ export function UsersPage() {
   const queryClient = useQueryClient();
   // Pre-filled by the command palette's admin user search (`?q=`), or empty
   // on a normal nav-link visit.
-  const search = useSearch({ from: '/app/admin/users' });
+  const search = useSearch({ from: '/app/app-content/admin/users' });
   const [q, setQ] = useState(search.q ?? '');
   const [status, setStatus] = useState(ANY);
   const [cursor, setCursor] = useState<string | undefined>(undefined);

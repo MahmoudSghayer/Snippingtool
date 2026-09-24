@@ -1,25 +1,21 @@
 import { SUBSCRIPTION_STATUSES } from '@sl/shared';
 import {
-  AreaChart,
   Badge,
   ChartCard,
-  ChartLegend,
   DataTable,
   DateRangePicker,
   defaultDateRange,
-  DonutChart,
   Drawer,
   FormField,
   Input,
   KpiGrid,
   PageHeader,
   Select,
-  seriesColor,
-  seriesLegendItems,
   StatTile,
   type ColumnDef,
   type DateRange,
 } from '@sl/ui';
+import { AreaChart, ChartLegend, DonutChart, seriesColor, seriesLegendItems } from '@sl/ui/charts';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 

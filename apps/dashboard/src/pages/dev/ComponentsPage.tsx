@@ -1,6 +1,4 @@
 import {
-  AreaChart,
-  BarChart,
   Badge,
   Button,
   Card,
@@ -14,19 +12,16 @@ import {
   DateRangePicker,
   defaultDateRange,
   DiffViewer,
-  DonutChart,
   Drawer,
   EmptyState,
   FormField,
   Input,
   KpiGrid,
-  LineChart,
   Modal,
   PageHeader,
   PasswordInput,
   Select,
   Skeleton,
-  Sparkline,
   StatTile,
   Switch,
   Tabs,
@@ -39,6 +34,7 @@ import {
   type ColumnDef,
   type DateRange,
 } from '@sl/ui';
+import { AreaChart, BarChart, DonutChart, LineChart, Sparkline } from '@sl/ui/charts';
 import { useState } from 'react';
 
 interface DemoRow {

@@ -35,10 +35,10 @@ interface MarketEventRow {
   summary: string | null;
 }
 
-interface EventsResponse {
-  events: MarketEventRow[];
-  lastCollectedAt: string | null;
-}
+// A compact card widget, not a paginated log — enough to cover a couple of
+// weeks of announcements without over-fetching (API default is 30, max 100;
+// see marketEventsQuerySchema in packages/shared/src/schemas/market.ts).
+const EVENTS_LIMIT = 20;
 
 const KIND_LABEL: Record<EventKind, string> = {
   content: 'Content',
@@ -82,10 +82,10 @@ export function EventsTimeline() {
     queryKey: ['market', 'events', kind],
     queryFn: async () => {
       const { data, error } = await api.GET('/api/v1/market/events', {
-        params: { query: kind === 'all' ? {} : { kind } },
+        params: { query: kind === 'all' ? { limit: EVENTS_LIMIT } : { kind, limit: EVENTS_LIMIT } },
       });
       if (error) throw error;
-      return data as unknown as EventsResponse;
+      return data;
     },
   });
 

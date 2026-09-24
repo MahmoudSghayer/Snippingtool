@@ -2,6 +2,11 @@
 // dashboard uses is re-exported from here; nothing reaches into
 // `@sl/ui/src/...` directly. Design tokens live in `./tokens.css`
 // (`@sl/ui/tokens.css`), imported once by the dashboard's global stylesheet.
+//
+// Recharts-based chart components live behind the `@sl/ui/charts` subpath
+// export (`./charts/index.ts`), not here — keeping them out of this barrel
+// is what lets routes that never render a chart (e.g. `/login`) skip the
+// Recharts chunk entirely.
 
 export * from './lib/cn.js';
 export * from './lib/format.js';
@@ -35,12 +40,3 @@ export * from './components/CopyField.js';
 export * from './components/Sidebar.js';
 export * from './components/KpiGrid.js';
 export * from './components/CommandPalette.js';
-
-export * from './charts/palette.js';
-export * from './charts/ChartTooltip.js';
-export * from './charts/ChartLegend.js';
-export * from './charts/LineChart.js';
-export * from './charts/AreaChart.js';
-export * from './charts/BarChart.js';
-export * from './charts/DonutChart.js';
-export * from './charts/Sparkline.js';

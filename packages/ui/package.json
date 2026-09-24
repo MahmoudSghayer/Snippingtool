@@ -6,10 +6,15 @@
   "description": "The Sniper's Ledger design system: dark gaming theme tokens (Tailwind v4) and shadcn-style React primitive components shared by the dashboard.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./charts": {
+      "types": "./dist/charts/index.d.ts",
+      "import": "./dist/charts/index.js"
     },
     "./tokens.css": "./src/tokens.css"
   },

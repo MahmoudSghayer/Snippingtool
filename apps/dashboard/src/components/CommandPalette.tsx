@@ -3,7 +3,7 @@
 // keyboard shortcut is global while the authenticated shell is mounted
 // (docs/07-dashboard.md "Command palette", PHASE 10).
 import { CommandPalette as UiCommandPalette, type CommandPaletteItem } from '@sl/ui';
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import {
   BarChart3,
@@ -160,22 +160,32 @@ export interface CommandPaletteProps {
   isAdmin: boolean;
 }
 
+/** Keystrokes shouldn't each fire a request — wait for the user to pause. */
+const USER_SEARCH_DEBOUNCE_MS = 200;
+
 export function CommandPalette({ open, onOpenChange, isAdmin }: CommandPaletteProps) {
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
-  const isEmailLike = query.trim().length >= 2;
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query), USER_SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [query]);
 
   const userSearchQuery = useQuery({
-    queryKey: ['command-palette', 'users', query],
-    queryFn: async () => {
+    queryKey: ['command-palette', 'users', debouncedQuery],
+    queryFn: async ({ signal }) => {
       const { data, error } = await api.GET('/api/v1/admin/users', {
-        params: { query: { q: query, limit: 5 } },
+        params: { query: { q: debouncedQuery, limit: 5 } },
+        signal,
       });
       if (error) throw error;
       return data;
     },
-    enabled: open && isAdmin && isEmailLike,
+    enabled: open && isAdmin && debouncedQuery.trim().length >= 2,
     staleTime: 10_000,
+    placeholderData: keepPreviousData,
   });
 
   const matchedRoutes = useMemo(() => {

@@ -1,10 +1,7 @@
 import {
-  AreaChart,
-  BarChart,
   Card,
   CardContent,
   ChartCard,
-  ChartLegend,
   DataTable,
   DateRangePicker,
   defaultDateRange,
@@ -13,7 +10,6 @@ import {
   FormField,
   PageHeader,
   Select,
-  seriesLegendItems,
   Tabs,
   TabsContent,
   TabsList,
@@ -21,6 +17,7 @@ import {
   type ColumnDef,
   type DateRange,
 } from '@sl/ui';
+import { AreaChart, BarChart, ChartLegend, seriesLegendItems } from '@sl/ui/charts';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 
