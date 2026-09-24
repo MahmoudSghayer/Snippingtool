@@ -18,6 +18,7 @@ import fp from 'fastify-plugin';
 import { type ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 
+import { PAYMENTS_NOTIFY_JOB } from '../../jobs/payments.notify.job.js';
 import { recordAudit } from '../../lib/audit.js';
 import { decodeCursor, encodeCursor } from '../../lib/pagination.js';
 import { ADMIN_RATE_LIMIT } from '../../lib/rate-limit-tiers.js';
@@ -60,6 +61,12 @@ export default fp(
           planCode: request.body.planCode,
           paypalTransactionId: request.body.paypalTransactionId,
           note: request.body.note,
+        });
+        // Tell the operator (jobs/payments.notify.job.ts). The claim is
+        // already saved and listed in admin, so a queue hiccup must not fail
+        // the buyer's request.
+        await fastify.enqueue(PAYMENTS_NOTIFY_JOB, { claimId: claim.id }).catch((err: unknown) => {
+          request.log.warn({ err, claimId: claim.id }, 'could not enqueue payments.notify');
         });
         return reply.status(201).send(toPaymentClaimDto(claim, plan.name));
       },
@@ -233,7 +240,7 @@ export default fp(
       },
     );
   },
-  { name: 'module:payment-claims', dependencies: ['auth', 'db', 'redis'] },
+  { name: 'module:payment-claims', dependencies: ['auth', 'db', 'redis', 'queues'] },
 );
 
 async function planNames(fastify: FastifyInstance): Promise<Map<string, string>> {

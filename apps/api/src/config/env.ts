@@ -182,12 +182,24 @@ const envSchema = z.object({
   ENTITLEMENT_SIGNING_KEY: z.string().min(1).optional(),
   ENTITLEMENT_PUBLIC_KEY: z.string().min(1).optional(),
 
+  // --- Operator notifications ---
+  // Discord channel webhook that gets a message for every PayPal payment a
+  // customer submits (jobs/payments.notify.job.ts), so an admin can approve
+  // it quickly. Unset = no messages; the admin Payments page still lists them.
+  PAYMENTS_DISCORD_WEBHOOK_URL: z.preprocess(
+    (v) => (v === '' ? undefined : v),
+    z.string().url().optional(),
+  ),
+
   // --- Extension download ---
   // Directory holding the `ledger-auto --template` build that
   // GET /downloads/extension zips and serves. The API image ships it at
   // /app/downloads/extension-template; in the repo it's
   // apps/extension/dist/ledger-auto-template. Unset = look in both.
-  EXTENSION_TEMPLATE_DIR: z.string().min(1).optional(),
+  EXTENSION_TEMPLATE_DIR: z.preprocess(
+    (v) => (v === '' ? undefined : v),
+    z.string().min(1).optional(),
+  ),
 
   // --- Stripe (owned by the subscriptions/payments module) ---
   STRIPE_SECRET_KEY: z.string().optional(),
