@@ -167,6 +167,70 @@ describe('plans, admin-plans, admin-bans, admin-flags', () => {
     expect(afterLift.banned).toBe(false);
   });
 
+  it('admin-bans: an account ban rejects an access token issued before it, on the next request', async () => {
+    const { token: adminToken } = await createAdmin(app, 'bans-token-admin@example.com');
+    const targetId = await createVerifiedUser(app, 'ban-token-target@example.com');
+    const targetToken = await signAccessToken(
+      { sub: targetId, sid: newId(), did: null, role: 'user', plan: null, ver: 0 },
+      app.config.JWT_PRIVATE_KEY!,
+    );
+    const me = () =>
+      app.inject({
+        method: 'GET',
+        url: '/api/v1/users/me',
+        headers: { authorization: `Bearer ${targetToken}` },
+      });
+    expect((await me()).statusCode).toBe(200);
+
+    const banRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/admin/bans',
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { type: 'account', userId: targetId, reason: 'botting' },
+    });
+    expect(banRes.statusCode).toBe(201);
+
+    expect((await me()).statusCode).toBe(401);
+  });
+
+  it('admin-bans: an IP ban cuts off an existing session from that address, and lifting restores it', async () => {
+    const { token: adminToken } = await createAdmin(app, 'bans-ip-admin@example.com');
+    const targetId = await createVerifiedUser(app, 'ban-ip-target@example.com');
+    const targetToken = await signAccessToken(
+      { sub: targetId, sid: newId(), did: null, role: 'user', plan: null, ver: 0 },
+      app.config.JWT_PRIVATE_KEY!,
+    );
+    const me = (remoteAddress: string) =>
+      app.inject({
+        method: 'GET',
+        url: '/api/v1/users/me',
+        remoteAddress,
+        headers: { authorization: `Bearer ${targetToken}` },
+      });
+    // Warm the per-request ban cache with a "not banned" answer first.
+    expect((await me('203.0.113.77')).statusCode).toBe(200);
+
+    const banRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/admin/bans',
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { type: 'ip', value: '203.0.113.77', reason: 'proxy farm' },
+    });
+    expect(banRes.statusCode).toBe(201);
+
+    expect((await me('203.0.113.77')).statusCode).toBe(403);
+    expect((await me('198.51.100.8')).statusCode).toBe(200);
+
+    const liftRes = await app.inject({
+      method: 'POST',
+      url: `/api/v1/admin/bans/${banRes.json().id}/lift`,
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { reason: 'shared address' },
+    });
+    expect(liftRes.statusCode).toBe(200);
+    expect((await me('203.0.113.77')).statusCode).toBe(200);
+  });
+
   it('admin-flags: lists open flags and marks one reviewed', async () => {
     const { token } = await createAdmin(app, 'flags-admin@example.com');
     const targetId = await createVerifiedUser(app, 'flag-target@example.com');

@@ -93,6 +93,7 @@ export default defineJob<SignalsExtractData>({
         continue;
       }
 
+      const rows: (typeof newsSignals.$inferInsert)[] = [];
       for (const signal of outcome.signals) {
         // A named player is resolved through the same conservative path the
         // collectors use: an unresolvable name yields no card id rather than
@@ -112,7 +113,7 @@ export default defineJob<SignalsExtractData>({
         const cohort =
           signal.cohort ?? (cardId ? null : { playerName: signal.playerName ?? 'unknown' });
 
-        await db.insert(newsSignals).values({
+        rows.push({
           newsItemId: article.id,
           direction: signal.direction,
           magnitude: signal.magnitude,
@@ -126,10 +127,17 @@ export default defineJob<SignalsExtractData>({
         });
       }
 
-      await db
-        .update(newsItems)
-        .set({ signalsExtractedAt: new Date(), signalsModel: outcome.model })
-        .where(eq(newsItems.id, article.id));
+      // An article's signals and its "extracted" stamp land together or not
+      // at all. Otherwise a failure part-way leaves some signals stored and
+      // the article unstamped, and the retry (a fresh, non-deterministic
+      // extraction) stores a second, different set next to them.
+      await db.transaction(async (tx) => {
+        if (rows.length > 0) await tx.insert(newsSignals).values(rows);
+        await tx
+          .update(newsItems)
+          .set({ signalsExtractedAt: new Date(), signalsModel: outcome.model })
+          .where(eq(newsItems.id, article.id));
+      });
 
       extracted += 1;
       if (outcome.signals.length > 0) withSignals += 1;

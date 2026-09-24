@@ -61,7 +61,7 @@ async function main() {
         await job.processor(bullJob, ctx);
         log.info({ job: job.name, jobId: bullJob.id }, 'job completed');
       },
-      { connection, concurrency: 1 },
+      { connection, concurrency: job.concurrency ?? 1 },
     );
     worker.on('failed', (bullJob, err) => {
       log.error({ job: job.name, jobId: bullJob?.id, err }, 'job failed');

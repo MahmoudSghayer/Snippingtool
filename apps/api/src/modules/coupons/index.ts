@@ -7,6 +7,7 @@ import { couponValidateRequestSchema, couponValidateResponseSchema } from '@sl/s
 import fp from 'fastify-plugin';
 import { type ZodTypeProvider } from 'fastify-type-provider-zod';
 
+import { LOOKUP_RATE_LIMIT } from '../../lib/rate-limit-tiers.js';
 import { getPlanByCode } from '../subscriptions/service.js';
 
 import { checkCouponEligibility } from './service.js';
@@ -35,6 +36,7 @@ export default fp(
     app.post(
       '/api/v1/coupons/validate',
       {
+        config: { rateLimit: LOOKUP_RATE_LIMIT },
         schema: {
           tags: ['coupons'],
           summary: 'Preview whether a coupon code is valid for a plan.',

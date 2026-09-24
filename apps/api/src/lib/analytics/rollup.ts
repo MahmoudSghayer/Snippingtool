@@ -89,15 +89,22 @@ export async function rollupProfitsForUserDay(
     tradesClosed: sold.length,
   };
 
-  const existing = await db.query.profits.findFirst({
-    where: and(eq(profits.userId, userId), eq(profits.day, day)),
-  });
   const hasActivity = sold.length + bought.length + snipes.length > 0;
 
-  if (existing) {
-    await db.update(profits).set(totals).where(eq(profits.id, existing.id));
-  } else if (hasActivity) {
-    await db.insert(profits).values({ id: newId(), userId, day, ...totals });
+  // Two writes for the same user can roll the same day up at once (a trades
+  // batch and a sniping ingest, or a request racing the hourly job), so the
+  // insert must not assume it is first. A day with no activity only ever
+  // updates an existing row (zeroing it) and never creates an empty one.
+  if (hasActivity) {
+    await db
+      .insert(profits)
+      .values({ id: newId(), userId, day, ...totals })
+      .onConflictDoUpdate({ target: [profits.userId, profits.day], set: totals });
+  } else {
+    await db
+      .update(profits)
+      .set(totals)
+      .where(and(eq(profits.userId, userId), eq(profits.day, day)));
   }
   return totals;
 }

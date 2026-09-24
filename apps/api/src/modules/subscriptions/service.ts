@@ -20,7 +20,7 @@ import {
 } from '@sl/shared';
 import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, ne } from 'drizzle-orm';
 
-import { AppErrors } from '../../lib/errors.js';
+import { AppErrors, isUniqueViolation } from '../../lib/errors.js';
 import { newId } from '../../lib/ids.js';
 import { upsertIpActivity } from '../../lib/ip-activity.js';
 import { publishToUser } from '../../ws/publish.js';
@@ -354,21 +354,32 @@ export async function startTrial(
   const now = new Date();
   const trialEndsAt = new Date(now.getTime() + TRIAL_LENGTH_DAYS * DAY_MS);
 
-  const [subRow] = await db
-    .insert(subscriptions)
-    .values({
-      id: newId(),
-      userId: input.userId,
-      planId: plan.id,
-      status: 'trialing',
-      currentPeriodStart: now,
-      currentPeriodEnd: null,
-      trialEndsAt,
-      cancelAtPeriodEnd: false,
-      autoRenew: false,
-      source: 'manual',
-    })
-    .returning();
+  // The live-subscription check above is not a lock: two concurrent trial
+  // requests (a double-click, two tabs) can both pass it. The partial unique
+  // index `subscriptions_one_live_per_user` lets exactly one insert win, and
+  // the loser gets the same conflict it would have got a moment later.
+  let subRow: SubscriptionRow | undefined;
+  try {
+    [subRow] = await db
+      .insert(subscriptions)
+      .values({
+        id: newId(),
+        userId: input.userId,
+        planId: plan.id,
+        status: 'trialing',
+        currentPeriodStart: now,
+        currentPeriodEnd: null,
+        trialEndsAt,
+        cancelAtPeriodEnd: false,
+        autoRenew: false,
+        source: 'manual',
+      })
+      .returning();
+  } catch (err) {
+    if (isUniqueViolation(err))
+      throw AppErrors.conflict('You already have an active subscription.');
+    throw err;
+  }
 
   const { row: licenseRow, fullKey } = await issueForSubscription(db, {
     subscriptionId: subRow!.id,

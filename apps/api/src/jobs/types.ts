@@ -32,6 +32,11 @@ export interface JobDefinition<TData = unknown> {
   /** Cron expression for a repeatable job. Omit for a job only ever
    * triggered manually/by another job (`queue.add`). */
   schedule?: string;
+  /** Jobs of this queue a worker process runs at once. Default 1, which is
+   * right for anything scheduled or order-sensitive; raise it for queues of
+   * independent, I/O-bound jobs (e.g. sending email) so a burst drains in
+   * parallel instead of one at a time. */
+  concurrency?: number;
   /** Runs once per invocation. Throwing marks the BullMQ job failed (and
    * retried per its `attempts` option, default 3 set in worker.ts). */
   processor: (job: Job<TData>, ctx: JobContext) => Promise<void>;

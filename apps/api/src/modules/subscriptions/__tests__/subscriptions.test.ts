@@ -153,6 +153,25 @@ describe('subscriptions module', () => {
     expect(me.entitlements.features).toContain('assist.ranker');
   });
 
+  it('two concurrent trial requests: one wins, the other is a 409, never a 500', async () => {
+    const ip = nextIp();
+    const accessToken = await registerVerifyLogin(
+      'trial-race@example.com',
+      ip,
+      'fp-race-00000000000000001',
+    );
+
+    const send = () =>
+      app.inject({
+        method: 'POST',
+        url: '/api/v1/subscriptions/trial',
+        remoteAddress: ip,
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+    const statuses = (await Promise.all([send(), send(), send()])).map((r) => r.statusCode).sort();
+    expect(statuses).toEqual([201, 409, 409]);
+  });
+
   it('trial abuse: denies a second trial from the same normalised (gmail dotted/plus) email and flags it', async () => {
     const ipA = nextIp();
     const tokenA = await registerVerifyLogin(

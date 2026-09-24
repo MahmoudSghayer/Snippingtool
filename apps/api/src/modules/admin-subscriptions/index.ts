@@ -17,7 +17,7 @@ import {
   subscriptionDtoSchema,
   SUBSCRIPTION_STATUSES,
 } from '@sl/shared';
-import { and, desc, eq, ilike, lt } from 'drizzle-orm';
+import { and, desc, eq, ilike, isNull, lt } from 'drizzle-orm';
 import fp from 'fastify-plugin';
 import { type ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
@@ -92,9 +92,14 @@ export default fp(
 
         let userIdsForSearch: string[] | null = null;
         if (search) {
+          // Soft-deleted accounts are out of scope like everywhere else, and
+          // the id list is capped so a broad substring (a mail domain) can't
+          // pull the whole users table into memory.
+          const pattern = `%${search.replace(/[\\%_]/g, '\\$&')}%`;
           const matches = await fastify.db.query.users.findMany({
-            where: ilike(users.email, `%${search}%`),
+            where: and(ilike(users.email, pattern), isNull(users.deletedAt)),
             columns: { id: true },
+            limit: 500,
           });
           userIdsForSearch = matches.map((u) => u.id);
           if (userIdsForSearch.length === 0) return { items: [], nextCursor: null };
