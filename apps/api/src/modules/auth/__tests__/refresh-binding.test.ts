@@ -60,7 +60,7 @@ describe('auth module — refresh-token binding', () => {
       url: '/api/v1/auth/register',
       remoteAddress: ip,
       headers: { 'user-agent': userAgent },
-      payload: { email, password: 'correcthorsebattery12', device },
+      payload: { email, password: 'correcthorsebattery12', device, acceptTerms: true },
     });
     expect(registerRes.statusCode).toBe(201);
 

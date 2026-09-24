@@ -163,6 +163,11 @@ export const notificationChannelEnum = pgEnum('notification_channel', [
 ]);
 
 export const paymentProviderEnum = pgEnum('payment_provider', ['stripe', 'manual']);
+export const paymentClaimStatusEnum = pgEnum('payment_claim_status', [
+  'pending',
+  'approved',
+  'rejected',
+]);
 export const paymentStatusEnum = pgEnum('payment_status', [
   'pending',
   'succeeded',

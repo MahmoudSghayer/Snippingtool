@@ -10,6 +10,7 @@
 
 import { adminUsers, users } from '@sl/db';
 import { resetDatabase } from '@sl/db/test-utils';
+import { TERMS_VERSION } from '@sl/shared';
 import { eq } from 'drizzle-orm';
 import { decodeJwt } from 'jose';
 import { authenticator } from 'otplib';
@@ -62,7 +63,7 @@ describe('auth module', () => {
       method: 'POST',
       url: '/api/v1/auth/register',
       remoteAddress: ip,
-      payload: { email, password, device },
+      payload: { email, password, device, acceptTerms: true },
     });
     expect(res.statusCode).toBe(201);
     const { userId } = res.json();
@@ -109,6 +110,35 @@ describe('auth module', () => {
     expect(meRes.statusCode).toBe(200);
   });
 
+  it('registration requires accepting the Terms, and records the version accepted', async () => {
+    const ip = nextIp();
+    const refused = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      remoteAddress: ip,
+      payload: { email: 'no-terms@example.com', password: 'correcthorsebattery12', device },
+    });
+    expect(refused.statusCode).toBe(400);
+
+    const accepted = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      remoteAddress: ip,
+      payload: {
+        email: 'terms@example.com',
+        password: 'correcthorsebattery12',
+        device,
+        acceptTerms: true,
+      },
+    });
+    expect(accepted.statusCode).toBe(201);
+    const row = await app.db.query.users.findFirst({
+      where: eq(users.id, accepted.json().userId),
+    });
+    expect(row?.termsVersion).toBe(TERMS_VERSION);
+    expect(row?.termsAcceptedAt).toBeInstanceOf(Date);
+  });
+
   it('rejects login before email verification', async () => {
     const ip = nextIp();
     const email = 'unverified@example.com';
@@ -116,7 +146,7 @@ describe('auth module', () => {
       method: 'POST',
       url: '/api/v1/auth/register',
       remoteAddress: ip,
-      payload: { email, password: 'correcthorsebattery12', device },
+      payload: { email, password: 'correcthorsebattery12', device, acceptTerms: true },
     });
 
     const res = await app.inject({

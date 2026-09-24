@@ -29,7 +29,7 @@ test('register -> verify -> login -> device registered -> trial -> license key s
 
   await test.step('register', async () => {
     const res = await request.post(`${API_ORIGIN}/api/v1/auth/register`, {
-      data: { email: EMAIL, password: TEST_PASSWORD, device },
+      data: { email: EMAIL, password: TEST_PASSWORD, device, acceptTerms: true },
     });
     expect(res.status(), await res.text()).toBe(201);
     const body = (await res.json()) as { userId: string };

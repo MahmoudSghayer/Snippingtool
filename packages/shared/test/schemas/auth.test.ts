@@ -28,6 +28,7 @@ describe('registerRequestSchema', () => {
       email: '  Player@Example.COM  ',
       password: 'correcthorse1',
       device: validDevice,
+      acceptTerms: true,
     });
     expect(result.success).toBe(true);
     if (result.success) expect(result.data.email).toBe('player@example.com');

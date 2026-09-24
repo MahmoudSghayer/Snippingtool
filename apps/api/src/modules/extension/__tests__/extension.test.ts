@@ -22,7 +22,7 @@ async function registerLoginVerified(app: FastifyInstance, email: string, ip: st
     method: 'POST',
     url: '/api/v1/auth/register',
     remoteAddress: ip,
-    payload: { email, password: 'correcthorsebattery12', device },
+    payload: { email, password: 'correcthorsebattery12', device, acceptTerms: true },
   });
   const token = extractToken(app.mailer.sentEmails.at(-1)!.html);
   await app.inject({

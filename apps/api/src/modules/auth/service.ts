@@ -4,7 +4,12 @@
 // routes.
 
 import { devices, users, type Database, type User } from '@sl/db';
-import { type DeviceFingerprint, type LoginResponse, type MfaEnrollResponse } from '@sl/shared';
+import {
+  TERMS_VERSION,
+  type DeviceFingerprint,
+  type LoginResponse,
+  type MfaEnrollResponse,
+} from '@sl/shared';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 
@@ -128,6 +133,10 @@ export async function register(
     passwordHash,
     timezone: input.timezone ?? 'UTC',
     referralCode: input.referralCode ?? null,
+    // registerRequestSchema only accepts `acceptTerms: true`, so reaching
+    // here means the current Terms were accepted.
+    termsVersion: TERMS_VERSION,
+    termsAcceptedAt: new Date(),
   });
 
   await sendVerificationEmail(ctx, id, input.email);

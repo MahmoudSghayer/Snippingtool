@@ -71,7 +71,8 @@ describe('plans, admin-plans, admin-bans, admin-flags', () => {
     const res = await app.inject({ method: 'GET', url: '/api/v1/plans' });
     expect(res.statusCode).toBe(200);
     const codes = res.json().items.map((p: { code: string }) => p.code);
-    expect(codes).toEqual(['trial', 'basic', 'pro', 'ultimate', 'lifetime']);
+    // basic is retired (inactive), so it isn't listed.
+    expect(codes).toEqual(['trial', 'pro', 'ultimate', 'lifetime']);
   });
 
   it('admin-plans: create a lifetime plan, then archive it (never a hard delete)', async () => {

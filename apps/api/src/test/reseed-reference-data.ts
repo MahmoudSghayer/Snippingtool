@@ -24,6 +24,7 @@ const PLAN_SEEDS = [
     isLifetime: false,
     deviceLimit: 1,
     sortOrder: 0,
+    isActive: true,
   },
   {
     code: 'basic',
@@ -33,33 +34,37 @@ const PLAN_SEEDS = [
     isLifetime: false,
     deviceLimit: 1,
     sortOrder: 1,
+    isActive: false,
   },
   {
     code: 'pro',
-    name: 'Pro',
+    name: 'Monthly',
     priceCents: 999,
     interval: 'month',
     isLifetime: false,
     deviceLimit: 2,
-    sortOrder: 2,
+    sortOrder: 1,
+    isActive: true,
   },
   {
     code: 'ultimate',
-    name: 'Ultimate',
-    priceCents: 1999,
+    name: 'Monthly + Mobile',
+    priceCents: 1399,
     interval: 'month',
     isLifetime: false,
     deviceLimit: 3,
-    sortOrder: 3,
+    sortOrder: 2,
+    isActive: true,
   },
   {
     code: 'lifetime',
-    name: 'Lifetime (Founders)',
-    priceCents: 9999,
+    name: 'Season',
+    priceCents: 2499,
     interval: 'one_time',
     isLifetime: true,
     deviceLimit: 3,
-    sortOrder: 4,
+    sortOrder: 3,
+    isActive: true,
   },
 ] as const;
 
@@ -77,6 +82,7 @@ export async function reseedPlans(db: Database): Promise<void> {
       deviceLimit: plan.deviceLimit,
       features: {},
       sortOrder: plan.sortOrder,
+      isActive: plan.isActive,
     });
   }
 }

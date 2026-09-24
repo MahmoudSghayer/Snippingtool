@@ -7518,12 +7518,19 @@
                       "fingerprint"
                     ],
                     "additionalProperties": false
+                  },
+                  "acceptTerms": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
                   }
                 },
                 "required": [
                   "email",
                   "password",
-                  "device"
+                  "device",
+                  "acceptTerms"
                 ],
                 "additionalProperties": false
               }
@@ -9126,7 +9133,8 @@
                           "automation.autobuyer",
                           "dashboard.analytics",
                           "dashboard.multi_device",
-                          "support.priority"
+                          "support.priority",
+                          "mobile.remote"
                         ]
                       }
                     },
@@ -9509,7 +9517,8 @@
                           "automation.autobuyer",
                           "dashboard.analytics",
                           "dashboard.multi_device",
-                          "support.priority"
+                          "support.priority",
+                          "mobile.remote"
                         ]
                       }
                     },
@@ -11804,6 +11813,693 @@
                   },
                   "required": [
                     "ok"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/payment-claims": {
+      "post": {
+        "summary": "Submit the PayPal transaction ID for a pass you paid for.",
+        "tags": [
+          "payment-claims"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "planCode": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 40
+                  },
+                  "paypalTransactionId": {
+                    "type": "string",
+                    "pattern": "^[0-9A-Z]{17}$"
+                  },
+                  "note": {
+                    "type": "string",
+                    "maxLength": 500
+                  }
+                },
+                "required": [
+                  "planCode",
+                  "paypalTransactionId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "planCode": {
+                      "type": "string"
+                    },
+                    "planName": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "amountCents": {
+                      "type": "integer"
+                    },
+                    "currency": {
+                      "type": "string"
+                    },
+                    "paypalTransactionId": {
+                      "type": "string"
+                    },
+                    "note": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "approved",
+                        "rejected"
+                      ]
+                    },
+                    "rejectReason": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "reviewedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "planCode",
+                    "planName",
+                    "amountCents",
+                    "currency",
+                    "paypalTransactionId",
+                    "note",
+                    "status",
+                    "rejectReason",
+                    "createdAt",
+                    "reviewedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "Your submitted payments, newest first.",
+        "tags": [
+          "payment-claims"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "planCode": {
+                            "type": "string"
+                          },
+                          "planName": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "amountCents": {
+                            "type": "integer"
+                          },
+                          "currency": {
+                            "type": "string"
+                          },
+                          "paypalTransactionId": {
+                            "type": "string"
+                          },
+                          "note": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "pending",
+                              "approved",
+                              "rejected"
+                            ]
+                          },
+                          "rejectReason": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "reviewedAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "nullable": true
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "planCode",
+                          "planName",
+                          "amountCents",
+                          "currency",
+                          "paypalTransactionId",
+                          "note",
+                          "status",
+                          "rejectReason",
+                          "createdAt",
+                          "reviewedAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/payment-claims": {
+      "get": {
+        "summary": "Submitted PayPal payments to review, newest first.",
+        "tags": [
+          "admin-payment-claims"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "approved",
+                "rejected"
+              ]
+            },
+            "in": "query",
+            "name": "status",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "in": "query",
+            "name": "cursor",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "planCode": {
+                            "type": "string"
+                          },
+                          "planName": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "amountCents": {
+                            "type": "integer"
+                          },
+                          "currency": {
+                            "type": "string"
+                          },
+                          "paypalTransactionId": {
+                            "type": "string"
+                          },
+                          "note": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "pending",
+                              "approved",
+                              "rejected"
+                            ]
+                          },
+                          "rejectReason": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "reviewedAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "nullable": true
+                          },
+                          "user": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "email": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "email"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "planCode",
+                          "planName",
+                          "amountCents",
+                          "currency",
+                          "paypalTransactionId",
+                          "note",
+                          "status",
+                          "rejectReason",
+                          "createdAt",
+                          "reviewedAt",
+                          "user"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "nextCursor": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2048,
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/payment-claims/{id}/approve": {
+      "post": {
+        "summary": "Approve a PayPal payment: issues or extends the pass.",
+        "tags": [
+          "admin-payment-claims"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "claim": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "planCode": {
+                          "type": "string"
+                        },
+                        "planName": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "amountCents": {
+                          "type": "integer"
+                        },
+                        "currency": {
+                          "type": "string"
+                        },
+                        "paypalTransactionId": {
+                          "type": "string"
+                        },
+                        "note": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "approved",
+                            "rejected"
+                          ]
+                        },
+                        "rejectReason": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "reviewedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "planCode",
+                        "planName",
+                        "amountCents",
+                        "currency",
+                        "paypalTransactionId",
+                        "note",
+                        "status",
+                        "rejectReason",
+                        "createdAt",
+                        "reviewedAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "subscription": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "plan": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "code": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 40
+                            },
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 80
+                            },
+                            "priceCents": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "currency": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 3
+                            },
+                            "interval": {
+                              "type": "string",
+                              "enum": [
+                                "day",
+                                "week",
+                                "month",
+                                "year",
+                                "one_time"
+                              ]
+                            },
+                            "deviceLimit": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "features": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "isLifetime": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "code",
+                            "name",
+                            "priceCents",
+                            "currency",
+                            "interval",
+                            "deviceLimit",
+                            "features",
+                            "isLifetime"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "trialing",
+                            "active",
+                            "past_due",
+                            "canceled",
+                            "suspended",
+                            "expired",
+                            "lifetime"
+                          ]
+                        },
+                        "currentPeriodStart": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        },
+                        "currentPeriodEnd": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        },
+                        "trialEndsAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        },
+                        "cancelAtPeriodEnd": {
+                          "type": "boolean"
+                        },
+                        "autoRenew": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "plan",
+                        "status",
+                        "currentPeriodStart",
+                        "currentPeriodEnd",
+                        "trialEndsAt",
+                        "cancelAtPeriodEnd",
+                        "autoRenew"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "claim",
+                    "subscription"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/payment-claims/{id}/reject": {
+      "post": {
+        "summary": "Reject a PayPal payment claim, with a reason the buyer sees.",
+        "tags": [
+          "admin-payment-claims"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "planCode": {
+                      "type": "string"
+                    },
+                    "planName": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "amountCents": {
+                      "type": "integer"
+                    },
+                    "currency": {
+                      "type": "string"
+                    },
+                    "paypalTransactionId": {
+                      "type": "string"
+                    },
+                    "note": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "approved",
+                        "rejected"
+                      ]
+                    },
+                    "rejectReason": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "reviewedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "planCode",
+                    "planName",
+                    "amountCents",
+                    "currency",
+                    "paypalTransactionId",
+                    "note",
+                    "status",
+                    "rejectReason",
+                    "createdAt",
+                    "reviewedAt"
                   ],
                   "additionalProperties": false
                 }
@@ -14962,7 +15658,7 @@
   },
   "servers": [
     {
-      "url": "https://api.46.62.142.29.sslip.io"
+      "url": "http://localhost:3000"
     }
   ]
 }

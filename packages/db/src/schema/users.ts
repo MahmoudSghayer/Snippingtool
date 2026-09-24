@@ -45,6 +45,9 @@ export const users = pgTable(
     lockedUntil: timestamptz('locked_until'),
 
     lastLoginAt: timestamptz('last_login_at'),
+
+    termsVersion: smallint('terms_version'),
+    termsAcceptedAt: timestamptz('terms_accepted_at'),
     lastIp: inet('last_ip'),
 
     timezone: text('timezone').notNull().default('UTC'),

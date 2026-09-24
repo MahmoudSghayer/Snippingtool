@@ -68,16 +68,15 @@ describe('seed is idempotent', () => {
     expect(adminProfiles[0]!.adminRole).toBe('super_admin');
   });
 
-  it('seeds correct trial/basic/pro/ultimate/lifetime prices', async () => {
+  it('seeds the pass catalogue: Monthly, Monthly + Mobile, Season; basic retired', async () => {
     await seed(getTestDatabaseUrl());
     const planRows = await db.select().from(plans);
     const byCode = Object.fromEntries(planRows.map((p) => [p.code, p]));
 
     expect(byCode.trial?.priceCents).toBe(0);
-    expect(byCode.basic?.priceCents).toBe(499);
-    expect(byCode.pro?.priceCents).toBe(999);
-    expect(byCode.ultimate?.priceCents).toBe(1999);
-    expect(byCode.lifetime?.priceCents).toBe(9999);
-    expect(byCode.lifetime?.isLifetime).toBe(true);
+    expect(byCode.basic?.isActive).toBe(false);
+    expect(byCode.pro).toMatchObject({ name: 'Monthly', priceCents: 999 });
+    expect(byCode.ultimate).toMatchObject({ name: 'Monthly + Mobile', priceCents: 1399 });
+    expect(byCode.lifetime).toMatchObject({ name: 'Season', priceCents: 2499 });
   });
 });

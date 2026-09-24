@@ -34,6 +34,11 @@ export const registerRequestSchema = z
     timezone: z.string().min(1).max(64).optional(),
     referralCode: z.string().min(1).max(40).optional(),
     device: deviceFingerprintSchema,
+    /** The Terms of Service and Refund Policy must be accepted to register;
+     * the API records TERMS_VERSION against the account. */
+    acceptTerms: z.literal(true, {
+      errorMap: () => ({ message: 'You must accept the Terms of Service to create an account.' }),
+    }),
   })
   .strict();
 export type RegisterRequest = z.infer<typeof registerRequestSchema>;

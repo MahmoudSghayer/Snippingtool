@@ -356,3 +356,63 @@ export const adminSubscriptionByUserResponseSchema = z.object({
   history: z.array(subscriptionDtoSchema),
 });
 export type AdminSubscriptionByUserResponse = z.infer<typeof adminSubscriptionByUserResponseSchema>;
+
+// ---------------------------------------------------------------------------
+// PayPal payment claims (migrations/0031). The buyer pays through PayPal.me,
+// then submits the transaction ID; an admin approves it against the PayPal
+// account, which issues or extends the pass.
+
+export const PAYMENT_CLAIM_STATUSES = ['pending', 'approved', 'rejected'] as const;
+export type PaymentClaimStatus = (typeof PAYMENT_CLAIM_STATUSES)[number];
+
+/** PayPal transaction IDs are 17 upper-case letters and digits
+ * (e.g. `8XY12345AB678901C`). Accepted in any case, with surrounding spaces;
+ * stored upper-case. */
+export const paypalTransactionIdSchema = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .regex(/^[0-9A-Z]{17}$/, 'A PayPal transaction ID is 17 letters and numbers.');
+
+export const createPaymentClaimRequestSchema = z
+  .object({
+    planCode: z.string().min(1).max(40),
+    paypalTransactionId: paypalTransactionIdSchema,
+    note: z.string().trim().max(500).optional(),
+  })
+  .strict();
+export type CreatePaymentClaimRequest = z.infer<typeof createPaymentClaimRequestSchema>;
+
+export const paymentClaimDtoSchema = z.object({
+  id: z.string().uuid(),
+  planCode: z.string(),
+  planName: z.string().nullable(),
+  amountCents: z.number().int(),
+  currency: z.string(),
+  paypalTransactionId: z.string(),
+  note: z.string().nullable(),
+  status: z.enum(PAYMENT_CLAIM_STATUSES),
+  rejectReason: z.string().nullable(),
+  createdAt: z.string().datetime(),
+  reviewedAt: z.string().datetime().nullable(),
+});
+export type PaymentClaimDto = z.infer<typeof paymentClaimDtoSchema>;
+
+export const adminPaymentClaimDtoSchema = paymentClaimDtoSchema.extend({
+  user: z.object({ id: z.string().uuid(), email: z.string() }),
+});
+export type AdminPaymentClaimDto = z.infer<typeof adminPaymentClaimDtoSchema>;
+
+export const adminPaymentClaimListQuerySchema = z
+  .object({
+    status: z.enum(PAYMENT_CLAIM_STATUSES).optional(),
+    cursor: z.string().min(1).max(2048).optional(),
+    limit: z.coerce.number().int().min(1).max(200).default(50),
+  })
+  .strict();
+export type AdminPaymentClaimListQuery = z.infer<typeof adminPaymentClaimListQuerySchema>;
+
+export const rejectPaymentClaimRequestSchema = z
+  .object({ reason: z.string().trim().min(1).max(500) })
+  .strict();
+export type RejectPaymentClaimRequest = z.infer<typeof rejectPaymentClaimRequestSchema>;

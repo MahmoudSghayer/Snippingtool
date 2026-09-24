@@ -84,7 +84,7 @@ describe('strictness: unknown top-level keys are rejected (mass-assignment defen
     [
       'registerRequestSchema',
       registerRequestSchema,
-      { email: 'a@example.com', password: 'correcthorse1', device: device() },
+      { email: 'a@example.com', password: 'correcthorse1', device: device(), acceptTerms: true },
     ],
     [
       'loginRequestSchema',

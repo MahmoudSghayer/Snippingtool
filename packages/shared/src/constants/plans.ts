@@ -55,13 +55,15 @@ export const FEATURE_KEYS = [
   'dashboard.analytics',
   'dashboard.multi_device',
   'support.priority',
+  'mobile.remote',
 ] as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
 
-/** Features unlocked per plan. Additive by design: `ultimate` is a superset
- * of `pro`, which is a superset of `basic`. `lifetime` mirrors `ultimate`'s
- * feature set at a one-time price instead of a recurring one. */
+/** Features unlocked per plan. Every paid plan includes the autobuyer; the
+ * plans differ in the mobile companion and in how long the pass lasts
+ * (see PLAN_CATALOGUE). `basic` is retired (it had no automation) and kept
+ * only so its existing subscriptions keep resolving. */
 export const PLAN_FEATURES: Readonly<Record<PlanCode, readonly FeatureKey[]>> = {
   trial: [
     'ledger.recorder',
@@ -79,6 +81,7 @@ export const PLAN_FEATURES: Readonly<Record<PlanCode, readonly FeatureKey[]>> = 
     'assist.filter_rotation',
     'assist.session_pnl',
     'assist.risk_meter',
+    'automation.autobuyer',
     'dashboard.analytics',
   ],
   ultimate: [
@@ -92,6 +95,7 @@ export const PLAN_FEATURES: Readonly<Record<PlanCode, readonly FeatureKey[]>> = 
     'dashboard.analytics',
     'dashboard.multi_device',
     'support.priority',
+    'mobile.remote',
   ],
   lifetime: [
     'ledger.recorder',
@@ -104,9 +108,46 @@ export const PLAN_FEATURES: Readonly<Record<PlanCode, readonly FeatureKey[]>> = 
     'dashboard.analytics',
     'dashboard.multi_device',
     'support.priority',
+    'mobile.remote',
   ],
 };
 
 export function planHasFeature(plan: PlanCode, feature: FeatureKey): boolean {
   return PLAN_FEATURES[plan].includes(feature);
 }
+
+/** How each plan code is sold. Plans are passes paid through PayPal.me, not
+ * subscriptions: nothing renews, and each purchase is a claim an admin
+ * approves (payment_claims, migrations/0031). `coming_soon` plans are shown
+ * but can't be bought yet; `retired` plans aren't shown at all. */
+export type PlanAvailability = 'available' | 'coming_soon' | 'retired';
+
+export interface PlanCatalogueEntry {
+  availability: PlanAvailability;
+  /** Days one purchase adds. `null` for Season, which ends at the next FC
+   * release rather than after a fixed number of days. */
+  passDays: number | null;
+}
+
+export const PLAN_CATALOGUE: Readonly<Record<Exclude<PlanCode, 'trial'>, PlanCatalogueEntry>> = {
+  basic: { availability: 'retired', passDays: 30 },
+  pro: { availability: 'available', passDays: 30 },
+  ultimate: { availability: 'coming_soon', passDays: 30 },
+  lifetime: { availability: 'coming_soon', passDays: null },
+};
+
+export function isPurchasablePlan(code: string): boolean {
+  return isPlanCode(code) && code !== 'trial' && PLAN_CATALOGUE[code].availability === 'available';
+}
+
+/** Where buyers pay. PayPal.me accepts an amount in the path:
+ * `${PAYPAL_ME_URL}/9.99USD`. */
+export const PAYPAL_ME_URL = 'https://paypal.me/MSgaier';
+
+export function paypalPaymentUrl(priceCents: number, currency = 'USD'): string {
+  return `${PAYPAL_ME_URL}/${(priceCents / 100).toFixed(2)}${currency.toUpperCase()}`;
+}
+
+/** Version of docs/legal/terms.md. Bump it when the Terms change, so every
+ * user is asked to accept the new version. */
+export const TERMS_VERSION = 1;
