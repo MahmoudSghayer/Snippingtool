@@ -6761,6 +6761,8 @@ export interface paths {
                 content: {
                     "application/json": {
                         attempts: {
+                            /** Format: uuid */
+                            attemptId?: string;
                             resourceId: number;
                             tradeId?: string;
                             targetPrice: number;

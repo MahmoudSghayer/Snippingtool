@@ -46,6 +46,15 @@ export async function isAuthenticated(): Promise<boolean> {
   return (await getSession<string | null>(ACCESS_TOKEN_KEY, null)) != null;
 }
 
+/** Whether this install is signed in to an account at all: an access
+ * token this browser session, or a stored refresh token (the access token
+ * lives in `storage.session`, so it is gone after a browser restart until
+ * the next refresh, while the account very much still exists). */
+export async function hasAccount(): Promise<boolean> {
+  if (await isAuthenticated()) return true;
+  return (await getLocal<string | null>(REFRESH_TOKEN_ENC_KEY, null)) != null;
+}
+
 export async function getValidAccessToken(): Promise<string | null> {
   return getSession<string | null>(ACCESS_TOKEN_KEY, null);
 }

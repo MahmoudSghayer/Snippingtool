@@ -8,8 +8,12 @@ import fp from 'fastify-plugin';
 import { type ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 
-import { AppErrors } from '../../lib/errors.js';
-import { getExtensionPackage } from '../../lib/extension-download.js';
+import { AppError, AppErrors } from '../../lib/errors.js';
+import {
+  ExtensionKeyUnavailableError,
+  getExtensionPackage,
+  type ExtensionPackage,
+} from '../../lib/extension-download.js';
 
 import type { FastifyInstance } from 'fastify';
 
@@ -19,13 +23,32 @@ export default fp(
   async function downloadsModule(fastify: FastifyInstance) {
     const app = fastify.withTypeProvider<ZodTypeProvider>();
 
-    const loadPackage = () =>
-      getExtensionPackage({
-        templateDir: fastify.config.EXTENSION_TEMPLATE_DIR,
-        apiOrigin: fastify.config.APP_ORIGIN,
-        dashboardOrigin: fastify.config.DASHBOARD_ORIGIN,
-        entitlementPublicKeyPem: fastify.config.ENTITLEMENT_PUBLIC_KEY,
-      });
+    /** The zip, `null` without a template build, or `'no-key'` when there
+     * is no usable Ed25519 ENTITLEMENT_PUBLIC_KEY to put in it (logged as an
+     * error: the operator has to fix the configuration). */
+    let keyErrorLogged = false;
+    const loadPackage = (log: FastifyInstance['log']): ExtensionPackage | null | 'no-key' => {
+      try {
+        return getExtensionPackage({
+          templateDir: fastify.config.EXTENSION_TEMPLATE_DIR,
+          apiOrigin: fastify.config.APP_ORIGIN,
+          dashboardOrigin: fastify.config.DASHBOARD_ORIGIN,
+          entitlementPublicKeyPem: fastify.config.ENTITLEMENT_PUBLIC_KEY,
+        });
+      } catch (err) {
+        if (!(err instanceof ExtensionKeyUnavailableError)) throw err;
+        // Once per process at error level (the operator must fix the
+        // configuration); /info is polled by every account page, so after
+        // that only at debug.
+        if (!keyErrorLogged) {
+          keyErrorLogged = true;
+          log.error({ err }, err.message);
+        } else {
+          log.debug({ err }, err.message);
+        }
+        return 'no-key';
+      }
+    };
 
     const isEntitled = async (userId: string) =>
       (await fastify.entitlements.getEntitlements(userId)).features.includes(REQUIRED_FEATURE);
@@ -48,7 +71,8 @@ export default fp(
         },
       },
       async (request) => {
-        const pkg = loadPackage();
+        const loaded = loadPackage(request.log);
+        const pkg = loaded === 'no-key' ? null : loaded;
         return {
           available: pkg !== null,
           entitled: await isEntitled(request.authUser!.id),
@@ -71,7 +95,13 @@ export default fp(
         if (!(await isEntitled(request.authUser!.id))) {
           throw AppErrors.forbidden('Downloading the extension needs an active pass.');
         }
-        const pkg = loadPackage();
+        const pkg = loadPackage(request.log);
+        if (pkg === 'no-key') {
+          throw new AppError(
+            'SERVICE_UNAVAILABLE',
+            'The extension download is not configured on this server yet.',
+          );
+        }
         if (!pkg) throw AppErrors.notFound('extension download');
 
         return reply

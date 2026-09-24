@@ -5,20 +5,21 @@ import { useNavigate } from '@tanstack/react-router';
 import { useCallback } from 'react';
 
 import { api } from '@/api/client.js';
-import { resetBootstrap } from '@/lib/authBootstrap.js';
-import { useAuthStore } from '@/stores/auth.js';
+import { clearLocalSession } from '@/lib/session.js';
 
 /** Ends the server session, then forgets it locally. The local part runs
  * even when the request fails (offline, already expired): the user asked to
- * be signed out of this browser either way. */
+ * be signed out of this browser either way. Local means everything
+ * (`clearLocalSession`, defect C9): the query cache too, not only the auth
+ * store, so the next person on this tab never sees this user's cached data. */
 export async function logout(): Promise<void> {
   try {
     await api.POST('/api/v1/auth/logout', { body: { allDevices: false } });
   } catch {
     // Network failure: still sign out locally below.
+  } finally {
+    clearLocalSession();
   }
-  resetBootstrap();
-  useAuthStore.getState().clearSession();
 }
 
 /** `logout()` followed by the sign-in page, for a button's onClick. */

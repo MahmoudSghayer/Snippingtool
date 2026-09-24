@@ -26,12 +26,14 @@ export const ERROR_CODES = [
   // Cross-cutting
   'RATE_LIMITED',
   'VALIDATION_FAILED',
+  'TIMESTAMP_OUT_OF_WINDOW',
   'NOT_FOUND',
   'FORBIDDEN',
   'CONFLICT',
   'INTERNAL',
   'KILL_SWITCH_ACTIVE',
   'MAINTENANCE_MODE',
+  'SERVICE_UNAVAILABLE',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
@@ -63,12 +65,18 @@ export const ERROR_STATUS: Readonly<Record<ErrorCode, number>> = {
   TRIAL_ABUSE_DETECTED: 403,
   RATE_LIMITED: 429,
   VALIDATION_FAILED: 400,
+  // An ingest timestamp outside its window (schemas/ingest-bounds.ts);
+  // `details.indices` lists the offending items of the batch.
+  TIMESTAMP_OUT_OF_WINDOW: 400,
   NOT_FOUND: 404,
   FORBIDDEN: 403,
   CONFLICT: 409,
   INTERNAL: 500,
   KILL_SWITCH_ACTIVE: 503,
   MAINTENANCE_MODE: 503,
+  // A feature this deployment is not configured for (e.g. the extension
+  // download without a usable ENTITLEMENT_PUBLIC_KEY).
+  SERVICE_UNAVAILABLE: 503,
 };
 
 export function statusForError(code: ErrorCode): number {

@@ -34,6 +34,18 @@ export function buildManifest(target, env) {
       type: 'module',
     },
     content_scripts: [
+      // Must come before adapter.js: it mints the per-page-load act-channel
+      // nonce and leaves it on <html> for the adapter to take, both at
+      // document_start, before any page script runs (src/lib/act-auth.ts).
+      // adapter.js copes with the opposite order, but this is the one that
+      // needs no fallback.
+      {
+        matches: EA_WEB_APP_MATCHES,
+        js: ['handoff.js'],
+        world: 'ISOLATED',
+        run_at: 'document_start',
+        all_frames: false,
+      },
       {
         matches: EA_WEB_APP_MATCHES,
         js: ['adapter.js'],

@@ -43,7 +43,9 @@ export function setUnauthorizedHandler(handler: (path: string) => void): void {
 
 /** Paths that must not trigger the 401 redirect loop: login itself
  * legitimately 401s on bad credentials, and refresh/logout run during the
- * redirect flow itself. */
+ * redirect flow itself. Also gates the silent-refresh attempt below (defect
+ * C8) — a 401 on `/auth/refresh` or `/auth/login` must never itself trigger
+ * another refresh, or a truly-dead session would loop forever. */
 const AUTH_EXEMPT_PATH_FRAGMENTS = [
   '/auth/login',
   '/auth/refresh',
@@ -51,27 +53,124 @@ const AUTH_EXEMPT_PATH_FRAGMENTS = [
   '/auth/mfa/verify',
 ];
 
+/** The two `authenticate` error codes (apps/api/src/plugins/auth.ts) that
+ * mean "the access token itself is the problem" — expired (`sl_at`'s 15min
+ * TTL elapsed) or simply absent (no cookie / no bearer header) — which a
+ * refresh can fix. Deliberately narrower than "every 401": AUTH_SESSION_REVOKED
+ * (row_version bumped by a password change/force-logout) and
+ * AUTH_TOKEN_REUSED (refresh-token reuse) mean the *session* is gone, not
+ * just the access token, so retrying after a refresh would either fail
+ * anyway or paper over a real revocation. */
+const REFRESHABLE_AUTH_CODES = new Set(['AUTH_TOKEN_EXPIRED', 'AUTH_TOKEN_INVALID']);
+
+/** Single-flight refresh (defect C8): two requests racing into a 401 at the
+ * same moment must not each fire their own `POST /auth/refresh` — the API
+ * rotates the refresh token on every use and treats a second presentation
+ * of the now-superseded token as reuse, revoking the whole session family
+ * (apps/api/src/modules/auth/service.ts `refresh`). Concurrent callers
+ * instead await this one shared promise; it's reset to `null` once the
+ * in-flight refresh settles, so the *next* 401 (not concurrent with this
+ * one) starts a fresh refresh rather than replaying a stale result. */
+let refreshPromise: Promise<boolean> | null = null;
+
+function silentRefresh(fetchFn: typeof fetch): Promise<boolean> {
+  if (!refreshPromise) {
+    // No CSRF header needed: `/auth/refresh` has no `verifyCsrf` preHandler
+    // (apps/api/src/modules/auth/index.ts) — it authenticates via the
+    // `sl_rt` cookie alone, which `credentials: 'include'` already attaches.
+    refreshPromise = api
+      .POST('/api/v1/auth/refresh', { body: {}, fetch: fetchFn })
+      .then(({ error }) => !error)
+      .catch(() => false)
+      .finally(() => {
+        refreshPromise = null;
+      });
+  }
+  return refreshPromise;
+}
+
+async function readErrorBody(response: Response): Promise<unknown> {
+  try {
+    // `.clone()` so this read doesn't consume the body openapi-fetch's own
+    // caller still needs to parse into `{ data, error }`.
+    return await response.clone().json();
+  } catch {
+    return undefined;
+  }
+}
+
+/** Keyed by openapi-fetch's own per-request `id` (stable across its
+ * `onRequest`/`onResponse` pair for one call): an unconsumed clone of the
+ * request exactly as it was sent (post CSRF-header), taken in `onRequest`
+ * before anything can read its body — so a 401 caused by an expired access
+ * token can be replayed byte-for-byte after a silent refresh, without
+ * re-running request construction (which `onResponse` has no hook into).
+ * Every entry is removed in `onResponse`/`onError`, so this never holds more
+ * than the requests currently in flight. */
+const pendingRequestClones = new Map<string, Request>();
+
 // `credentials` is a read-only property on a constructed `Request`, so it
 // can't be set from inside `onRequest` — it's passed to `createClient`
 // below instead (openapi-fetch forwards it into the `Request` it builds).
 const csrfAndCredentialsMiddleware: Middleware = {
-  async onRequest({ request }) {
+  async onRequest({ request, id }) {
     if (MUTATING_METHODS.has(request.method)) {
       const token = readCsrfCookie();
       if (token) request.headers.set('x-csrf-token', token);
     }
+    pendingRequestClones.set(id, request.clone());
     return request;
   },
-  async onResponse({ request, response }) {
-    if (response.status === 401) {
-      const isExempt = AUTH_EXEMPT_PATH_FRAGMENTS.some((fragment) =>
-        request.url.includes(fragment),
-      );
-      if (!isExempt && unauthorizedHandler) {
-        unauthorizedHandler(window.location.pathname + window.location.search);
+  async onResponse({ request, response, id, options }) {
+    const clonedRequest = pendingRequestClones.get(id);
+    pendingRequestClones.delete(id);
+
+    if (response.status !== 401) return response;
+
+    const isExempt = AUTH_EXEMPT_PATH_FRAGMENTS.some((fragment) =>
+      request.url.includes(fragment),
+    );
+
+    if (!isExempt && clonedRequest) {
+      const body = await readErrorBody(response);
+      if (isApiErrorBody(body) && REFRESHABLE_AUTH_CODES.has(body.code)) {
+        const refreshed = await silentRefresh(options.fetch);
+        if (refreshed) {
+          // Re-read the CSRF cookie right before replaying, rather than
+          // reusing whatever `onRequest` captured on the original clone: on
+          // a fresh browser session (no `sl_csrf` cookie yet), the *first*
+          // request carries no CSRF header, and the CSRF plugin's own
+          // `onRequest` hook mints the cookie on the server while handling
+          // that very request — its `Set-Cookie` lands on this 401 response
+          // and the browser applies it before this code runs. Replaying
+          // with the original (missing/stale) header would needlessly fail
+          // `verifyCsrf` on the retry.
+          if (MUTATING_METHODS.has(clonedRequest.method)) {
+            const csrfToken = readCsrfCookie();
+            if (csrfToken) clonedRequest.headers.set('x-csrf-token', csrfToken);
+          }
+          const retryResponse = await options.fetch(clonedRequest);
+          if (retryResponse.status !== 401) return retryResponse;
+          // Still unauthorized even after a successful refresh (e.g. the
+          // session was revoked in the gap between refresh and retry) —
+          // don't hand the caller a bare 401; fall through to the same
+          // "clear auth state and redirect to login" path below, against
+          // *this* response rather than the original one.
+          response = retryResponse;
+        }
+        // Refresh failed (refresh token also expired/invalid/reused) — fall
+        // through to the same "clear auth state and redirect to login"
+        // behaviour as any other unrecoverable 401, below.
       }
     }
+
+    if (!isExempt && unauthorizedHandler) {
+      unauthorizedHandler(window.location.pathname + window.location.search);
+    }
     return response;
+  },
+  onError({ id }) {
+    pendingRequestClones.delete(id);
   },
 };
 

@@ -151,7 +151,10 @@ merely still using the product continuously.
 
 `lib/analytics/profits.ts`, backed entirely by the `profits` daily rollup
 table (written by `lib/analytics/rollup.ts` — synchronously by every ingest
-route for the days that write touched, and swept hourly by the
+route for the days that write touched, as one `INSERT … SELECT … ON
+CONFLICT (user_id, day) DO UPDATE` inside the ingest's own transaction and
+under a per-`(user, day)` advisory lock, so concurrent ingests for a new
+day neither 500 nor lose each other's rows, and swept hourly by the
 `profits.rollup` job as a backstop; see `02-database.md` §6.6) — never by
 `trades` directly, so these numbers always match what a user's own
 `/api/v1/profits` shows for the same range, and a trade logged a second ago
@@ -310,11 +313,11 @@ no historical meaning (§11).
 
 ### Jobs
 
-| Job                                                     | Schedule                                                                  | What it does                                                                                                                                                                                                                                                                         |
-| ------------------------------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `profits.rollup` (`src/jobs/profits.rollup.job.ts`)     | `7 * * * *` (hourly, a few minutes past the hour)                         | Recomputes today's `profits` row for every user with trade or sniping activity today, via `lib/analytics/rollup.ts`. A backstop only: the ingest routes already roll up the days they write, so this exists to self-heal a crashed request or a row edited straight in the database. |
-| `analytics.daily` (`src/jobs/analytics.daily.job.ts`)   | `0 2 * * *` (02:00 UTC nightly)                                           | `materializeDay` for **yesterday** (UTC), then `refreshMvKpiDaily`. Runs after `profits.rollup` (hourly) and the 5-minute subscription/license jobs, so yesterday's data is long finalised.                                                                                          |
-| `analytics.hourly` (`src/jobs/analytics.hourly.job.ts`) | `20 * * * *` (hourly, offset a few minutes past `profits.rollup`'s `:07`) | `materializeDay` for **today** (UTC) — a partial-day snapshot that converges to the full day's numbers as more of today's data lands, the same self-healing idempotent-upsert pattern as `profits.rollup.job.ts`. Does **not** refresh `mv_kpi_daily` (once/night is enough).        |
+| Job                                                     | Schedule                                                                  | What it does                                                                                                                                                                                                                                                                                                                                                       |
+| ------------------------------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `profits.rollup` (`src/jobs/profits.rollup.job.ts`)     | `7 * * * *` (hourly, a few minutes past the hour)                         | Recomputes today's and yesterday's `profits` rows for every user with trade or sniping activity on those days, via `lib/analytics/rollup.ts`. A backstop only: the ingest routes already roll up the days they write, in the same transaction as the write, so this exists to self-heal a row edited straight in the database or a write just before midnight UTC. |
+| `analytics.daily` (`src/jobs/analytics.daily.job.ts`)   | `0 2 * * *` (02:00 UTC nightly)                                           | `materializeDay` for **yesterday** (UTC), then `refreshMvKpiDaily`. Runs after `profits.rollup` (hourly) and the 5-minute subscription/license jobs, so yesterday's data is long finalised.                                                                                                                                                                        |
+| `analytics.hourly` (`src/jobs/analytics.hourly.job.ts`) | `20 * * * *` (hourly, offset a few minutes past `profits.rollup`'s `:07`) | `materializeDay` for **today** (UTC) — a partial-day snapshot that converges to the full day's numbers as more of today's data lands, the same self-healing idempotent-upsert pattern as `profits.rollup.job.ts`. Does **not** refresh `mv_kpi_daily` (once/night is enough).                                                                                      |
 
 ### Backfill
 

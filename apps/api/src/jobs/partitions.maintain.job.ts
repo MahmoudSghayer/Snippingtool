@@ -39,21 +39,61 @@ export default defineJob({
       throw new Error(`partitions.maintain: unexpected fromMonth value: ${fromMonth}`);
     }
 
+    // One table's failure must not stop the others: before the ingest
+    // timestamp bounds (@sl/shared ingest-bounds.ts), a far-future row in
+    // one table's DEFAULT partition made create_month_partitions() throw
+    // for that table, and every table after it in this list silently
+    // stopped getting partitions too. Each table is tried on its own; the
+    // job still fails at the end (so BullMQ records it and retries) naming
+    // every table that failed.
+    const failed: string[] = [];
     for (const table of PARTITIONED_TABLES) {
-      // `create_month_partitions(parent text, from_month date, months int)`:
-      // the table name is a text argument (the function quotes the
-      // identifier itself), so all three values bind as $1/$2/$3.
-      await db.execute(
-        sql.join([
-          sql`SELECT create_month_partitions(`,
-          sql.param(table),
-          sql`, `,
-          sql.param(fromMonth),
-          sql`::date, `,
-          sql.param(MONTHS_AHEAD),
-          sql`)`,
-        ]),
-      );
+      try {
+        // `create_month_partitions(parent text, from_month date, months int)`:
+        // the table name is a text argument (the function quotes the
+        // identifier itself), so all three values bind as $1/$2/$3.
+        await db.execute(
+          sql.join([
+            sql`SELECT create_month_partitions(`,
+            sql.param(table),
+            sql`, `,
+            sql.param(fromMonth),
+            sql`::date, `,
+            sql.param(MONTHS_AHEAD),
+            sql`)`,
+          ]),
+        );
+      } catch (err) {
+        failed.push(table);
+        log.error(
+          { table, err: err instanceof Error ? err.message : String(err) },
+          'partitions.maintain: could not create partitions for table',
+        );
+      }
+
+      // Rows in the DEFAULT partition are rows outside every monthly range.
+      // They are still queryable, but they block creating the partition
+      // that covers them, so they need moving by hand (docs/02-database.md,
+      // partition maintenance runbook). `default_partition_row_count` is
+      // migration 0032's helper; it quotes the identifier itself.
+      try {
+        const [row] = (await db.execute(
+          sql.join([sql`SELECT default_partition_row_count(`, sql.param(table), sql`) AS n`]),
+        )) as unknown as Array<{ n: string | number }>;
+        const defaultRows = Number(row?.n ?? 0);
+        if (defaultRows > 0) {
+          log.error({ table, defaultRows }, 'partitions.maintain: rows in DEFAULT partition');
+        }
+      } catch (err) {
+        log.warn(
+          { table, err: err instanceof Error ? err.message : String(err) },
+          'partitions.maintain: could not count DEFAULT partition rows',
+        );
+      }
+    }
+
+    if (failed.length > 0) {
+      throw new Error(`partitions.maintain: failed for ${failed.join(', ')}`);
     }
 
     log.info(

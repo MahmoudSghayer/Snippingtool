@@ -45,15 +45,35 @@ export async function retryFetch(path: string, init: RequestInit = {}, opts: Ret
       }
       return res;
     } catch (err) {
-      if (attempt >= maxRetries) throw err;
+      if (attempt >= maxRetries) throw new NetworkError(err);
       await sleep(backoffMs(attempt));
       attempt++;
     }
   }
 }
 
-export interface ApiErrorBody {
-  error?: { code?: string; message?: string };
+/** The request never got a response: `fetch` itself rejected (offline, DNS,
+ * connection refused, CORS/TLS failure, abort) on every attempt. Distinct
+ * from `ApiError` (the API answered) and from anything thrown locally after
+ * a response arrived, so callers can tell "unreachable" apart. Keeps the
+ * original message, which is what the popup shows. */
+export class NetworkError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+    this.name = 'NetworkError';
+  }
+}
+
+/** The API's error envelope is `{ code, message, details?, requestId }`
+ * (@sl/shared apiErrorSchema). The `{ error: { ... } }` wrapping is accepted
+ * too (apiErrorEnvelope). */
+interface ApiErrorFields {
+  code?: string;
+  message?: string;
+  details?: Record<string, unknown>;
+}
+export interface ApiErrorBody extends ApiErrorFields {
+  error?: ApiErrorFields;
 }
 
 export class ApiError extends Error {
@@ -62,6 +82,7 @@ export class ApiError extends Error {
     public readonly code: string,
     message: string,
     public readonly requestId?: string,
+    public readonly details?: Record<string, unknown>,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -72,7 +93,10 @@ export async function toApiError(res: Response): Promise<ApiError> {
   const requestId = res.headers.get('x-request-id') ?? undefined;
   try {
     const body = (await res.json()) as ApiErrorBody;
-    return new ApiError(res.status, body.error?.code ?? 'INTERNAL', body.error?.message ?? res.statusText, requestId);
+    // Top-level first: that is what the API sends. Reading only `error.*`
+    // made every code 'INTERNAL'.
+    const fields = body.error ?? body;
+    return new ApiError(res.status, fields.code ?? 'INTERNAL', fields.message ?? res.statusText, requestId, fields.details);
   } catch {
     return new ApiError(res.status, 'INTERNAL', res.statusText, requestId);
   }

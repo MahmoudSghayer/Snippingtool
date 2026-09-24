@@ -8,7 +8,17 @@
 // alters these tables (see src/index.ts / docs/02-database.md).
 
 import { relations } from 'drizzle-orm';
-import { index, inet, integer, jsonb, pgTable, primaryKey, text, uuid } from 'drizzle-orm/pg-core';
+import {
+  index,
+  inet,
+  integer,
+  jsonb,
+  pgTable,
+  primaryKey,
+  text,
+  uniqueIndex,
+  uuid,
+} from 'drizzle-orm/pg-core';
 
 import { devices, sessions } from './auth.js';
 import {
@@ -101,12 +111,21 @@ export const snipingActivity = pgTable(
     outcome: snipingOutcomeEnum('outcome').notNull(),
     latencyMs: integer('latency_ms'),
     errorCode: text('error_code'),
+    // Client-generated per attempt (0032); NULL from older extensions.
+    attemptId: uuid('attempt_id'),
 
     occurredAt: timestamptz('occurred_at').notNull().defaultNow(),
     createdAt: createdAt(),
   },
   (t) => [
     primaryKey({ columns: [t.id, t.occurredAt] }),
+    // Includes the partition key, as every unique index on a partitioned
+    // table must; a retried attempt re-sends its original occurred_at.
+    uniqueIndex('sniping_activity_user_id_attempt_id_unique').on(
+      t.userId,
+      t.attemptId,
+      t.occurredAt,
+    ),
     index('sniping_activity_user_id_idx').on(t.userId, t.occurredAt),
     index('sniping_activity_device_id_idx').on(t.deviceId, t.occurredAt),
     index('sniping_activity_resource_id_idx').on(t.resourceId, t.occurredAt),

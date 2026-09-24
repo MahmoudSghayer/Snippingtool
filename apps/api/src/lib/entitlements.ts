@@ -40,12 +40,16 @@ export interface EntitlementSnapshot {
 
 export interface EntitlementProvider {
   getEntitlements(userId: string): Promise<EntitlementSnapshot>;
-  /** Signs an entitlement snapshot into the opaque blob the extension caches
-   * for its offline-grace window. */
+  /** Signs an entitlement snapshot into the blob the extension caches for
+   * its offline-grace window. Pass `killSwitchActive` wherever the extension
+   * will cache the result (bootstrap/heartbeat): the extension only honours
+   * the kill switch from inside the signature, never from an unsigned cached
+   * field (claims: `entitlementBlobClaimsSchema` in `@sl/shared`). */
   signEntitlementBlob(
     snapshot: EntitlementSnapshot,
     userId: string,
     deviceId: string,
+    killSwitchActive?: boolean,
   ): Promise<string>;
 }
 
@@ -113,16 +117,20 @@ export class DefaultEntitlementProvider implements EntitlementProvider {
     snapshot: EntitlementSnapshot,
     userId: string,
     deviceId: string,
+    killSwitchActive?: boolean,
   ): Promise<string> {
     if (!this.signingKeyPem) {
       // Dev/test fallback: an unsigned-but-structured blob, clearly marked as
       // such. Never used when ENTITLEMENT_SIGNING_KEY is configured.
-      return Buffer.from(JSON.stringify({ unsigned: true, snapshot, userId, deviceId })).toString(
-        'base64url',
-      );
+      return Buffer.from(
+        JSON.stringify({ unsigned: true, snapshot, userId, deviceId, killSwitchActive }),
+      ).toString('base64url');
     }
     const key = await importPKCS8(this.signingKeyPem, 'EdDSA');
-    return new SignJWT({ snapshot, deviceId })
+    // `killSwitchActive` is omitted (not `false`) when the caller didn't pass
+    // it, so a blob can never claim "off" by accident.
+    const claims = killSwitchActive === undefined ? { snapshot, deviceId } : { snapshot, deviceId, killSwitchActive };
+    return new SignJWT(claims)
       .setProtectedHeader({ alg: 'EdDSA' })
       .setSubject(userId)
       .setIssuedAt()

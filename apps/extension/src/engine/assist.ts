@@ -7,6 +7,8 @@
  * confirm key is not an exemption from the safety budget, it is the thing
  * the safety budget is shaped around.
  */
+import { ACT_ERROR, isAdapterRefusal } from '../lib/act-auth.js';
+
 import type { Governor } from './governor.js';
 import type { ScoredOpportunity } from './ranker.js';
 import type { AttemptInput, TradeInput } from './types.js';
@@ -125,7 +127,9 @@ export class AssistEngine {
    * §3.4). */
   async confirmBuy(): Promise<void> {
     if (this.paused) return;
-    const top = this.deps.getRanked()[0];
+    // The ranker already drops listings the adapter cannot buy; skipping
+    // them here too means none is ever attempted only to be refused.
+    const top = this.deps.getRanked().find((c) => c.buyable !== false);
     if (!top) return;
 
     const decision = this.deps.governor.allow({ kind: 'buy', coins: top.price });
@@ -144,28 +148,35 @@ export class AssistEngine {
 
     const result = await this.deps.adapter.buy(top.tradeId, top.price);
     if (result.ok) {
-      this.deps.onAttempt({
-        resourceId: top.resourceId,
-        tradeId: top.tradeId,
-        targetPrice: top.price,
-        listedPrice: top.price,
-        outcome: 'success',
-        latencyMs: result.latencyMs,
-        errorCode: null,
-      });
-      this.recordBuy(top.price);
-      this.deps.onTrade({ tradeId: top.tradeId, resourceId: top.resourceId, buyPrice: top.price });
-    } else {
-      this.deps.onAttempt({
-        resourceId: top.resourceId,
-        tradeId: top.tradeId,
-        targetPrice: top.price,
-        listedPrice: top.price,
-        outcome: 'failed',
-        latencyMs: result.latencyMs,
-        errorCode: result.error ?? 'unknown_error',
-      });
+      this.recordSuccess(top, result.latencyMs);
+      return;
     }
+    if (result.error === ACT_ERROR.timeoutUnknown) {
+      // It reached EA and EA had not answered in time: it may have bought.
+      // Recorded as attempted (outcome unknown), still charged to the
+      // governor, and settled if EA's late answer arrives.
+      this.deps.onAttempt({ ...this.attemptBase(top), outcome: 'attempted', latencyMs: result.latencyMs, errorCode: ACT_ERROR.timeoutUnknown });
+      void result.late?.then((late) => {
+        if (late.ok) this.recordSuccess(top, late.latencyMs);
+      });
+      return;
+    }
+    // A refusal never reached EA: give the governor its budget back — but
+    // only when the adapter itself signed it. An unsigned outcome (a
+    // timeout reported as adapter_unauthenticated on an unsigned probe's
+    // hint) could be a page script's doing, and the buy may have happened.
+    if (result.signed && isAdapterRefusal(result.error)) this.deps.governor.refund(decision);
+    this.deps.onAttempt({ ...this.attemptBase(top), outcome: 'failed', latencyMs: result.latencyMs, errorCode: result.error ?? 'unknown_error' });
+  }
+
+  private attemptBase(top: ScoredOpportunity): { resourceId: number; tradeId: string; targetPrice: number; listedPrice: number } {
+    return { resourceId: top.resourceId, tradeId: top.tradeId, targetPrice: top.price, listedPrice: top.price };
+  }
+
+  private recordSuccess(top: ScoredOpportunity, latencyMs: number): void {
+    this.deps.onAttempt({ ...this.attemptBase(top), outcome: 'success', latencyMs, errorCode: null });
+    this.recordBuy(top.price);
+    this.deps.onTrade({ tradeId: top.tradeId, resourceId: top.resourceId, buyPrice: top.price });
   }
 
   recordBuy(coins: number): void {

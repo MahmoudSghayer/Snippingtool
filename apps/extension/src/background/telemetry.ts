@@ -2,14 +2,13 @@
  * background/telemetry.ts — routes `telemetry.enqueue` messages into
  * `lib/telemetry.ts`'s in-memory queues and flushes them on a
  * `chrome.alarms` tick (never a `setInterval`). `content/index.ts` is the
- * only sender; this file just dispatches by `kind`.
+ * only sender; `lib/telemetry.ts`'s `enqueue` gates and dispatches by `kind`.
  */
 import browser from 'webextension-polyfill';
 
 import { logger } from '../lib/logger.js';
 import * as telemetry from '../lib/telemetry.js';
 
-import type { ActivityEvent, FilterStats, RiskBudgetEvent, SnipingAttempt, TelemetryEvent, Trade } from '@sl/shared';
 
 const FLUSH_ALARM = 'sl.telemetry.flush';
 const FLUSH_PERIOD_MINUTES = 2;
@@ -18,36 +17,12 @@ export function ensureFlushAlarm(): void {
   browser.alarms.create(FLUSH_ALARM, { periodInMinutes: FLUSH_PERIOD_MINUTES });
 }
 
-export type TelemetryEnqueuePayload =
-  | { kind: 'activity'; items: ActivityEvent[] }
-  | { kind: 'sniping'; items: SnipingAttempt[] }
-  | { kind: 'trades'; items: Trade[] }
-  | { kind: 'filterStats'; items: FilterStats[] }
-  | { kind: 'riskEvents'; items: RiskBudgetEvent[] }
-  | { kind: 'event'; items: TelemetryEvent[] };
+export type { TelemetryEnqueuePayload } from '../lib/telemetry.js';
 
-export function handleTelemetryEnqueue(payload: TelemetryEnqueuePayload): { queued: number } {
-  switch (payload.kind) {
-    case 'activity':
-      telemetry.enqueueActivity(payload.items);
-      break;
-    case 'sniping':
-      telemetry.enqueueSniping(payload.items);
-      break;
-    case 'trades':
-      telemetry.enqueueTrades(payload.items);
-      break;
-    case 'filterStats':
-      telemetry.enqueueFilterStats(payload.items);
-      break;
-    case 'riskEvents':
-      telemetry.enqueueRiskEvents(payload.items);
-      break;
-    case 'event':
-      telemetry.enqueueTelemetry(payload.items);
-      break;
-  }
-  return { queued: payload.items.length };
+/** Queues nothing while the user is opted out or signed out — see
+ * `lib/telemetry.ts`'s `enqueue`. */
+export async function handleTelemetryEnqueue(payload: telemetry.TelemetryEnqueuePayload): Promise<{ queued: number }> {
+  return telemetry.enqueue(payload);
 }
 
 export async function handleTelemetryFlush(): Promise<{ ok: boolean; sent: number }> {

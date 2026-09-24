@@ -41,8 +41,12 @@ describe('lib/analytics/rollup', () => {
       soldAt: at,
     });
 
+    // Each in its own transaction, as every real caller runs it, so the
+    // per-(user, day) advisory lock is actually held while each computes.
     await Promise.all(
-      Array.from({ length: 6 }, () => rollupProfitsForUserDay(db, userId, '2024-06-01')),
+      Array.from({ length: 6 }, () =>
+        db.transaction((tx) => rollupProfitsForUserDay(tx, userId, '2024-06-01')),
+      ),
     );
 
     const rows = await db.query.profits.findMany({ where: eq(profits.userId, userId) });
@@ -56,8 +60,16 @@ describe('lib/analytics/rollup', () => {
       .insert(users)
       .values({ id: userId, email: 'rollup-empty@example.com', passwordHash: 'x' });
 
-    await rollupProfitsForUserDay(db, userId, '2024-06-02');
+    await db.transaction((tx) => rollupProfitsForUserDay(tx, userId, '2024-06-02'));
 
     expect(await db.query.profits.findMany({ where: eq(profits.userId, userId) })).toEqual([]);
+  });
+
+  // The advisory lock is transaction-scoped: outside a transaction it is
+  // released as soon as it is taken and serialises nothing.
+  it('refuses to run outside a transaction', async () => {
+    await expect(
+      rollupProfitsForUserDay(db as never, newId(), '2024-06-03'),
+    ).rejects.toThrow(/transaction/);
   });
 });

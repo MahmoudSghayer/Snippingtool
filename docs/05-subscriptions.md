@@ -259,13 +259,20 @@ within the same encapsulation context, so this module never attempts to
 replace the decoration — it only ever consumes the `EntitlementProvider`
 interface the core agent published.
 
-**Verification (extension side, documented for completeness — implemented in
-`apps/extension`):** the cached blob's signature is checked against the
-embedded public key; if valid and `issuedAt` is within
-`offline_grace_hours` (`system_config`, default 24) of the extension's local
-clock, the cached entitlement is trusted without a network round trip.
-Outside that window, or on signature failure, the extension downgrades to M1
-read-only until a fresh bootstrap/heartbeat succeeds.
+The bootstrap/heartbeat blobs also carry a top-level `killSwitchActive`
+claim (claims schema: `entitlementBlobClaimsSchema` in `@sl/shared`).
+
+**Verification (extension side, `apps/extension/src/lib/license.ts`):** the
+public key is baked in at build time as `VITE_LICENSE_PUBLIC_KEY` (the API's
+`ENTITLEMENT_PUBLIC_KEY` PEM as-is). The blob's signature and `exp` are
+checked on **every** read of the cache, and a cache stamped more than 5
+minutes in the future is refused; features and the kill switch are read
+from the signed claims only, never from the response fields cached beside
+the blob. While the API is unreachable, a verified blob is honoured for 24h
+from its signed `iat` (the extension's fixed grace; it does not read
+`offline_grace_hours`); after that paid features are off until a
+bootstrap/heartbeat succeeds. The signed kill switch is honoured
+throughout, and a blob without the claim never counts as "off".
 
 ---
 

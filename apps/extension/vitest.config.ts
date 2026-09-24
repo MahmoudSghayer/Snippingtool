@@ -21,7 +21,12 @@ export default defineConfig({
     'import.meta.env.VITE_API_ORIGIN': JSON.stringify('https://api.test.local'),
     'import.meta.env.VITE_UPDATE_URL': JSON.stringify(''),
     'import.meta.env.VITE_EXTENSION_VERSION': JSON.stringify('0.1.0'),
-    'import.meta.env.VITE_LICENSE_PUBLIC_KEY': JSON.stringify(''),
+    // A test-only Ed25519 public key (private half in
+    // test/unit/license-test-keys.ts), in the same SPKI PEM form as the API's
+    // ENTITLEMENT_PUBLIC_KEY, so licence verification runs for real in tests.
+    'import.meta.env.VITE_LICENSE_PUBLIC_KEY': JSON.stringify(
+      '-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAh0+wT0NW0GyjaaZGmHy7w4D7eZrMxwukv8+wiTdc7c8=\\n-----END PUBLIC KEY-----',
+    ),
   },
   test: {
     environment: 'jsdom',

@@ -12,15 +12,16 @@ import { countObservedSearches, governedSearch } from '../../src/engine/search.j
 
 import type { ActionOutcome, AdapterClient } from '../../src/content/adapter-client.js';
 import type { ScoredOpportunity } from '../../src/engine/ranker.js';
+import type { TrimmedAuction } from '@sl/shared';
 
 const START = 1_700_000_000_000;
 
 function fakeAdapter(clock: { now: number }) {
-  const auctionListeners = new Set<(auctions: unknown[]) => void>();
+  const auctionListeners = new Set<(auctions: TrimmedAuction[]) => void>();
   const emitSearchResponse = () => {
     // One search, reported twice: the patched XHR and emitAuctionInfo.
-    for (const cb of auctionListeners) cb([{ tradeId: 't' }]);
-    for (const cb of auctionListeners) cb([{ tradeId: 't' }]);
+    for (const cb of auctionListeners) cb([{ tradeId: 't' } as TrimmedAuction]);
+    for (const cb of auctionListeners) cb([{ tradeId: 't' } as TrimmedAuction]);
   };
   const adapter: AdapterClient = {
     probeStatus: null,
@@ -33,8 +34,10 @@ function fakeAdapter(clock: { now: number }) {
     }),
     buy: vi.fn(async () => ({ ok: true, latencyMs: 5 })),
     readResult: vi.fn(async () => ({ ok: true, latencyMs: 5 })),
+    diagnostics: vi.fn(async () => ({ ok: false, latencyMs: 0 })),
     onProbe: () => () => undefined,
     onShape: () => () => undefined,
+    onBuyable: () => () => undefined,
     onAuctions: (cb) => {
       auctionListeners.add(cb);
       return () => auctionListeners.delete(cb);

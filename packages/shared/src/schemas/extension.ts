@@ -27,13 +27,21 @@ export const bootstrapResponseSchema = z.object({
   features: z.array(z.enum(FEATURE_KEYS)),
   settings: userSettingsSchema,
   killSwitchActive: z.boolean(),
-  /** Signed, opaque blob the extension caches for the 24h offline grace
-   * window; verified locally, never decoded/trusted for anything beyond
-   * "was this issued and is it still within its own expiry". */
+  /** Signed blob (compact EdDSA JWS, claims `entitlementBlobClaimsSchema`)
+   * the extension caches for the 24h offline grace window. Verified on every
+   * cache read; a cached entitlement's features, kill switch and expiry are
+   * read from its claims only. */
   entitlementBlob: z.string().min(1),
   serverTime: z.string().datetime(),
 });
 export type BootstrapResponse = z.infer<typeof bootstrapResponseSchema>;
+
+// `entitlementBlobClaimsSchema` lives in ./entitlement.js (re-exported
+// here): the extension's background imports it at runtime, and anything it
+// pulls from this module brings this module's other top-level schemas with
+// it, including `z.enum(FEATURE_KEYS)` and so the `automation.autobuyer`
+// string the listable `ledger` build must never contain.
+export { entitlementBlobClaimsSchema, type EntitlementBlobClaims } from './entitlement.js';
 
 /** `POST /extension/heartbeat` — every 10 minutes via an MV3 `alarms` tick
  * (never a `setInterval` in the service worker). Cheap refresh of the same

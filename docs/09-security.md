@@ -397,6 +397,18 @@ rewrite history, only add to it.
   `event.source !== window` (or `!== target`) before processing, and every
   send uses an explicit target origin (`window.location.origin` /
   `target.location.origin`) — never `'*'`.
+- **Act-channel authentication** (defect C10): `event.source` cannot tell
+  the extension's messages from a page script's, so `act_request` /
+  `action_result` carry an HMAC-SHA256 under a per-page-load nonce
+  (`lib/act-auth.ts`). `content/handoff.ts` (ISOLATED, `document_start`)
+  puts the nonce on `<html>`; `adapter.ts` takes it and removes the
+  attribute before any page script runs, then keeps only the derived key.
+  The nonce itself never crosses `postMessage`. The adapter ignores
+  unsigned and replayed requests; content drops unsigned, unknown or
+  duplicate results and schema-validates every inbound message. Not a
+  hard boundary — see docs/threat-model.md §3.1 for what a script in the
+  same MAIN world can still do. Both builds keep the act surface (assist
+  buys use it), so both require this.
 - **Runtime message validation** (added/extended this pass,
   `background/index.ts`):
   - `sender.id !== browser.runtime.id` is checked first — only ever acts

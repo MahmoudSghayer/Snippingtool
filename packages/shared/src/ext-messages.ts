@@ -6,7 +6,7 @@ import { emailSchema, passwordSchema } from './schemas/auth.js';
 import { filterCriteriaSchema, filterStatsSchema, savedFilterSchema } from './schemas/filters.js';
 import { riskBudgetEventSchema } from './schemas/risk.js';
 import { snipingAttemptSchema } from './schemas/sniping.js';
-import { tradeSchema } from './schemas/trades.js';
+import { tradeIngestSchema } from './schemas/trades.js';
 
 /**
  * Typed message shapes for the extension's two internal channels. These are
@@ -34,6 +34,12 @@ export const trimmedAuctionSchema = z.object({
   offers: z.number(),
   expiresAt: z.number().nullable(),
   seenAt: z.number(),
+  /** Whether the adapter could buy this listing if asked: false when the
+   * EA service-layer shape it selected buys on an item entity it has not
+   * seen for this listing, or when it selected no shape at all
+   * (apps/extension/src/main/adapter.ts). Absent means unknown (older
+   * records); the ranker only drops an explicit `false`. */
+  buyable: z.boolean().optional(),
 });
 export type TrimmedAuction = z.infer<typeof trimmedAuctionSchema>;
 
@@ -53,6 +59,16 @@ export const adapterProbeMessageSchema = z.object({
     ok: z.boolean(),
     checkedAt: z.number(),
     reason: z.string().optional(),
+    /** `false` when the adapter never received this page load's act-channel
+     * nonce, so it can authenticate no act request. Unsigned, so only a
+     * hint: content reports a call that then times out as
+     * `adapter_unauthenticated` (not retried), and never fails a call on
+     * this flag alone. */
+    actReady: z.boolean().optional(),
+    /** Which candidate EA service-layer shape the probe selected
+     * (`main/adapter.ts`, docs/06-extension.md §4). Absent when `ok` is
+     * false: no shape, no act. */
+    shape: z.enum(['promise', 'observable']).optional(),
   }),
 });
 
@@ -78,6 +94,74 @@ export const adapterAuctionsMessageSchema = z.object({
   }),
 });
 
+/** Listings already reported in an `auctions` message that the adapter can
+ * now buy (the observable shape saw their item entities through its search
+ * hook, main/search-hook.ts). Not a search: content marks the tracked
+ * listings buyable and counts or records nothing. Unsigned, like
+ * `auctions`: a forged one can at worst make content try a listing the
+ * adapter then refuses with a signed `listing_entity_unknown`. */
+export const adapterListingsBuyableMessageSchema = z.object({
+  channel: z.literal(ADAPTER_CHANNEL),
+  kind: z.literal('listings_buyable'),
+  data: z.object({ tradeIds: z.array(z.string().min(1).max(40)).max(500) }),
+});
+
+/** HMAC-SHA256 (hex) of an act-channel message under the per-page-load
+ * nonce (apps/extension/src/lib/act-auth.ts). Optional in these schemas so
+ * the shapes stay additive, but both ends of the extension require it: the
+ * adapter ignores an `act_request` without a valid one, and content drops
+ * an `action_result` without one — any page script can post on this
+ * channel, and the MAC is what tells the extension's own messages apart. */
+export const adapterMessageMacSchema = z.string().regex(/^[0-9a-f]{64}$/);
+
+/** A description of an object by key names and value types only — never
+ * values (`main/diagnostics.ts`'s `describeKeys`). A leaf is a type name
+ * (`'function'`, `'number'`, `'object'` past the depth limit, ...). */
+export type DiagnosticsKeyTree = string | { [key: string]: DiagnosticsKeyTree };
+export const diagnosticsKeyTreeSchema: z.ZodType<DiagnosticsKeyTree> = z.lazy(() =>
+  z.union([z.string().max(200), z.record(z.string().max(200), diagnosticsKeyTreeSchema)]),
+);
+
+/** What the adapter knows about the page's EA service layer, for the
+ * options page's "Copy diagnostics" (docs/06-extension.md §4, day-one
+ * checklist). Read-only, and carries no values from the page: key names,
+ * types, the adapter's own counters and its own (scrubbed) log lines.
+ * Every field is spelled out, not `.passthrough()`: content verifies the
+ * MAC over the *parsed* result, so a key zod stripped would fail it. */
+export const adapterDiagnosticsSchema = z.object({
+  probe: z.object({
+    ok: z.boolean(),
+    reason: z.string().max(2000).optional(),
+    shape: z.enum(['promise', 'observable']).nullable(),
+    checkedAt: z.number(),
+  }),
+  /** Every candidate shape the probe tried, in order, and why it was not
+   * present — the first thing to read when `probe.ok` is false. */
+  candidates: z
+    .array(
+      z.object({
+        shape: z.string().max(40),
+        present: z.boolean(),
+        reason: z.string().max(500).optional(),
+      }),
+    )
+    .max(10),
+  /** `window.services`, key names down to depth 3. */
+  servicesKeys: diagnosticsKeyTreeSchema,
+  /** Types of the few page globals a shape relies on (e.g. the search
+   * criteria constructor). */
+  globals: z.record(z.string().max(80), z.string().max(40)),
+  /** The last market response the adapter saw (passive or act search),
+   * keys and types only. */
+  lastMarketResponse: z
+    .object({ source: z.string().max(40), at: z.number(), shape: diagnosticsKeyTreeSchema })
+    .nullable(),
+  stats: z.object({ seen: z.number(), parsed: z.number(), failed: z.number() }),
+  /** The adapter's last 50 log lines, already scrubbed. */
+  log: z.array(z.string().max(1000)).max(50),
+});
+export type AdapterDiagnostics = z.infer<typeof adapterDiagnosticsSchema>;
+
 /** Result of an `act()` call (`search`/`buy`/`readResult`) driven through
  * the web app's own service layer — never a forged request. Only present in
  * builds where M2/M3 act surface is enabled. `requestId` (added
@@ -89,7 +173,7 @@ export const adapterActionResultMessageSchema = z.object({
   channel: z.literal(ADAPTER_CHANNEL),
   kind: z.literal('action_result'),
   data: z.object({
-    action: z.enum(['search', 'buy', 'readResult']),
+    action: z.enum(['search', 'buy', 'readResult', 'diagnostics']),
     requestId: z.string().min(1).optional(),
     ok: z.boolean(),
     requestedAt: z.number(),
@@ -99,7 +183,14 @@ export const adapterActionResultMessageSchema = z.object({
      * still an open listing" read, never listing contents beyond what
      * `trimAuction` already allows out of the page. */
     stillListed: z.boolean().optional(),
+    /** Only present for `action: 'diagnostics'`. */
+    diagnostics: adapterDiagnosticsSchema.optional(),
+    /** A second result for a `buy` whose first result was
+     * `error: 'timeout_unknown'`: EA's answer arrived after the adapter
+     * stopped waiting, and `ok` says whether it bought. */
+    late: z.boolean().optional(),
   }),
+  mac: adapterMessageMacSchema.optional(),
 });
 
 /** ISOLATED world (content/engine) -> MAIN world (adapter): drive the act
@@ -122,14 +213,27 @@ export const adapterActRequestMessageSchema = z.object({
       action: z.literal('buy'),
       requestId: z.string().min(1),
       tradeId: z.string().min(1),
-      price: z.number().int().min(0),
+      /** The buy-now price content expects to pay. The adapter refuses
+       * (`price_mismatch` / `listing_unknown`) unless it equals the price
+       * it last saw listed for `tradeId`; a listing with no buy-now price
+       * (0) never matches. `main/adapter.ts`'s zod-free `asActRequest`
+       * re-checks this shape by hand — keep the two in sync. */
+      price: z.number().int().positive(),
     }),
     z.object({
       action: z.literal('readResult'),
       requestId: z.string().min(1),
       tradeId: z.string().min(1),
     }),
+    /** Read-only: the adapter's diagnostics report (options page, "Copy
+     * diagnostics"). Authenticated like every other act request, so no page
+     * script can make the adapter describe the page to it on demand. */
+    z.object({
+      action: z.literal('diagnostics'),
+      requestId: z.string().min(1),
+    }),
   ]),
+  mac: adapterMessageMacSchema.optional(),
 });
 export type AdapterActRequestMessage = z.infer<typeof adapterActRequestMessageSchema>;
 
@@ -138,6 +242,7 @@ export const adapterMessageSchema = z.discriminatedUnion('kind', [
   adapterProbeMessageSchema,
   adapterShapeMessageSchema,
   adapterAuctionsMessageSchema,
+  adapterListingsBuyableMessageSchema,
   adapterActionResultMessageSchema,
 ]);
 export type AdapterMessage = z.infer<typeof adapterMessageSchema>;
@@ -354,7 +459,7 @@ const extTelemetryPlainEventSchema = z
 export const extBackgroundTelemetryEnqueuePayloadSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('activity'), items: z.array(activityEventSchema).max(500) }).strict(),
   z.object({ kind: z.literal('sniping'), items: z.array(snipingAttemptSchema).max(500) }).strict(),
-  z.object({ kind: z.literal('trades'), items: z.array(tradeSchema).max(500) }).strict(),
+  z.object({ kind: z.literal('trades'), items: z.array(tradeIngestSchema).max(500) }).strict(),
   z.object({ kind: z.literal('filterStats'), items: z.array(filterStatsSchema).max(200) }).strict(),
   z
     .object({ kind: z.literal('riskEvents'), items: z.array(riskBudgetEventSchema).max(200) })
@@ -421,6 +526,18 @@ export const extContentKillSwitchMessageSchema = z
   })
   .strict();
 export type ExtContentKillSwitchMessage = z.infer<typeof extContentKillSwitchMessageSchema>;
+
+/** Options page -> an EA tab's content script: collect the adapter's
+ * diagnostics report (`content/diagnostics.ts`). Answered with
+ * `extContentDiagnosticsResponseSchema`. */
+export const extContentDiagnosticsRequestSchema = z
+  .object({ type: z.literal('diagnostics.collect') })
+  .strict();
+export const extContentDiagnosticsResponseSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), diagnostics: adapterDiagnosticsSchema }),
+  z.object({ ok: z.literal(false), error: z.string().max(2000) }),
+]);
+export type ExtContentDiagnosticsResponse = z.infer<typeof extContentDiagnosticsResponseSchema>;
 
 export const extBackgroundEngineStateSetPayloadSchema = z
   .object({

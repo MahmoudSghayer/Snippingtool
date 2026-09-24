@@ -62,6 +62,9 @@ export const trades = pgTable(
     index('trades_resource_id_idx').on(t.resourceId).where(isNull(t.deletedAt)),
     index('trades_status_idx').on(t.status).where(isNull(t.deletedAt)),
     index('trades_sold_at_idx').on(t.userId, t.soldAt).where(isNull(t.deletedAt)),
+    index('trades_user_id_bought_at_idx')
+      .on(t.userId, t.boughtAt.desc(), t.id)
+      .where(isNull(t.deletedAt)),
   ],
 );
 

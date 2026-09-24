@@ -5,6 +5,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 
+import { clearLocalSession } from '@/lib/session.js';
 import { WsConnection } from '@/lib/ws.js';
 import { useAdminLiveStore } from '@/stores/adminLive.js';
 import { useAuthStore } from '@/stores/auth.js';
@@ -26,7 +27,11 @@ export function useWsGateway(): void {
       (event) => {
         switch (event.type) {
           case 'session.revoked': {
-            useAuthStore.getState().clearSession();
+            // Defect C9: also clears the query cache (not just the auth
+            // store) — a force-logout/ban must not leave this account's
+            // cached data sitting around for whoever logs in next on this
+            // tab.
+            clearLocalSession();
             toast.error('You were signed out', {
               description:
                 event.reason === 'admin_force_logout'

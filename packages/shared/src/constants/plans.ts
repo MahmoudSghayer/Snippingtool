@@ -60,6 +60,26 @@ export const FEATURE_KEYS = [
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
 
+/** `FEATURE_KEYS` split by build target, each spelled out as its own
+ * literal (not derived from `FEATURE_KEYS`): the listable `ledger` build
+ * must not contain the string `autobuyer` anywhere (test/e2e/
+ * extension.spec.ts), so code in that build that needs the list of known
+ * keys imports `LISTABLE_FEATURE_KEYS` and lets `FEATURE_KEYS` tree-shake
+ * away. test/plans.test.ts checks the two lists partition `FEATURE_KEYS`. */
+export const LISTABLE_FEATURE_KEYS = [
+  'ledger.recorder',
+  'ledger.price_model',
+  'assist.ranker',
+  'assist.filter_rotation',
+  'assist.session_pnl',
+  'assist.risk_meter',
+  'dashboard.analytics',
+  'dashboard.multi_device',
+  'support.priority',
+  'mobile.remote',
+] as const satisfies readonly FeatureKey[];
+export const AUTOMATION_FEATURE_KEYS = ['automation.autobuyer'] as const satisfies readonly FeatureKey[];
+
 /** Features unlocked per plan. Every paid plan includes the autobuyer; the
  * plans differ in the mobile companion and in how long the pass lasts
  * (see PLAN_CATALOGUE). `basic` is retired (it had no automation) and kept
