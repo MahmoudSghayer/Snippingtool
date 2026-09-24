@@ -46,7 +46,8 @@ describe('userscript token', () => {
     const other = newId();
     const [, sig] = token.split('.');
     expect(verifyUserscriptToken(`${other}.${sig}`, secret)).toBeNull();
-    expect(verifyUserscriptToken(`${token.slice(0, -1)}A`, secret)).toBeNull();
+    const flipped = `${token.slice(0, -1)}${token.endsWith('A') ? 'B' : 'A'}`;
+    expect(verifyUserscriptToken(flipped, secret)).toBeNull();
     expect(verifyUserscriptToken(userId, secret)).toBeNull();
     expect(verifyUserscriptToken(token, 'a-different-cookie-secret-32-bytes')).toBeNull();
   });
