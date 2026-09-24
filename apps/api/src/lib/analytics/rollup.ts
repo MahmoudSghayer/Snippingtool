@@ -65,6 +65,19 @@ const ZERO_TOTALS: ProfitDayTotals = {
   tradesClosed: 0,
 };
 
+/** A Drizzle transaction handle (what `db.transaction(cb)` passes `cb`).
+ * The rollup takes this, not `Database`: its advisory lock is
+ * transaction-scoped, and outside a transaction it would be released the
+ * moment it was taken. */
+export type Transaction = Parameters<Parameters<Database['transaction']>[0]>[0];
+
+function assertTransaction(tx: Transaction): void {
+  // A plain `Database` has no rollback(); only a transaction handle does.
+  if (typeof (tx as { rollback?: unknown }).rollback !== 'function') {
+    throw new Error('rollupProfitsForUserDay must run inside a transaction');
+  }
+}
+
 /** Recomputes and upserts the `profits` row for one user on one UTC day,
  * entirely in SQL. Returns the totals written (zeros when there was nothing
  * to write). A day with no activity at all still gets a zero row if one
@@ -72,10 +85,11 @@ const ZERO_TOTALS: ProfitDayTotals = {
  * leaving stale numbers behind), but a day that never had a row does not
  * get an empty one. Call it inside a transaction: see this file's header. */
 export async function rollupProfitsForUserDay(
-  tx: Database,
+  tx: Transaction,
   userId: string,
   day: string,
 ): Promise<ProfitDayTotals> {
+  assertTransaction(tx);
   const { start, end } = dayBounds(day);
   // Built the way the repo requires (packages/config/eslint-preset.js):
   // constant SQL chunks joined with separately bound params, never a value
@@ -175,7 +189,7 @@ export async function rollupProfitsForUserDay(
  * same day many times rolls it up once, and goes in sorted order so the
  * advisory locks are always taken in the same order. */
 export async function rollupProfitsForUserDays(
-  tx: Database,
+  tx: Transaction,
   keys: Iterable<{ userId: string; day: string }>,
 ): Promise<number> {
   const unique = new Map<string, { userId: string; day: string }>();
@@ -212,7 +226,7 @@ export async function rollupProfitsForDay(db: Database, day: string): Promise<nu
   ]);
   const userIds = [...new Set([...traders, ...snipers].map((r) => r.userId))].sort();
   for (const userId of userIds) {
-    await db.transaction((tx) => rollupProfitsForUserDay(tx as unknown as Database, userId, day));
+    await db.transaction((tx) => rollupProfitsForUserDay(tx, userId, day));
   }
   return userIds.length;
 }
