@@ -97,10 +97,10 @@ function batchValues(t: ReportTradesRequest['trades'][number], existing: TradeRo
     // the whole batch). Not a 400: the extension cannot fix a report the
     // dashboard's /close made stale, and rejecting it would fail every other
     // trade in the batch with it.
-    const boughtAt =
-      existing.soldAt && buySide.boughtAt > existing.soldAt
-        ? (existing.boughtAt ?? buySide.boughtAt)
-        : buySide.boughtAt;
+    // A stored purchase time of null stays null: trades_sold_after_bought
+    // accepts a NULL bought_at, and the reported one is after the sale.
+    const boughtAt: Date | null =
+      existing.soldAt && buySide.boughtAt > existing.soldAt ? existing.boughtAt : buySide.boughtAt;
     return {
       ...buySide,
       boughtAt,

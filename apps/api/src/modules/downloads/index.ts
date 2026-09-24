@@ -26,6 +26,7 @@ export default fp(
     /** The zip, `null` without a template build, or `'no-key'` when there
      * is no usable Ed25519 ENTITLEMENT_PUBLIC_KEY to put in it (logged as an
      * error: the operator has to fix the configuration). */
+    let keyErrorLogged = false;
     const loadPackage = (log: FastifyInstance['log']): ExtensionPackage | null | 'no-key' => {
       try {
         return getExtensionPackage({
@@ -36,7 +37,15 @@ export default fp(
         });
       } catch (err) {
         if (!(err instanceof ExtensionKeyUnavailableError)) throw err;
-        log.error({ err }, err.message);
+        // Once per process at error level (the operator must fix the
+        // configuration); /info is polled by every account page, so after
+        // that only at debug.
+        if (!keyErrorLogged) {
+          keyErrorLogged = true;
+          log.error({ err }, err.message);
+        } else {
+          log.debug({ err }, err.message);
+        }
         return 'no-key';
       }
     };

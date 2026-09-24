@@ -306,6 +306,34 @@ describe('ingest correctness', () => {
       expect(after!.soldAt!.toISOString()).toBe(soldAt);
     });
 
+    // A stored trade can have no purchase time (bought_at is nullable). The
+    // guard's fallback must keep it null, which the CHECK accepts, not take
+    // the report's purchase time after the recorded sale.
+    it('a stale report for a sold trade with no stored purchase time keeps it null', async () => {
+      const { userId, token } = await createUser(app, 'null-bought@example.com');
+      const soldAt = new Date(Date.now() - 2 * DAY);
+      await app.db.insert(trades).values({
+        id: newId(),
+        userId,
+        tradeId: 'nb',
+        resourceId: '1',
+        buyPrice: 1000,
+        sellPrice: 2000,
+        eaTax: 100,
+        netProfit: 900,
+        status: 'sold',
+        boughtAt: null,
+        soldAt,
+      });
+      const res = await post('/api/v1/trades/batch', token, {
+        trades: [trade({ tradeId: 'nb', buyPrice: 1000, boughtAt: new Date(Date.now() - MINUTE).toISOString() })],
+      });
+      expect(res.statusCode, res.body).toBe(200);
+      const row = await app.db.query.trades.findFirst({ where: eq(trades.userId, userId) });
+      expect(row).toMatchObject({ status: 'sold', boughtAt: null });
+      expect(row!.soldAt!.toISOString()).toBe(soldAt.toISOString());
+    });
+
     it('rejects an oversized price with a 400 instead of a 500', async () => {
       const { token } = await createUser(app, 'big-price@example.com');
       for (const overrides of [
