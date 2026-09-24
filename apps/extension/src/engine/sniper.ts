@@ -6,24 +6,38 @@
  * Each cycle searches the next filter, collects what came back, and buys
  * every listing at or under the price cap, cheapest first. Between searches
  * it waits a random delay from the user's range; every N searches it takes a
- * break; every N minutes it rests. All of those numbers are the user's to
- * choose, from very safe to very risky.
+ * break; every N minutes it rests.
  *
- * What the user cannot turn off: every search and every buy still goes
- * through `governor.allow()` (with the thresholds from the page's Safety
- * limits), the server kill switch stops the loop, and so does an adapter
- * probe failure or market-shape change — acting on an EA app that no longer
- * looks the way `main/adapter.ts` expects is never safe.
+ * Recommended limits (the default, `safetyMode: 'recommended'`): the bot
+ * runs on `effectiveBotSettings()` — its safety limits clamped to the user's
+ * governor settings and its search delay raised to fit inside them. That
+ * happens here, on every start and settings change, not only in the page,
+ * so a hand-edited storage value cannot get past it. With the recommended
+ * limits turned off (custom mode, acknowledged on the page) the user's own
+ * values apply within `BOT_LIMITS`.
  *
- * The bot runs its own governor, created fresh on every start from
- * `settings.safety`, so its session length counts from when the user pressed
- * Start.
+ * What the user cannot turn off, in either mode: every search and every buy
+ * still goes through `governor.allow()`, the server kill switch stops the
+ * loop, and so does an adapter probe failure or market-shape change —
+ * acting on an EA app that no longer looks the way `main/adapter.ts`
+ * expects is never safe.
+ *
+ * The bot runs its own governor, created fresh on every start, so its
+ * session length counts from when the user pressed Start.
  */
-import { Governor } from './governor.js';
+import { BOT_SAFETY_LIMITS, GOVERNOR_ABSOLUTE_LIMITS, effectiveBotSettings } from '@sl/shared';
+
+import { Governor, type GovernorBounds } from './governor.js';
 
 import type { AttemptInput, TradeInput } from './types.js';
 import type { AdapterClient } from '../content/adapter-client.js';
-import type { BotSettings, FilterCriteria, TrimmedAuction } from '@sl/shared';
+import type {
+  BotSettings,
+  EffectiveBotSettings,
+  FilterCriteria,
+  GovernorSettings,
+  TrimmedAuction,
+} from '@sl/shared';
 
 /** EA keeps 5% of every sale. */
 const EA_TAX = 0.05;
@@ -112,6 +126,9 @@ export interface SniperDeps {
   getFilters: () => SniperFilter[];
   /** Expected resale price for a card, or null if the ledger has no data. */
   estimateSellPrice: (resourceId: number) => Promise<number | null>;
+  /** The user's server-synced governor settings: the caps recommended mode
+   * holds the bot to. Null/absent = the shipped defaults. */
+  getGovernorSettings?: () => GovernorSettings | null;
   /** The server kill switch as the content script currently knows it. */
   killSwitch: () => { active: boolean; reason?: string };
   onChange: () => void;
@@ -149,8 +166,15 @@ function emptyStats(): SniperStats {
   };
 }
 
+function boundsFor(e: EffectiveBotSettings): GovernorBounds {
+  return e.mode === 'custom' ? BOT_SAFETY_LIMITS : GOVERNOR_ABSOLUTE_LIMITS;
+}
+
 export class Sniper {
-  private settings: BotSettings;
+  /** What the bot runs on: the saved settings after the safety mode's
+   * clamping (`effectiveBotSettings`). */
+  private settings: EffectiveBotSettings;
+  private rawSettings: BotSettings;
   private governor: Governor | null = null;
   private abort: AbortController | null = null;
   private stats: SniperStats = emptyStats();
@@ -173,7 +197,8 @@ export class Sniper {
     private readonly deps: SniperDeps,
     settings: BotSettings,
   ) {
-    this.settings = settings;
+    this.rawSettings = settings;
+    this.settings = this.resolve(settings);
     this.now = deps.now ?? Date.now;
     this.random = deps.random ?? Math.random;
     this.sleep = deps.sleep ?? abortableSleep;
@@ -212,11 +237,21 @@ export class Sniper {
     return this.abort != null;
   }
 
+  /** The settings the bot actually runs on (after the safety mode). */
+  getEffectiveSettings(): EffectiveBotSettings {
+    return this.settings;
+  }
+
   /** Takes effect from the next wait/break/rest; the safety limits apply to
    * the running governor straight away. */
   setSettings(settings: BotSettings): void {
-    this.settings = settings;
-    this.governor?.setSettings(settings.safety);
+    this.rawSettings = settings;
+    this.settings = this.resolve(settings);
+    this.governor?.setSettings(this.settings.safety, boundsFor(this.settings));
+  }
+
+  private resolve(settings: BotSettings): EffectiveBotSettings {
+    return effectiveBotSettings(settings, this.deps.getGovernorSettings?.() ?? null);
   }
 
   start(): void {
@@ -232,7 +267,19 @@ export class Sniper {
       return;
     }
     this.abort = new AbortController();
-    this.governor = new Governor(this.settings.safety, { now: this.now });
+    // Re-read the caps: the governor settings may have changed since.
+    this.settings = this.resolve(this.rawSettings);
+    this.governor = new Governor(this.settings.safety, {
+      now: this.now,
+      bounds: boundsFor(this.settings),
+    });
+    this.addLog({
+      kind: 'info',
+      message:
+        this.settings.mode === 'custom'
+          ? 'Custom limits on — higher ban risk'
+          : `Recommended limits on: at most ${this.settings.safety.actionsPerHour} actions an hour`,
+    });
     this.stats = { ...emptyStats(), startedAt: this.now() };
     this.filterIndex = 0;
     this.addLog({ kind: 'info', message: 'Bot started' });

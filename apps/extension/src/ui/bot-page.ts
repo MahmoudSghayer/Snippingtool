@@ -8,22 +8,33 @@
  * session — profit, searches, top snipes, the countdown to the next action,
  * counters, the bot log and search results.
  *
- * Every limit is the user's call. Presets range from Safe to Risky and the
- * fields accept anything inside `BOT_LIMITS` (checked by `botSettingsSchema`
- * before saving); the page only labels how risky the current pacing is.
+ * Safety mode: with the recommended limits on (the default), the bot's
+ * limits are clamped to the user's governor settings and the delay presets
+ * are derived from those caps ("Careful / Balanced / Fastest allowed"). The
+ * engine enforces the same clamping (`effectiveBotSettings` in
+ * engine/sniper.ts); this page only shows it. Turning the recommended limits
+ * off takes an inline confirmation with a required checkbox
+ * (`CUSTOM_LIMITS_ACKNOWLEDGMENT`); while they are off, a "Custom limits —
+ * higher ban risk" badge with a one-click "Back to recommended" stays in the
+ * top bar, and the fields accept anything inside `BOT_LIMITS`.
  *
  * Renders in its own shadow root; EA's styles cannot reach in. All text
  * that comes from data (filter names, card names, error messages) goes
  * through `esc()`.
  */
 import {
+  CUSTOM_LIMITS_ACKNOWLEDGMENT,
   SAFETY_PRESETS,
-  SEARCH_DELAY_PRESETS,
   botRiskLevel,
   botSettingsSchema,
+  effectiveBotSettings,
   estimatedSearchesPerHour,
+  searchDelayPresets,
+  withSafetyMode,
   type BotSettings,
+  type EffectiveBotSettings,
   type FilterCriteria,
+  type GovernorSettings,
   type SafetyPresetKey,
   type SavedFilter,
 } from '@sl/shared';
@@ -52,6 +63,8 @@ export interface BotPageDeps {
    * not need a page reload. */
   prepare: () => Promise<void>;
   getSettings: () => BotSettings;
+  /** The user's governor settings: the caps recommended mode applies. */
+  getGovernorSettings: () => GovernorSettings | null;
   saveSettings: (settings: BotSettings) => Promise<void>;
   getFilters: () => SavedFilter[];
   saveFilters: (filters: SavedFilter[]) => Promise<void>;
@@ -158,6 +171,19 @@ const CSS = `
   .close { border: 0; background: none; font-size: 20px; line-height: 1; color: #8b919c; padding: 4px 8px; }
   .notice { margin: 10px 18px 0; padding: 10px 12px; border-radius: 8px; background: rgba(245,158,11,.12); color: #fbbf24; }
   .notice[hidden] { display: none; }
+  .mode { display: flex; align-items: center; gap: 8px; }
+  .mode-badge { padding: 3px 10px; border-radius: 6px; font-size: 11px; font-weight: 800; letter-spacing: .3px; }
+  .mode-badge.recommended { background: rgba(34,197,94,.18); color: #4ade80; }
+  .mode-badge.custom { background: #ef4444; color: #fff; }
+  .mode button { border: 1px solid #4ade80; background: none; border-radius: 8px; padding: 4px 10px; color: #4ade80; font-size: 12px; font-weight: 700; }
+  .modebox { border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; background: #181b22; }
+  .modebox.custom { border: 1px solid #ef4444; }
+  .modebox p { margin: 0 0 6px; }
+  .modebox button { border: 1px solid #333844; background: none; border-radius: 8px; padding: 6px 10px; color: #e8eaed; font-weight: 600; margin-right: 6px; }
+  .modebox button.danger { border-color: #ef4444; color: #f87171; }
+  .modebox button:disabled { opacity: .45; cursor: not-allowed; }
+  .modebox label { display: flex; gap: 8px; align-items: flex-start; margin: 8px 0; color: #e8eaed; }
+  .modebox label input { margin-top: 3px; }
 
   .body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(360px, 44%) 1fr; }
   .settings { overflow-y: auto; padding: 14px 16px 60px; border-right: 1px solid #262a33; }
@@ -388,6 +414,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       <span class="ver" title="Nova Trade version">v${esc(import.meta.env.VITE_EXTENSION_VERSION)}</span>
       <span class="chip" id="phase">Ready</span>
       <span class="risk" id="risk"></span>
+      <span class="mode" id="mode" aria-live="polite"></span>
       <span class="spacer"></span>
       <span class="saved" id="saved" aria-live="polite"></span>
       <button class="ghost" id="reset" type="button">Reset stats</button>
@@ -431,11 +458,53 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     renderKnobs();
   }
 
+  /** The settings the bot will actually run on (the engine computes the
+   * same thing; this is only for display). */
+  function effective(): EffectiveBotSettings {
+    return effectiveBotSettings(settings, deps.getGovernorSettings());
+  }
+
+  /** Whether the inline "turn off the recommended limits" step is open. */
+  let confirmingCustom = false;
+
+  function renderMode(): void {
+    const eff = effective();
+    $('mode').innerHTML =
+      eff.mode === 'custom'
+        ? `<span class="mode-badge custom">Custom limits — higher ban risk</span>
+           <button type="button" id="back-recommended">Back to recommended</button>`
+        : `<span class="mode-badge recommended">Recommended limits</span>`;
+  }
+
+  function safetyModeHtml(eff: EffectiveBotSettings): string {
+    if (eff.mode === 'custom') {
+      return `<div class="modebox custom">
+        <p><b>Recommended limits are off.</b> The bot runs on your own limits below, up to the maximums. Going faster raises the risk of an EA ban, and a ban is never refundable. The server kill switch still stops the bot.</p>
+        <button type="button" id="mode-recommended">Back to recommended</button></div>`;
+    }
+    const c = eff.caps!;
+    const caps = `${fmt(c.actionsPerHour)} actions an hour, ${fmt(c.sessionLengthMinutes)}-minute sessions, ${c.buyToSearchRatio} buys per search, ${fmt(c.cooldownSeconds)} s cooldown, ${fmt(c.maxCoinFlowPerHour)} coins an hour`;
+    const confirm = confirmingCustom
+      ? `<label><input type="checkbox" id="ack-custom" /> <span>${esc(CUSTOM_LIMITS_ACKNOWLEDGMENT)}</span></label>
+         <button type="button" class="danger" id="mode-custom-confirm" disabled>Turn off recommended limits</button>
+         <button type="button" id="mode-custom-cancel">Cancel</button>`
+      : `<button type="button" class="danger" id="mode-custom">Turn off recommended limits…</button>`;
+    return `<div class="modebox">
+      <p><b>Recommended limits are on.</b> The bot stays inside your safety settings: ${esc(caps)}. You can set tighter limits below, not looser ones.</p>
+      ${confirm}</div>`;
+  }
+
   function renderKnobs(): void {
     const s = settings;
-    const delayPreset = SEARCH_DELAY_PRESETS.find(
+    const eff = effective();
+    const presets = searchDelayPresets(eff.mode, eff.minSearchDelaySeconds);
+    const delayPreset = presets.find(
       (p) => p.min === s.searchDelay.min && p.max === s.searchDelay.max,
     )?.key;
+    const delayHint =
+      eff.mode === 'recommended'
+        ? `<div class="hint">Recommended limits keep at least ${fmt(Math.ceil(eff.minSearchDelaySeconds))} seconds between searches; a shorter delay runs at that pace.</div>`
+        : '';
     const safetyPreset = (Object.keys(SAFETY_PRESETS) as SafetyPresetKey[]).find((k) =>
       Object.entries(SAFETY_PRESETS[k]).every(
         ([f, v]) => s.safety[f as keyof BotSettings['safety']] === v,
@@ -447,12 +516,14 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         'Delay Settings',
         `<div class="row"><div class="label"><b>Search Delay Time</b><span>Delay between searches (seconds)</span></div>
           ${stepper('delay', rangeText(s.searchDelay), 'secs')}</div>
-        <div class="presets">${SEARCH_DELAY_PRESETS.map(
-          (
-            p,
-          ) => `<button type="button" class="preset" data-delay="${p.key}" aria-pressed="${delayPreset === p.key}">
-            <b>${p.min}-${p.max}</b><small class="tag-${p.key}">${p.label.toUpperCase()}</small></button>`,
-        ).join('')}</div>`,
+        <div class="presets">${presets
+          .map(
+            (
+              p,
+            ) => `<button type="button" class="preset" data-delay="${p.key}" data-min="${p.min}" data-max="${p.max}" aria-pressed="${delayPreset === p.key}">
+            <b>${p.min}-${p.max}</b><small class="tag-${p.tone}">${esc(p.label.toUpperCase())}</small></button>`,
+          )
+          .join('')}</div>${delayHint}`,
       ) +
       section(
         'Break Settings',
@@ -486,16 +557,20 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       ) +
       section(
         'Safety Limits',
-        `<div class="presets" style="justify-content:flex-start;padding:0 0 6px">${(
-          ['low', 'medium', 'high'] as const
-        )
-          .map(
-            (
-              k,
-            ) => `<button type="button" class="preset" data-safety="${k}" aria-pressed="${safetyPreset === k}">
+        `${safetyModeHtml(eff)}${
+          eff.mode === 'custom'
+            ? `<div class="presets" style="justify-content:flex-start;padding:0 0 6px">${(
+                ['low', 'medium', 'high'] as const
+              )
+                .map(
+                  (
+                    k,
+                  ) => `<button type="button" class="preset" data-safety="${k}" aria-pressed="${safetyPreset === k}">
               <b>${k === 'low' ? 'Low' : k === 'medium' ? 'Medium' : 'High'}</b><small class="tag-${k === 'low' ? 'safe' : k === 'medium' ? 'medium' : 'risky'}">${k.toUpperCase()} RISK</small></button>`,
-          )
-          .join('')}</div>
+                )
+                .join('')}</div>`
+            : `<div class="presets" style="justify-content:flex-start;padding:0 0 6px"><button type="button" class="preset" id="use-caps"><b>Use the recommended limits</b></button></div>`
+        }
         <div class="row"><div class="label"><b>Actions Per Hour</b><span>Searches + buys in any hour before the bot cools down</span></div>
           ${stepper('s-aph', String(s.safety.actionsPerHour), '/hour')}</div>
         <div class="row"><div class="label"><b>Session Length</b><span>The bot stops after this long</span></div>
@@ -508,8 +583,9 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
           ${stepper('s-flow', String(s.safety.maxCoinFlowPerHour), 'coins', true)}</div>
         <div class="hint" id="pace"></div>`,
         '',
-        false,
+        eff.mode === 'custom' || confirmingCustom,
       );
+    renderMode();
     renderRisk();
   }
 
@@ -1093,18 +1169,24 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   }
 
   function renderRisk(): void {
-    const level = botRiskLevel(settings);
+    const eff = effective();
+    const level = botRiskLevel(eff);
     const risk = $('risk');
     risk.className = `risk ${level}`;
     risk.textContent = `${level.toUpperCase()} RISK`;
-    const perHour = estimatedSearchesPerHour(settings);
+    const perHour = estimatedSearchesPerHour(eff);
+    const limit = eff.safety.actionsPerHour;
     const pace = root.getElementById('pace');
     if (pace) {
-      pace.className = perHour > settings.safety.actionsPerHour ? 'warn' : 'hint';
+      pace.className = perHour > limit ? 'warn' : 'hint';
+      const inForce =
+        eff.mode === 'recommended' && limit < settings.safety.actionsPerHour
+          ? ` The recommended limits hold it to ${fmt(limit)} actions an hour.`
+          : '';
       pace.textContent =
-        perHour > settings.safety.actionsPerHour
-          ? `This pace is about ${fmt(perHour)} searches an hour, above your ${fmt(settings.safety.actionsPerHour)} actions-per-hour limit — the bot will pause when it reaches the limit.`
-          : `This pace is about ${fmt(perHour)} searches an hour. Faster is riskier: EA can flag or ban accounts that search non-stop.`;
+        perHour > limit
+          ? `This pace is about ${fmt(perHour)} searches an hour, above your ${fmt(limit)} actions-per-hour limit — the bot will pause when it reaches the limit.`
+          : `This pace is about ${fmt(perHour)} searches an hour. Faster is riskier: EA can flag or ban accounts that search non-stop.${inForce}`;
     }
   }
 
@@ -1132,6 +1214,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     };
     const s = settings;
     const next: BotSettings = {
+      safetyMode: s.safetyMode,
+      customRiskAcknowledgedAt: s.customRiskAcknowledgedAt,
       searchDelay: rng('delay', false, s.searchDelay),
       breaks: {
         enabled: s.breaks.enabled,
@@ -1235,8 +1319,26 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       const next = readSettings();
       if (next) commit(next, false);
     } else if (el.dataset.delay) {
-      const p = SEARCH_DELAY_PRESETS.find((x) => x.key === el.dataset.delay)!;
-      commit({ ...settings, searchDelay: { min: p.min, max: p.max } }, true);
+      const min = Number(el.dataset.min);
+      const max = Number(el.dataset.max);
+      commit({ ...settings, searchDelay: { min, max } }, true);
+    } else if (el.id === 'use-caps') {
+      const caps = effective().caps;
+      if (caps) commit({ ...settings, safety: { ...caps } }, true);
+    } else if (el.id === 'mode-custom') {
+      confirmingCustom = true;
+      renderKnobs();
+      (root.getElementById('ack-custom') as HTMLInputElement | null)?.focus();
+    } else if (el.id === 'mode-custom-cancel') {
+      confirmingCustom = false;
+      renderKnobs();
+    } else if (el.id === 'mode-custom-confirm') {
+      const ack = root.getElementById('ack-custom') as HTMLInputElement | null;
+      if (!ack?.checked) return;
+      confirmingCustom = false;
+      commit(withSafetyMode(settings, 'custom', { acknowledged: true }), true);
+    } else if (el.id === 'mode-recommended') {
+      backToRecommended();
     } else if (el.dataset.safety) {
       commit(
         { ...settings, safety: { ...SAFETY_PRESETS[el.dataset.safety as SafetyPresetKey] } },
@@ -1254,8 +1356,23 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     if (el.closest('summary')) e.preventDefault();
   });
 
+  function backToRecommended(): void {
+    confirmingCustom = false;
+    commit(withSafetyMode(settings, 'recommended'), true);
+  }
+
+  // The top bar's "Back to recommended" (shown while custom limits are on).
+  $('mode').addEventListener('click', (e) => {
+    if ((e.target as HTMLElement).closest('#back-recommended')) backToRecommended();
+  });
+
   $('settings').addEventListener('change', (e) => {
     const input = e.target as HTMLInputElement;
+    if (input.id === 'ack-custom') {
+      const confirm = root.getElementById('mode-custom-confirm') as HTMLButtonElement | null;
+      if (confirm) confirm.disabled = !input.checked;
+      return;
+    }
     if (!input.id || input.id.startsWith('nf-')) return;
     const next = readSettings();
     if (next) commit(next, false);

@@ -1,16 +1,29 @@
 import { z } from 'zod';
 
+import {
+  DEFAULT_GOVERNOR_SETTINGS,
+  GOVERNOR_ABSOLUTE_LIMITS,
+  type GovernorSettings,
+} from './settings.js';
+
 /**
  * Settings for the extension's Sniping Bot page (apps/extension
  * `engine/sniper.ts`, `ui/bot-page.ts`). They live in the extension's own
- * storage, never on the server, and every one of them is the user's call:
- * the page offers safe and risky presets, and the user may go past either.
+ * storage, never on the server.
  *
  * `safety` holds the governor thresholds the bot runs under. It has the same
- * shape as the server-synced `GovernorSettings`, but its bounds are
- * `BOT_LIMITS`, which are far wider than `GOVERNOR_ABSOLUTE_LIMITS`: the
- * Sniping Bot is explicitly the "the user decides the risk" surface. The
- * server kill switch still applies whatever these say.
+ * shape as the server-synced `GovernorSettings`. How far it may go depends on
+ * `safetyMode`:
+ *
+ *   - `'recommended'` (the default): the bot's effective limits are clamped
+ *     to the user's own governor settings (themselves bounded by
+ *     `GOVERNOR_ABSOLUTE_LIMITS`), and the search delay is raised so the pace
+ *     cannot run past those caps. See `effectiveBotSettings`.
+ *   - `'custom'`: the user turned the recommended limits off, after
+ *     explicitly accepting the higher ban risk (`customRiskAcknowledgedAt`).
+ *     `BOT_LIMITS` apply, which are far wider.
+ *
+ * The server kill switch and the adapter checks stop the bot in both modes.
  */
 export const BOT_LIMITS = {
   searchDelaySeconds: { min: 0.5, max: 600 },
@@ -41,8 +54,23 @@ const range = (b: Bound, integer: boolean) =>
     .strict()
     .refine((r) => r.min <= r.max, { message: 'min must not be greater than max' });
 
+export const BOT_SAFETY_MODES = ['recommended', 'custom'] as const;
+export type BotSafetyMode = (typeof BOT_SAFETY_MODES)[number];
+
+/** What the user must tick before custom limits turn on. Shown verbatim on
+ * the Sniping Bot page. */
+export const CUSTOM_LIMITS_ACKNOWLEDGMENT =
+  'I understand that going faster than the recommended limits raises the risk of an EA ban, and that a ban is never refundable';
+
 export const botSettingsSchema = z
   .object({
+    /** Recommended limits on (the default) or off. Settings saved before this
+     * field existed, and any value that is not a known mode, read as
+     * `'recommended'`. */
+    safetyMode: z.enum(BOT_SAFETY_MODES).default('recommended').catch('recommended'),
+    /** When the user accepted `CUSTOM_LIMITS_ACKNOWLEDGMENT` (ISO 8601).
+     * Custom mode without it runs as recommended (`effectiveSafetyMode`). */
+    customRiskAcknowledgedAt: z.string().datetime().nullable().default(null).catch(null),
     /** Seconds between two searches. */
     searchDelay: range(BOT_LIMITS.searchDelaySeconds, false),
     breaks: z
@@ -88,7 +116,8 @@ export const botSettingsSchema = z
   .strict();
 export type BotSettings = z.infer<typeof botSettingsSchema>;
 
-/** Search-delay presets shown on the page, riskiest first. */
+/** Search-delay presets for custom mode, riskiest first. Recommended mode
+ * uses `searchDelayPresets` instead, which derives them from the caps. */
 export const SEARCH_DELAY_PRESETS = [
   { key: 'risky', label: 'Risky', min: 1, max: 2 },
   { key: 'medium', label: 'Medium', min: 2, max: 4 },
@@ -122,6 +151,8 @@ export const SAFETY_PRESETS = {
 export type SafetyPresetKey = keyof typeof SAFETY_PRESETS;
 
 export const DEFAULT_BOT_SETTINGS: BotSettings = {
+  safetyMode: 'recommended',
+  customRiskAcknowledgedAt: null,
   searchDelay: { min: 3, max: 5 },
   breaks: { enabled: true, searches: { min: 15, max: 15 }, seconds: { min: 10, max: 10 } },
   rest: { enabled: true, afterMinutes: { min: 20, max: 30 }, minutes: { min: 15, max: 20 } },
@@ -155,4 +186,187 @@ export function botRiskLevel(s: BotSettings): BotRiskLevel {
   if (perHour >= 900) return 'high';
   if (perHour >= 300) return 'medium';
   return 'low';
+}
+
+// ---- recommended vs custom limits -----------------------------------------
+
+type SafetyKey = keyof BotSettings['safety'];
+const SAFETY_KEYS: readonly SafetyKey[] = [
+  'actionsPerHour',
+  'sessionLengthMinutes',
+  'buyToSearchRatio',
+  'cooldownSeconds',
+  'maxCoinFlowPerHour',
+];
+
+/** The bounds the bot's own governor clamps to in custom mode. */
+export const BOT_SAFETY_LIMITS: Record<SafetyKey, Bound> = {
+  actionsPerHour: BOT_LIMITS.actionsPerHour,
+  sessionLengthMinutes: BOT_LIMITS.sessionLengthMinutes,
+  buyToSearchRatio: BOT_LIMITS.buyToSearchRatio,
+  cooldownSeconds: BOT_LIMITS.cooldownSeconds,
+  maxCoinFlowPerHour: BOT_LIMITS.maxCoinFlowPerHour,
+};
+
+const clampTo = (b: Bound, value: number, fallback: number): number =>
+  Number.isFinite(value) ? Math.min(b.max, Math.max(b.min, value)) : fallback;
+
+/** Custom mode only counts once the risk was acknowledged: a stored
+ * `'custom'` without a valid acknowledgment runs as recommended. */
+export function effectiveSafetyMode(
+  s: Pick<BotSettings, 'safetyMode' | 'customRiskAcknowledgedAt'>,
+): BotSafetyMode {
+  if (s.safetyMode !== 'custom') return 'recommended';
+  const at = s.customRiskAcknowledgedAt;
+  return typeof at === 'string' && Number.isFinite(Date.parse(at)) ? 'custom' : 'recommended';
+}
+
+/** The caps recommended mode holds the bot to: the user's governor settings
+ * (null = not loaded, use the shipped defaults), clamped into
+ * `GOVERNOR_ABSOLUTE_LIMITS` so a corrupt or hand-edited cache cannot widen
+ * them. */
+export function recommendedCaps(governor: GovernorSettings | null | undefined): GovernorSettings {
+  const g = governor ?? DEFAULT_GOVERNOR_SETTINGS;
+  const out = {} as GovernorSettings;
+  for (const k of SAFETY_KEYS) {
+    out[k] = clampTo(GOVERNOR_ABSOLUTE_LIMITS[k], g[k], DEFAULT_GOVERNOR_SETTINGS[k]);
+  }
+  return out;
+}
+
+/** The shortest average gap between two searches that keeps the bot inside
+ * `caps.actionsPerHour`, counting the buys each search may lead to (at most
+ * `buyToSearchRatio` per search). */
+export function minSearchDelaySeconds(
+  caps: Pick<GovernorSettings, 'actionsPerHour' | 'buyToSearchRatio'>,
+): number {
+  return (3_600 * (1 + caps.buyToSearchRatio)) / caps.actionsPerHour;
+}
+
+export interface EffectiveBotSettings extends BotSettings {
+  /** The mode actually in force (see `effectiveSafetyMode`). */
+  mode: BotSafetyMode;
+  /** Recommended mode's caps; null in custom mode. */
+  caps: GovernorSettings | null;
+  /** The shortest search delay the engine will use. */
+  minSearchDelaySeconds: number;
+}
+
+/**
+ * What the bot actually runs on. The engine calls this on every start and
+ * settings change, so the clamping holds whatever the page or storage says.
+ *
+ * Recommended mode: each safety limit is the tighter of the user's value and
+ * the cap (for the cooldown, the longer one), and the search delay is raised
+ * to at least `minSearchDelaySeconds` of those limits. Breaks and rests only
+ * ever add waiting, so they cannot push the pace past the caps.
+ *
+ * Custom mode: the user's values, clamped into `BOT_LIMITS`.
+ */
+export function effectiveBotSettings(
+  s: BotSettings,
+  governor: GovernorSettings | null | undefined,
+): EffectiveBotSettings {
+  const mode = effectiveSafetyMode(s);
+  const own = {} as BotSettings['safety'];
+  for (const k of SAFETY_KEYS) {
+    own[k] = clampTo(BOT_SAFETY_LIMITS[k], s.safety[k], DEFAULT_BOT_SETTINGS.safety[k]);
+  }
+  const delayBound = BOT_LIMITS.searchDelaySeconds;
+  const delayMin = clampTo(delayBound, s.searchDelay.min, DEFAULT_BOT_SETTINGS.searchDelay.min);
+  const delayMax = Math.max(delayMin, clampTo(delayBound, s.searchDelay.max, delayMin));
+
+  if (mode === 'custom') {
+    return {
+      ...s,
+      mode,
+      caps: null,
+      safety: own,
+      searchDelay: { min: delayMin, max: delayMax },
+      minSearchDelaySeconds: delayBound.min,
+    };
+  }
+
+  const caps = recommendedCaps(governor);
+  const safety: BotSettings['safety'] = {
+    actionsPerHour: Math.min(own.actionsPerHour, caps.actionsPerHour),
+    sessionLengthMinutes: Math.min(own.sessionLengthMinutes, caps.sessionLengthMinutes),
+    buyToSearchRatio: Math.min(own.buyToSearchRatio, caps.buyToSearchRatio),
+    cooldownSeconds: Math.max(own.cooldownSeconds, caps.cooldownSeconds),
+    maxCoinFlowPerHour: Math.min(own.maxCoinFlowPerHour, caps.maxCoinFlowPerHour),
+  };
+  const floor = minSearchDelaySeconds(safety);
+  const min = Math.max(delayMin, floor);
+  return {
+    ...s,
+    mode,
+    caps,
+    safety,
+    searchDelay: { min, max: Math.max(delayMax, min) },
+    minSearchDelaySeconds: floor,
+  };
+}
+
+/**
+ * Switch the safety mode. Turning custom limits on needs the user's explicit
+ * acknowledgment of `CUSTOM_LIMITS_ACKNOWLEDGMENT` (the page's required
+ * checkbox) and records when it was given; without it this throws. Going
+ * back to recommended clears the acknowledgment, so the next switch asks
+ * again.
+ */
+export function withSafetyMode(
+  s: BotSettings,
+  mode: BotSafetyMode,
+  opts: { acknowledged?: boolean; now?: Date } = {},
+): BotSettings {
+  if (mode === 'recommended') {
+    return { ...s, safetyMode: 'recommended', customRiskAcknowledgedAt: null };
+  }
+  if (opts.acknowledged !== true) {
+    throw new Error('Custom limits need the risk acknowledgment first.');
+  }
+  return {
+    ...s,
+    safetyMode: 'custom',
+    customRiskAcknowledgedAt: (opts.now ?? new Date()).toISOString(),
+  };
+}
+
+export interface SearchDelayPreset {
+  key: string;
+  label: string;
+  /** Colour of the preset's tag. */
+  tone: 'safe' | 'medium' | 'risky';
+  min: number;
+  max: number;
+}
+
+/**
+ * The search-delay presets for a mode. Recommended mode derives all three
+ * from the caps, so each stays inside them: "Fastest allowed" starts at the
+ * shortest delay the caps permit (rounded up to a whole second), and
+ * "Balanced" and "Careful" are slower multiples of it. Custom mode shows the
+ * fixed `SEARCH_DELAY_PRESETS`, riskiest first.
+ */
+export function searchDelayPresets(
+  mode: BotSafetyMode,
+  minDelaySeconds: number,
+): SearchDelayPreset[] {
+  if (mode === 'custom') {
+    return SEARCH_DELAY_PRESETS.map((p) => ({
+      key: p.key,
+      label: p.label,
+      tone: p.key === 'risky' ? 'risky' : p.key === 'medium' ? 'medium' : 'safe',
+      min: p.min,
+      max: p.max,
+    }));
+  }
+  const b = BOT_LIMITS.searchDelaySeconds;
+  const sec = (n: number) => Math.min(b.max, Math.max(b.min, Math.ceil(n)));
+  const m = Math.max(minDelaySeconds, b.min);
+  return [
+    { key: 'careful', label: 'Careful', tone: 'safe', min: sec(m * 2), max: sec(m * 3) },
+    { key: 'balanced', label: 'Balanced', tone: 'safe', min: sec(m * 1.5), max: sec(m * 2) },
+    { key: 'fastest', label: 'Fastest allowed', tone: 'medium', min: sec(m), max: sec(m * 1.25) },
+  ];
 }

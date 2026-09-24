@@ -216,13 +216,37 @@ minutes. It ships through the same `virtual:autobuyer-loader` alias as the
 autobuyer (`loadSniper()`), so the `ledger` build never contains it, and the
 autobuyer does not buy while the bot runs.
 
-**The user sets every limit.** Its settings (`BotSettings` in
-`@sl/shared`) live in `storage.local`, never on the server, and are bounded
-by `BOT_LIMITS`, which are far wider than `GOVERNOR_ABSOLUTE_LIMITS`: presets
-go from Safe (3-5 s) to Risky (1-2 s), and the page labels the pace LOW,
-MEDIUM or HIGH RISK. The bot runs its own governor built from the page's
-Safety limits; the server kill switch and adapter probe failures stop it
-whatever those say.
+**Recommended limits are on by default; the user can turn them off.** Its
+settings (`BotSettings` in `@sl/shared`) live in `storage.local`, never on
+the server. `safetyMode` decides how far they may go:
+
+- **`recommended`** (the default, and what settings saved before the field
+  existed read as): `effectiveBotSettings()` clamps the bot's actions per
+  hour, session length, buy:search ratio and coin flow per hour to the
+  user's governor settings (the cooldown to the longer of the two), which
+  are themselves bounded by `GOVERNOR_ABSOLUTE_LIMITS`, and raises the search
+  delay to at least `3600 × (1 + ratio) / actionsPerHour` seconds so the
+  pace cannot run past the cap. With the default governor settings (30
+  actions an hour, ratio 0.35) that is 162 s. The engine applies this on
+  every start and settings change, so a hand-edited storage value cannot
+  get around it. The delay presets are derived from the same numbers:
+  Careful (2-3×), Balanced (1.5-2×) and Fastest allowed (1-1.25× the
+  minimum).
+- **`custom`**: the user turned the recommended limits off on the page,
+  after ticking a required checkbox ("I understand that going faster than
+  the recommended limits raises the risk of an EA ban, and that a ban is
+  never refundable"); `customRiskAcknowledgedAt` records when. `BOT_LIMITS`
+  apply, the old Safe / Medium / Risky presets come back, and a "Custom
+  limits — higher ban risk" badge with a one-click "Back to recommended"
+  stays in the page's top bar. A stored `custom` without an acknowledgment
+  runs as recommended. Each switch is reported as a `settings_change`
+  activity event with the field `bot.safetyMode=custom` or
+  `bot.safetyMode=recommended` (`lib/bot-safety.ts`), subject to the usual
+  telemetry opt-out.
+
+The bot runs its own governor built from those effective limits (bounded by
+`BOT_SAFETY_LIMITS` in custom mode, `GOVERNOR_ABSOLUTE_LIMITS` otherwise). In
+both modes the server kill switch and adapter probe failures stop it.
 
 **Snipe targets are built like EA's own search panel**: OVR range slider
 with Min/Max OVR, "Type Player Name" (with EA portraits), and Quality,
