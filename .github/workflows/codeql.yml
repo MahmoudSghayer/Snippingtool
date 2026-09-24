@@ -26,10 +26,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@3ea06614dafe36dec890db3446326e0d40ce53d4 # v3
         with:
           languages: javascript-typescript
           # No compiled artifacts needed for JS/TS analysis (unlike a
@@ -43,7 +43,7 @@ jobs:
       # (docs/11-devops.md "CI/CD"). Flip `upload` to `always` once the
       # repository is public or has Advanced Security.
       - name: perform CodeQL analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@3ea06614dafe36dec890db3446326e0d40ce53d4 # v3
         with:
           category: '/language:javascript-typescript'
           upload: never
@@ -52,7 +52,7 @@ jobs:
       - name: fail on error-level CodeQL findings (annotates every finding)
         run: node .github/scripts/codeql-gate.mjs codeql-results/javascript.sarif
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:
           name: codeql-results

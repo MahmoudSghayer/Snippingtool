@@ -7,6 +7,7 @@
 import {
   devices,
   ipActivity,
+  licenses,
   notifications,
   plans,
   subscriptions,
@@ -20,7 +21,7 @@ import {
 } from '@sl/shared';
 import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, ne } from 'drizzle-orm';
 
-import { AppErrors } from '../../lib/errors.js';
+import { AppErrors, isUniqueViolation } from '../../lib/errors.js';
 import { newId } from '../../lib/ids.js';
 import { upsertIpActivity } from '../../lib/ip-activity.js';
 import { publishToUser } from '../../ws/publish.js';
@@ -354,21 +355,32 @@ export async function startTrial(
   const now = new Date();
   const trialEndsAt = new Date(now.getTime() + TRIAL_LENGTH_DAYS * DAY_MS);
 
-  const [subRow] = await db
-    .insert(subscriptions)
-    .values({
-      id: newId(),
-      userId: input.userId,
-      planId: plan.id,
-      status: 'trialing',
-      currentPeriodStart: now,
-      currentPeriodEnd: null,
-      trialEndsAt,
-      cancelAtPeriodEnd: false,
-      autoRenew: false,
-      source: 'manual',
-    })
-    .returning();
+  // The live-subscription check above is not a lock: two concurrent trial
+  // requests (a double-click, two tabs) can both pass it. The partial unique
+  // index `subscriptions_one_live_per_user` lets exactly one insert win, and
+  // the loser gets the same conflict it would have got a moment later.
+  let subRow: SubscriptionRow | undefined;
+  try {
+    [subRow] = await db
+      .insert(subscriptions)
+      .values({
+        id: newId(),
+        userId: input.userId,
+        planId: plan.id,
+        status: 'trialing',
+        currentPeriodStart: now,
+        currentPeriodEnd: null,
+        trialEndsAt,
+        cancelAtPeriodEnd: false,
+        autoRenew: false,
+        source: 'manual',
+      })
+      .returning();
+  } catch (err) {
+    if (isUniqueViolation(err))
+      throw AppErrors.conflict('You already have an active subscription.');
+    throw err;
+  }
 
   const { row: licenseRow, fullKey } = await issueForSubscription(db, {
     subscriptionId: subRow!.id,
@@ -574,6 +586,13 @@ export async function extendSubscription(
     .set({ currentPeriodEnd: newEnd })
     .where(eq(subscriptions.id, subscriptionId))
     .returning();
+  // The license was issued with the old period end as its expiry; without
+  // moving it too, licenses.revalidate expires the license on the old date
+  // while the subscription still shows as active.
+  const license = await findActiveForSubscription(db, subscriptionId);
+  if (license?.expiresAt) {
+    await db.update(licenses).set({ expiresAt: newEnd }).where(eq(licenses.id, license.id));
+  }
   const plan = await getPlanById(db, after!.planId);
   if (plan) await publishSubscriptionChanged(redis, after!, plan);
   return { before, after: after! };
@@ -717,4 +736,18 @@ export async function expireDueSubscriptions(
   }
 
   return { expiredCount: due.length };
+}
+
+/** Ends a live trial so a paid pass can replace it: the trial row becomes
+ * `canceled` and its license is revoked. Used when a trialing user buys a
+ * pass (modules/payment-claims). */
+export async function endTrialForUpgrade(db: Database, trial: SubscriptionRow): Promise<void> {
+  if (trial.status !== 'trialing') throw AppErrors.conflict('Subscription is not a trial.');
+  const now = new Date();
+  await db
+    .update(subscriptions)
+    .set({ status: 'canceled', trialEndsAt: null, canceledAt: now, endedAt: now })
+    .where(eq(subscriptions.id, trial.id));
+  const license = await findActiveForSubscription(db, trial.id);
+  if (license) await revokeLicense(db, license.id, 'upgraded_to_paid');
 }

@@ -71,6 +71,15 @@ export function useWsGateway(): void {
         }
       },
       (wsStatus) => useConnectionStore.getState().setStatus(wsStatus),
+      () => {
+        // The socket reopened after a reconnect (not the first connect) —
+        // while it was down we missed whatever WS-pushed events would have
+        // kept these caches fresh, so reconcile them by refetching instead
+        // of trusting stale data until their own refetch intervals fire.
+        void queryClient.invalidateQueries({ queryKey: ['subscription'] });
+        void queryClient.invalidateQueries({ queryKey: ['notifications'] });
+        void queryClient.invalidateQueries({ queryKey: ['admin', 'toggles'] });
+      },
     );
 
     connectionRef.current = connection;

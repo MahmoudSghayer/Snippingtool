@@ -9,6 +9,7 @@
     "build": "pnpm run build:ledger && pnpm run build:auto",
     "build:ledger": "node scripts/build.mjs ledger",
     "build:auto": "node scripts/build.mjs ledger-auto",
+    "build:template": "node scripts/build.mjs ledger-auto --template",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint . --max-warnings=0",
     "test": "vitest run",

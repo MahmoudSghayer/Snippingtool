@@ -81,7 +81,7 @@ describe('auth module — IP monitoring', () => {
       method: 'POST',
       url: '/api/v1/auth/register',
       remoteAddress: ip,
-      payload: { email, password: 'correcthorsebattery12', device: device(fp) },
+      payload: { email, password: 'correcthorsebattery12', device: device(fp), acceptTerms: true },
     });
     expect(registerRes.statusCode).toBe(201);
     const { userId } = registerRes.json();

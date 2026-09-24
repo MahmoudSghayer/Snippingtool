@@ -65,6 +65,7 @@ export async function registerAndVerifyOnly(
     email,
     password: TEST_PASSWORD,
     device: deviceFingerprint('register-only'),
+    acceptTerms: true,
   });
   if (register.status !== 201)
     throw new Error(
@@ -93,6 +94,7 @@ export async function registerAndLogin(
     email,
     password: TEST_PASSWORD,
     device,
+    acceptTerms: true,
   });
   if (register.status !== 201)
     throw new Error(
@@ -144,6 +146,7 @@ export async function createAdminSession(
     email,
     password: TEST_PASSWORD,
     device,
+    acceptTerms: true,
   });
   if (register.status !== 201)
     throw new Error(

@@ -220,7 +220,10 @@ reachable:
 call it before _every_ attempt, never once per session. Four thresholds,
 all from `GovernorSettings` (`packages/shared/src/schemas/settings.ts`,
 user-tunable within `GOVERNOR_ABSOLUTE_LIMITS`, the hard floor/ceiling
-independent of any user or admin setting):
+independent of any user or admin setting). The governor clamps whatever
+settings it is given (constructor and `setSettings`) into those bounds, so a
+stale cache or a hand-edited value can never loosen it; a non-finite value
+falls back to the shipped default:
 
 | Threshold              | Default | Absolute bounds | Kind          |
 | ---------------------- | ------- | --------------- | ------------- |
@@ -234,13 +237,25 @@ independent of any user or admin setting):
   suspicious shape, not just buying). Checked against what the count
   _would become_ if the action were allowed, so the limit is never exceeded
   by even one action.
-- **`sessionLengthMinutes`** — wall-clock time since the `Governor` instance
-  was created. Crash recovery (§7) carries this across a page reload within
-  the same browsing session rather than resetting it — resetting it on
-  reload would be a governor bypass disguised as a convenience.
+- **`sessionLengthMinutes`** — wall-clock time since the session started.
+  Crash recovery (§7) carries this across a page reload within the same
+  browsing session rather than resetting it — resetting it on reload would
+  be a governor bypass disguised as a convenience. Once it trips and its
+  cooldown has elapsed, the next `allow()` starts a new session: the session
+  clock and the per-session buy/search counts reset, while the cooldown, the
+  one-hour windows and the kill switch do not. `resetSession()` does the
+  same on demand (for a future UI button).
 - **`buyToSearchRatio`** — `(buys + 1) / max(searches, 1)` must stay under
   the ratio for a `buy` to be allowed. A human who only ever buys and never
-  searches is about the single most suspicious shape there is.
+  searches is about the single most suspicious shape there is. Searches are
+  counted two ways (`engine/search.ts`): every search the extension issues
+  goes through `governedSearch`, which calls `allow({ kind: 'search' })`
+  first and skips the search if denied; a search the human runs in EA's own
+  UI is only observed, so `recordObservedSearch()` counts it (toward this
+  ratio and `actionsPerHour`) without gating. The adapter reports one search
+  response more than once, so observed reports within 1.5 s of the last
+  counted search, or while an engine search is in flight, count as that
+  same search.
 - **`maxCoinFlowPerHour`** — sliding one-hour window over coins spent on
   `buy` actions specifically (added to `GovernorSettings` for this file —
   see `packages/shared/src/schemas/settings.ts`, additive/backward-

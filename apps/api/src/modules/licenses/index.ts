@@ -13,6 +13,7 @@ import { type ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 
 import { AppErrors } from '../../lib/errors.js';
+import { LOOKUP_RATE_LIMIT } from '../../lib/rate-limit-tiers.js';
 
 import {
   findLatestForUser,
@@ -76,6 +77,7 @@ export default fp(
         // No `fastify.authenticate` — this is the extension's device-level
         // check-in, authenticated by the license key + device fingerprint
         // themselves, not a user session (docs/05-subscriptions.md §10).
+        config: { rateLimit: LOOKUP_RATE_LIMIT },
         schema: {
           tags: ['licenses'],
           summary: 'Validate a license key for a device: status, entitlements, signed blob.',

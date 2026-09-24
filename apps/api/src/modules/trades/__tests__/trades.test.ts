@@ -286,6 +286,48 @@ describe('trades module (/api/v1/trades)', () => {
     expect(again.statusCode).toBe(409);
   });
 
+  it('batch: a stale `bought` report never erases a sale recorded with close', async () => {
+    const { userId, token } = await createUser(app, 'trades-stale@example.com');
+    const report = tradePayload({
+      tradeId: 'stale',
+      buyPrice: 20000,
+      boughtAt: new Date(Date.now() - 60_000).toISOString(),
+    });
+    await app.inject({
+      method: 'POST',
+      url: '/api/v1/trades/batch',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { trades: [report] },
+    });
+    const row = await app.db.query.trades.findFirst({
+      where: and(eq(trades.userId, userId), eq(trades.tradeId, 'stale')),
+    });
+    const closed = await app.inject({
+      method: 'POST',
+      url: `/api/v1/trades/${row!.id}/close`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { sellPrice: 30000 },
+    });
+    expect(closed.statusCode).toBe(200);
+
+    // The extension still believes the card is `bought` and re-reports it.
+    const resync = await app.inject({
+      method: 'POST',
+      url: '/api/v1/trades/batch',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { trades: [report, report] },
+    });
+    expect(resync.statusCode).toBe(200);
+    expect(resync.json()).toEqual({ upserted: 1 });
+
+    const after = await app.db.query.trades.findFirst({ where: eq(trades.id, row!.id) });
+    expect(after).toMatchObject({ status: 'sold', sellPrice: 30000, netProfit: 8500 });
+    const [profitRow] = await app.db.query.profits.findMany({
+      where: eq(profits.userId, userId),
+    });
+    expect(profitRow).toMatchObject({ netProfit: 8500, tradesClosed: 1 });
+  });
+
   it('close: rejects a sale dated before the purchase', async () => {
     const { userId, token } = await createUser(app, 'trades-close-early@example.com');
     await app.inject({

@@ -1,4 +1,4 @@
-// Matches migrations/0017_coupons.sql, 0018_billing.sql.
+// Matches migrations/0017_coupons.sql, 0018_billing.sql, 0031_payment_claims.sql.
 
 import { isNull, relations } from 'drizzle-orm';
 import {
@@ -12,11 +12,13 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 
+import { adminUsers } from './admin.js';
 import {
   couponTypeEnum,
   createdAt,
   deletedAt,
   idPk,
+  paymentClaimStatusEnum,
   paymentProviderEnum,
   paymentStatusEnum,
   rowVersion,
@@ -190,3 +192,49 @@ export const stripeWebhookEvents = pgTable(
     index('stripe_webhook_events_unprocessed_idx').on(t.createdAt).where(isNull(t.processedAt)),
   ],
 );
+
+// ---------------------------------------------------------------------------
+
+/** A buyer's statement that they paid through PayPal.me, which an admin
+ * checks against the PayPal account before approving. See 0031. */
+export const paymentClaims = pgTable(
+  'payment_claims',
+  {
+    id: idPk(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    planCode: text('plan_code').notNull(),
+    amountCents: integer('amount_cents').notNull(),
+    currency: text('currency').notNull().default('usd'),
+    paypalTransactionId: text('paypal_transaction_id').notNull(),
+    note: text('note'),
+
+    status: paymentClaimStatusEnum('status').notNull().default('pending'),
+    reviewedByAdminId: uuid('reviewed_by_admin_id').references(() => adminUsers.id, {
+      onDelete: 'set null',
+    }),
+    reviewedAt: timestamptz('reviewed_at'),
+    rejectReason: text('reject_reason'),
+    subscriptionId: uuid('subscription_id').references(() => subscriptions.id, {
+      onDelete: 'set null',
+    }),
+
+    deletedAt: deletedAt(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    rowVersion: rowVersion(),
+  },
+  (t) => [
+    index('payment_claims_status_idx').on(t.status, t.createdAt).where(isNull(t.deletedAt)),
+    index('payment_claims_user_id_idx').on(t.userId, t.createdAt).where(isNull(t.deletedAt)),
+  ],
+);
+
+export const paymentClaimsRelations = relations(paymentClaims, ({ one }) => ({
+  user: one(users, { fields: [paymentClaims.userId], references: [users.id] }),
+  subscription: one(subscriptions, {
+    fields: [paymentClaims.subscriptionId],
+    references: [subscriptions.id],
+  }),
+}));

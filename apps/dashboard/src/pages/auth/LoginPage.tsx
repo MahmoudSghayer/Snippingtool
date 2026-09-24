@@ -21,6 +21,8 @@ import { z } from 'zod';
 import { api, apiErrorMessage } from '@/api/client.js';
 import { ensureBootstrapped, resetBootstrap } from '@/lib/authBootstrap.js';
 import { buildDevicePayload, defaultDeviceName } from '@/lib/device.js';
+import { postLoginPath } from '@/routes/access.js';
+import { useAuthStore } from '@/stores/auth.js';
 
 const credentialsSchema = z.object({
   email: emailSchema,
@@ -76,9 +78,9 @@ export function LoginPage() {
   async function completeSession() {
     resetBootstrap();
     await ensureBootstrapped();
-    const dest =
-      search.returnTo && search.returnTo.startsWith('/') ? search.returnTo : '/dashboard';
-    await navigate({ to: dest });
+    // Admins land on the admin dashboard, customers on /account, unless
+    // `returnTo` names the page they were on (routes/access.ts).
+    await navigate({ to: postLoginPath(search.returnTo, useAuthStore.getState().admin) });
   }
 
   function resetMfaState() {
@@ -290,7 +292,9 @@ export function LoginPage() {
     <Card>
       <CardHeader className="flex-col items-start gap-1">
         <CardTitle>Sign in</CardTitle>
-        <p className="text-xs text-ink-2">Track your snipes, profit and subscription.</p>
+        <p className="text-xs text-ink-2">
+          Manage your pass, download the extension and see your devices.
+        </p>
       </CardHeader>
       <CardContent>
         <form
@@ -324,7 +328,7 @@ export function LoginPage() {
           <FormField
             label="This device"
             htmlFor="deviceName"
-            hint="Shown in Settings → Sessions so you can recognise and revoke it later."
+            hint="Listed under Devices in My account, so you can recognise and revoke it later."
             error={credentialsForm.formState.errors.deviceName?.message}
           >
             <Input id="deviceName" {...credentialsForm.register('deviceName')} />

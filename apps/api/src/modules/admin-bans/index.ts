@@ -121,7 +121,7 @@ export default fp(
         const before = await fastify.db.query.bans.findFirst({
           where: (t, { eq: eqOp }) => eqOp(t.id, request.params.id),
         });
-        const after = await liftBan(fastify.db, request.params.id);
+        const after = await liftBan(fastify.db, fastify.redis, request.params.id);
 
         await recordAdminAction({
           db: fastify.db,

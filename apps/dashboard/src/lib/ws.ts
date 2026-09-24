@@ -10,6 +10,7 @@ import type { WsEvent } from '@sl/shared';
 export type WsEventHandler = (event: WsEvent) => void;
 export type WsStatus = 'connecting' | 'open' | 'closed';
 export type WsStatusHandler = (status: WsStatus) => void;
+export type WsReconnectHandler = () => void;
 
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 30_000;
@@ -29,12 +30,20 @@ export class WsConnection {
   private socket: WebSocket | null = null;
   private reconnectAttempt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private presenceTimer: ReturnType<typeof setInterval> | null = null;
   private closedByCaller = false;
+  // Set once the socket has completed its first successful `open`, so a
+  // later `open` (i.e. after a drop + backoff, not the initial connect) can
+  // be told apart and trigger a cache reconciliation — see `onReconnect`.
+  private hasConnectedOnce = false;
 
   constructor(
     private readonly onEvent: WsEventHandler,
     private readonly onStatus?: WsStatusHandler,
+    // Called when the socket reopens after a *reconnect* (not the first
+    // connect). While the socket was down, WS-pushed events (notifications,
+    // subscription/toggle changes, ...) were missed, so the cache they'd
+    // normally keep fresh can be stale — the caller should invalidate it.
+    private readonly onReconnect?: WsReconnectHandler,
   ) {}
 
   async connect(): Promise<void> {
@@ -52,7 +61,10 @@ export class WsConnection {
 
       socket.addEventListener('open', () => {
         this.reconnectAttempt = 0;
+        const isReconnect = this.hasConnectedOnce;
+        this.hasConnectedOnce = true;
         this.onStatus?.('open');
+        if (isReconnect) this.onReconnect?.();
       });
       socket.addEventListener('message', (event) => {
         try {
@@ -86,7 +98,6 @@ export class WsConnection {
   close(): void {
     this.closedByCaller = true;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-    if (this.presenceTimer) clearInterval(this.presenceTimer);
     this.socket?.close();
     this.socket = null;
     this.onStatus?.('closed');

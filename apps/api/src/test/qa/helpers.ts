@@ -74,7 +74,7 @@ export async function createUserSession(
     method: 'POST',
     url: '/api/v1/auth/register',
     remoteAddress: ip,
-    payload: { email, password: TEST_PASSWORD, device: device(fp) },
+    payload: { email, password: TEST_PASSWORD, device: device(fp), acceptTerms: true },
   });
   if (registerRes.statusCode !== 201) {
     throw new Error(
@@ -122,7 +122,7 @@ export async function createAdminSession(
     method: 'POST',
     url: '/api/v1/auth/register',
     remoteAddress: ip,
-    payload: { email, password: TEST_PASSWORD, device: device(fp) },
+    payload: { email, password: TEST_PASSWORD, device: device(fp), acceptTerms: true },
   });
   if (registerRes.statusCode !== 201) {
     throw new Error(

@@ -1,0 +1,17 @@
+services:
+  api:
+    image: local/api:local
+    build: { context: .., dockerfile: infra/docker/api.Dockerfile, target: server }
+  worker:
+    image: local/worker:local
+    build: { context: .., dockerfile: infra/docker/api.Dockerfile, target: worker }
+  migrator:
+    image: local/db-migrator:local
+    build: { context: .., dockerfile: infra/docker/db-migrator.Dockerfile }
+  dashboard:
+    image: local/dashboard:local
+    build:
+      context: ..
+      dockerfile: infra/docker/dashboard.Dockerfile
+      args:
+        VITE_API_ORIGIN: https://api.46.62.142.29.sslip.io

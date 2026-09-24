@@ -79,8 +79,12 @@ USER sl
 # schedule is the actionable failure — see docs/11-devops.md's "backup age"
 # alert, which reads the same freshness signal from Prometheus rather than
 # this container's health state).
+# -maxdepth 3, not 1: pg-backup.sh writes to $BACKUP_DIR/postgres/daily/,
+# three levels down, so the original -maxdepth 1 searched only the bare
+# /backups directory and matched nothing. The check could never pass, however
+# healthy the backups actually were.
 HEALTHCHECK --interval=5m --timeout=10s --start-period=1m --retries=1 \
-  CMD sh -c 'pgrep -f supercronic >/dev/null && find "${BACKUP_DIR}" -maxdepth 1 -name "*.dump.gz" -mmin -1500 | grep -q . || exit 1'
+  CMD sh -c 'pgrep -f supercronic >/dev/null && find "${BACKUP_DIR}" -maxdepth 3 -name "*.dump.gz" -mmin -1500 | grep -q . || exit 1'
 
 ENTRYPOINT ["/sbin/tini", "--"]
 # -no-reap: tini (PID 1 via ENTRYPOINT above) already reaps zombie children,

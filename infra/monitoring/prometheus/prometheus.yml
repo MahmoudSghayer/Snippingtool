@@ -14,12 +14,11 @@ rule_files:
 alerting:
   alertmanagers:
     - static_configs:
-        - targets: []
-          # No Alertmanager container is shipped for the MVP (single-VM
-          # scale doesn't justify it yet — see docs/11-devops.md's scaling
-          # notes); rules still evaluate and are visible/queryable in
-          # Prometheus + Grafana. Point this at an Alertmanager instance
-          # (or a hosted one) when paging integrations are wired up.
+        # The `alertmanager` service in docker-compose.{staging,prod}.yml,
+        # which delivers to Discord (monitoring/alertmanager/alertmanager.yml).
+        # Dev's `monitoring` profile has no Alertmanager; Prometheus there just
+        # logs that it can't reach it, and rules still evaluate.
+        - targets: ['alertmanager:9093']
 
 scrape_configs:
   - job_name: prometheus

@@ -394,7 +394,7 @@ export default fp(
         await fastify.mailer
           .send({
             to: user.email,
-            subject: "You've been signed out — The Sniper's Ledger",
+            subject: "You've been signed out — Nova Trade",
             html: forceLogoutNoticeHtml(request.body.reason),
             text: forceLogoutNoticeText(request.body.reason),
           })

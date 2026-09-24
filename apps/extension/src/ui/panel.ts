@@ -137,7 +137,7 @@ export function createPanel(doc: Document = document): Panel {
   panel.innerHTML = `
     <div class="head">
       <span class="dot" id="dot"></span>
-      <span class="name">Sniper's Ledger</span>
+      <span class="name">Nova Trade</span>
       <span class="chev" id="chev">▾</span>
     </div>
     <div class="body">

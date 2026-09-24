@@ -34,7 +34,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 DUMP_FILE="${1:-}"
 if [ -z "$DUMP_FILE" ]; then
-  DUMP_FILE="$(find "$DAILY_DIR" -maxdepth 1 -name '*.dump.gz' -printf '%f\n' 2>/dev/null | sort | tail -n1)"
+  DUMP_FILE="$(find "$DAILY_DIR" -maxdepth 1 -name '*.dump.gz' 2>/dev/null | sed 's|.*/||' | sort | tail -n1)"
   if [ -z "$DUMP_FILE" ]; then
     echo "[verify-backup] no dump found in $DAILY_DIR — has pg-backup.sh run yet?" >&2
     exit 1

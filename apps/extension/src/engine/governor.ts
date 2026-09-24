@@ -15,14 +15,21 @@
  *                            (search + buy both count; a lot of very fast
  *                            searching is exactly the shape of behaviour
  *                            that gets flagged, not just buying).
- *   - sessionLengthMinutes — wall-clock time since the governor was created
+ *   - sessionLengthMinutes — wall-clock time since the session started
  *                            (a new browser session / extension reload
  *                            resets it — see `serialize`/`hydrate` for how
  *                            `content/index.ts` carries it across a page
- *                            reload instead of a session boundary).
+ *                            reload instead of a session boundary). Once it
+ *                            trips and its cooldown has elapsed, the next
+ *                            `allow()` starts a new session (`resetSession`).
  *   - buyToSearchRatio     — buys / searches must stay under the ratio; a
  *                            human who only ever buys and never searches is
  *                            the single most suspicious shape there is.
+ *                            Searches reach it two ways: engine-issued ones
+ *                            pass `allow({kind:'search'})` (engine/search.ts's
+ *                            `governedSearch`), and ones the human runs in
+ *                            EA's own UI — which the extension only observes —
+ *                            are counted by `recordObservedSearch()`.
  *   - maxCoinFlowPerHour   — coins spent on `buy` actions, sliding one-hour
  *                            window (added to `GovernorSettings` alongside
  *                            the other three — see packages/shared/src/
@@ -37,11 +44,18 @@
  * window) and denying everything else while they cool down would just be a
  * second, redundant cooldown.
  *
+ * Settings are clamped to `GOVERNOR_ABSOLUTE_LIMITS` on the way in (the
+ * constructor, `setSettings`, and therefore `hydrate`): a cached settings
+ * document or a hand-edited `storage.local` value must never be able to
+ * loosen the governor past the absolute ceiling.
+ *
  * The kill switch (`setKillSwitch(true, reason)`, driven by
  * `lib/license.ts`'s bootstrap/heartbeat and the WS `kill_switch` push,
  * docs/01-architecture.md §3.7) is unconditional and checked first, always —
  * no threshold math can override it.
  */
+import { DEFAULT_GOVERNOR_SETTINGS, GOVERNOR_ABSOLUTE_LIMITS } from '@sl/shared';
+
 import type { GovernorSettings, RiskEventKind } from '@sl/shared';
 
 export type ActionKind = 'search' | 'buy';
@@ -97,11 +111,43 @@ export interface GovernorState {
   buyCount: number;
   coinFlow: Array<{ at: number; coins: number }>;
   cooldownUntil: number;
+  /** Set when the session-length hard stop trips; the first `allow()` after
+   * its cooldown starts a new session. Optional so state saved by an older
+   * build still hydrates. */
+  sessionExpired?: boolean;
   killSwitchActive: boolean;
   killSwitchReason?: string;
 }
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
+
+/** EA's search response reaches the content script more than once — the
+ * patched XHR and `emitAuctionInfo` both report it (src/main/adapter.ts) —
+ * so observed reports this close to the last counted search are treated as
+ * the same search. Nobody runs two real searches in EA's UI within 1.5 s,
+ * and erring towards *under*-counting searches only makes the ratio
+ * stricter, never looser. */
+export const OBSERVED_SEARCH_DEDUPE_MS = 1_500;
+
+function clampSetting(key: keyof GovernorSettings, value: number): number {
+  // A non-finite value (a corrupt cache) has no meaningful clamp — fall
+  // back to the shipped default rather than letting NaN disable a check
+  // (every `x > NaN` comparison is false).
+  if (!Number.isFinite(value)) return DEFAULT_GOVERNOR_SETTINGS[key];
+  const { min, max } = GOVERNOR_ABSOLUTE_LIMITS[key];
+  return Math.min(max, Math.max(min, value));
+}
+
+/** Clamp every threshold into `GOVERNOR_ABSOLUTE_LIMITS`. */
+export function clampGovernorSettings(settings: GovernorSettings): GovernorSettings {
+  return {
+    actionsPerHour: clampSetting('actionsPerHour', settings.actionsPerHour),
+    sessionLengthMinutes: clampSetting('sessionLengthMinutes', settings.sessionLengthMinutes),
+    buyToSearchRatio: clampSetting('buyToSearchRatio', settings.buyToSearchRatio),
+    cooldownSeconds: clampSetting('cooldownSeconds', settings.cooldownSeconds),
+    maxCoinFlowPerHour: clampSetting('maxCoinFlowPerHour', settings.maxCoinFlowPerHour),
+  };
+}
 
 function freshState(now: number): GovernorState {
   return {
@@ -111,6 +157,7 @@ function freshState(now: number): GovernorState {
     buyCount: 0,
     coinFlow: [],
     cooldownUntil: 0,
+    sessionExpired: false,
     killSwitchActive: false,
   };
 }
@@ -119,15 +166,22 @@ export class Governor {
   private settings: GovernorSettings;
   private state: GovernorState;
   private readonly now: () => number;
+  /** When the last search was counted (gated or observed) — in memory only;
+   * losing it on reload costs at most one extra counted search. */
+  private lastSearchAt = Number.NEGATIVE_INFINITY;
+  /** Engine-issued searches currently awaiting their response. While any is
+   * in flight, observed search responses belong to it (it was already
+   * counted by `allow`) and are not counted again. */
+  private engineSearchesInFlight = 0;
 
   constructor(settings: GovernorSettings, opts: { now?: () => number; state?: GovernorState } = {}) {
-    this.settings = settings;
+    this.settings = clampGovernorSettings(settings);
     this.now = opts.now ?? Date.now;
     this.state = opts.state ?? freshState(this.now());
   }
 
   setSettings(settings: GovernorSettings): void {
-    this.settings = settings;
+    this.settings = clampGovernorSettings(settings);
   }
 
   getSettings(): GovernorSettings {
@@ -149,6 +203,47 @@ export class Governor {
     const cutoff = now - ONE_HOUR_MS;
     this.state.actionTimestamps = this.state.actionTimestamps.filter((t) => t > cutoff);
     this.state.coinFlow = this.state.coinFlow.filter((c) => c.at > cutoff);
+  }
+
+  /** Start a new session: the session clock and the per-session buy/search
+   * counters start over. Deliberately leaves the cooldown, the sliding
+   * one-hour windows (`actionsPerHour`, `maxCoinFlowPerHour`) and the kill
+   * switch alone — a session reset (automatic, or a future UI button) must
+   * never be a way around those. */
+  resetSession(now: number = this.now()): void {
+    this.state.sessionStartedAt = now;
+    this.state.searchCount = 0;
+    this.state.buyCount = 0;
+    this.state.sessionExpired = false;
+  }
+
+  /** Count a search the human ran in EA's own UI, which the extension only
+   * observed (assist mode's normal shape). Never gates — the search already
+   * happened — but it does count toward `searchCount` and `actionsPerHour`,
+   * or assist mode would have every buy after the first denied
+   * `buy_search_ratio`. Returns whether it was counted: duplicate reports of
+   * one search (`OBSERVED_SEARCH_DEDUPE_MS`) and the response of an
+   * engine-issued search already counted by `allow` are not. */
+  recordObservedSearch(now: number = this.now()): boolean {
+    if (this.engineSearchesInFlight > 0) return false;
+    if (now - this.lastSearchAt < OBSERVED_SEARCH_DEDUPE_MS) return false;
+    this.prune(now);
+    this.state.actionTimestamps.push(now);
+    this.state.searchCount++;
+    this.lastSearchAt = now;
+    return true;
+  }
+
+  /** Bracket an engine-issued search's adapter call (engine/search.ts) so
+   * its observed response is attributed to it instead of counted twice. */
+  beginEngineSearch(): void {
+    this.engineSearchesInFlight++;
+  }
+
+  endEngineSearch(now: number = this.now()): void {
+    this.engineSearchesInFlight = Math.max(0, this.engineSearchesInFlight - 1);
+    // A report trailing the call's resolution is still the same search.
+    this.lastSearchAt = now;
   }
 
   private hardStop(now: number, kind: RiskEventKind, value: number, threshold: number, events: RiskBudgetEventInput[]): GovernorDecision {
@@ -175,10 +270,13 @@ export class Governor {
     this.prune(now);
 
     // Session length is a hard stop: once tripped, every action is denied
-    // until the caller starts a fresh governor (new session) or the
-    // cooldown clears (whichever the caller wires up — see docs/06-extension.md).
+    // for the cooldown. The first action after that cooldown starts a new
+    // session — without this, the elapsed time stays over the limit and the
+    // stop re-trips forever (docs/06-extension.md §5).
+    if (this.state.sessionExpired) this.resetSession(now);
     const sessionElapsedMinutes = (now - this.state.sessionStartedAt) / 60_000;
     if (sessionElapsedMinutes > this.settings.sessionLengthMinutes) {
+      this.state.sessionExpired = true;
       return this.hardStop(now, 'session_length', sessionElapsedMinutes, this.settings.sessionLengthMinutes, events);
     }
 
@@ -211,6 +309,7 @@ export class Governor {
     this.state.actionTimestamps.push(now);
     if (action.kind === 'search') {
       this.state.searchCount++;
+      this.lastSearchAt = now;
     } else {
       this.state.buyCount++;
       if (action.coins) this.state.coinFlow.push({ at: now, coins: action.coins });

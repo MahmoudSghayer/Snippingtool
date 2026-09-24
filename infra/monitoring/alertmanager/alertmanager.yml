@@ -1,0 +1,17 @@
+# Routes every Prometheus alert (infra/monitoring/prometheus/alert-rules.yml)
+# to a Discord channel. The webhook URL is a secret, so it isn't in this
+# file: the compose service writes ALERT_DISCORD_WEBHOOK_URL to
+# /tmp/discord-webhook-url at start (see docker-compose.prod.yml).
+route:
+  receiver: discord
+  group_by: ['alertname']
+  group_wait: 30s
+  group_interval: 5m
+  # A still-firing alert is repeated so it can't be forgotten after one ping.
+  repeat_interval: 4h
+
+receivers:
+  - name: discord
+    discord_configs:
+      - webhook_url_file: /tmp/discord-webhook-url
+        send_resolved: true

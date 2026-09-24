@@ -56,7 +56,7 @@ describe('licenses module', () => {
       method: 'POST',
       url: '/api/v1/auth/register',
       remoteAddress: ip,
-      payload: { email, password: 'correcthorsebattery12', device },
+      payload: { email, password: 'correcthorsebattery12', device, acceptTerms: true },
     });
     expect(registerRes.statusCode).toBe(201);
     const mail = app.mailer.sentEmails.at(-1);

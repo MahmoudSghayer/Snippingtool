@@ -86,3 +86,12 @@ export function isAppError(error: unknown): error is AppError {
   const candidate = error as AppError;
   return typeof candidate.status === 'number' && typeof candidate.code === 'string';
 }
+
+/** True when `err` is Postgres's unique_violation (23505). drizzle-orm wraps
+ * the driver error in a `DrizzleQueryError`, so the code can be on `.code`
+ * or on `.cause.code` (same unwrapping as modules/settings and
+ * modules/payments/webhooks.ts). */
+export function isUniqueViolation(err: unknown): boolean {
+  const e = err as { code?: string; cause?: { code?: string } } | null;
+  return (e?.code ?? e?.cause?.code) === '23505';
+}

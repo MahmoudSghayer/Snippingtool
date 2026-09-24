@@ -18,6 +18,11 @@ interface ImportMetaEnv {
   readonly VITE_AUTOMATION: '0' | '1';
   readonly VITE_BUILD_TARGET: 'ledger' | 'ledger-auto';
   readonly VITE_API_ORIGIN: string;
+  /** Origin of the companion dashboard. `background/welcome.ts` opens
+   * `<origin>/bot` on first install so a new user lands where saved
+   * searches are created — the extension has nothing to search until
+   * one exists. */
+  readonly VITE_DASHBOARD_ORIGIN: string;
   /** Only meaningful for `ledger-auto` (self-hosted updates); empty string
    * for `ledger` (Chrome Web Store owns updates, no `update_url` emitted). */
   readonly VITE_UPDATE_URL: string;

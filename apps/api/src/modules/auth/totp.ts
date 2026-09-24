@@ -8,7 +8,7 @@ export function generateTotpSecret(): string {
   return authenticator.generateSecret();
 }
 
-export function totpKeyUri(secret: string, email: string, issuer = "The Sniper's Ledger"): string {
+export function totpKeyUri(secret: string, email: string, issuer = 'Nova Trade'): string {
   return authenticator.keyuri(email, issuer, secret);
 }
 

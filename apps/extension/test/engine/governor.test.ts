@@ -1,7 +1,7 @@
-import { DEFAULT_GOVERNOR_SETTINGS, type GovernorSettings } from '@sl/shared';
+import { DEFAULT_GOVERNOR_SETTINGS, GOVERNOR_ABSOLUTE_LIMITS, type GovernorSettings } from '@sl/shared';
 import { describe, expect, it } from 'vitest';
 
-import { Governor } from '../../src/engine/governor.js';
+import { Governor, OBSERVED_SEARCH_DEDUPE_MS } from '../../src/engine/governor.js';
 
 const settings: GovernorSettings = {
   ...DEFAULT_GOVERNOR_SETTINGS,
@@ -130,7 +130,10 @@ describe('Governor — buyToSearchRatio', () => {
 
 describe('Governor — maxCoinFlowPerHour', () => {
   it('allows spend within budget and denies a buy that would exceed it', () => {
-    const { gov } = governorAt(START, { maxCoinFlowPerHour: 1000, buyToSearchRatio: 999, actionsPerHour: 999 });
+    // Settings are clamped to GOVERNOR_ABSOLUTE_LIMITS (ratio ceiling 1), so
+    // enough searches are made that the ratio never interferes here.
+    const { gov } = governorAt(START, { maxCoinFlowPerHour: 1000, buyToSearchRatio: 1, actionsPerHour: 120 });
+    gov.allow({ kind: 'search' });
     gov.allow({ kind: 'search' });
     expect(gov.allow({ kind: 'buy', coins: 900 }).allowed).toBe(true);
     const denied = gov.allow({ kind: 'buy', coins: 200 }); // 900 + 200 > 1000
@@ -142,12 +145,14 @@ describe('Governor — maxCoinFlowPerHour', () => {
   it('coin flow is a sliding window', () => {
     const { gov, setNow } = governorAt(START, {
       maxCoinFlowPerHour: 1000,
-      buyToSearchRatio: 999,
-      actionsPerHour: 999,
-      sessionLengthMinutes: 999,
+      buyToSearchRatio: 1,
+      actionsPerHour: 120,
+      sessionLengthMinutes: 240,
     });
+    gov.allow({ kind: 'search' }, START);
     expect(gov.allow({ kind: 'buy', coins: 900 }, START).allowed).toBe(true);
     setNow(START + 3_600_001);
+    gov.allow({ kind: 'search' });
     // the earlier 900-coin spend has aged out of the window
     expect(gov.allow({ kind: 'buy', coins: 900 }).allowed).toBe(true);
   });
@@ -178,5 +183,161 @@ describe('Governor — serialize/hydrate', () => {
     const snap = rehydrated.snapshot();
     expect(snap.actionsLastHour).toBe(2);
     expect(snap.coinFlowLastHour).toBe(500);
+  });
+});
+
+describe('Governor — searches are counted (defect C1)', () => {
+  it('allows buys under default settings while searches keep the ratio in bounds', () => {
+    // DEFAULT_GOVERNOR_SETTINGS: ratio 0.35, 30 actions/hour. Three searches
+    // per buy keeps buys/searches at 1/3, 2/6, 3/9 … — always <= 0.35.
+    let clock = START;
+    const gov = new Governor(DEFAULT_GOVERNOR_SETTINGS, { now: () => clock });
+    for (let round = 0; round < 5; round++) {
+      for (let s = 0; s < 3; s++) {
+        clock += 20_000;
+        expect(gov.allow({ kind: 'search' }).allowed).toBe(true);
+      }
+      clock += 20_000;
+      const buy = gov.allow({ kind: 'buy', coins: 10_000 });
+      expect(buy.allowed, `buy #${round + 1}: ${buy.reason ?? ''}`).toBe(true);
+    }
+    expect(gov.snapshot().buyToSearchRatio).toBeCloseTo(5 / 15);
+    // A buy with no search since the last one pushes the ratio to 6/15 = 0.4.
+    expect(gov.allow({ kind: 'buy', coins: 10_000 }).reason).toBe('buy_search_ratio');
+  });
+
+  it('recordObservedSearch counts a user-issued search toward the ratio and actionsPerHour without gating', () => {
+    const { gov, setNow } = governorAt(START, { buyToSearchRatio: 0.5, actionsPerHour: 120 });
+    expect(gov.recordObservedSearch()).toBe(true);
+    setNow(START + 10_000);
+    expect(gov.recordObservedSearch()).toBe(true);
+    expect(gov.snapshot().actionsLastHour).toBe(2);
+    // 1 buy / 2 observed searches = 0.5 — allowed only because they counted.
+    expect(gov.allow({ kind: 'buy', coins: 100 }).allowed).toBe(true);
+  });
+
+  it('recordObservedSearch never gates, even with the kill switch active (it records what already happened)', () => {
+    const { gov } = governorAt(START);
+    gov.setKillSwitch(true);
+    expect(gov.recordObservedSearch()).toBe(true);
+    expect(gov.snapshot().actionsLastHour).toBe(1);
+  });
+
+  it('counts one search once even though the adapter reports it twice', () => {
+    const { gov, setNow } = governorAt(START, { actionsPerHour: 120 });
+    expect(gov.recordObservedSearch()).toBe(true);
+    setNow(START + 50);
+    expect(gov.recordObservedSearch()).toBe(false); // the duplicate report
+    setNow(START + OBSERVED_SEARCH_DEDUPE_MS + 100);
+    expect(gov.recordObservedSearch()).toBe(true); // a genuinely new search
+    expect(gov.snapshot().actionsLastHour).toBe(2);
+  });
+
+  it('does not re-count the response of an engine-issued (gated) search', () => {
+    const { gov, setNow } = governorAt(START, { actionsPerHour: 120 });
+    gov.beginEngineSearch();
+    expect(gov.allow({ kind: 'search' }).allowed).toBe(true);
+    // A slow response, well past the dedupe window, still belongs to it.
+    setNow(START + OBSERVED_SEARCH_DEDUPE_MS * 5);
+    expect(gov.recordObservedSearch()).toBe(false);
+    expect(gov.recordObservedSearch()).toBe(false);
+    gov.endEngineSearch();
+    // A trailing duplicate right after the call settles is still absorbed.
+    setNow(START + OBSERVED_SEARCH_DEDUPE_MS * 5 + 50);
+    expect(gov.recordObservedSearch()).toBe(false);
+    expect(gov.snapshot().actionsLastHour).toBe(1);
+  });
+});
+
+describe('Governor — settings are clamped to GOVERNOR_ABSOLUTE_LIMITS', () => {
+  const wild: GovernorSettings = {
+    actionsPerHour: 100_000,
+    sessionLengthMinutes: 1,
+    buyToSearchRatio: 50,
+    cooldownSeconds: -5,
+    maxCoinFlowPerHour: 999_999_999,
+  };
+  const expected: GovernorSettings = {
+    actionsPerHour: GOVERNOR_ABSOLUTE_LIMITS.actionsPerHour.max,
+    sessionLengthMinutes: GOVERNOR_ABSOLUTE_LIMITS.sessionLengthMinutes.min,
+    buyToSearchRatio: GOVERNOR_ABSOLUTE_LIMITS.buyToSearchRatio.max,
+    cooldownSeconds: GOVERNOR_ABSOLUTE_LIMITS.cooldownSeconds.min,
+    maxCoinFlowPerHour: GOVERNOR_ABSOLUTE_LIMITS.maxCoinFlowPerHour.max,
+  };
+
+  it('clamps in the constructor', () => {
+    const gov = new Governor(wild, { now: () => START });
+    expect(gov.getSettings()).toEqual(expected);
+    expect(gov.snapshot().actionsPerHourLimit).toBe(120);
+  });
+
+  it('clamps in setSettings', () => {
+    const gov = new Governor(DEFAULT_GOVERNOR_SETTINGS, { now: () => START });
+    gov.setSettings(wild);
+    expect(gov.getSettings()).toEqual(expected);
+  });
+
+  it('clamps on hydrate, and enforces the clamped ceiling', () => {
+    const gov = Governor.hydrate({ ...wild, sessionLengthMinutes: 240 }, new Governor(DEFAULT_GOVERNOR_SETTINGS, { now: () => START }).serialize(), {
+      now: () => START,
+    });
+    for (let i = 0; i < 120; i++) expect(gov.allow({ kind: 'search' }).allowed).toBe(true);
+    expect(gov.allow({ kind: 'search' }).reason).toBe('hard_stop');
+  });
+
+  it('falls back to the shipped default for a non-finite value', () => {
+    const gov = new Governor({ ...DEFAULT_GOVERNOR_SETTINGS, actionsPerHour: Number.NaN }, { now: () => START });
+    expect(gov.getSettings().actionsPerHour).toBe(DEFAULT_GOVERNOR_SETTINGS.actionsPerHour);
+  });
+});
+
+describe('Governor — session reset', () => {
+  it('starts a new session once the session-length stop\'s cooldown has elapsed', () => {
+    const { gov, setNow } = governorAt(START, { sessionLengthMinutes: 10, actionsPerHour: 120, cooldownSeconds: 30, buyToSearchRatio: 0.5 });
+    gov.allow({ kind: 'search' }, START);
+    gov.allow({ kind: 'search' }, START);
+    const sessionEnd = START + 11 * 60_000;
+    setNow(sessionEnd);
+    const tripped = gov.allow({ kind: 'search' });
+    expect(tripped.reason).toBe('hard_stop');
+    expect(tripped.events.some((e) => e.kind === 'session_length')).toBe(true);
+
+    setNow(sessionEnd + 29_000);
+    expect(gov.allow({ kind: 'search' }).allowed).toBe(false); // still cooling down
+
+    setNow(sessionEnd + 30_001);
+    // Previously this re-tripped session_length forever.
+    expect(gov.allow({ kind: 'search' }).allowed).toBe(true);
+    const snap = gov.snapshot();
+    expect(snap.sessionElapsedMinutes).toBeLessThan(1);
+    expect(snap.inCooldown).toBe(false);
+    // Per-session ratio counters started over: 1 search so far this session.
+    expect(gov.serialize()).toMatchObject({ searchCount: 1, buyCount: 0, sessionExpired: false });
+    // …but the hourly window did not: the 2 searches from before still count.
+    expect(snap.actionsLastHour).toBe(3);
+  });
+
+  it('carries a tripped session across serialize/hydrate so the reset still happens after a reload', () => {
+    const { gov } = governorAt(START, { sessionLengthMinutes: 10, cooldownSeconds: 30 });
+    const sessionEnd = START + 11 * 60_000;
+    expect(gov.allow({ kind: 'search' }, sessionEnd).reason).toBe('hard_stop');
+    const reloaded = Governor.hydrate({ ...settings, sessionLengthMinutes: 10, cooldownSeconds: 30 }, gov.serialize(), {
+      now: () => sessionEnd + 31_000,
+    });
+    expect(reloaded.allow({ kind: 'search' }).allowed).toBe(true);
+  });
+
+  it('resetSession() starts a new session but never clears a cooldown or the hourly windows', () => {
+    const { gov, setNow } = governorAt(START, { actionsPerHour: 1, cooldownSeconds: 30, sessionLengthMinutes: 60 });
+    gov.allow({ kind: 'search' }, START);
+    expect(gov.allow({ kind: 'search' }, START + 10).reason).toBe('hard_stop');
+    setNow(START + 20 * 60_000);
+    gov.resetSession();
+    const snap = gov.snapshot();
+    expect(snap.sessionElapsedMinutes).toBe(0);
+    expect(snap.actionsLastHour).toBe(1);
+    expect(gov.serialize()).toMatchObject({ searchCount: 0, buyCount: 0 });
+    // still over the hourly window — a session reset is not a bypass
+    expect(gov.allow({ kind: 'search' }).allowed).toBe(false);
   });
 });

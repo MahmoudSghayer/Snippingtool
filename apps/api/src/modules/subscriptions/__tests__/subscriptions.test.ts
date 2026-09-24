@@ -64,7 +64,7 @@ describe('subscriptions module', () => {
       method: 'POST',
       url: '/api/v1/auth/register',
       remoteAddress: ip,
-      payload: { email, password: 'correcthorsebattery12', device },
+      payload: { email, password: 'correcthorsebattery12', device, acceptTerms: true },
     });
     expect(registerRes.statusCode).toBe(201);
     const mail = app.mailer.sentEmails.at(-1);
@@ -151,6 +151,25 @@ describe('subscriptions module', () => {
     expect(me.license.keyPrefix).toBe(trialBody.license.keyPrefix);
     expect(me.entitlements.plan).toBe('trial');
     expect(me.entitlements.features).toContain('assist.ranker');
+  });
+
+  it('two concurrent trial requests: one wins, the other is a 409, never a 500', async () => {
+    const ip = nextIp();
+    const accessToken = await registerVerifyLogin(
+      'trial-race@example.com',
+      ip,
+      'fp-race-00000000000000001',
+    );
+
+    const send = () =>
+      app.inject({
+        method: 'POST',
+        url: '/api/v1/subscriptions/trial',
+        remoteAddress: ip,
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+    const statuses = (await Promise.all([send(), send(), send()])).map((r) => r.statusCode).sort();
+    expect(statuses).toEqual([201, 409, 409]);
   });
 
   it('trial abuse: denies a second trial from the same normalised (gmail dotted/plus) email and flags it', async () => {

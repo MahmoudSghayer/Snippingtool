@@ -27,6 +27,17 @@ REDIS_AUTH_ARGS=()
 if [ -n "${REDIS_PASSWORD:-}" ]; then
   REDIS_AUTH_ARGS=(-a "$REDIS_PASSWORD" --no-auth-warning)
 fi
+# The production stack runs Redis with a TLS-only listener, so `redis-cli`
+# has to speak TLS and verify against the stack CA (REDIS_CA_FILE, wired in
+# infra/docker-compose.prod.yml). Unset elsewhere — dev/staging Redis is
+# still plaintext — which leaves the invocation below byte-identical to
+# what it was before TLS.
+REDIS_TLS_ARGS=()
+REDIS_SCHEME='redis'
+if [ -n "${REDIS_CA_FILE:-}" ]; then
+  REDIS_TLS_ARGS=(--tls --cacert "$REDIS_CA_FILE")
+  REDIS_SCHEME='rediss'
+fi
 
 BACKUP_DIR="${BACKUP_DIR:-/backups}"
 RETAIN_DAILY="${BACKUP_RETAIN_DAILY:-7}"
@@ -46,8 +57,9 @@ final_rdb="$DAILY_DIR/${base_name}.rdb.gz"
 cleanup() { rm -f "$tmp_rdb"; }
 trap cleanup EXIT
 
-echo "[redis-backup] snapshotting redis://${REDIS_HOST}:${REDIS_PORT} -> ${tmp_rdb}"
-redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" "${REDIS_AUTH_ARGS[@]}" --rdb "$tmp_rdb"
+echo "[redis-backup] snapshotting ${REDIS_SCHEME}://${REDIS_HOST}:${REDIS_PORT} -> ${tmp_rdb}"
+redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" \
+  "${REDIS_TLS_ARGS[@]}" "${REDIS_AUTH_ARGS[@]}" --rdb "$tmp_rdb"
 
 echo "[redis-backup] compressing"
 gzip -9 -c "$tmp_rdb" > "$final_rdb"
@@ -59,7 +71,7 @@ echo "[redis-backup] wrote $final_rdb ($(du -h "$final_rdb" | cut -f1))"
 prune_tier() {
   local dir="$1" keep="$2"
   local files total drop
-  files=$(find "$dir" -maxdepth 1 -name '*.rdb.gz' -printf '%f\n' | sort)
+  files=$(find "$dir" -maxdepth 1 -name '*.rdb.gz' | sed 's|.*/||' | sort)
   total=$(echo "$files" | grep -c . || true)
   if [ "$total" -le "$keep" ]; then return; fi
   drop=$((total - keep))

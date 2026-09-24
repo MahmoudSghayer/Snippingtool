@@ -25,6 +25,13 @@ export const INGEST_RATE_LIMIT = { max: 120, timeWindow: 60_000 };
 
 export const ADMIN_RATE_LIMIT = { max: 60, timeWindow: 60_000 };
 
+/** Unauthenticated lookups that answer "is this secret valid?" —
+ * `coupons/validate` (admin-chosen, human-readable codes) and
+ * `licenses/validate`. A person checks a code a handful of times; anything
+ * faster is enumeration. Keyed by IP like the global tier, since there is no
+ * user to key by. */
+export const LOOKUP_RATE_LIMIT = { max: 10, timeWindow: 60_000 };
+
 /** Health/liveness/readiness probes are exempt from rate limiting entirely
  * — infra (load balancers, orchestrators) polls them frequently by design,
  * and refusing that traffic would turn a monitoring probe into a

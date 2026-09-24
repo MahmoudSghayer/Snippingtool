@@ -39,10 +39,13 @@ describe('plan constants', () => {
     }
   });
 
-  it('only grants automation.autobuyer to ultimate and lifetime', () => {
+  it('grants the autobuyer on every paid pass, and mobile only with Mobile and Season', () => {
     expect(planHasFeature('basic', 'automation.autobuyer')).toBe(false);
-    expect(planHasFeature('pro', 'automation.autobuyer')).toBe(false);
+    expect(planHasFeature('pro', 'automation.autobuyer')).toBe(true);
     expect(planHasFeature('ultimate', 'automation.autobuyer')).toBe(true);
     expect(planHasFeature('lifetime', 'automation.autobuyer')).toBe(true);
+    expect(planHasFeature('pro', 'mobile.remote')).toBe(false);
+    expect(planHasFeature('ultimate', 'mobile.remote')).toBe(true);
+    expect(planHasFeature('lifetime', 'mobile.remote')).toBe(true);
   });
 });

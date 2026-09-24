@@ -109,8 +109,23 @@ const envSchema = z.object({
 
   // --- Data stores ---
   DATABASE_URL: z.string().min(1).default('postgres://sl:sl@127.0.0.1:5432/sniper_ledger'),
-  TEST_DATABASE_URL: z.string().min(1).optional(),
+  // Test-only, and absent in real deployments — but an env *file* spells
+  // "unset" as `TEST_DATABASE_URL=`, which is an empty string, not
+  // undefined, and `.min(1)` rejected it hard enough to stop the
+  // production API booting. Every other optional var here is a bare
+  // `.optional()` that tolerates ''; normalise '' to undefined so this
+  // one behaves the same while keeping the non-empty guarantee for
+  // callers that do set it.
+  TEST_DATABASE_URL: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(1).optional()),
   REDIS_URL: z.string().min(1).default('redis://127.0.0.1:6379'),
+  // PEM bundle used to verify the Redis server certificate when REDIS_URL
+  // is `rediss://`. Needed by the single-VM compose topology, where Redis
+  // is an in-stack container holding a cert from this repo's own CA
+  // (infra/scripts/gen-datastore-certs.sh) rather than one chaining to a
+  // public root Node already trusts. Leave unset against a managed Redis
+  // with a publicly-trusted cert — the system trust store is then used, and
+  // verification stays on either way (plugins/redis.ts).
+  REDIS_TLS_CA_FILE: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(1).optional()),
   // Logical Redis DB index used only under NODE_ENV=test (plugins/redis.ts,
   // src/test/global-setup.ts) — see the SKELETON_READY note on why this is a
   // dedicated DB index rather than a key prefix. Configurable so two test
@@ -124,6 +139,24 @@ const envSchema = z.object({
   APP_ORIGIN: z.string().url().default('http://localhost:3000'),
   DASHBOARD_ORIGIN: z.string().url().default('http://localhost:5173'),
   EXTENSION_IDS: z.string().default(''),
+  // Additional browser origins allowed to call this API, comma-separated.
+  // DASHBOARD_ORIGIN is deliberately NOT a list: it doubles as a security
+  // boundary in modules/payments (assertDashboardOrigin pins Stripe
+  // success/cancel redirect URLs to it), so widening it there would widen
+  // where a checkout session can send a user. This var only ever feeds the
+  // CORS allowlist. Needed when the same API serves more than one dashboard
+  // deployment — e.g. the Vercel host alongside the self-hosted
+  // docker-compose.prod.yml one (docs/11-devops.md 6).
+  EXTRA_CORS_ORIGINS: z.string().default(''),
+
+  // --- Signal extraction (docs/14-ml-suggestions.md Phase D) ---------------
+  // Optional. Unset disables signal extraction entirely rather than failing
+  // the process: it is one capability of this deployment, and a worker that
+  // refuses to start without it would take the backups, rollups and licence
+  // heartbeats down with it. The SDK reads this variable itself, so it is
+  // declared here only to document the dependency and keep check-env.mjs
+  // honest about what a full deployment needs.
+  ANTHROPIC_API_KEY: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(1).optional()),
 
   // --- Cookies / CSRF ---
   COOKIE_SECRET: z.string().min(16).default('dev-cookie-secret-change-me-32-bytes-min'),
@@ -148,6 +181,25 @@ const envSchema = z.object({
   // --- Entitlement signing (Ed25519) — declared for the subscriptions agent too ---
   ENTITLEMENT_SIGNING_KEY: z.string().min(1).optional(),
   ENTITLEMENT_PUBLIC_KEY: z.string().min(1).optional(),
+
+  // --- Operator notifications ---
+  // Discord channel webhook that gets a message for every PayPal payment a
+  // customer submits (jobs/payments.notify.job.ts), so an admin can approve
+  // it quickly. Unset = no messages; the admin Payments page still lists them.
+  PAYMENTS_DISCORD_WEBHOOK_URL: z.preprocess(
+    (v) => (v === '' ? undefined : v),
+    z.string().url().optional(),
+  ),
+
+  // --- Extension download ---
+  // Directory holding the `ledger-auto --template` build that
+  // GET /downloads/extension zips and serves. The API image ships it at
+  // /app/downloads/extension-template; in the repo it's
+  // apps/extension/dist/ledger-auto-template. Unset = look in both.
+  EXTENSION_TEMPLATE_DIR: z.preprocess(
+    (v) => (v === '' ? undefined : v),
+    z.string().min(1).optional(),
+  ),
 
   // --- Stripe (owned by the subscriptions/payments module) ---
   STRIPE_SECRET_KEY: z.string().optional(),

@@ -4,7 +4,12 @@
 // routes.
 
 import { devices, users, type Database, type User } from '@sl/db';
-import { type DeviceFingerprint, type LoginResponse, type MfaEnrollResponse } from '@sl/shared';
+import {
+  TERMS_VERSION,
+  type DeviceFingerprint,
+  type LoginResponse,
+  type MfaEnrollResponse,
+} from '@sl/shared';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 
@@ -128,6 +133,10 @@ export async function register(
     passwordHash,
     timezone: input.timezone ?? 'UTC',
     referralCode: input.referralCode ?? null,
+    // registerRequestSchema only accepts `acceptTerms: true`, so reaching
+    // here means the current Terms were accepted.
+    termsVersion: TERMS_VERSION,
+    termsAcceptedAt: new Date(),
   });
 
   await sendVerificationEmail(ctx, id, input.email);
@@ -152,7 +161,7 @@ export async function sendVerificationEmail(
   const { verifyEmailHtml, verifyEmailText } = await import('../../emails/templates.js');
   await ctx.mailer.send({
     to: email,
-    subject: "Verify your email — The Sniper's Ledger",
+    subject: 'Verify your email — Nova Trade',
     html: verifyEmailHtml(token),
     text: verifyEmailText(token),
   });
@@ -531,7 +540,7 @@ export async function requestPasswordReset(
   const { resetPasswordHtml, resetPasswordText } = await import('../../emails/templates.js');
   await ctx.mailer.send({
     to: user.email,
-    subject: "Reset your password — The Sniper's Ledger",
+    subject: 'Reset your password — Nova Trade',
     html: resetPasswordHtml(token),
     text: resetPasswordText(token),
   });

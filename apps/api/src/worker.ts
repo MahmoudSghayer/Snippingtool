@@ -8,13 +8,13 @@
 
 import { createDb } from '@sl/db';
 import { Queue, Worker } from 'bullmq';
-import { Redis } from 'ioredis';
 import pino from 'pino';
 import 'dotenv/config';
 
 import { loadEnv } from './config/env.js';
 import { loadJobs } from './jobs/index.js';
 import { createMailer } from './lib/mailer.js';
+import { createRedisConnection } from './lib/redis-connection.js';
 
 import type { JobContext } from './jobs/types.js';
 
@@ -23,7 +23,9 @@ async function main() {
   const log = pino({ level: env.LOG_LEVEL, name: '@sl/api-worker' });
 
   const { db, sql } = createDb(env.DATABASE_URL, { max: 5 });
-  const connection = new Redis(env.REDIS_URL, { maxRetriesPerRequest: null });
+  // Via the shared factory: a hand-rolled `new Redis(url)` here is what
+  // silently killed every scheduled job when Redis moved to TLS.
+  const connection = createRedisConnection(env, { maxRetriesPerRequest: null });
 
   const ctx: JobContext = { db, redis: connection, env, mailer: createMailer(env), log };
   const jobs = await loadJobs();
@@ -59,7 +61,7 @@ async function main() {
         await job.processor(bullJob, ctx);
         log.info({ job: job.name, jobId: bullJob.id }, 'job completed');
       },
-      { connection, concurrency: 1 },
+      { connection, concurrency: job.concurrency ?? 1 },
     );
     worker.on('failed', (bullJob, err) => {
       log.error({ job: job.name, jobId: bullJob?.id, err }, 'job failed');

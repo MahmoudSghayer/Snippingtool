@@ -35,7 +35,8 @@ const FIXED_DEVICE_FINGERPRINT = 'e2e00000'.repeat(6); // 48 hex-ish chars, well
 
 /** Logs the given page in as the seeded admin, completing TOTP
  * enrollment (first spec of the run) or step-up verification (every spec
- * after), and waits for `/dashboard` to load. */
+ * after), and waits for the admin dashboard (`/admin`), where an admin
+ * lands after signing in. */
 export async function loginAsAdmin(
   page: Page,
   deviceName = 'Playwright e2e runner',
@@ -87,5 +88,5 @@ export async function loginAsAdmin(
     await page.getByRole('button', { name: 'Verify' }).click();
   }
 
-  await expect(page).toHaveURL(/\/dashboard$/, { timeout: 15_000 });
+  await expect(page).toHaveURL(/\/admin$/, { timeout: 15_000 });
 }

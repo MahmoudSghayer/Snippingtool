@@ -1,0 +1,21 @@
+# Nova Trade: only the public marketing and legal pages should be indexed.
+# The signed-in app (served from /app.html for every other route) is not.
+# The origin is the Vercel domain for now; when a custom domain replaces
+# it, update this line, public/sitemap.xml and the canonical links in
+# index.html, terms/ and refund-policy/.
+User-agent: *
+Allow: /
+Allow: /terms
+Allow: /refund-policy
+Disallow: /dashboard
+Disallow: /admin
+Disallow: /trades
+Disallow: /bot
+Disallow: /analytics
+Disallow: /subscriptions
+Disallow: /settings
+Disallow: /login
+Disallow: /register
+Disallow: /app.html
+
+Sitemap: https://snippingtool-eta.vercel.app/sitemap.xml

@@ -30,6 +30,7 @@ async function upsertPlan(
     deviceLimit: number;
     features: Record<string, unknown>;
     sortOrder: number;
+    isActive?: boolean;
   },
 ) {
   const existing = await db.query.plans.findFirst({ where: eq(plans.code, plan.code) });
@@ -45,7 +46,7 @@ async function upsertPlan(
         deviceLimit: plan.deviceLimit,
         features: plan.features,
         sortOrder: plan.sortOrder,
-        isActive: true,
+        isActive: plan.isActive ?? true,
       })
       .where(eq(plans.id, existing.id));
     console.log(`  plan ${plan.code}: updated`);
@@ -150,46 +151,48 @@ export async function seed(connectionString: string = getDatabaseUrl()) {
     await upsertPlan(db, {
       code: 'basic',
       name: 'Basic',
-      description: 'Single-device access to the recorder and assist tools.',
+      description: 'Retired: the plan without automation. Kept so existing subscriptions resolve.',
       priceCents: 499,
       interval: 'month',
       isLifetime: false,
       deviceLimit: 1,
       features: { ranker: true, assist: true, automation: false },
-      sortOrder: 1,
+      sortOrder: 9,
+      isActive: false,
     });
     await upsertPlan(db, {
       code: 'pro',
-      name: 'Pro',
-      description: 'Two devices, full assist toolset.',
+      name: 'Monthly',
+      description: '30-day pass. Recorder, ranking, session P&L and the autobuyer.',
       priceCents: 999,
       interval: 'month',
       isLifetime: false,
       deviceLimit: 2,
-      features: { ranker: true, assist: true, automation: false },
-      sortOrder: 2,
+      features: { ranker: true, assist: true, automation: true, mobile: false },
+      sortOrder: 1,
     });
     await upsertPlan(db, {
       code: 'ultimate',
-      name: 'Ultimate',
-      description: 'Three devices and every feature, including gated automation.',
-      priceCents: 1999,
+      name: 'Monthly + Mobile',
+      description:
+        '30-day pass. Everything in Monthly, plus Telegram and Discord remote alerts and control.',
+      priceCents: 1399,
       interval: 'month',
       isLifetime: false,
       deviceLimit: 3,
-      features: { ranker: true, assist: true, automation: true },
-      sortOrder: 3,
+      features: { ranker: true, assist: true, automation: true, mobile: true },
+      sortOrder: 2,
     });
     await upsertPlan(db, {
       code: 'lifetime',
-      name: 'Lifetime (Founders)',
-      description: 'One-time purchase, lifetime access, three devices, every feature.',
-      priceCents: 9999,
+      name: 'Season',
+      description: 'Valid until the next EA SPORTS FC release. Everything in Monthly + Mobile.',
+      priceCents: 2499,
       interval: 'one_time',
       isLifetime: true,
       deviceLimit: 3,
-      features: { ranker: true, assist: true, automation: true },
-      sortOrder: 4,
+      features: { ranker: true, assist: true, automation: true, mobile: true },
+      sortOrder: 3,
     });
 
     console.log('Seeding feature toggles...');

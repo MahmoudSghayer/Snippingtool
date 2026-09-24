@@ -21,6 +21,9 @@ export type EmailJobData = z.infer<typeof emailJobDataSchema>;
 
 export default defineJob<EmailJobData>({
   name: 'email.send',
+  // Each email is independent and waits on SMTP, so a signup burst can go
+  // out several at a time.
+  concurrency: 5,
   async processor(job, { mailer, log }) {
     const data = emailJobDataSchema.parse(job.data);
     await mailer.send(data);

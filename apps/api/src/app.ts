@@ -31,6 +31,7 @@ import errorHandlerPlugin from './plugins/error-handler.js';
 import mailerPlugin from './plugins/mailer.js';
 import metricsPlugin from './plugins/metrics.js';
 import otelPlugin from './plugins/otel.js';
+import queuesPlugin from './plugins/queues.js';
 import rateLimitPlugin from './plugins/rate-limit.js';
 import redisPlugin from './plugins/redis.js';
 import requestIdPlugin from './plugins/request-id.js';
@@ -91,6 +92,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   await app.register(requestIdPlugin);
   await app.register(dbPlugin);
   await app.register(redisPlugin);
+  await app.register(queuesPlugin);
   await app.register(entitlementsPlugin);
   await app.register(mailerPlugin);
   await app.register(metricsPlugin);
@@ -103,9 +105,9 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     openapi: {
       openapi: '3.1.0',
       info: {
-        title: "The Sniper's Ledger API",
+        title: 'Nova Trade API',
         version: '1.0.0',
-        description: "REST + WebSocket API for The Sniper's Ledger backend.",
+        description: 'REST + WebSocket API for Nova Trade.',
       },
       servers: [{ url: env.APP_ORIGIN }],
       components: {

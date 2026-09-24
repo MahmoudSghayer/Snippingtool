@@ -1,6 +1,5 @@
 import {
   Badge,
-  BarChart,
   Card,
   CardContent,
   ChartCard,
@@ -17,6 +16,7 @@ import {
   type ColumnDef,
   type DateRange,
 } from '@sl/ui';
+import { BarChart } from '@sl/ui/charts';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 
@@ -193,6 +193,11 @@ function useActivity<
         params: { query: { ...toRangeQuery(range), limit: 100 } },
       });
       if (error) throw error;
+      // `path` is generic over a union of route keys (see the comment
+      // above), so `api.GET`'s return type here is the union of *every*
+      // route's response body, not just this one's — TS can't see that
+      // `Row` is actually this call's item type through that union, so the
+      // cast has to go through `unknown` rather than a direct narrowing.
       return (data as unknown as { items: Row[] }).items;
     },
   });

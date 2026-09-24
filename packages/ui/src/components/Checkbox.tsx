@@ -11,6 +11,9 @@ export interface CheckboxProps {
   id?: string;
   className?: string;
   'aria-label'?: string;
+  'aria-describedby'?: string;
+  'aria-invalid'?: boolean;
+  'aria-required'?: boolean;
 }
 
 export function Checkbox({ className, ...props }: CheckboxProps) {

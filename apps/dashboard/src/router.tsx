@@ -8,18 +8,22 @@ import {
   createRoute,
   createRouter,
   lazyRouteComponent,
-  Navigate,
   notFound,
-  redirect,
 } from '@tanstack/react-router';
 import { z } from 'zod';
 
 import { setUnauthorizedHandler } from '@/api/client.js';
 import { permissionsFor, type AdminNavKey } from '@/lib/adminNav.js';
-import { ensureBootstrapped } from '@/lib/authBootstrap.js';
-import { ErrorPage } from '@/pages/ErrorPage.js';
+import { AppContentErrorCard, ErrorPage } from '@/pages/ErrorPage.js';
 import { NotFoundPage } from '@/pages/NotFoundPage.js';
-import { AppLayout, PublicLayout, RootLayout } from '@/routes/layouts.js';
+import {
+  ACCOUNT_PATH,
+  redirectToHome,
+  requireSignedIn,
+  RETIRED_CUSTOMER_PATHS,
+} from '@/routes/access.js';
+import { AppLayout, RootLayout } from '@/routes/layouts.js';
+import { AuthColumn, SiteLayout } from '@/routes/SiteLayout.js';
 import { useAuthStore } from '@/stores/auth.js';
 
 /** Route-level counterpart to the nav filtering in routes/layouts.tsx
@@ -38,25 +42,36 @@ const rootRoute = createRootRoute({
   errorComponent: ErrorPage,
 });
 
-// --- Public (unauthenticated) ----------------------------------------------
+// --- Website pages (customer-facing) -----------------------------------------
+// Everything a customer sees in the SPA sits inside the website's header and
+// footer (SiteLayout). Sign-in and sign-up pages sit in a narrow column
+// inside it; /account is the signed-in customer area. Email links land here
+// too: /verify-email?token= and /reset-password?token= (apps/api's
+// emails/templates.ts).
 
-const publicLayoutRoute = createRoute({
+const siteLayoutRoute = createRoute({
   getParentRoute: () => rootRoute,
-  id: 'public',
-  component: PublicLayout,
+  id: 'site',
+  component: SiteLayout,
+});
+
+const authColumnRoute = createRoute({
+  getParentRoute: () => siteLayoutRoute,
+  id: 'auth',
+  component: AuthColumn,
 });
 
 const loginSearchSchema = z.object({ returnTo: z.string().optional() });
 
 const loginRoute = createRoute({
-  getParentRoute: () => publicLayoutRoute,
+  getParentRoute: () => authColumnRoute,
   path: '/login',
   validateSearch: loginSearchSchema,
   component: lazyRouteComponent(() => import('@/pages/auth/LoginPage.js'), 'LoginPage'),
 });
 
 const registerRoute = createRoute({
-  getParentRoute: () => publicLayoutRoute,
+  getParentRoute: () => authColumnRoute,
   path: '/register',
   component: lazyRouteComponent(() => import('@/pages/auth/RegisterPage.js'), 'RegisterPage'),
 });
@@ -64,14 +79,14 @@ const registerRoute = createRoute({
 const verifyEmailSearchSchema = z.object({ token: z.string().optional() });
 
 const verifyEmailRoute = createRoute({
-  getParentRoute: () => publicLayoutRoute,
+  getParentRoute: () => authColumnRoute,
   path: '/verify-email',
   validateSearch: verifyEmailSearchSchema,
   component: lazyRouteComponent(() => import('@/pages/auth/VerifyEmailPage.js'), 'VerifyEmailPage'),
 });
 
 const forgotPasswordRoute = createRoute({
-  getParentRoute: () => publicLayoutRoute,
+  getParentRoute: () => authColumnRoute,
   path: '/forgot-password',
   component: lazyRouteComponent(
     () => import('@/pages/auth/ForgotPasswordPage.js'),
@@ -82,7 +97,7 @@ const forgotPasswordRoute = createRoute({
 const resetPasswordSearchSchema = z.object({ token: z.string().optional() });
 
 const resetPasswordRoute = createRoute({
-  getParentRoute: () => publicLayoutRoute,
+  getParentRoute: () => authColumnRoute,
   path: '/reset-password',
   validateSearch: resetPasswordSearchSchema,
   component: lazyRouteComponent(
@@ -91,63 +106,67 @@ const resetPasswordRoute = createRoute({
   ),
 });
 
-// --- Authenticated shell -----------------------------------------------------
+const accountRoute = createRoute({
+  getParentRoute: () => siteLayoutRoute,
+  path: ACCOUNT_PATH,
+  beforeLoad: ({ location }) => requireSignedIn(location),
+  component: lazyRouteComponent(() => import('@/pages/account/AccountPage.js'), 'AccountPage'),
+});
+
+// --- Redirect-only routes ----------------------------------------------------
+// `/` is the static landing page in production (vercel.json / nginx serve
+// index.html); the SPA only matches it on a client-side navigation. The
+// retired customer pages (/dashboard, /trades, /bot, /analytics,
+// /subscriptions, /settings) keep old bookmarks and emails working. All of
+// them send a signed-in user to their home (admins: /admin, everyone else:
+// /account) and a signed-out one to /login.
+
+const indexRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/',
+  beforeLoad: redirectToHome,
+});
+
+const retiredCustomerRoutes = RETIRED_CUSTOMER_PATHS.map((path) =>
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path,
+    beforeLoad: redirectToHome,
+  }),
+);
+
+// --- Admin dashboard (sidebar shell) -------------------------------------------
 
 const appLayoutRoute = createRoute({
   getParentRoute: () => rootRoute,
   id: 'app',
   component: AppLayout,
   beforeLoad: async ({ location }) => {
-    await ensureBootstrapped();
-    if (useAuthStore.getState().status !== 'authenticated') {
-      throw redirect({ to: '/login', search: { returnTo: location.href } });
-    }
+    await requireSignedIn(location);
+    // The shell is admin-only: a customer gets the plain 404 page, never the
+    // sidebar. `adminLayoutRoute` below keeps its own check as well.
+    if (useAuthStore.getState().admin === null) throw notFound();
   },
 });
 
-const dashboardRoute = createRoute({
+// Pathless route nested *inside* `appLayoutRoute`, with no component of its
+// own (falls through to rendering `<Outlet />`) — its only job is owning an
+// `errorComponent`. Because it sits below `AppLayout` (sidebar/topbar) in
+// the match tree rather than replacing it, a page render error is caught
+// here: the shell stays mounted and only `<main>`'s content is swapped for
+// the error card (`AppContentErrorCard`'s `reset` retries in place). Putting
+// `errorComponent` on `appLayoutRoute` itself would instead unmount
+// `AppLayout` entirely on every page error, sidebar included.
+const appContentRoute = createRoute({
   getParentRoute: () => appLayoutRoute,
-  path: '/dashboard',
-  component: lazyRouteComponent(() => import('@/pages/user/DashboardPage.js'), 'DashboardPage'),
-});
-
-const tradesRoute = createRoute({
-  getParentRoute: () => appLayoutRoute,
-  path: '/trades',
-  component: lazyRouteComponent(() => import('@/pages/user/TradesPage.js'), 'TradesPage'),
-});
-
-const analyticsRoute = createRoute({
-  getParentRoute: () => appLayoutRoute,
-  path: '/analytics',
-  component: lazyRouteComponent(() => import('@/pages/user/AnalyticsPage.js'), 'AnalyticsPage'),
-});
-
-const subscriptionsRoute = createRoute({
-  getParentRoute: () => appLayoutRoute,
-  path: '/subscriptions',
-  component: lazyRouteComponent(
-    () => import('@/pages/user/SubscriptionsPage.js'),
-    'SubscriptionsPage',
-  ),
-});
-
-const settingsRoute = createRoute({
-  getParentRoute: () => appLayoutRoute,
-  path: '/settings',
-  component: lazyRouteComponent(() => import('@/pages/user/SettingsPage.js'), 'SettingsPage'),
-});
-
-const indexRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/',
-  component: () => <Navigate to="/dashboard" />,
+  id: 'app-content',
+  errorComponent: AppContentErrorCard,
 });
 
 // --- Admin (nested under the app shell, additionally role-guarded) ---------
 
 const adminLayoutRoute = createRoute({
-  getParentRoute: () => appLayoutRoute,
+  getParentRoute: () => appContentRoute,
   path: '/admin',
   beforeLoad: () => {
     if (useAuthStore.getState().admin === null) {
@@ -213,6 +232,13 @@ const adminSubscriptionsRoute = createRoute({
   beforeLoad: () => requireAdminNavPermission('admin-subscriptions'),
 });
 
+const adminPaymentsRoute = createRoute({
+  getParentRoute: () => adminLayoutRoute,
+  path: '/payments',
+  component: lazyRouteComponent(() => import('@/pages/admin/PaymentsPage.js'), 'PaymentsPage'),
+  beforeLoad: () => requireAdminNavPermission('admin-payments'),
+});
+
 const adminCouponsRoute = createRoute({
   getParentRoute: () => adminLayoutRoute,
   path: '/coupons',
@@ -268,35 +294,37 @@ const devComponentsRoute = createRoute({
     : NotFoundPage,
 });
 
-const routeTree = rootRoute.addChildren([
+export const routeTree = rootRoute.addChildren([
   indexRoute,
-  publicLayoutRoute.addChildren([
-    loginRoute,
-    registerRoute,
-    verifyEmailRoute,
-    forgotPasswordRoute,
-    resetPasswordRoute,
+  ...retiredCustomerRoutes,
+  siteLayoutRoute.addChildren([
+    authColumnRoute.addChildren([
+      loginRoute,
+      registerRoute,
+      verifyEmailRoute,
+      forgotPasswordRoute,
+      resetPasswordRoute,
+    ]),
+    accountRoute,
   ]),
   appLayoutRoute.addChildren([
-    dashboardRoute,
-    tradesRoute,
-    analyticsRoute,
-    subscriptionsRoute,
-    settingsRoute,
-    adminLayoutRoute.addChildren([
-      adminOverviewRoute,
-      adminUsersRoute,
-      adminProfitsRoute,
-      adminActivityRoute,
-      adminSystemRoute,
-      adminAuditRoute,
-      adminSubscriptionsRoute,
-      adminCouponsRoute,
-      adminPlansRoute,
-      adminFlagsRoute,
-      adminBansRoute,
-      adminFeatureTogglesRoute,
-      adminConfigRoute,
+    appContentRoute.addChildren([
+      adminLayoutRoute.addChildren([
+        adminOverviewRoute,
+        adminUsersRoute,
+        adminProfitsRoute,
+        adminActivityRoute,
+        adminSystemRoute,
+        adminAuditRoute,
+        adminSubscriptionsRoute,
+        adminPaymentsRoute,
+        adminCouponsRoute,
+        adminPlansRoute,
+        adminFlagsRoute,
+        adminBansRoute,
+        adminFeatureTogglesRoute,
+        adminConfigRoute,
+      ]),
     ]),
   ]),
   devComponentsRoute,
@@ -332,16 +360,14 @@ const PAGE_TITLES: [string, string][] = [
   ['/verify-email', 'Verify email'],
   ['/forgot-password', 'Forgot password'],
   ['/reset-password', 'Reset password'],
-  ['/dashboard', 'Dashboard'],
-  ['/analytics', 'Analytics'],
-  ['/subscriptions', 'Subscription'],
-  ['/settings', 'Settings'],
+  ['/account', 'My account'],
   ['/admin/users', 'Admin · Users'],
   ['/admin/profits', 'Admin · Profits'],
   ['/admin/activity', 'Admin · Activity'],
   ['/admin/system', 'Admin · System'],
   ['/admin/audit', 'Admin · Audit log'],
   ['/admin/subscriptions', 'Admin · Subscriptions'],
+  ['/admin/payments', 'Admin · Payments'],
   ['/admin/coupons', 'Admin · Coupons'],
   ['/admin/plans', 'Admin · Plans'],
   ['/admin/flags', 'Admin · Flags'],
@@ -356,7 +382,7 @@ function titleForPath(pathname: string): string {
   const match = PAGE_TITLES.find(
     ([prefix]) => pathname === prefix || pathname.startsWith(`${prefix}/`),
   );
-  return match ? `${match[1]} · The Sniper's Ledger` : "The Sniper's Ledger";
+  return match ? `${match[1]} · Nova Trade` : 'Nova Trade';
 }
 
 document.title = titleForPath(window.location.pathname);

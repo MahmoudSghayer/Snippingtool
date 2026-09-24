@@ -49,7 +49,7 @@ describe('CSRF (docs/04-auth.md §10)', () => {
       method: 'POST',
       url: '/api/v1/auth/register',
       remoteAddress: ip,
-      payload: { email, password: TEST_PASSWORD, device: device(fp) },
+      payload: { email, password: TEST_PASSWORD, device: device(fp), acceptTerms: true },
     });
     const { userId } = registerRes.json() as { userId: string };
     const mail = app.mailer.sentEmails.at(-1)!;

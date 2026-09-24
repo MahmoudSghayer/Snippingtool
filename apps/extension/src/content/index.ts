@@ -23,7 +23,9 @@ import browser from 'webextension-polyfill';
 import { AssistEngine } from '../engine/assist.js';
 import { Governor, type GovernorState } from '../engine/governor.js';
 import { rankCandidates, type OpportunityCandidate, type ScoredOpportunity } from '../engine/ranker.js';
+import { countObservedSearches, governedSearch } from '../engine/search.js';
 import { logger } from '../lib/logger.js';
+import { singleFlight } from '../lib/single-flight.js';
 import { createPanel, type Panel } from '../ui/panel.js';
 
 import { createAdapterClient } from './adapter-client.js';
@@ -196,6 +198,12 @@ async function main(): Promise<void> {
     }
   });
 
+  // Every observed search response counts toward the governor's
+  // buy/search ratio and actionsPerHour — the human searching in EA's own UI
+  // is what keeps assist-mode buys allowed (engine/search.ts). A no-op until
+  // the bootstrap below has created a governor.
+  countObservedSearches(adapter, () => governor);
+
   let probeOk = true;
   adapter.onProbe((status) => {
     probeOk = status.ok;
@@ -349,8 +357,14 @@ async function main(): Promise<void> {
       getRanked: () => rankedCandidates,
       onFilterSelected: (handle) => {
         const filter = filters.find((f) => f.id === handle.id);
-        if (!filter) return;
-        void adapter.search(filter.filter);
+        if (!filter || !governor) return;
+        // Engine-issued, so gated: a denied search is skipped (the denial is
+        // already reported as a risk event by the `allow` wrapper below).
+        void governedSearch(governor, adapter, filter.filter)
+          .then((result) => {
+            if (!result.searched) logger.warn(`filter search skipped by the governor: ${result.decision.reason ?? 'denied'}`, 'governor');
+          })
+          .catch((err) => logger.error(`filter search failed: ${String(err)}`, 'adapter.search'));
         const event: ActivityEvent = {
           type: 'filter_change',
           occurredAt: nowIso(),
@@ -407,18 +421,22 @@ async function main(): Promise<void> {
   async function refreshSummaries(): Promise<void> {
     const resourceIds = new Set<number>();
     for (const a of tracked.values()) resourceIds.add(a.resourceId);
-    let n = 0;
-    for (const resourceId of resourceIds) {
-      if (n++ >= 20) break;
-      const result = await send<{ resourceId: number; summary: PriceSummary }>('summary', {
-        resourceId,
-        minProfit: settingsCache.targets.minProfitPerSnipe,
-      });
-      if (result) lastSummaryByResource.set(resourceId, result.summary);
-    }
+    // Capped at 20 distinct resources per tick (same cap as before) — fetched
+    // concurrently rather than one `send()` round trip at a time, since each
+    // request is independent of the others.
+    const capped = Array.from(resourceIds).slice(0, 20);
+    await Promise.all(
+      capped.map(async (resourceId) => {
+        const result = await send<{ resourceId: number; summary: PriceSummary }>('summary', {
+          resourceId,
+          minProfit: settingsCache.targets.minProfitPerSnipe,
+        });
+        if (result) lastSummaryByResource.set(resourceId, result.summary);
+      }),
+    );
   }
 
-  async function engineTick(): Promise<void> {
+  async function engineTickImpl(): Promise<void> {
     if (!governor || !probeOk) return;
     const pulled = await send<{ active: boolean; reason?: string }>('license.killSwitchGet');
     if (pulled && pulled.active !== killSwitchActive) applyKillSwitch(pulled.active, pulled.reason);
@@ -434,6 +452,17 @@ async function main(): Promise<void> {
       if (stop) reportAutobuyerStop(stop.reason, stop.detail);
     }
   }
+
+  // Re-entrancy guard (docs/12-testing.md "Defects found"): `refreshSummaries`
+  // above can take up to 20 sequential-looking `send()` round trips (now
+  // concurrent, but still not instant) and `autobuyer.runCycle` awaits a
+  // full buy cycle — both comfortably longer than a single tick interval is
+  // guaranteed to be. Without a guard, `setInterval` could fire a second
+  // `engineTick` while the first was still awaiting either of those, running
+  // two overlapping autobuyer cycles against the same tracked auctions. This
+  // drops any tick that fires while one is already in flight rather than
+  // queuing or overlapping it.
+  const engineTick = singleFlight(engineTickImpl);
 
   function reportAutobuyerStop(reason: StopReason, detail: string): void {
     logger.error(`autobuyer stopped: ${reason} — ${detail}`, 'autobuyer');

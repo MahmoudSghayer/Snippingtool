@@ -1,8 +1,8 @@
 import { Badge, Drawer, Sidebar, Toaster } from '@sl/ui';
-import { Link, Outlet, useMatchRoute, useNavigate } from '@tanstack/react-router';
+import { useQuery } from '@tanstack/react-query';
+import { Link, Outlet, useMatchRoute } from '@tanstack/react-router';
 import {
   Activity,
-  ArrowLeftRight,
   AlertTriangle,
   BarChart3,
   Bell,
@@ -12,26 +12,25 @@ import {
   Flag,
   Gauge,
   Gift,
-  LayoutDashboard,
   LogOut,
   Menu,
+  Receipt,
   Search,
   Server,
-  Settings as SettingsIcon,
   Shield,
   Sliders,
   Ticket,
+  UserRound,
   Users as UsersIcon,
-  Wallet,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 import { api } from '@/api/client.js';
 import { CommandPalette, useCommandPaletteShortcut } from '@/components/CommandPalette.js';
 import { NotificationsBell } from '@/components/NotificationsBell.js';
 import { useWsGateway } from '@/hooks/useWsGateway.js';
 import { ADMIN_NAV_PERMISSIONS, type AdminNavKey } from '@/lib/adminNav.js';
-import { resetBootstrap } from '@/lib/authBootstrap.js';
+import { useLogout } from '@/lib/logout.js';
 import { useAuthStore } from '@/stores/auth.js';
 import { useConnectionStore } from '@/stores/connection.js';
 
@@ -46,55 +45,27 @@ export function RootLayout() {
   );
 }
 
-/** Centered card shell for /login, /register, /forgot-password, etc. */
-export function PublicLayout() {
+/** The public brand: "Nova Trade" wordmark with its "AI Powered" tagline. */
+function Wordmark({ size }: { size: 'sm' | 'lg' }) {
   return (
-    <div className="flex min-h-dvh flex-col items-center justify-center gap-8 bg-ground px-4 py-10">
-      <div className="flex items-center gap-2 text-ink">
-        <Shield className="size-6 text-gold" aria-hidden="true" />
-        <span className="font-mono text-lg font-semibold tracking-tight">The Sniper's Ledger</span>
-      </div>
-      <div className="w-full max-w-sm">
-        <Outlet />
-      </div>
-    </div>
+    <span className="flex items-center gap-2">
+      <Shield
+        className={size === 'lg' ? 'size-6 text-gold' : 'size-5 text-gold'}
+        aria-hidden="true"
+      />
+      <span
+        className={`font-mono font-semibold tracking-tight text-ink ${size === 'lg' ? 'text-lg' : 'text-sm'}`}
+      >
+        Nova Trade
+      </span>
+      <span className="rounded-full border border-gold/30 bg-gold/10 px-1.5 py-0.5 text-[10px] font-medium uppercase leading-none tracking-wide text-gold">
+        AI Powered
+      </span>
+    </span>
   );
 }
 
 const NO_PERMISSIONS: readonly string[] = [];
-
-const userNav = [
-  {
-    key: 'dashboard',
-    label: 'Dashboard',
-    href: '/dashboard',
-    icon: <LayoutDashboard className="size-4" />,
-  },
-  {
-    key: 'trades',
-    label: 'Trades',
-    href: '/trades',
-    icon: <ArrowLeftRight className="size-4" />,
-  },
-  {
-    key: 'analytics',
-    label: 'Analytics',
-    href: '/analytics',
-    icon: <BarChart3 className="size-4" />,
-  },
-  {
-    key: 'subscriptions',
-    label: 'Subscription',
-    href: '/subscriptions',
-    icon: <Wallet className="size-4" />,
-  },
-  {
-    key: 'settings',
-    label: 'Settings',
-    href: '/settings',
-    icon: <SettingsIcon className="size-4" />,
-  },
-];
 
 const adminNav = [
   { key: 'admin-overview', label: 'Overview', href: '/admin', icon: <Gauge className="size-4" /> },
@@ -135,6 +106,12 @@ const adminNav = [
     icon: <CreditCard className="size-4" />,
   },
   {
+    key: 'admin-payments',
+    label: 'Payments',
+    href: '/admin/payments',
+    icon: <Receipt className="size-4" />,
+  },
+  {
     key: 'admin-coupons',
     label: 'Coupons',
     href: '/admin/coupons',
@@ -157,12 +134,13 @@ const adminNav = [
   },
 ];
 
-/** Authenticated shell: sidebar + topbar. Mounted by every `/dashboard`,
- * `/analytics`, `/subscriptions`, `/settings` and `/admin/*` route
- * (docs/07-dashboard.md "Shell"). */
+/** Admin shell: sidebar + topbar, mounted by every `/admin/*` route
+ * (docs/07-dashboard.md "Shell"). Customers never see it: their pages live
+ * in routes/SiteLayout.tsx, and router.tsx 404s this whole branch for a
+ * non-admin. */
 export function AppLayout() {
   const matchRoute = useMatchRoute();
-  const navigate = useNavigate();
+  const handleLogout = useLogout();
   const user = useAuthStore((s) => s.user);
   const isAdmin = useAuthStore((s) => s.admin !== null);
   // Select the store's own array (or null) and default outside the
@@ -180,34 +158,17 @@ export function AppLayout() {
   useWsGateway();
   useCommandPaletteShortcut(setPaletteOpen);
 
-  useEffect(() => {
-    if (!user) return;
-    // Registers activity-agnostic presence — the WS hook alone keeps the
-    // socket open, this effect just guarantees the app shell only mounts
-    // once a session is known (see AuthGuard below for the actual guard).
-  }, [user]);
-
-  async function handleLogout() {
-    await api.POST('/api/v1/auth/logout', { body: { allDevices: false } });
-    resetBootstrap();
-    useAuthStore.getState().clearSession();
-    void navigate({ to: '/login' });
-  }
-
   // A nav item is shown only when the caller's real permission set grants
   // at least one of the permissions its page needs (docs/07-dashboard.md §2,
   // lib/adminNav.ts) — real per-role gating, not `isAdmin` alone.
   const visibleAdminNav = adminNav.filter((item) =>
     ADMIN_NAV_PERMISSIONS[item.key as AdminNavKey].some((p) => adminPermissions.includes(p)),
   );
+  const pendingPayments = usePendingPaymentCount(
+    isAdmin && adminPermissions.includes('subscriptions.read'),
+  );
 
   const sections = [
-    {
-      items: userNav.map((item) => ({
-        ...item,
-        active: !!matchRoute({ to: item.href, fuzzy: item.href !== '/dashboard' }),
-      })),
-    },
     ...(isAdmin && visibleAdminNav.length > 0
       ? [
           {
@@ -215,6 +176,13 @@ export function AppLayout() {
             items: visibleAdminNav.map((item) => ({
               ...item,
               active: !!matchRoute({ to: item.href, fuzzy: item.href !== '/admin' }),
+              badge:
+                item.key === 'admin-payments' && pendingPayments ? (
+                  <Badge tone="warning">
+                    {pendingPayments}
+                    <span className="sr-only"> pending</span>
+                  </Badge>
+                ) : undefined,
             })),
           },
         ]
@@ -222,21 +190,29 @@ export function AppLayout() {
   ];
 
   const brand = (
-    <Link to="/dashboard" className="flex items-center gap-2 font-mono text-sm font-semibold">
-      <Shield className="size-5 text-gold" aria-hidden="true" />
-      Sniper's Ledger
+    <Link to="/admin" aria-label="Nova Trade admin: go to overview">
+      <Wordmark size="sm" />
     </Link>
   );
 
   const signOutFooter = (
-    <button
-      type="button"
-      onClick={handleLogout}
-      className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium text-ink-2 hover:bg-surface-2 hover:text-ink"
-    >
-      <LogOut className="size-4" aria-hidden="true" />
-      Sign out
-    </button>
+    <div className="flex flex-col gap-0.5">
+      <Link
+        to="/account"
+        className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium text-ink-2 hover:bg-surface-2 hover:text-ink"
+      >
+        <UserRound className="size-4" aria-hidden="true" />
+        My account
+      </Link>
+      <button
+        type="button"
+        onClick={() => void handleLogout()}
+        className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium text-ink-2 hover:bg-surface-2 hover:text-ink"
+      >
+        <LogOut className="size-4" aria-hidden="true" />
+        Sign out
+      </button>
+    </div>
   );
 
   const connectionLabel =
@@ -339,6 +315,29 @@ export function AppLayout() {
       </div>
     </div>
   );
+}
+
+const PENDING_COUNT_PAGE = 100;
+
+/** Pending PayPal payment claims, for the admin nav badge: one page of the
+ * same list the Payments page shows, counted client-side ("100+" past one
+ * page). Shares the `['admin', 'payment-claims']` key prefix, so approving
+ * or rejecting on that page refreshes it. */
+function usePendingPaymentCount(enabled: boolean): string | null {
+  const query = useQuery({
+    queryKey: ['admin', 'payment-claims', 'pending-count'],
+    enabled,
+    refetchInterval: 60_000,
+    queryFn: async () => {
+      const { data, error } = await api.GET('/api/v1/admin/payment-claims', {
+        params: { query: { status: 'pending', limit: PENDING_COUNT_PAGE } },
+      });
+      if (error) throw error;
+      return data;
+    },
+  });
+  if (!enabled || !query.data || query.data.items.length === 0) return null;
+  return query.data.nextCursor ? `${PENDING_COUNT_PAGE}+` : String(query.data.items.length);
 }
 
 export function AdminOnlyGate({ children }: { children: React.ReactNode }) {

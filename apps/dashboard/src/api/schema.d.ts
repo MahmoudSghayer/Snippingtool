@@ -3400,6 +3400,8 @@ export interface paths {
                             os?: string;
                             extensionVersion?: string;
                         };
+                        /** @enum {boolean} */
+                        acceptTerms: true;
                     };
                 };
             };
@@ -4279,6 +4281,81 @@ export interface paths {
         };
         trace?: never;
     };
+    "/api/v1/downloads/extension/info": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether the extension can be downloaded, and which version. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            available: boolean;
+                            entitled: boolean;
+                            version: string | null;
+                            sizeBytes: number | null;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/downloads/extension": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download the Nova Trade extension (zip). Requires an active pass. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/extension/bootstrap": {
         parameters: {
             query?: never;
@@ -4358,7 +4435,7 @@ export interface paths {
                                 /** Format: date-time */
                                 expiresAt: string | null;
                             } | null;
-                            features: ("ledger.recorder" | "ledger.price_model" | "assist.ranker" | "assist.filter_rotation" | "assist.session_pnl" | "assist.risk_meter" | "automation.autobuyer" | "dashboard.analytics" | "dashboard.multi_device" | "support.priority")[];
+                            features: ("ledger.recorder" | "ledger.price_model" | "assist.ranker" | "assist.filter_rotation" | "assist.session_pnl" | "assist.risk_meter" | "automation.autobuyer" | "dashboard.analytics" | "dashboard.multi_device" | "support.priority" | "mobile.remote")[];
                             settings: {
                                 version: number;
                                 targets: {
@@ -4472,7 +4549,7 @@ export interface paths {
                                 /** Format: date-time */
                                 expiresAt: string | null;
                             } | null;
-                            features: ("ledger.recorder" | "ledger.price_model" | "assist.ranker" | "assist.filter_rotation" | "assist.session_pnl" | "assist.risk_meter" | "automation.autobuyer" | "dashboard.analytics" | "dashboard.multi_device" | "support.priority")[];
+                            features: ("ledger.recorder" | "ledger.price_model" | "assist.ranker" | "assist.filter_rotation" | "assist.session_pnl" | "assist.risk_meter" | "automation.autobuyer" | "dashboard.analytics" | "dashboard.multi_device" | "support.priority" | "mobile.remote")[];
                             settings: {
                                 version: number;
                                 targets: {
@@ -5254,6 +5331,246 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    window?: "1h" | "24h" | "7d" | "30d";
+                    scope?: "mine" | "market";
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            meta: {
+                                /** @enum {string} */
+                                scope: "mine" | "market";
+                                /** @enum {string} */
+                                window: "1h" | "24h" | "7d" | "30d";
+                                contributors: number | null;
+                                suppressedForPrivacy: boolean;
+                                emptyReason: string | null;
+                            };
+                            rows: {
+                                resourceId: string;
+                                name: string | null;
+                                rating: number | null;
+                                attempts: number;
+                                successes: number;
+                                successRate: number | null;
+                                medianListedPrice: number | null;
+                                minListedPrice: number | null;
+                                maxListedPrice: number | null;
+                                /** Format: date-time */
+                                lastSeenAt: string;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/movers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    window?: "1h" | "24h" | "7d" | "30d";
+                    scope?: "mine" | "market";
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            meta: {
+                                /** @enum {string} */
+                                scope: "mine" | "market";
+                                /** @enum {string} */
+                                window: "1h" | "24h" | "7d" | "30d";
+                                contributors: number | null;
+                                suppressedForPrivacy: boolean;
+                                emptyReason: string | null;
+                            };
+                            rows: {
+                                resourceId: string;
+                                name: string | null;
+                                rating: number | null;
+                                currentMedian: number;
+                                previousMedian: number;
+                                changePct: number;
+                                currentSamples: number;
+                                previousSamples: number;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/cards/{resourceId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    window?: "1h" | "24h" | "7d" | "30d";
+                    scope?: "mine" | "market";
+                };
+                header?: never;
+                path: {
+                    resourceId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            meta: {
+                                /** @enum {string} */
+                                scope: "mine" | "market";
+                                /** @enum {string} */
+                                window: "1h" | "24h" | "7d" | "30d";
+                                contributors: number | null;
+                                suppressedForPrivacy: boolean;
+                                emptyReason: string | null;
+                            };
+                            resourceId: string;
+                            name: string | null;
+                            rating: number | null;
+                            points: {
+                                /** Format: date-time */
+                                bucket: string;
+                                medianListedPrice: number;
+                                samples: number;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    kind?: "content" | "season" | "pitch_notes" | "ratings_refresh" | "other";
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            events: {
+                                /** Format: uuid */
+                                id: string;
+                                /** @enum {string} */
+                                kind: "content" | "season" | "pitch_notes" | "ratings_refresh" | "other";
+                                title: string;
+                                slug: string;
+                                sourceUrl: string | null;
+                                /** Format: date-time */
+                                announcedAt: string;
+                                /** Format: date-time */
+                                startsAt: string | null;
+                                /** Format: date-time */
+                                endsAt: string | null;
+                                /** @enum {string} */
+                                dateConfidence: "announced" | "stated" | "inferred";
+                                fcTitle: string | null;
+                                summary: string | null;
+                            }[];
+                            /** Format: date-time */
+                            lastCollectedAt: string | null;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/notifications": {
         parameters: {
             query?: never;
@@ -5375,6 +5692,311 @@ export interface paths {
                         "application/json": {
                             /** @enum {boolean} */
                             ok: true;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payment-claims": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Your submitted payments, newest first. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: {
+                                /** Format: uuid */
+                                id: string;
+                                planCode: string;
+                                planName: string | null;
+                                amountCents: number;
+                                currency: string;
+                                paypalTransactionId: string;
+                                note: string | null;
+                                /** @enum {string} */
+                                status: "pending" | "approved" | "rejected";
+                                rejectReason: string | null;
+                                /** Format: date-time */
+                                createdAt: string;
+                                /** Format: date-time */
+                                reviewedAt: string | null;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** Submit the PayPal transaction ID for a pass you paid for. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        planCode: string;
+                        paypalTransactionId: string;
+                        note?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            id: string;
+                            planCode: string;
+                            planName: string | null;
+                            amountCents: number;
+                            currency: string;
+                            paypalTransactionId: string;
+                            note: string | null;
+                            /** @enum {string} */
+                            status: "pending" | "approved" | "rejected";
+                            rejectReason: string | null;
+                            /** Format: date-time */
+                            createdAt: string;
+                            /** Format: date-time */
+                            reviewedAt: string | null;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/payment-claims": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Submitted PayPal payments to review, newest first. */
+        get: {
+            parameters: {
+                query?: {
+                    status?: "pending" | "approved" | "rejected";
+                    cursor?: string;
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: {
+                                /** Format: uuid */
+                                id: string;
+                                planCode: string;
+                                planName: string | null;
+                                amountCents: number;
+                                currency: string;
+                                paypalTransactionId: string;
+                                note: string | null;
+                                /** @enum {string} */
+                                status: "pending" | "approved" | "rejected";
+                                rejectReason: string | null;
+                                /** Format: date-time */
+                                createdAt: string;
+                                /** Format: date-time */
+                                reviewedAt: string | null;
+                                user: {
+                                    /** Format: uuid */
+                                    id: string;
+                                    email: string;
+                                };
+                            }[];
+                            nextCursor: string | null;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/payment-claims/{id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve a PayPal payment: issues or extends the pass. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            claim: {
+                                /** Format: uuid */
+                                id: string;
+                                planCode: string;
+                                planName: string | null;
+                                amountCents: number;
+                                currency: string;
+                                paypalTransactionId: string;
+                                note: string | null;
+                                /** @enum {string} */
+                                status: "pending" | "approved" | "rejected";
+                                rejectReason: string | null;
+                                /** Format: date-time */
+                                createdAt: string;
+                                /** Format: date-time */
+                                reviewedAt: string | null;
+                            };
+                            subscription: {
+                                /** Format: uuid */
+                                id: string;
+                                plan: {
+                                    /** Format: uuid */
+                                    id: string;
+                                    code: string;
+                                    name: string;
+                                    priceCents: number;
+                                    currency: string;
+                                    /** @enum {string} */
+                                    interval: "day" | "week" | "month" | "year" | "one_time";
+                                    deviceLimit: number;
+                                    features: string[];
+                                    isLifetime: boolean;
+                                };
+                                /** @enum {string} */
+                                status: "trialing" | "active" | "past_due" | "canceled" | "suspended" | "expired" | "lifetime";
+                                /** Format: date-time */
+                                currentPeriodStart: string | null;
+                                /** Format: date-time */
+                                currentPeriodEnd: string | null;
+                                /** Format: date-time */
+                                trialEndsAt: string | null;
+                                cancelAtPeriodEnd: boolean;
+                                autoRenew: boolean;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/payment-claims/{id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject a PayPal payment claim, with a reason the buyer sees. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        reason: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            id: string;
+                            planCode: string;
+                            planName: string | null;
+                            amountCents: number;
+                            currency: string;
+                            paypalTransactionId: string;
+                            note: string | null;
+                            /** @enum {string} */
+                            status: "pending" | "approved" | "rejected";
+                            rejectReason: string | null;
+                            /** Format: date-time */
+                            createdAt: string;
+                            /** Format: date-time */
+                            reviewedAt: string | null;
                         };
                     };
                 };

@@ -1,6 +1,8 @@
 // Online-user presence, backed by Redis: a set `presence:online` of userIds
 // plus a per-user TTL key `presence:user:<id>` that a connected WS client
-// refreshes every 20s. `presence.sweep` (jobs/presence.sweep.job.ts) removes
+// refreshes every 20s. The key holds the user's number of open connections
+// (dashboard tabs, the extension), so closing one of them leaves the user
+// online while another is still connected. `presence.sweep` (jobs/presence.sweep.job.ts) removes
 // stale entries whose TTL key has already expired but whose set membership
 // survived an ungraceful disconnect (crash, network drop with no close
 // frame).
@@ -18,16 +20,38 @@ export async function markOnline(redis: Redis, userId: string): Promise<void> {
   await redis
     .multi()
     .sadd(ONLINE_SET, userId)
-    .set(presenceKey(userId), '1', 'EX', PRESENCE_TTL_SECONDS)
+    .incr(presenceKey(userId))
+    .expire(presenceKey(userId), PRESENCE_TTL_SECONDS)
     .exec();
 }
 
+// Refreshes the TTL without touching the count. If the key already expired
+// (a stalled event loop, a sweep in between), the connection re-registers
+// itself as one.
+const TOUCH_SCRIPT = `
+if redis.call('EXPIRE', KEYS[1], ARGV[1]) == 0 then
+  redis.call('SET', KEYS[1], 1, 'EX', ARGV[1])
+  redis.call('SADD', KEYS[2], ARGV[2])
+end
+return 1`;
+
 export async function touchPresence(redis: Redis, userId: string): Promise<void> {
-  await redis.set(presenceKey(userId), '1', 'EX', PRESENCE_TTL_SECONDS);
+  await redis.eval(TOUCH_SCRIPT, 2, presenceKey(userId), ONLINE_SET, PRESENCE_TTL_SECONDS, userId);
 }
 
+// Decrement and, at zero, leave the online set, as one atomic step — a
+// separate DECR then SREM would let a connection opening in between be
+// removed right after it registered.
+const OFFLINE_SCRIPT = `
+local n = redis.call('DECR', KEYS[1])
+if n <= 0 then
+  redis.call('DEL', KEYS[1])
+  redis.call('SREM', KEYS[2], ARGV[1])
+end
+return n`;
+
 export async function markOffline(redis: Redis, userId: string): Promise<void> {
-  await redis.multi().srem(ONLINE_SET, userId).del(presenceKey(userId)).exec();
+  await redis.eval(OFFLINE_SCRIPT, 2, presenceKey(userId), ONLINE_SET, userId);
 }
 
 export async function countOnline(redis: Redis): Promise<number> {
@@ -60,15 +84,13 @@ export async function* scanOnlineUserIds(
  * Called by the presence.sweep job on a schedule. Returns the number
  * removed. */
 export async function sweepStalePresence(redis: Redis): Promise<number> {
-  const members = await redis.smembers(ONLINE_SET);
-  if (members.length === 0) return 0;
   let removed = 0;
-  for (const userId of members) {
-    const exists = await redis.exists(presenceKey(userId));
-    if (!exists) {
-      await redis.srem(ONLINE_SET, userId);
-      removed++;
-    }
+  for await (const batch of scanOnlineUserIds(redis)) {
+    const pipeline = redis.pipeline();
+    for (const userId of batch) pipeline.exists(presenceKey(userId));
+    const results = (await pipeline.exec()) ?? [];
+    const stale = batch.filter((_, i) => results[i]?.[1] === 0);
+    if (stale.length > 0) removed += await redis.srem(ONLINE_SET, ...stale);
   }
   return removed;
 }

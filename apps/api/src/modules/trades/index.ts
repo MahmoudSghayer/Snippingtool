@@ -16,10 +16,11 @@ import {
   paginatedResponseSchema,
   paginationQuerySchema,
   reportTradesRequestSchema,
+  type ReportTradesRequest,
   tradeSchema,
   type Trade,
 } from '@sl/shared';
-import { and, desc, eq, isNull, lt } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, lt } from 'drizzle-orm';
 import fp from 'fastify-plugin';
 import { z } from 'zod';
 
@@ -52,6 +53,42 @@ function touchedDays(row: { boughtAt: Date | null; soldAt: Date | null }): strin
   if (row.boughtAt) days.push(utcDay(row.boughtAt));
   if (row.soldAt) days.push(utcDay(row.soldAt));
   return days;
+}
+
+const TERMINAL_STATUSES: ReadonlySet<TradeRow['status']> = new Set(['sold', 'expired', 'unsold']);
+
+/** Column values for a batch-reported trade. The extension never sees a
+ * sale (see the file header), so its local copy of a trade can still say
+ * `bought` after the dashboard recorded the sale with `/close`. A report
+ * that would move a finished trade back to `bought`/`listed` keeps the
+ * stored sale instead of erasing it. */
+function batchValues(t: ReportTradesRequest['trades'][number], existing: TradeRow | undefined) {
+  const buySide = {
+    tradeId: t.tradeId,
+    resourceId: String(t.resourceId),
+    assetId: t.assetId != null ? String(t.assetId) : null,
+    rating: t.rating,
+    buyPrice: t.buyPrice,
+    boughtAt: new Date(t.boughtAt),
+  };
+
+  if (existing && TERMINAL_STATUSES.has(existing.status) && !TERMINAL_STATUSES.has(t.status)) {
+    return {
+      ...buySide,
+      status: existing.status,
+      sellPrice: existing.sellPrice,
+      soldAt: existing.soldAt,
+      ...profitColumns(t.buyPrice, existing.sellPrice),
+    };
+  }
+
+  return {
+    ...buySide,
+    status: t.status,
+    sellPrice: t.sellPrice,
+    soldAt: t.soldAt ? new Date(t.soldAt) : null,
+    ...profitColumns(t.buyPrice, t.sellPrice),
+  };
 }
 
 function toTradeDto(t: TradeRow): Trade {
@@ -91,45 +128,42 @@ export default fp(
       },
       async (request) => {
         const userId = request.authUser!.id;
-        let upserted = 0;
         const affected: { userId: string; day: string }[] = [];
 
-        for (const t of request.body.trades) {
-          const existing = await fastify.db.query.trades.findFirst({
+        // A batch may report the same trade more than once (the extension
+        // re-queues on a failed flush); the last report wins.
+        const latest = new Map(request.body.trades.map((t) => [t.tradeId, t]));
+
+        await fastify.db.transaction(async (tx) => {
+          const existingRows = await tx.query.trades.findMany({
             where: and(
               eq(trades.userId, userId),
-              eq(trades.tradeId, t.tradeId),
+              inArray(trades.tradeId, [...latest.keys()]),
               isNull(trades.deletedAt),
             ),
           });
+          const existingByTradeId = new Map(existingRows.map((r) => [r.tradeId, r]));
 
-          const values = {
-            tradeId: t.tradeId,
-            resourceId: String(t.resourceId),
-            assetId: t.assetId != null ? String(t.assetId) : null,
-            rating: t.rating,
-            buyPrice: t.buyPrice,
-            sellPrice: t.sellPrice,
-            ...profitColumns(t.buyPrice, t.sellPrice),
-            status: t.status,
-            boughtAt: new Date(t.boughtAt),
-            soldAt: t.soldAt ? new Date(t.soldAt) : null,
-          };
+          const inserts: (typeof trades.$inferInsert)[] = [];
+          for (const t of latest.values()) {
+            const existing = existingByTradeId.get(t.tradeId);
+            const values = batchValues(t, existing);
 
-          if (existing) {
-            // The row's previous days need re-rolling too, in case the
-            // client moved or removed its sale.
-            for (const day of touchedDays(existing)) affected.push({ userId, day });
-            await fastify.db.update(trades).set(values).where(eq(trades.id, existing.id));
-          } else {
-            await fastify.db.insert(trades).values({ id: newId(), userId, ...values });
+            if (existing) {
+              // The row's previous days need re-rolling too, in case the
+              // client moved or removed its sale.
+              for (const day of touchedDays(existing)) affected.push({ userId, day });
+              await tx.update(trades).set(values).where(eq(trades.id, existing.id));
+            } else {
+              inserts.push({ id: newId(), userId, ...values });
+            }
+            for (const day of touchedDays(values)) affected.push({ userId, day });
           }
-          for (const day of touchedDays(values)) affected.push({ userId, day });
-          upserted++;
-        }
+          if (inserts.length > 0) await tx.insert(trades).values(inserts);
+        });
 
         await rollupProfitsForUserDays(fastify.db, affected);
-        return { upserted };
+        return { upserted: latest.size };
       },
     );
 

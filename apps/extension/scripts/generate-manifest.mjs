@@ -22,11 +22,11 @@ export function buildManifest(target, env) {
   /** @type {Record<string, unknown>} */
   const manifest = {
     manifest_version: 3,
-    name: isAuto ? "Sniper's Ledger (Automation)" : "Sniper's Ledger",
+    name: 'Nova Trade',
     version: env.version,
     description: isAuto
-      ? "Sniper's Ledger with M3 automation: attempts still gated by the safety governor on every single action. Self-hosted build — not distributed via the Chrome Web Store."
-      : "Records what the FC transfer market actually does and assists human-driven sniping with an opportunity ranker, filter rotation and a visible risk budget meter.",
+      ? 'Nova Trade for the EA FC web app: finds and buys underpriced players, with a safety governor checking every action.'
+      : 'Nova Trade for the EA FC web app: ranks transfer market opportunities, rotates your filters and shows your risk budget.',
     permissions: ['storage', 'unlimitedStorage', 'alarms'],
     host_permissions: hostPermissions,
     background: {
@@ -51,7 +51,7 @@ export function buildManifest(target, env) {
     ],
     action: {
       default_popup: 'src/popup/index.html',
-      default_title: "Sniper's Ledger",
+      default_title: 'Nova Trade',
     },
     options_ui: {
       page: 'src/options/index.html',

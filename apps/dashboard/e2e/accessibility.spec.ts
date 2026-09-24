@@ -1,4 +1,4 @@
-// axe-core accessibility checks (PHASE 10 deliverable 4): Login, Dashboard
+// axe-core accessibility checks (PHASE 10 deliverable 4): Login, My account
 // and Admin Overview must carry zero serious/critical violations. Runs
 // against the real apps/api + seeded dev Postgres/Redis, same as
 // dashboard.spec.ts (see that file's header for the infra this expects).
@@ -35,17 +35,16 @@ test.describe('accessibility (axe-core, zero serious/critical)', () => {
     expectNoSeriousOrCriticalViolations(results);
   });
 
-  test('dashboard and admin overview (post-login)', async ({ page }) => {
+  test('admin overview and my account (post-login)', async ({ page }) => {
+    // Signing in as an admin lands on /admin (the admin overview).
     await loginAsAdmin(page);
-
-    await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible();
-    const dashboardResults = await new AxeBuilder({ page }).include('body').analyze();
-    expectNoSeriousOrCriticalViolations(dashboardResults);
-
-    await page.goto('/admin');
-    await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible();
     await expect(page.getByText('Online users')).toBeVisible();
     const adminResults = await new AxeBuilder({ page }).include('body').analyze();
     expectNoSeriousOrCriticalViolations(adminResults);
+
+    await page.goto('/account');
+    await expect(page.getByRole('heading', { level: 1, name: 'My account' })).toBeVisible();
+    const accountResults = await new AxeBuilder({ page }).include('body').analyze();
+    expectNoSeriousOrCriticalViolations(accountResults);
   });
 });

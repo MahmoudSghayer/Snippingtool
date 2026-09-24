@@ -41,7 +41,13 @@ export function createDb(
   const sql = postgres(connectionString, {
     max: options.max ?? 10,
     debug: options.debug ?? false,
-    ssl: options.ssl,
+    // Spread rather than always setting the key. postgres.js resolves each
+    // option as `k in o ? o[k] : k in query ? ...`, so an `ssl: undefined`
+    // that is merely *present* still wins over the connection string — which
+    // silently threw away `?sslmode=require` and connected in plaintext while
+    // config/env.ts's production check, which only greps the URL text, went on
+    // passing. Omitting the key entirely lets the URL decide.
+    ...(options.ssl === undefined ? {} : { ssl: options.ssl }),
   });
 
   const db = drizzle(sql, { schema });

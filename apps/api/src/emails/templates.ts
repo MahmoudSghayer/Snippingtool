@@ -2,7 +2,7 @@
 // are short, static-shaped emails, and keeping them as plain functions means
 // no extra runtime dependency and full type safety on the parameters.
 
-const BRAND = "The Sniper's Ledger";
+const BRAND = 'Nova Trade';
 
 // XSS hardening (docs/09-security.md "Escaped email templates"): every
 // value interpolated into an HTML email body below that did not originate
@@ -34,12 +34,16 @@ function wrapHtml(title: string, bodyHtml: string): string {
 </html>`;
 }
 
-function appOrigin(): string {
-  return process.env.APP_ORIGIN ?? 'http://localhost:5173';
+/** Links in emails open pages on the website (verify email, reset
+ * password, sign in), which is DASHBOARD_ORIGIN. It used APP_ORIGIN, the
+ * API's own address, which serves none of those pages, so every link in
+ * production was a 404 and no new account could be verified. */
+function siteOrigin(): string {
+  return (process.env.DASHBOARD_ORIGIN ?? 'http://localhost:5173').replace(/\/+$/, '');
 }
 
 export function verifyEmailHtml(token: string): string {
-  const url = `${appOrigin()}/verify-email?token=${encodeURIComponent(token)}`;
+  const url = `${siteOrigin()}/verify-email?token=${encodeURIComponent(token)}`;
   return wrapHtml(
     'Verify your email',
     `<p>Welcome! Confirm your email address to activate your account.</p>
@@ -50,12 +54,12 @@ export function verifyEmailHtml(token: string): string {
 }
 
 export function verifyEmailText(token: string): string {
-  const url = `${appOrigin()}/verify-email?token=${encodeURIComponent(token)}`;
+  const url = `${siteOrigin()}/verify-email?token=${encodeURIComponent(token)}`;
   return `Verify your email for ${BRAND}: ${url}\n\nThis link expires in 24 hours.`;
 }
 
 export function resetPasswordHtml(token: string): string {
-  const url = `${appOrigin()}/reset-password?token=${encodeURIComponent(token)}`;
+  const url = `${siteOrigin()}/reset-password?token=${encodeURIComponent(token)}`;
   return wrapHtml(
     'Reset your password',
     `<p>We received a request to reset your password.</p>
@@ -66,7 +70,7 @@ export function resetPasswordHtml(token: string): string {
 }
 
 export function resetPasswordText(token: string): string {
-  const url = `${appOrigin()}/reset-password?token=${encodeURIComponent(token)}`;
+  const url = `${siteOrigin()}/reset-password?token=${encodeURIComponent(token)}`;
   return `Reset your password for ${BRAND}: ${url}\n\nThis link expires in 1 hour and can only be used once. Using it will sign you out of every device.`;
 }
 

@@ -21,6 +21,7 @@ import fp from 'fastify-plugin';
 
 import { AppErrors } from '../lib/errors.js';
 import { verifyAccessToken, type AccessTokenClaims } from '../lib/tokens.js';
+import { isRequestBanned } from '../modules/bans/service.js';
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
@@ -84,6 +85,8 @@ async function resolveAuthUser(fastify: FastifyInstance, request: FastifyRequest
   if (user.status === 'banned' || user.status === 'suspended')
     throw AppErrors.forbidden('Account is not active.');
   if (user.rowVersion !== claims.ver) throw AppErrors.sessionRevoked();
+  if (await isRequestBanned(fastify.db, fastify.redis, { userId: user.id, ip: request.ip }))
+    throw AppErrors.forbidden('This account, device, or network has been banned.');
 
   request.authUser = {
     id: user.id,
@@ -132,5 +135,5 @@ export default fp(
       };
     });
   },
-  { name: 'auth', dependencies: ['config', 'db', 'cookie'] },
+  { name: 'auth', dependencies: ['config', 'db', 'redis', 'cookie'] },
 );

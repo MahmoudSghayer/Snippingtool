@@ -5,7 +5,9 @@
 // be used for pub/sub commands). Both close on shutdown.
 
 import fp from 'fastify-plugin';
-import { Redis } from 'ioredis';
+import { Redis, type RedisOptions } from 'ioredis';
+
+import { redisTlsOptions } from '../lib/redis-connection.js';
 
 import type { FastifyInstance } from 'fastify';
 
@@ -41,16 +43,18 @@ export default fp(
     const isTest = fastify.config.NODE_ENV === 'test';
     const db = isTest ? fastify.config.REDIS_TEST_DB : undefined;
 
-    const redis = new Redis(fastify.config.REDIS_URL, {
+    // TLS settings come from lib/redis-connection.ts so this file and
+    // worker.ts cannot drift apart again — they already did once, and the
+    // symptom was a worker that ran, logged nothing and did no work.
+    const options: RedisOptions = {
       maxRetriesPerRequest: null,
       lazyConnect: false,
       db,
-    });
-    const redisSub = new Redis(fastify.config.REDIS_URL, {
-      maxRetriesPerRequest: null,
-      lazyConnect: false,
-      db,
-    });
+      ...redisTlsOptions(fastify.config),
+    };
+
+    const redis = new Redis(fastify.config.REDIS_URL, options);
+    const redisSub = new Redis(fastify.config.REDIS_URL, options);
 
     redis.on('error', (err) => fastify.log.error({ err }, 'redis connection error'));
     redisSub.on('error', (err) => fastify.log.error({ err }, 'redis pub/sub connection error'));

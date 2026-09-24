@@ -1,6 +1,5 @@
 import {
   Badge,
-  BarChart,
   Button,
   Card,
   CardContent,
@@ -11,6 +10,7 @@ import {
   PageHeader,
   StatTile,
 } from '@sl/ui';
+import { BarChart } from '@sl/ui/charts';
 import { useQuery } from '@tanstack/react-query';
 import { Database, RefreshCw, Server, Wifi } from 'lucide-react';
 

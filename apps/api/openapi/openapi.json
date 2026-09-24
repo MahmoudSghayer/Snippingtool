@@ -1,9 +1,9 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "The Sniper's Ledger API",
+    "title": "Nova Trade API",
     "version": "1.0.0",
-    "description": "REST + WebSocket API for The Sniper's Ledger backend."
+    "description": "REST + WebSocket API for Nova Trade."
   },
   "components": {
     "securitySchemes": {
@@ -7518,12 +7518,19 @@
                       "fingerprint"
                     ],
                     "additionalProperties": false
+                  },
+                  "acceptTerms": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
                   }
                 },
                 "required": [
                   "email",
                   "password",
-                  "device"
+                  "device",
+                  "acceptTerms"
                 ],
                 "additionalProperties": false
               }
@@ -8875,6 +8882,62 @@
         }
       }
     },
+    "/api/v1/downloads/extension/info": {
+      "get": {
+        "summary": "Whether the extension can be downloaded, and which version.",
+        "tags": [
+          "downloads"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "available": {
+                      "type": "boolean"
+                    },
+                    "entitled": {
+                      "type": "boolean"
+                    },
+                    "version": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "sizeBytes": {
+                      "type": "integer",
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "available",
+                    "entitled",
+                    "version",
+                    "sizeBytes"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/downloads/extension": {
+      "get": {
+        "summary": "Download the Nova Trade extension (zip). Requires an active pass.",
+        "tags": [
+          "downloads"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
     "/api/v1/extension/bootstrap": {
       "post": {
         "tags": [
@@ -9126,7 +9189,8 @@
                           "automation.autobuyer",
                           "dashboard.analytics",
                           "dashboard.multi_device",
-                          "support.priority"
+                          "support.priority",
+                          "mobile.remote"
                         ]
                       }
                     },
@@ -9509,7 +9573,8 @@
                           "automation.autobuyer",
                           "dashboard.analytics",
                           "dashboard.multi_device",
-                          "support.priority"
+                          "support.priority",
+                          "mobile.remote"
                         ]
                       }
                     },
@@ -11044,6 +11109,602 @@
         }
       }
     },
+    "/api/v1/market/activity": {
+      "get": {
+        "tags": [
+          "market"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1h",
+                "24h",
+                "7d",
+                "30d"
+              ],
+              "default": "24h"
+            },
+            "in": "query",
+            "name": "window",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "mine",
+                "market"
+              ],
+              "default": "mine"
+            },
+            "in": "query",
+            "name": "scope",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "meta": {
+                      "type": "object",
+                      "properties": {
+                        "scope": {
+                          "type": "string",
+                          "enum": [
+                            "mine",
+                            "market"
+                          ]
+                        },
+                        "window": {
+                          "type": "string",
+                          "enum": [
+                            "1h",
+                            "24h",
+                            "7d",
+                            "30d"
+                          ]
+                        },
+                        "contributors": {
+                          "type": "integer",
+                          "nullable": true
+                        },
+                        "suppressedForPrivacy": {
+                          "type": "boolean"
+                        },
+                        "emptyReason": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      },
+                      "required": [
+                        "scope",
+                        "window",
+                        "contributors",
+                        "suppressedForPrivacy",
+                        "emptyReason"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "resourceId": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "rating": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "attempts": {
+                            "type": "integer"
+                          },
+                          "successes": {
+                            "type": "integer"
+                          },
+                          "successRate": {
+                            "type": "number",
+                            "nullable": true
+                          },
+                          "medianListedPrice": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "minListedPrice": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "maxListedPrice": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "lastSeenAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "resourceId",
+                          "name",
+                          "rating",
+                          "attempts",
+                          "successes",
+                          "successRate",
+                          "medianListedPrice",
+                          "minListedPrice",
+                          "maxListedPrice",
+                          "lastSeenAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "meta",
+                    "rows"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/movers": {
+      "get": {
+        "tags": [
+          "market"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1h",
+                "24h",
+                "7d",
+                "30d"
+              ],
+              "default": "24h"
+            },
+            "in": "query",
+            "name": "window",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "mine",
+                "market"
+              ],
+              "default": "mine"
+            },
+            "in": "query",
+            "name": "scope",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "meta": {
+                      "type": "object",
+                      "properties": {
+                        "scope": {
+                          "type": "string",
+                          "enum": [
+                            "mine",
+                            "market"
+                          ]
+                        },
+                        "window": {
+                          "type": "string",
+                          "enum": [
+                            "1h",
+                            "24h",
+                            "7d",
+                            "30d"
+                          ]
+                        },
+                        "contributors": {
+                          "type": "integer",
+                          "nullable": true
+                        },
+                        "suppressedForPrivacy": {
+                          "type": "boolean"
+                        },
+                        "emptyReason": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      },
+                      "required": [
+                        "scope",
+                        "window",
+                        "contributors",
+                        "suppressedForPrivacy",
+                        "emptyReason"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "resourceId": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "rating": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "currentMedian": {
+                            "type": "integer"
+                          },
+                          "previousMedian": {
+                            "type": "integer"
+                          },
+                          "changePct": {
+                            "type": "number"
+                          },
+                          "currentSamples": {
+                            "type": "integer"
+                          },
+                          "previousSamples": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "resourceId",
+                          "name",
+                          "rating",
+                          "currentMedian",
+                          "previousMedian",
+                          "changePct",
+                          "currentSamples",
+                          "previousSamples"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "meta",
+                    "rows"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/cards/{resourceId}": {
+      "get": {
+        "tags": [
+          "market"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1h",
+                "24h",
+                "7d",
+                "30d"
+              ],
+              "default": "7d"
+            },
+            "in": "query",
+            "name": "window",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "mine",
+                "market"
+              ],
+              "default": "mine"
+            },
+            "in": "query",
+            "name": "scope",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "in": "path",
+            "name": "resourceId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "meta": {
+                      "type": "object",
+                      "properties": {
+                        "scope": {
+                          "type": "string",
+                          "enum": [
+                            "mine",
+                            "market"
+                          ]
+                        },
+                        "window": {
+                          "type": "string",
+                          "enum": [
+                            "1h",
+                            "24h",
+                            "7d",
+                            "30d"
+                          ]
+                        },
+                        "contributors": {
+                          "type": "integer",
+                          "nullable": true
+                        },
+                        "suppressedForPrivacy": {
+                          "type": "boolean"
+                        },
+                        "emptyReason": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      },
+                      "required": [
+                        "scope",
+                        "window",
+                        "contributors",
+                        "suppressedForPrivacy",
+                        "emptyReason"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "resourceId": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "rating": {
+                      "type": "integer",
+                      "nullable": true
+                    },
+                    "points": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "bucket": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "medianListedPrice": {
+                            "type": "integer"
+                          },
+                          "samples": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "bucket",
+                          "medianListedPrice",
+                          "samples"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "meta",
+                    "resourceId",
+                    "name",
+                    "rating",
+                    "points"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/events": {
+      "get": {
+        "tags": [
+          "market"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "content",
+                "season",
+                "pitch_notes",
+                "ratings_refresh",
+                "other"
+              ]
+            },
+            "in": "query",
+            "name": "kind",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 30
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "content",
+                              "season",
+                              "pitch_notes",
+                              "ratings_refresh",
+                              "other"
+                            ]
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "slug": {
+                            "type": "string"
+                          },
+                          "sourceUrl": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "announcedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "startsAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "nullable": true
+                          },
+                          "endsAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "nullable": true
+                          },
+                          "dateConfidence": {
+                            "type": "string",
+                            "enum": [
+                              "announced",
+                              "stated",
+                              "inferred"
+                            ]
+                          },
+                          "fcTitle": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "summary": {
+                            "type": "string",
+                            "nullable": true
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "kind",
+                          "title",
+                          "slug",
+                          "sourceUrl",
+                          "announcedAt",
+                          "startsAt",
+                          "endsAt",
+                          "dateConfidence",
+                          "fcTitle",
+                          "summary"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "lastCollectedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "events",
+                    "lastCollectedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/notifications": {
       "get": {
         "tags": [
@@ -11208,6 +11869,693 @@
                   },
                   "required": [
                     "ok"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/payment-claims": {
+      "post": {
+        "summary": "Submit the PayPal transaction ID for a pass you paid for.",
+        "tags": [
+          "payment-claims"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "planCode": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 40
+                  },
+                  "paypalTransactionId": {
+                    "type": "string",
+                    "pattern": "^[0-9A-Z]{17}$"
+                  },
+                  "note": {
+                    "type": "string",
+                    "maxLength": 500
+                  }
+                },
+                "required": [
+                  "planCode",
+                  "paypalTransactionId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "planCode": {
+                      "type": "string"
+                    },
+                    "planName": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "amountCents": {
+                      "type": "integer"
+                    },
+                    "currency": {
+                      "type": "string"
+                    },
+                    "paypalTransactionId": {
+                      "type": "string"
+                    },
+                    "note": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "approved",
+                        "rejected"
+                      ]
+                    },
+                    "rejectReason": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "reviewedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "planCode",
+                    "planName",
+                    "amountCents",
+                    "currency",
+                    "paypalTransactionId",
+                    "note",
+                    "status",
+                    "rejectReason",
+                    "createdAt",
+                    "reviewedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "Your submitted payments, newest first.",
+        "tags": [
+          "payment-claims"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "planCode": {
+                            "type": "string"
+                          },
+                          "planName": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "amountCents": {
+                            "type": "integer"
+                          },
+                          "currency": {
+                            "type": "string"
+                          },
+                          "paypalTransactionId": {
+                            "type": "string"
+                          },
+                          "note": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "pending",
+                              "approved",
+                              "rejected"
+                            ]
+                          },
+                          "rejectReason": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "reviewedAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "nullable": true
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "planCode",
+                          "planName",
+                          "amountCents",
+                          "currency",
+                          "paypalTransactionId",
+                          "note",
+                          "status",
+                          "rejectReason",
+                          "createdAt",
+                          "reviewedAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/payment-claims": {
+      "get": {
+        "summary": "Submitted PayPal payments to review, newest first.",
+        "tags": [
+          "admin-payment-claims"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "approved",
+                "rejected"
+              ]
+            },
+            "in": "query",
+            "name": "status",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "in": "query",
+            "name": "cursor",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "planCode": {
+                            "type": "string"
+                          },
+                          "planName": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "amountCents": {
+                            "type": "integer"
+                          },
+                          "currency": {
+                            "type": "string"
+                          },
+                          "paypalTransactionId": {
+                            "type": "string"
+                          },
+                          "note": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "pending",
+                              "approved",
+                              "rejected"
+                            ]
+                          },
+                          "rejectReason": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "reviewedAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "nullable": true
+                          },
+                          "user": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "email": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "email"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "planCode",
+                          "planName",
+                          "amountCents",
+                          "currency",
+                          "paypalTransactionId",
+                          "note",
+                          "status",
+                          "rejectReason",
+                          "createdAt",
+                          "reviewedAt",
+                          "user"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "nextCursor": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2048,
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/payment-claims/{id}/approve": {
+      "post": {
+        "summary": "Approve a PayPal payment: issues or extends the pass.",
+        "tags": [
+          "admin-payment-claims"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "claim": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "planCode": {
+                          "type": "string"
+                        },
+                        "planName": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "amountCents": {
+                          "type": "integer"
+                        },
+                        "currency": {
+                          "type": "string"
+                        },
+                        "paypalTransactionId": {
+                          "type": "string"
+                        },
+                        "note": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "approved",
+                            "rejected"
+                          ]
+                        },
+                        "rejectReason": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "reviewedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "planCode",
+                        "planName",
+                        "amountCents",
+                        "currency",
+                        "paypalTransactionId",
+                        "note",
+                        "status",
+                        "rejectReason",
+                        "createdAt",
+                        "reviewedAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "subscription": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "plan": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "code": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 40
+                            },
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 80
+                            },
+                            "priceCents": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "currency": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 3
+                            },
+                            "interval": {
+                              "type": "string",
+                              "enum": [
+                                "day",
+                                "week",
+                                "month",
+                                "year",
+                                "one_time"
+                              ]
+                            },
+                            "deviceLimit": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "features": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "isLifetime": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "code",
+                            "name",
+                            "priceCents",
+                            "currency",
+                            "interval",
+                            "deviceLimit",
+                            "features",
+                            "isLifetime"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "trialing",
+                            "active",
+                            "past_due",
+                            "canceled",
+                            "suspended",
+                            "expired",
+                            "lifetime"
+                          ]
+                        },
+                        "currentPeriodStart": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        },
+                        "currentPeriodEnd": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        },
+                        "trialEndsAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        },
+                        "cancelAtPeriodEnd": {
+                          "type": "boolean"
+                        },
+                        "autoRenew": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "plan",
+                        "status",
+                        "currentPeriodStart",
+                        "currentPeriodEnd",
+                        "trialEndsAt",
+                        "cancelAtPeriodEnd",
+                        "autoRenew"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "claim",
+                    "subscription"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/payment-claims/{id}/reject": {
+      "post": {
+        "summary": "Reject a PayPal payment claim, with a reason the buyer sees.",
+        "tags": [
+          "admin-payment-claims"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "planCode": {
+                      "type": "string"
+                    },
+                    "planName": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "amountCents": {
+                      "type": "integer"
+                    },
+                    "currency": {
+                      "type": "string"
+                    },
+                    "paypalTransactionId": {
+                      "type": "string"
+                    },
+                    "note": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "approved",
+                        "rejected"
+                      ]
+                    },
+                    "rejectReason": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "reviewedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "planCode",
+                    "planName",
+                    "amountCents",
+                    "currency",
+                    "paypalTransactionId",
+                    "note",
+                    "status",
+                    "rejectReason",
+                    "createdAt",
+                    "reviewedAt"
                   ],
                   "additionalProperties": false
                 }

@@ -1,5 +1,4 @@
 import {
-  AreaChart,
   Button,
   Card,
   CardContent,
@@ -20,6 +19,7 @@ import {
   type ColumnDef,
   type DateRange,
 } from '@sl/ui';
+import { AreaChart } from '@sl/ui/charts';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 

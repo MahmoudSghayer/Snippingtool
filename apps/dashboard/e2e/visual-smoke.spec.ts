@@ -2,7 +2,7 @@
 // 390/768/1440px, screenshots each into apps/dashboard/screenshots/, and
 // asserts zero console errors / page errors on every page at every
 // breakpoint. Also captures a rough Web Vitals reading (FCP/LCP/CLS/TTFB)
-// for /login and /dashboard at desktop width — printed to stdout and
+// for /login and /account at desktop width — printed to stdout and
 // attached to the test report; docs/10-design-system.md records the
 // numbers from the run this spec's header comment was last updated for.
 //
@@ -84,7 +84,7 @@ test.describe('visual smoke (screenshots + no console errors)', () => {
   test('every route at 390/768/1440px', async ({ page }, testInfo) => {
     // Defect #10 (docs/12-testing.md "Defects found"): this now covers the
     // 11 admin sub-pages docs/10-design-system.md §14 used to flag as
-    // un-screenshotted (30 routes × 3 breakpoints, one continuous session,
+    // un-screenshotted (every route × 3 breakpoints, one continuous session,
     // plus Web Vitals captures) — comfortably past the suite-wide default
     // `timeout: 60_000` in playwright.config.ts, which is sized for the
     // smaller specs, not this one.
@@ -144,11 +144,9 @@ test.describe('visual smoke (screenshots + no console errors)', () => {
 
     for (const vp of VIEWPORTS) {
       await page.setViewportSize({ width: vp.width, height: vp.height });
-      await visit('/dashboard', 'dashboard', 'Dashboard', vp.name);
-      await visit('/trades', 'trades', 'Trades', vp.name);
-      await visit('/analytics', 'analytics', 'Analytics', vp.name);
-      await visit('/subscriptions', 'subscriptions', 'Subscription', vp.name);
-      await visit('/settings', 'settings', 'Settings', vp.name);
+      // The customer area (the retired /dashboard, /trades, /analytics,
+      // /subscriptions and /settings pages all redirect away now).
+      await visit('/account', 'account', 'My account', vp.name);
       await visit('/admin', 'admin-overview', 'Overview', vp.name);
       await visit('/admin/audit', 'admin-audit', 'Audit log', vp.name);
 
@@ -163,6 +161,7 @@ test.describe('visual smoke (screenshots + no console errors)', () => {
       await visit('/admin/activity', 'admin-activity', 'Activity', vp.name);
       await visit('/admin/system', 'admin-system', 'System', vp.name);
       await visit('/admin/subscriptions', 'admin-subscriptions', 'Subscriptions', vp.name);
+      await visit('/admin/payments', 'admin-payments', 'Payments', vp.name);
       await visit('/admin/coupons', 'admin-coupons', 'Coupons', vp.name);
       await visit('/admin/plans', 'admin-plans', 'Plans', vp.name);
       await visit('/admin/flags', 'admin-flags', 'Flags', vp.name);
@@ -177,14 +176,14 @@ test.describe('visual smoke (screenshots + no console errors)', () => {
     //     desktop width, against this dev build (not a production build —
     //     numbers here are directional, not a Lighthouse-grade budget). ---
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto('/dashboard');
-    await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible();
-    const dashboardVitals = await captureVitals(page);
+    await page.goto('/account');
+    await expect(page.getByRole('heading', { level: 1, name: 'My account' })).toBeVisible();
+    const accountVitals = await captureVitals(page);
 
     // eslint-disable-next-line no-console
-    console.log('[web-vitals] /dashboard (dev server, 1440px):', JSON.stringify(dashboardVitals));
-    await testInfo.attach('web-vitals-dashboard', {
-      body: JSON.stringify(dashboardVitals, null, 2),
+    console.log('[web-vitals] /account (dev server, 1440px):', JSON.stringify(accountVitals));
+    await testInfo.attach('web-vitals-account', {
+      body: JSON.stringify(accountVitals, null, 2),
       contentType: 'application/json',
     });
 
