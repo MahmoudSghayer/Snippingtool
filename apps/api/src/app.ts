@@ -105,9 +105,9 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     openapi: {
       openapi: '3.1.0',
       info: {
-        title: "The Sniper's Ledger API",
+        title: 'Nova Trade API',
         version: '1.0.0',
-        description: "REST + WebSocket API for The Sniper's Ledger backend.",
+        description: 'REST + WebSocket API for Nova Trade.',
       },
       servers: [{ url: env.APP_ORIGIN }],
       components: {

@@ -161,7 +161,7 @@ export async function sendVerificationEmail(
   const { verifyEmailHtml, verifyEmailText } = await import('../../emails/templates.js');
   await ctx.mailer.send({
     to: email,
-    subject: "Verify your email — The Sniper's Ledger",
+    subject: 'Verify your email — Nova Trade',
     html: verifyEmailHtml(token),
     text: verifyEmailText(token),
   });
@@ -540,7 +540,7 @@ export async function requestPasswordReset(
   const { resetPasswordHtml, resetPasswordText } = await import('../../emails/templates.js');
   await ctx.mailer.send({
     to: user.email,
-    subject: "Reset your password — The Sniper's Ledger",
+    subject: 'Reset your password — Nova Trade',
     html: resetPasswordHtml(token),
     text: resetPasswordText(token),
   });
