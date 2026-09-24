@@ -146,6 +146,14 @@ database backup only for data loss, never to undo a deploy; see
 - Watch `/admin/payments`, and the Discord channels, for the first real
   payments.
 
+## Changing the API address later
+
+If the API moves to a new domain, update it in three places: the
+`VITE_API_ORIGIN` default in `vercel.json`'s `buildCommand`, the
+`connect-src` of the `Content-Security-Policy` in `vercel.json` (both the
+`https://` and `wss://` forms), and `APP_ORIGIN` in `infra/.env.production`.
+If the CSP is missed, the website loads but can't reach the API.
+
 ## 8. Pull request description (paste into GitHub)
 
 > **Nova Trade launch: audit fixes, PayPal passes, website and account area**
