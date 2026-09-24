@@ -27,7 +27,7 @@ take action, and we have no control over it.
 
 We have worked to **lower** that risk: Nova Trade limits how many actions it
 takes per hour, how long a session runs, and how buying compares with searching,
-and it can be stopped remotely. You can turn off the recommended limits; if you do, you accept the higher risk that comes with it. Lower risk is not no risk. **Nova Trade is not
+and it can be stopped remotely. You can change the recommended limits; if you raise them, you accept the higher risk that comes with it. Lower risk is not no risk. **Nova Trade is not
 ban-free and is never sold as undetectable.**
 
 You use the Service at your own risk. **We are not responsible for any ban,
