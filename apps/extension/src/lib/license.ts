@@ -38,6 +38,7 @@ import {
 } from '@sl/shared';
 
 import { apiJson } from './api.js';
+import { recordServerTime } from './clock.js';
 import { computeFingerprint, detectBrowser, detectOs } from './fingerprint.js';
 import { retryFetch } from './http.js';
 import { logger } from './logger.js';
@@ -236,7 +237,9 @@ export async function bootstrap(): Promise<BootstrapResponse> {
     extensionVersion: EXTENSION_VERSION,
     buildTarget: BUILD_TARGET,
   };
+  const sentAt = Date.now();
   const data = await apiJson<BootstrapResponse>('/api/v1/extension/bootstrap', { method: 'POST', body: JSON.stringify(body) });
+  await recordServerTime(data.serverTime, sentAt, Date.now());
   await cache(data);
   return data;
 }
@@ -248,7 +251,9 @@ export async function bootstrap(): Promise<BootstrapResponse> {
 export async function heartbeat(deviceId: string, engineState: HeartbeatRequest['engineState']): Promise<HeartbeatResponse | null> {
   try {
     const body: HeartbeatRequest = { deviceId, extensionVersion: EXTENSION_VERSION, engineState };
+    const sentAt = Date.now();
     const data = await apiJson<HeartbeatResponse>('/api/v1/extension/heartbeat', { method: 'POST', body: JSON.stringify(body) });
+    await recordServerTime(data.serverTime, sentAt, Date.now());
     const prior = await readUnverifiedCache();
     await cache({ ...data, userId: prior?.bootstrap.userId ?? '' });
     return data;

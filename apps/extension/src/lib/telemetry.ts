@@ -50,12 +50,20 @@
  *    before the user opted out.
  *  - Each batch type holds at most `MAX_QUEUED_PER_KIND` items; the oldest
  *    go first when a long outage fills it.
+ *  - Timestamps are moved onto the server's clock once, as an item is
+ *    queued (lib/clock.ts, from bootstrap/heartbeat `serverTime`), so a
+ *    machine whose clock runs fast is not rejected by the API's 5-minute
+ *    window, and a retry resends exactly what was queued.
+ *  - A 400 TIMESTAMP_OUT_OF_WINDOW names the offending items
+ *    (`details.indices`): only those are dropped and the rest of the chunk
+ *    is sent again straight away.
  */
 
-import { isWithinIngestWindow } from '@sl/shared';
+import { isWithinIngestWindow, isWithinTradeWindow, TIMESTAMP_OUT_OF_WINDOW } from '@sl/shared';
 
 import { ApiError, apiJson } from './api.js';
 import { hasAccount } from './auth.js';
+import { ensureClockLoaded, serverNow, toServerTime } from './clock.js';
 import { logger } from './logger.js';
 import { getCachedSettings } from './settings.js';
 import { getLocal, getSession, setLocal, setSession } from './storage.js';
@@ -201,8 +209,31 @@ export async function whenPersisted(): Promise<void> {
   await persistChain;
 }
 
+/** Moves an item's own timestamps onto the server's clock. Filter stats
+ * are left alone: `windowStart` is a local aggregation key, not a moment. */
+function onServerClock<K extends QueueKind>(kind: K, items: QueuedBatches[K]): QueuedBatches[K] {
+  switch (kind) {
+    case 'trades':
+      return (items as Trade[]).map((t) => ({
+        ...t,
+        boughtAt: toServerTime(t.boughtAt),
+        soldAt: t.soldAt == null ? t.soldAt : toServerTime(t.soldAt),
+      })) as QueuedBatches[K];
+    case 'filterStats':
+      return items;
+    default:
+      return (items as { occurredAt: string }[]).map((e) => ({
+        ...e,
+        occurredAt: toServerTime(e.occurredAt),
+      })) as unknown as QueuedBatches[K];
+  }
+}
+
 function push<K extends QueueKind>(kind: K, items: QueuedBatches[K]): void {
-  (queue[kind] as unknown[]).push(...items);
+  // Corrected here, once: the persisted item carries the server-clock
+  // timestamp, so every retry resends it unchanged (the sniping
+  // idempotency key includes occurredAt).
+  (queue[kind] as unknown[]).push(...onServerClock(kind, items));
   capKind(queue, kind);
   schedulePersist();
 }
@@ -251,6 +282,7 @@ async function mayQueue(): Promise<boolean> {
 /** The background's entry point for `telemetry.enqueue` messages. */
 export async function enqueue(payload: TelemetryEnqueuePayload): Promise<{ queued: number }> {
   if (!(await mayQueue())) return { queued: 0 };
+  await ensureClockLoaded();
   switch (payload.kind) {
     case 'activity':
       enqueueActivity(payload.items);
@@ -301,9 +333,20 @@ interface KindResult<T> {
   ok: boolean;
 }
 
+/** The offending item indices of a TIMESTAMP_OUT_OF_WINDOW rejection, or
+ * `null` for anything else. */
+function outOfWindowIndices(err: unknown, chunkLength: number): Set<number> | null {
+  if (!(err instanceof ApiError) || err.status !== 400 || err.code !== TIMESTAMP_OUT_OF_WINDOW) return null;
+  const raw = (err.details as { indices?: unknown } | undefined)?.indices;
+  if (!Array.isArray(raw)) return null;
+  const indices = new Set(raw.filter((i): i is number => Number.isInteger(i) && i >= 0 && i < chunkLength));
+  return indices.size > 0 ? indices : null;
+}
+
 /** Sends one batch type in chunks. Stops at the first retryable failure and
  * hands back what was not sent; a permanently rejected chunk is dropped and
- * the rest still go. */
+ * the rest still go. A chunk rejected for out-of-window timestamps loses
+ * only the items the API named, and the rest of it is sent again at once. */
 async function postBatch<T>(
   path: string,
   key: string,
@@ -312,40 +355,53 @@ async function postBatch<T>(
 ): Promise<KindResult<T>> {
   let sent = 0;
   for (let i = 0; i < items.length; i += chunkSize) {
-    const chunk = items.slice(i, i + chunkSize);
-    try {
-      await apiJson(path, { method: 'POST', body: JSON.stringify({ [key]: chunk }) });
-      sent += chunk.length;
-    } catch (err) {
-      if (isPermanentRejection(err)) {
-        logger.warn(
-          `telemetry: ${path} rejected ${chunk.length} item(s) with ${err.status} ${err.code}, dropping them: ${err.message}`,
-          'telemetry',
-        );
-        continue;
+    let chunk = items.slice(i, i + chunkSize);
+    // One resend per rejected item at most: each rejection removes at
+    // least one item, so this always ends.
+    for (;;) {
+      try {
+        if (chunk.length > 0) await apiJson(path, { method: 'POST', body: JSON.stringify({ [key]: chunk }) });
+        sent += chunk.length;
+        break;
+      } catch (err) {
+        const bad = outOfWindowIndices(err, chunk.length);
+        if (bad) {
+          logger.warn(`telemetry: ${path} rejected ${bad.size} item(s) as outside the time window, dropping only those`, 'telemetry');
+          chunk = chunk.filter((_, index) => !bad.has(index));
+          continue;
+        }
+        if (isPermanentRejection(err)) {
+          logger.warn(
+            `telemetry: ${path} rejected ${chunk.length} item(s) with ${err.status} ${err.code}, dropping them: ${err.message}`,
+            'telemetry',
+          );
+          break;
+        }
+        logger.warn(`telemetry flush of ${path} failed, re-queueing ${items.length - i} item(s): ${String(err)}`, 'telemetry');
+        return { sent, unsent: [...chunk, ...items.slice(i + chunkSize)], ok: false };
       }
-      logger.warn(`telemetry flush of ${path} failed, re-queueing ${items.length - i} item(s): ${String(err)}`, 'telemetry');
-      return { sent, unsent: items.slice(i), ok: false };
     }
   }
   return { sent, unsent: [], ok: true };
 }
 
-/** Drops items whose timestamps the API would reject (more than 7 days old,
- * or more than 5 minutes ahead — @sl/shared's ingest window), so one stale
+/** Drops items whose timestamps the API would reject (@sl/shared's ingest
+ * windows: activity and sniping 7 days back, trades 400 days back, all 5
+ * minutes ahead), judged on the server's clock (lib/clock.ts), so one stale
  * item cannot get a whole chunk rejected. Only the batch types the API
  * bounds are filtered. */
 function dropOutOfWindow(q: QueuedBatches): QueuedBatches {
-  const now = Date.now();
+  const now = serverNow();
   // Only drops what is provably outside the window; anything malformed is
   // left for the API to judge (and a 4xx then drops it anyway).
-  const inWindow = (iso: string | undefined) =>
-    !Number.isFinite(Date.parse(iso ?? '')) || isWithinIngestWindow(iso as string, now);
+  const parses = (iso: string | undefined) => Number.isFinite(Date.parse(iso ?? ''));
+  const inWindow = (iso: string | undefined) => !parses(iso) || isWithinIngestWindow(iso as string, now);
+  const inTradeWindow = (iso: string | undefined) => !parses(iso) || isWithinTradeWindow(iso as string, now);
   const kept: QueuedBatches = {
     ...q,
     activity: q.activity.filter((e) => inWindow(e.occurredAt)),
     sniping: q.sniping.filter((a) => inWindow(a.occurredAt)),
-    trades: q.trades.filter((t) => inWindow(t.boughtAt) && (t.soldAt == null || inWindow(t.soldAt))),
+    trades: q.trades.filter((t) => inTradeWindow(t.boughtAt) && (t.soldAt == null || inTradeWindow(t.soldAt))),
   };
   const dropped =
     q.activity.length - kept.activity.length +

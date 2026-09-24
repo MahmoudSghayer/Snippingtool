@@ -6,11 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useRealChromeStorage } from './chrome-storage-stub.js';
 
+import type * as ClockModule from '../../src/lib/clock.js';
 import type * as SettingsModule from '../../src/lib/settings.js';
 import type * as StorageModule from '../../src/lib/storage.js';
 import type * as TelemetryModule from '../../src/lib/telemetry.js';
 
-const DAY = 24 * 60 * 60 * 1000;
+const MINUTE = 60 * 1000;
+const DAY = 24 * 60 * MINUTE;
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -48,6 +50,7 @@ describe('lib/telemetry.ts: flush and enqueue correctness', () => {
   let telemetry: typeof TelemetryModule;
   let settings: typeof SettingsModule;
   let storage: typeof StorageModule;
+  let clock: typeof ClockModule;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -56,6 +59,7 @@ describe('lib/telemetry.ts: flush and enqueue correctness', () => {
     telemetry = await import('../../src/lib/telemetry.js');
     settings = await import('../../src/lib/settings.js');
     storage = await import('../../src/lib/storage.js');
+    clock = await import('../../src/lib/clock.js');
     await settings.applyServerSettings({ ...settings.DEFAULT_SETTINGS, version: 1, telemetryOptOut: false });
     await telemetry.whenHydrated();
   });
@@ -165,6 +169,100 @@ describe('lib/telemetry.ts: flush and enqueue correctness', () => {
       const res = await telemetry.enqueue({ kind: 'sniping', items: [snipe()] as never });
       expect(res).toEqual({ queued: 1 });
       expect(telemetry.pendingCount()).toBe(1);
+    });
+  });
+
+  // Review fix round 1: the API keeps its window strict (clamping would
+  // break the sniping idempotency key), so the extension corrects its own
+  // clock from the server's `serverTime`, once, when an item is queued.
+  describe('clock skew and out-of-window items', () => {
+    /** An API whose clock is `skewMs` behind this machine's, rejecting what
+     * its real ingest window would (5 minutes ahead). */
+    function serverBehindBy(skewMs: number) {
+      return async (_url: string, init: RequestInit) => {
+        const body = JSON.parse(String(init.body)) as { attempts?: { occurredAt: string }[] };
+        const serverNow = Date.now() - skewMs;
+        const indices = (body.attempts ?? [])
+          .map((a, i) => (Date.parse(a.occurredAt) > serverNow + 5 * MINUTE ? i : -1))
+          .filter((i) => i >= 0);
+        if (indices.length > 0) return json(400, { code: 'TIMESTAMP_OUT_OF_WINDOW', message: 'x', details: { indices } });
+        return json(200, { accepted: body.attempts?.length ?? 0 });
+      };
+    }
+
+    it('a client 10 minutes fast loses nothing, even after a service-worker restart', async () => {
+      const now = Date.now();
+      // Heartbeat: the server says it is 10 minutes earlier than we think.
+      await clock.recordServerTime(new Date(now - 10 * MINUTE).toISOString(), now, now);
+
+      // Fresh service worker: the offset comes back from storage.
+      vi.resetModules();
+      telemetry = await import('../../src/lib/telemetry.js');
+      await telemetry.whenHydrated();
+      await storage.setLocal('sl.refreshTokenEnc', 'encrypted-refresh-token');
+
+      const res = await telemetry.enqueue({ kind: 'sniping', items: [snipe(), snipe()] as never });
+      expect(res).toEqual({ queued: 2 });
+
+      fetchMock.mockImplementation(serverBehindBy(10 * MINUTE));
+      const result = await telemetry.flush();
+      expect(result).toEqual({ ok: true, sent: 2 });
+      expect(telemetry.pendingCount()).toBe(0);
+    });
+
+    it('drops only the out-of-window item of a chunk and still sends the rest', async () => {
+      telemetry.enqueueSniping([snipe({ resourceId: 1 }), snipe({ resourceId: 2 }), snipe({ resourceId: 3 })] as never);
+      fetchMock
+        .mockImplementationOnce(async () =>
+          json(400, { code: 'TIMESTAMP_OUT_OF_WINDOW', message: 'x', details: { indices: [1] } }),
+        )
+        .mockImplementation(async () => json(200, { accepted: 2 }));
+
+      const result = await telemetry.flush();
+      expect(result).toEqual({ ok: true, sent: 2 });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const resent = bodyOf(fetchMock.mock.calls[1]!).attempts as { resourceId: number }[];
+      expect(resent.map((a) => a.resourceId)).toEqual([1, 3]);
+      expect(telemetry.pendingCount()).toBe(0);
+    });
+
+    it('a retry resends byte-identical timestamps, even after the offset changes', async () => {
+      const now = Date.now();
+      await clock.recordServerTime(new Date(now - 10 * MINUTE).toISOString(), now, now);
+      telemetry.enqueueSniping([snipe()] as never);
+      telemetry.enqueueTrades([
+        { tradeId: 't', resourceId: 1, assetId: null, rating: null, buyPrice: 100, sellPrice: null, eaTax: 0, netProfit: null, status: 'bought', boughtAt: new Date().toISOString(), soldAt: null },
+      ] as never);
+
+      fetchMock.mockImplementation(async () => json(503, { code: 'INTERNAL' }));
+      await telemetry.flush();
+      const first = fetchMock.mock.calls.map((c) => [pathOf(c), bodyOf(c)] as const);
+      // Queued with the corrected clock.
+      const sentAt = Date.parse((first.find(([p]) => p.includes('/sniping/'))![1].attempts?.[0] as { occurredAt: string }).occurredAt);
+      expect(Math.abs(sentAt - (now - 10 * MINUTE))).toBeLessThan(MINUTE);
+
+      // The next heartbeat measures a different offset; queued items keep theirs.
+      await clock.recordServerTime(new Date(Date.now() - 3 * MINUTE).toISOString(), Date.now(), Date.now());
+      fetchMock.mockReset();
+      fetchMock.mockImplementation(async () => json(200, { accepted: 1 }));
+      await telemetry.flush();
+      const second = fetchMock.mock.calls.map((c) => [pathOf(c), bodyOf(c)] as const);
+      // retryFetch retried the 503s, so compare the distinct requests.
+      const distinct = (calls: (readonly [string, unknown])[]) =>
+        [...new Map(calls.map(([p, b]) => [p, JSON.stringify(b)])).entries()].sort();
+      expect(distinct(second)).toEqual(distinct(first));
+    }, 30_000);
+
+    it('keeps trade reports up to 400 days old; activity and sniping only 7 days', async () => {
+      telemetry.enqueueTrades([
+        { tradeId: 'old', resourceId: 1, assetId: null, rating: null, buyPrice: 100, sellPrice: null, eaTax: 0, netProfit: null, status: 'listed', boughtAt: new Date(Date.now() - 30 * DAY).toISOString(), soldAt: null },
+      ] as never);
+      telemetry.enqueueSniping([snipe({ occurredAt: new Date(Date.now() - 8 * DAY).toISOString() })] as never);
+      fetchMock.mockImplementation(async () => json(200, { accepted: 1 }));
+
+      const result = await telemetry.flush();
+      expect(result).toEqual({ ok: true, sent: 1 });
+      expect(pathOf(fetchMock.mock.calls[0]!)).toContain('/trades/batch');
     });
   });
 });

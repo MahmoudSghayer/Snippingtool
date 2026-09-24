@@ -502,10 +502,23 @@ background context.
 the chunks that failed are re-queued. Every sniping attempt carries a
 client `attemptId` (kept with its original `occurredAt` in the queue), so a
 re-sent attempt is stored once by the API. A batch rejected with a 4xx
-other than 401/403/408/429 is logged and dropped, not retried forever;
-items outside the API's timestamp window (7 days back, 5 minutes ahead)
-are dropped before sending; each batch type holds at most 1,000 items,
-oldest dropped first.
+other than 401/403/408/429 is logged and dropped, not retried forever,
+except a `TIMESTAMP_OUT_OF_WINDOW` 400: it names the offending items
+(`details.indices`), only those are dropped, and the rest of the chunk is
+sent again at once. Items outside the API's timestamp window (5 minutes
+ahead; 7 days back for activity and sniping, 400 days back for trades) are
+dropped before sending; each batch type holds at most 1,000 items, oldest
+dropped first.
+
+**Clock skew.** The API keeps that window strict and never clamps (a
+clamped `occurredAt` would stop matching a retried attempt's idempotency
+key). Instead `lib/clock.ts` keeps the offset between this machine and the
+server, measured from the `serverTime` in every bootstrap and heartbeat
+response and persisted in `storage.local`. `lib/telemetry.ts` moves an
+item's `occurredAt`/`boughtAt`/`soldAt` onto the server's clock once, when
+the item is queued, so the persisted item — and every retry of it — carries
+the corrected timestamp, and a machine whose clock runs fast loses
+nothing. The before-sending filter uses the corrected clock too.
 
 ## 7. Crash recovery
 

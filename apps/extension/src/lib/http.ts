@@ -64,8 +64,16 @@ export class NetworkError extends Error {
   }
 }
 
-export interface ApiErrorBody {
-  error?: { code?: string; message?: string };
+/** The API's error envelope is `{ code, message, details?, requestId }`
+ * (@sl/shared apiErrorSchema). The `{ error: { ... } }` wrapping is accepted
+ * too (apiErrorEnvelope). */
+interface ApiErrorFields {
+  code?: string;
+  message?: string;
+  details?: Record<string, unknown>;
+}
+export interface ApiErrorBody extends ApiErrorFields {
+  error?: ApiErrorFields;
 }
 
 export class ApiError extends Error {
@@ -74,6 +82,7 @@ export class ApiError extends Error {
     public readonly code: string,
     message: string,
     public readonly requestId?: string,
+    public readonly details?: Record<string, unknown>,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -84,7 +93,10 @@ export async function toApiError(res: Response): Promise<ApiError> {
   const requestId = res.headers.get('x-request-id') ?? undefined;
   try {
     const body = (await res.json()) as ApiErrorBody;
-    return new ApiError(res.status, body.error?.code ?? 'INTERNAL', body.error?.message ?? res.statusText, requestId);
+    // Top-level first: that is what the API sends. Reading only `error.*`
+    // made every code 'INTERNAL'.
+    const fields = body.error ?? body;
+    return new ApiError(res.status, fields.code ?? 'INTERNAL', fields.message ?? res.statusText, requestId, fields.details);
   } catch {
     return new ApiError(res.status, 'INTERNAL', res.statusText, requestId);
   }
