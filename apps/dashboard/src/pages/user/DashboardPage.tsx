@@ -20,6 +20,7 @@ import { Link } from '@tanstack/react-router';
 import { AlertTriangle, Gauge, Laptop, ShieldCheck, TrendingUp } from 'lucide-react';
 
 import { api } from '@/api/client.js';
+import { ExtensionDownloadCard } from '@/components/ExtensionDownload.js';
 
 import type { Trade } from '@sl/shared';
 
@@ -149,6 +150,8 @@ export function DashboardPage() {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader title="Dashboard" description="Your profit, snipes and account at a glance." />
+
+      <ExtensionDownloadCard variant="compact" hideWhenNotEntitled />
 
       <KpiGrid>
         <StatTile

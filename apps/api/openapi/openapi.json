@@ -8882,6 +8882,62 @@
         }
       }
     },
+    "/api/v1/downloads/extension/info": {
+      "get": {
+        "summary": "Whether the extension can be downloaded, and which version.",
+        "tags": [
+          "downloads"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "available": {
+                      "type": "boolean"
+                    },
+                    "entitled": {
+                      "type": "boolean"
+                    },
+                    "version": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "sizeBytes": {
+                      "type": "integer",
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "available",
+                    "entitled",
+                    "version",
+                    "sizeBytes"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/downloads/extension": {
+      "get": {
+        "summary": "Download the Nova Trade extension (zip). Requires an active pass.",
+        "tags": [
+          "downloads"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
     "/api/v1/extension/bootstrap": {
       "post": {
         "tags": [

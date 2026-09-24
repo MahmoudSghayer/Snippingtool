@@ -22,6 +22,7 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 
 import { api, apiErrorMessage } from '@/api/client.js';
+import { ExtensionDownloadCard, useExtensionDownloadInfo } from '@/components/ExtensionDownload.js';
 import {
   catalogueEntry,
   passLengthLabel,
@@ -188,6 +189,11 @@ export function SubscriptionsPage() {
       toast.error("Couldn't revoke device", { description: apiErrorMessage(error) }),
   });
 
+  // Entitled users came here to get the extension, so it goes first; everyone
+  // else sees the short "comes with a pass" card next to the plans.
+  const extensionInfoQuery = useExtensionDownloadInfo();
+  const extensionEntitled = extensionInfoQuery.data?.entitled === true;
+
   const subscription = subscriptionQuery.data?.subscription ?? null;
   const license = subscriptionQuery.data?.license ?? null;
   const allPlans = plansQuery.data?.items ?? [];
@@ -197,6 +203,8 @@ export function SubscriptionsPage() {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader title="Subscription" description="Your pass, payments, license and devices." />
+
+      {extensionEntitled && <ExtensionDownloadCard />}
 
       <Card>
         <CardHeader>
@@ -276,7 +284,9 @@ export function SubscriptionsPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      {!extensionEntitled && <ExtensionDownloadCard />}
+
+      <Card id="pricing" className="scroll-mt-6">
         <CardHeader className="flex-col items-start gap-1">
           <CardTitle>Step 1 · Pay with PayPal</CardTitle>
           <p className="text-xs text-ink-2">

@@ -28,6 +28,7 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
 
 import { buildManifest } from './generate-manifest.mjs';
+import { TEMPLATE_PLACEHOLDERS } from './template-placeholders.mjs';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(dirname, '..');
@@ -36,23 +37,37 @@ const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
 const target = process.argv[2];
 const watch = process.argv.includes('--watch');
 if (target !== 'ledger' && target !== 'ledger-auto') {
-  console.error(`usage: node scripts/build.mjs <ledger|ledger-auto> [--watch]`);
+  console.error(`usage: node scripts/build.mjs <ledger|ledger-auto> [--watch] [--template]`);
   process.exit(1);
 }
 
-const outDir = path.join(root, 'dist', target);
+// `--template` builds the downloadable `ledger-auto` zip's template: the
+// API origin, dashboard origin and license public key are placeholders that
+// the API fills in with its own configuration when it serves the download
+// (apps/api/src/lib/extension-download.ts), so one image serves a correct
+// extension on any deployment. The placeholders are exported from
+// ./template-placeholders.mjs, which the API imports too.
+const template = process.argv.includes('--template');
+if (template && target !== 'ledger-auto') {
+  console.error('--template only applies to ledger-auto');
+  process.exit(1);
+}
+
+const outDir = path.join(root, 'dist', template ? 'ledger-auto-template' : target);
 
 const env = {
   VITE_AUTOMATION: target === 'ledger-auto' ? '1' : '0',
   VITE_BUILD_TARGET: target,
-  VITE_API_ORIGIN: process.env.VITE_API_ORIGIN || 'https://api.snipersledger.app',
+  VITE_API_ORIGIN: template ? TEMPLATE_PLACEHOLDERS.apiOrigin : process.env.VITE_API_ORIGIN || 'https://api.snipersledger.app',
   // Where the companion site lives, for the install-time welcome tab
   // (background/welcome.ts). Same override story as VITE_API_ORIGIN:
   // set it in the environment to point a build at a self-hosted stack.
-  VITE_DASHBOARD_ORIGIN: process.env.VITE_DASHBOARD_ORIGIN || 'https://snipersledger.app',
-  VITE_UPDATE_URL: target === 'ledger-auto' ? process.env.VITE_UPDATE_URL || 'https://updates.snipersledger.app/ledger-auto/update.xml' : '',
+  VITE_DASHBOARD_ORIGIN: template ? TEMPLATE_PLACEHOLDERS.dashboardOrigin : process.env.VITE_DASHBOARD_ORIGIN || 'https://snipersledger.app',
+  // An unpacked (downloaded) extension ignores update_url, so the template
+  // doesn't declare one.
+  VITE_UPDATE_URL: target === 'ledger-auto' && !template ? process.env.VITE_UPDATE_URL || 'https://updates.snipersledger.app/ledger-auto/update.xml' : '',
   VITE_EXTENSION_VERSION: pkg.version,
-  VITE_LICENSE_PUBLIC_KEY: process.env.VITE_LICENSE_PUBLIC_KEY || '',
+  VITE_LICENSE_PUBLIC_KEY: template ? TEMPLATE_PLACEHOLDERS.licensePublicKey : process.env.VITE_LICENSE_PUBLIC_KEY || '',
 };
 
 const define = Object.fromEntries(Object.entries(env).map(([k, v]) => [`import.meta.env.${k}`, JSON.stringify(v)]));

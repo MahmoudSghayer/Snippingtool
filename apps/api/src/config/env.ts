@@ -182,6 +182,13 @@ const envSchema = z.object({
   ENTITLEMENT_SIGNING_KEY: z.string().min(1).optional(),
   ENTITLEMENT_PUBLIC_KEY: z.string().min(1).optional(),
 
+  // --- Extension download ---
+  // Directory holding the `ledger-auto --template` build that
+  // GET /downloads/extension zips and serves. The API image ships it at
+  // /app/downloads/extension-template; in the repo it's
+  // apps/extension/dist/ledger-auto-template. Unset = look in both.
+  EXTENSION_TEMPLATE_DIR: z.string().min(1).optional(),
+
   // --- Stripe (owned by the subscriptions/payments module) ---
   STRIPE_SECRET_KEY: z.string().optional(),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),

@@ -47,6 +47,14 @@ COPY . .
 RUN pnpm install --frozen-lockfile
 RUN pnpm turbo run build --filter=@sl/api...
 RUN pnpm --filter=@sl/api deploy --prod /prod/api
+# The downloadable extension (GET /api/v1/downloads/extension). Built once as
+# a template with placeholder origins; the API fills in its own APP_ORIGIN,
+# DASHBOARD_ORIGIN and entitlement key when it serves the zip
+# (apps/api/src/lib/extension-download.ts), so this image needs no
+# per-deployment build args for it.
+RUN pnpm --filter=@sl/extension build:template \
+ && mkdir -p /prod/api/downloads \
+ && cp -r apps/extension/dist/ledger-auto-template /prod/api/downloads/extension-template
 
 # ---------------------------------------------------------------------------
 # runtime — shared base for server + worker: non-root user, tini as PID 1,
