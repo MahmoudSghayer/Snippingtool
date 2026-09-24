@@ -34,6 +34,12 @@ export const trimmedAuctionSchema = z.object({
   offers: z.number(),
   expiresAt: z.number().nullable(),
   seenAt: z.number(),
+  /** Whether the adapter could buy this listing if asked: false when the
+   * EA service-layer shape it selected buys on an item entity it has not
+   * seen for this listing, or when it selected no shape at all
+   * (apps/extension/src/main/adapter.ts). Absent means unknown (older
+   * records); the ranker only drops an explicit `false`. */
+  buyable: z.boolean().optional(),
 });
 export type TrimmedAuction = z.infer<typeof trimmedAuctionSchema>;
 
@@ -161,6 +167,10 @@ export const adapterActionResultMessageSchema = z.object({
     stillListed: z.boolean().optional(),
     /** Only present for `action: 'diagnostics'`. */
     diagnostics: adapterDiagnosticsSchema.optional(),
+    /** A second result for a `buy` whose first result was
+     * `error: 'timeout_unknown'`: EA's answer arrived after the adapter
+     * stopped waiting, and `ok` says whether it bought. */
+    late: z.boolean().optional(),
   }),
   mac: adapterMessageMacSchema.optional(),
 });

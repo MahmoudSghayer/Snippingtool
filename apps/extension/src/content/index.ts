@@ -423,7 +423,13 @@ async function main(): Promise<void> {
     }
     return Array.from(byResource.entries())
       .slice(0, 20)
-      .flatMap(([, auctions]) => auctions.map((a) => ({ resourceId: a.resourceId, tradeId: a.tradeId, price: a.buyNow, summary: lastSummaryByResource.get(a.resourceId) })))
+      .flatMap(([, auctions]) =>
+        // A listing the adapter said it cannot buy never becomes a candidate
+        // (engine/ranker.ts drops `buyable: false` too, belt and braces).
+        auctions
+          .filter((a) => a.buyable !== false)
+          .map((a) => ({ resourceId: a.resourceId, tradeId: a.tradeId, price: a.buyNow, summary: lastSummaryByResource.get(a.resourceId) })),
+      )
       .filter((c): c is OpportunityCandidate => c.summary != null);
   }
 

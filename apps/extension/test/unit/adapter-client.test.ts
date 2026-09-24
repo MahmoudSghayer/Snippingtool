@@ -208,3 +208,29 @@ describe('diagnostics', () => {
     await expect(promise).resolves.toMatchObject({ ok: false, error: 'timed out waiting for adapter response' });
   });
 });
+
+describe('a buy whose answer came after the adapter stopped waiting', () => {
+  it('resolves timeout_unknown with a late promise that a signed late result settles', async () => {
+    const promise = client.buy('t1', 1000);
+    const req = await lastRequest();
+    const requestId = req.data.requestId as string;
+    deliver(await signedResult({ action: 'buy', requestId, ok: false, error: 'timeout_unknown', requestedAt: 1, completedAt: 12_001 }));
+    const outcome = await promise;
+    expect(outcome).toMatchObject({ ok: false, error: 'timeout_unknown' });
+    expect(outcome.late).toBeInstanceOf(Promise);
+
+    // An unsigned late result is ignored...
+    deliver({ channel: ADAPTER_CHANNEL, kind: 'action_result', data: { action: 'buy', requestId, ok: true, late: true, requestedAt: 1, completedAt: 20_000 } });
+    // ...a signed one settles it.
+    deliver(await signedResult({ action: 'buy', requestId, ok: true, late: true, requestedAt: 1, completedAt: 20_001 }));
+    await expect(outcome.late).resolves.toMatchObject({ ok: true, latencyMs: 20_000 });
+  });
+
+  it('ignores a late result for a request that did not time out', async () => {
+    const promise = client.buy('t1', 1000);
+    const req = await lastRequest();
+    deliver(await signedResult({ action: 'buy', requestId: req.data.requestId, ok: false, error: 'price_mismatch', requestedAt: 1, completedAt: 2 }));
+    const outcome = await promise;
+    expect(outcome.late).toBeUndefined();
+  });
+});

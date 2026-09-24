@@ -38,7 +38,9 @@ import { scrubText } from '../lib/redact.js';
 
 import { createAdapterLog, describeKeys } from './diagnostics.js';
 import { normaliseListing, normaliseListings, type NormalisedListing } from './ea-listing.js';
-import { selectShape, type ShapeName, type ShapeSelection } from './shapes.js';
+import { TimeoutUnknownError, describeError, extractListingArray } from './ea-response.js';
+import { createSearchHook } from './search-hook.js';
+import { selectShape, type ServiceShape, type ShapeName, type ShapeSelection } from './shapes.js';
 
 import type { AdapterDiagnostics, FilterCriteria, TrimmedAuction } from '@sl/shared';
 
@@ -72,6 +74,8 @@ const mapClear = Map.prototype.clear;
 const setHas = Set.prototype.has;
 const setAdd = Set.prototype.add;
 const promiseThen = Promise.prototype.then;
+const setTimer = setTimeout;
+const SEARCH_HOOK_RECHECK_MS = 2000;
 function protoGetter(proto: object | undefined, name: string): ((this: unknown) => unknown) | undefined {
   return proto ? (Object.getOwnPropertyDescriptor(proto, name)?.get as ((this: unknown) => unknown) | undefined) : undefined;
 }
@@ -128,6 +132,7 @@ let lastProbeSummary = '';
  * again before every single `act` call (docs/01-architecture.md, §3.5). */
 function probe(): { result: ProbeResult; selection: ShapeSelection } {
   const selection = selectShape(servicesRoot());
+  ensureSearchHook(selection);
   const result: ProbeResult = selection.shape ? { ok: true, shape: selection.shape.name } : { ok: false, reason: selection.reason };
   // Logged on change only, so a failing probe re-run before every act call
   // does not push everything else out of the 50-line log.
@@ -175,6 +180,9 @@ interface ActionResult {
   error?: string;
   stillListed?: boolean;
   diagnostics?: AdapterDiagnostics;
+  /** A second result for a buy that first came back `timeout_unknown`:
+   * EA's answer arrived after all (lib/act-auth.ts). */
+  late?: boolean;
 }
 
 /** `action_result` is the one adapter -> content message that carries a MAC
@@ -241,10 +249,15 @@ function trimAuction(a: NormalisedListing, seenAt: number): TrimmedAuction {
 function emitListings(url: string, listings: NormalisedListing[], entities?: Map<string, unknown>): TrimmedAuction[] {
   const seenAt = now();
   const auctions: TrimmedAuction[] = [];
+  // `buyable` tells content up front which listings a buy could go through
+  // for, so it never spends an attempt on one the adapter would refuse
+  // (engine/ranker.ts drops the rest). Under no shape at all, nothing is.
+  const shape: ServiceShape | null = selectShape(servicesRoot()).shape;
   for (let i = 0; i < listings.length; i++) {
     const trimmed = trimAuction(listings[i]!, seenAt);
+    const seen = rememberListing(trimmed, entities ? apply(mapGet, entities, [trimmed.tradeId]) : undefined);
+    trimmed.buyable = shape !== null && (!shape.buysOnEntity || seen.entity !== undefined);
     auctions[auctions.length] = trimmed;
-    rememberListing(trimmed, entities ? apply(mapGet, entities, [trimmed.tradeId]) : undefined);
   }
   stats.parsed++;
   post('auctions', { url, seenAt, auctions, stats: { ...stats } });
@@ -283,7 +296,7 @@ const MAX_REMEMBERED_LISTINGS = 5000;
 const lastSeenListings = new Map<string, SeenListing>();
 let rememberedListings = 0;
 
-function rememberListing(a: TrimmedAuction, entity: unknown): void {
+function rememberListing(a: TrimmedAuction, entity: unknown): SeenListing {
   const previous = apply(mapGet, lastSeenListings, [a.tradeId]) as SeenListing | undefined;
   if (!previous) {
     if (++rememberedListings > MAX_REMEMBERED_LISTINGS) {
@@ -294,7 +307,56 @@ function rememberListing(a: TrimmedAuction, entity: unknown): void {
   // A passive sighting after an act search keeps the entity: it is still
   // the same listing (a relist gets a new tradeId).
   const keep = entity ?? previous?.entity;
-  apply(mapSet, lastSeenListings, [a.tradeId, keep === undefined ? { buyNow: a.buyNow, expiresAt: a.expiresAt } : { buyNow: a.buyNow, expiresAt: a.expiresAt, entity: keep }]);
+  const seen: SeenListing = keep === undefined ? { buyNow: a.buyNow, expiresAt: a.expiresAt } : { buyNow: a.buyNow, expiresAt: a.expiresAt, entity: keep };
+  apply(mapSet, lastSeenListings, [a.tradeId, seen]);
+  return seen;
+}
+
+/** A mixed page: some entries unreadable. Not a failed response (the rest
+ * are recorded), but counted and logged, so a partial shape change shows. */
+function skippedEntries(source: string): (count: number) => void {
+  return (count) => {
+    stats.failed++;
+    adapterLog.add(`${source}: skipped ${count} unreadable entries`);
+  };
+}
+
+// ---- the observable shape's search hook (main/search-hook.ts) -------------
+
+/** A search the page itself ran, seen through the hook: record its
+ * listings with their entities, so the observable shape can buy them. An
+ * unreadable response is only logged; the page's search is not ours to
+ * fail, and passive observation reports the network side anyway. */
+function onHookedSearch(response: unknown): void {
+  let entries: unknown[];
+  let listings: NormalisedListing[];
+  try {
+    entries = extractListingArray(response, { requireSuccess: true });
+    listings = normaliseListings(entries, skippedEntries('hook'));
+  } catch (err) {
+    adapterLog.add(`hook: ${describeError(err)}`);
+    return;
+  }
+  lastMarketResponse = { source: 'hook:search', at: now(), value: response };
+  emitListings('hook:search', listings, entitiesByTradeId(entries));
+}
+
+const searchHook = createSearchHook(onHookedSearch);
+
+function ensureSearchHook(selection: ShapeSelection): void {
+  if (selection.shape?.name !== 'observable') return;
+  if (!searchHook.isInstalled(servicesRoot()) && searchHook.ensure(servicesRoot())) adapterLog.add('search hook installed');
+}
+
+/** Each readable entry by its tradeId: the observable shape's buy acts on
+ * the entity itself (main/shape-observable.ts). */
+function entitiesByTradeId(entries: unknown[]): Map<string, unknown> {
+  const entities = new Map<string, unknown>();
+  for (let i = 0; i < entries.length; i++) {
+    const tradeId = normaliseListing(entries[i])?.tradeId;
+    if (tradeId) apply(mapSet, entities, [tradeId, entries[i]]);
+  }
+  return entities;
 }
 
 function handleBody(url: string, body: unknown): void {
@@ -321,7 +383,7 @@ function handleBody(url: string, body: unknown): void {
 
   let listings: NormalisedListing[];
   try {
-    listings = normaliseListings(auctionInfo);
+    listings = normaliseListings(auctionInfo, skippedEntries('passive'));
   } catch (err) {
     // Entries there, none readable: the same payload change, one level down.
     shapeFailure(err instanceof Error ? err.message : String(err));
@@ -459,13 +521,17 @@ if (typeof nativeFetch === 'function' && responseClone && responseText) {
 // (main/shapes.ts). Every error, and every refusal, is also written to the
 // adapter's log for the diagnostics report.
 
+/** What content hears about a failed call: the message as before (the
+ * autobuyer matches EA's "sold"/"expired" wording in it). */
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** Post a failed result, and log it. */
-function fail(action: ActionResult['action'], requestId: string, requestedAt: number, error: string | undefined): void {
-  adapterLog.add(`${action} failed: ${error ?? 'unknown error'}`);
+/** Post a failed result, and log it. The log gets `logText` when given —
+ * `describeError`'s allowlist for anything EA's code threw, never EA's own
+ * message text, which could quote a coin balance. */
+function fail(action: ActionResult['action'], requestId: string, requestedAt: number, error: string | undefined, logText?: string): void {
+  adapterLog.add(`${action} failed: ${logText ?? error ?? 'unknown error'}`);
   postResult({ action, requestId, ok: false, requestedAt, completedAt: now(), error });
 }
 
@@ -475,24 +541,18 @@ async function actSearch(requestId: string, filter: FilterCriteria): Promise<voi
   const shape = selection.shape;
   if (!result.ok || !shape) return fail('search', requestId, requestedAt, result.reason);
   try {
-    const { response, entries } = await shape.search(servicesRoot() as Record<string, unknown>, filter);
+    // `unhooked`: the search hook stands aside for our own search, which is
+    // recorded right here (the call into EA is synchronous; see
+    // main/search-hook.ts).
+    const services = servicesRoot() as Record<string, unknown>;
+    const { response, entries } = await searchHook.unhooked(() => shape.search(services, filter));
     lastMarketResponse = { source: 'act:search', at: now(), value: response };
-    const listings = normaliseListings(entries);
-    let entities: Map<string, unknown> | undefined;
-    if (shape.buysOnEntity) {
-      // Keep each readable entry by its tradeId: this shape's buy acts on
-      // the entity itself (main/shape-observable.ts).
-      entities = new Map();
-      for (let i = 0; i < entries.length; i++) {
-        const tradeId = normaliseListing(entries[i])?.tradeId;
-        if (tradeId) apply(mapSet, entities, [tradeId, entries[i]]);
-      }
-    }
-    emitListings('act:search', listings, entities);
+    const listings = normaliseListings(entries, skippedEntries('search'));
+    emitListings('act:search', listings, shape.buysOnEntity ? entitiesByTradeId(entries) : undefined);
     adapterLog.add(`search ok (${shape.name}): ${listings.length} listings`);
     postResult({ action: 'search', requestId, ok: true, requestedAt, completedAt: now() });
   } catch (err) {
-    fail('search', requestId, requestedAt, errorText(err));
+    fail('search', requestId, requestedAt, errorText(err), describeError(err));
   }
 }
 
@@ -516,11 +576,25 @@ async function actBuy(requestId: string, tradeId: string, price: number): Promis
   const entity = (apply(mapGet, lastSeenListings, [tradeId]) as SeenListing | undefined)?.entity;
   if (shape.buysOnEntity && entity === undefined) return fail('buy', requestId, requestedAt, ACT_ERROR.listingEntityUnknown);
   try {
-    await shape.buy(servicesRoot() as Record<string, unknown>, { tradeId, price, entity });
+    await shape.buy(servicesRoot() as Record<string, unknown>, {
+      tradeId,
+      price,
+      entity,
+      // EA answered after we reported `timeout_unknown`: say how it went,
+      // in a second signed result content is waiting for.
+      onLate: (bought) => {
+        adapterLog.add(`late buy answer (${shape.name}): ${bought ? 'bought' : 'not bought'}`);
+        postResult({ action: 'buy', requestId, ok: bought, late: true, requestedAt, completedAt: now() });
+      },
+    });
     adapterLog.add(`buy ok (${shape.name})`);
     postResult({ action: 'buy', requestId, ok: true, requestedAt, completedAt: now() });
   } catch (err) {
-    fail('buy', requestId, requestedAt, errorText(err));
+    if (err instanceof TimeoutUnknownError) {
+      fail('buy', requestId, requestedAt, ACT_ERROR.timeoutUnknown, `${ACT_ERROR.timeoutUnknown}: ${err.message}`);
+      return;
+    }
+    fail('buy', requestId, requestedAt, errorText(err), describeError(err));
   }
 }
 
@@ -533,7 +607,7 @@ async function actReadResult(requestId: string, tradeId: string): Promise<void> 
     const stillListed = await shape.readResult(servicesRoot() as Record<string, unknown>, tradeId);
     postResult({ action: 'readResult', requestId, ok: true, requestedAt, completedAt: now(), stillListed });
   } catch (err) {
-    fail('readResult', requestId, requestedAt, errorText(err));
+    fail('readResult', requestId, requestedAt, errorText(err), describeError(err));
   }
 }
 
@@ -559,6 +633,7 @@ function diagnosticsReport(): AdapterDiagnostics {
     globals: {
       services: services === null ? 'null' : typeof services,
       UTSearchCriteriaDTO: typeof (window as unknown as Record<string, unknown>).UTSearchCriteriaDTO,
+      searchHook: searchHook.isInstalled(services) ? 'installed' : 'not installed',
     },
     lastMarketResponse: last ? { source: last.source, at: last.at, shape: describeKeys(last.value, 6) } : null,
     stats: { ...stats },
@@ -572,7 +647,7 @@ function actDiagnostics(requestId: string): void {
     adapterLog.add('diagnostics requested');
     postResult({ action: 'diagnostics', requestId, ok: true, requestedAt, completedAt: now(), diagnostics: diagnosticsReport() });
   } catch (err) {
-    fail('diagnostics', requestId, requestedAt, errorText(err));
+    fail('diagnostics', requestId, requestedAt, errorText(err), describeError(err));
   }
 }
 
@@ -647,3 +722,15 @@ window.addEventListener('message', (event: MessageEvent) => {
 
 post('ready', { channel: ADAPTER_CHANNEL });
 runProbeAndReport();
+// `window.services` appears some time after document_start, and the page
+// may rebuild it; the probe installs the search hook whenever it runs, and
+// this keeps checking between act calls so the human's first searches are
+// seen too. A few property reads every couple of seconds.
+setTimer(function recheck() {
+  try {
+    ensureSearchHook(selectShape(servicesRoot()));
+  } catch {
+    /* never break the page */
+  }
+  setTimer(recheck, SEARCH_HOOK_RECHECK_MS);
+}, SEARCH_HOOK_RECHECK_MS);

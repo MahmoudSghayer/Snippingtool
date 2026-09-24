@@ -35,9 +35,22 @@ const MAX_NODES = 1500;
  * and a rejected report is one content never sees. */
 const MAX_KEY_LENGTH = 120;
 
+/** An array's length, read through its own property descriptor: no page
+ * code runs (a Proxy's trap aside, which the caller guards). */
+function arrayLength(value: unknown[]): string {
+  const descriptor = getOwnPropertyDescriptor(value, 'length');
+  return descriptor && 'value' in descriptor && typeof descriptor.value === 'number' ? String(descriptor.value) : '?';
+}
+
 function typeName(value: unknown): string {
   if (value === null) return 'null';
-  if (isArray(value)) return `array(${value.length})`;
+  if (isArray(value)) {
+    try {
+      return `array(${arrayLength(value)})`;
+    } catch {
+      return 'array(?)';
+    }
+  }
   return typeof value;
 }
 
@@ -90,7 +103,14 @@ export function describeKeys(value: unknown, depth: number): DiagnosticsKeyTree 
 
     if (isArray(current)) {
       const out: Record<string, DiagnosticsKeyTree> = { '#array': typeName(current) };
-      if (current.length > 0) out['[0]'] = walk(current[0], remaining - 1);
+      // `[0]` through its descriptor too: an index can be a getter.
+      let first: PropertyDescriptor | undefined;
+      try {
+        first = getOwnPropertyDescriptor(current, '0');
+      } catch {
+        first = undefined;
+      }
+      if (first) out['[0]'] = 'value' in first ? walk(first.value, remaining - 1) : 'getter';
       return out;
     }
 

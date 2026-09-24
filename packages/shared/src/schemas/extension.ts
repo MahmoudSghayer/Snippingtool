@@ -4,7 +4,7 @@ import { FEATURE_KEYS } from '../constants/plans.js';
 
 import { deviceFingerprintSchema } from './auth.js';
 import { userSettingsSchema } from './settings.js';
-import { entitlementSnapshotSchema, licenseDtoSchema, subscriptionDtoSchema } from './subscriptions.js';
+import { licenseDtoSchema, subscriptionDtoSchema } from './subscriptions.js';
 
 /** `POST /extension/bootstrap` — called once on startup (and after login).
  * Returns everything the background service worker needs to decide "am I
@@ -36,28 +36,12 @@ export const bootstrapResponseSchema = z.object({
 });
 export type BootstrapResponse = z.infer<typeof bootstrapResponseSchema>;
 
-/** The claims inside `entitlementBlob`: a compact EdDSA JWS
- * (`base64url(header).base64url(claims).base64url(signature)`) that
- * `apps/api/src/lib/entitlements.ts` signs with `ENTITLEMENT_SIGNING_KEY`.
- * The extension verifies it against the public key baked into its build and
- * then reads features, expiry and the kill switch *only* from these claims
- * whenever it answers from its cache: the response fields cached next to the
- * blob are plain `storage.local` data anyone can edit.
- *
- * `killSwitchActive` is optional only so blobs signed before it became a
- * claim still verify; the extension never reads a missing claim as "off" —
- * it asks `GET /extension/kill-switch` instead, and assumes "on" if it can't. */
-export const entitlementBlobClaimsSchema = z.object({
-  snapshot: entitlementSnapshotSchema,
-  deviceId: z.string().min(1),
-  killSwitchActive: z.boolean().optional(),
-  /** userId */
-  sub: z.string().min(1),
-  /** seconds since epoch, as JWT `iat`/`exp` */
-  iat: z.number().int(),
-  exp: z.number().int(),
-});
-export type EntitlementBlobClaims = z.infer<typeof entitlementBlobClaimsSchema>;
+// `entitlementBlobClaimsSchema` lives in ./entitlement.js (re-exported
+// here): the extension's background imports it at runtime, and anything it
+// pulls from this module brings this module's other top-level schemas with
+// it, including `z.enum(FEATURE_KEYS)` and so the `automation.autobuyer`
+// string the listable `ledger` build must never contain.
+export { entitlementBlobClaimsSchema, type EntitlementBlobClaims } from './entitlement.js';
 
 /** `POST /extension/heartbeat` — every 10 minutes via an MV3 `alarms` tick
  * (never a `setInterval` in the service worker). Cheap refresh of the same

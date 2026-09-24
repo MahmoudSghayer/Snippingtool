@@ -160,3 +160,54 @@ describe('AssistEngine keyboard cycling', () => {
     expect(onAttempt).not.toHaveBeenCalled();
   });
 });
+
+describe('AssistEngine: what reaches EA, and what the governor charges', () => {
+  it('skips a candidate the adapter cannot buy and takes the next one', async () => {
+    const buy = vi.fn(async () => ({ ok: true, latencyMs: 5 }));
+    const { engine } = makeEngine({
+      ranked: [opportunity({ tradeId: 'passive-only', buyable: false }), opportunity({ tradeId: 'buyable' })],
+      adapter: fakeAdapter({ buy }),
+    });
+    await engine.confirmBuy();
+    expect(buy).toHaveBeenCalledTimes(1);
+    expect(buy).toHaveBeenCalledWith('buyable', 1000);
+  });
+
+  it.each(['price_mismatch', 'listing_unknown', 'listing_entity_unknown', 'adapter_unauthenticated'])(
+    'refunds the governor when the adapter refuses with %s (the buy never reached EA)',
+    async (error) => {
+      const buy = vi.fn(async () => ({ ok: false, error, latencyMs: 1 }));
+      const { engine, governor } = makeEngine({ adapter: fakeAdapter({ buy }) });
+      governor.allow({ kind: 'search' });
+      const before = governor.snapshot();
+      await engine.confirmBuy();
+      expect(governor.snapshot()).toEqual(before);
+    },
+  );
+
+  it('keeps the charge for a failure that did reach EA', async () => {
+    const buy = vi.fn(async () => ({ ok: false, error: 'bid reported success: false (status 470)', latencyMs: 1 }));
+    const { engine, governor } = makeEngine({ adapter: fakeAdapter({ buy }) });
+    governor.allow({ kind: 'search' });
+    await engine.confirmBuy();
+    expect(governor.snapshot().coinFlowLastHour).toBe(1000);
+  });
+
+  it('records an unknown outcome on timeout_unknown, then the trade if the late answer says it went through', async () => {
+    let resolveLate: (o: { ok: boolean; latencyMs: number }) => void = () => undefined;
+    const late = new Promise<{ ok: boolean; latencyMs: number }>((r) => (resolveLate = r));
+    const buy = vi.fn(async () => ({ ok: false, error: 'timeout_unknown', latencyMs: 12_000, late }));
+    const { engine, onAttempt, onTrade, governor } = makeEngine({ adapter: fakeAdapter({ buy }) });
+    governor.allow({ kind: 'search' });
+    await engine.confirmBuy();
+    expect(onAttempt).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'attempted', errorCode: 'timeout_unknown' }));
+    expect(onTrade).not.toHaveBeenCalled();
+    // Not refunded: it may well have gone through.
+    expect(governor.snapshot().coinFlowLastHour).toBe(1000);
+
+    resolveLate({ ok: true, latencyMs: 13_000 });
+    await vi.waitFor(() => expect(onTrade).toHaveBeenCalledWith(expect.objectContaining({ tradeId: 'trade-1', buyPrice: 1000 })));
+    expect(onAttempt).toHaveBeenLastCalledWith(expect.objectContaining({ outcome: 'success', errorCode: null }));
+    expect(engine.sessionPnl.trades).toBe(1);
+  });
+});

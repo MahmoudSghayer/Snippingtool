@@ -26,8 +26,9 @@
  */
 
 import {
+  AUTOMATION_FEATURE_KEYS,
   entitlementBlobClaimsSchema,
-  FEATURE_KEYS,
+  LISTABLE_FEATURE_KEYS,
   type BootstrapRequest,
   type BootstrapResponse,
   type EntitlementBlobClaims,
@@ -167,7 +168,15 @@ export async function readUnverifiedCache(): Promise<CachedEntitlement | null> {
   return getLocal<CachedEntitlement | null>(CACHE_KEY, null);
 }
 
-const KNOWN_FEATURES: ReadonlySet<string> = new Set(FEATURE_KEYS);
+/** The feature keys this build knows; anything else in the signed claims
+ * is dropped. Per build target: `new Set(FEATURE_KEYS)` bundled every key,
+ * `automation.autobuyer` included, into the listable `ledger` build's
+ * background.js, which must never mention the autobuyer
+ * (test/e2e/extension.spec.ts). `VITE_AUTOMATION` is a build-time constant,
+ * so in `ledger` the automation list is folded away with the branch. */
+const KNOWN_FEATURES: ReadonlySet<string> = new Set<string>(
+  import.meta.env.VITE_AUTOMATION === '1' ? [...LISTABLE_FEATURE_KEYS, ...AUTOMATION_FEATURE_KEYS] : LISTABLE_FEATURE_KEYS,
+);
 
 /** The cached entitlement, verified on this read: `null` if there is none,
  * its `cachedAt` is more than 5 minutes ahead of `now`, or its blob fails

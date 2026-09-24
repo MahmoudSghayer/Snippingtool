@@ -34,6 +34,9 @@ export interface OpportunityCandidate {
    * tradeId, price)` would be called with if this candidate is taken. */
   price: number;
   summary: PriceSummary;
+  /** `false` when the adapter said it could not buy this listing
+   * (TrimmedAuction.buyable): never ranked, so never attempted. */
+  buyable?: boolean;
 }
 
 export interface ScoredOpportunity extends OpportunityCandidate {
@@ -76,10 +79,12 @@ export interface RankOptions {
 }
 
 /** Highest EV first. Ties broken by lower price (cheaper capital tied up for
- * the same expected return). */
+ * the same expected return). A candidate the adapter said it cannot buy
+ * (`buyable: false`) is left out altogether. */
 export function rankCandidates(candidates: OpportunityCandidate[], opts: RankOptions = {}): ScoredOpportunity[] {
   const minEv = opts.minEv ?? 0;
   return candidates
+    .filter((c) => c.buyable !== false)
     .map((c) => ({ ...c, ...scoreOpportunity(c.summary, c.price) }))
     .filter((c) => c.ev >= minEv)
     .sort((a, b) => (b.ev !== a.ev ? b.ev - a.ev : a.price - b.price));

@@ -143,20 +143,22 @@ describe('observable shape: search', () => {
     expect(result.data.ok).toBe(true);
     const [criteria, page] = svc.searchTransferMarket.mock.calls[0]!;
     expect(page).toBe(1);
-    expect(criteria).toMatchObject({ maskedDefId: 7, minBuy: 1_000, maxBuy: 10_000, minRating: 85, maxRating: 87 });
-    expect(lastAuctions().map((a) => [a.tradeId, a.buyNow, a.resourceId, a.rating])).toEqual([
-      ['101', 9_000, 7, 86],
-      ['102', 9_500, 7, 86],
-      ['103', 9_900, 7, 86],
+    expect(criteria).toMatchObject({ type: 'player', maskedDefId: 7, minBuy: 1_000, maxBuy: 10_000, minRating: 85, maxRating: 87 });
+    expect(lastAuctions().map((a) => [a.tradeId, a.buyNow, a.resourceId, a.rating, a.buyable])).toEqual([
+      ['101', 9_000, 7, 86, true],
+      ['102', 9_500, 7, 86, true],
+      ['103', 9_900, 7, 86, true],
     ]);
+    // The search hook stands aside for the adapter's own search: one report, not two.
+    expect(posted.filter((m) => m.kind === 'auctions')).toHaveLength(1);
   });
 
   it('refuses a filter field its criteria builder does not map, instead of searching wider', async () => {
     const svc = observableServices();
     install(svc.services);
-    const result = await act({ action: 'search', filter: { maxPrice: 5_000, club: 10 } });
+    const result = await act({ action: 'search', filter: { maxPrice: 5_000, chemistryStyle: 3 } });
     expect(result.data.ok).toBe(false);
-    expect(result.data.error).toMatch(/club/);
+    expect(result.data.error).toMatch(/chemistryStyle/);
     expect(svc.searchTransferMarket).not.toHaveBeenCalled();
   });
 });
@@ -168,7 +170,18 @@ describe('promise shape: search', () => {
     install(svc.services);
     expect((await act({ action: 'search', filter: { maxPrice: 2_000 } })).data.ok).toBe(true);
     expect(svc.search).toHaveBeenCalledWith(expect.objectContaining({ maxBuy: 2_000 }));
-    expect(lastAuctions()).toMatchObject([{ tradeId: '201', buyNow: 1_100, resourceId: 5 }]);
+    expect(lastAuctions()).toMatchObject([{ tradeId: '201', buyNow: 1_100, resourceId: 5, buyable: true }]);
+  });
+
+  it('marks passively seen listings buyable, since it buys by tradeId', async () => {
+    install(promiseServices().services);
+    await act({ action: 'diagnostics' });
+    const url = 'https://utas.mob.v4.prd.futc-ext.gcp.ea.com/ut/game/fc26/transfermarket';
+    const res = new Response(JSON.stringify({ auctionInfo: [utasAuction({ tradeId: 203, buyNowPrice: 700 })] }));
+    (res as unknown as { __testUrl: string }).__testUrl = url;
+    nativeFetch.mockResolvedValueOnce(res);
+    await window.fetch(url);
+    await vi.waitFor(() => expect(lastAuctions()).toMatchObject([{ tradeId: '203', buyable: true }]));
   });
 
   it('observes an observable the repository hands back instead of treating it as the result', async () => {
@@ -198,6 +211,7 @@ describe('garbage payloads are errors, never ok with an empty list', () => {
 
   it.each([
     ['success: false', { success: false, status: 461 }],
+    ['no success key at all', { data: { items: [] } }],
     ['no data', { success: true }],
     ['a null item list', { success: true, data: { items: null } }],
     ['a non-object response', 'ok'],
@@ -290,6 +304,8 @@ describe('buy via the observable shape', () => {
     nativeFetch.mockResolvedValueOnce(res);
     await window.fetch(url);
     await vi.waitFor(() => expect(posted.filter((m) => m.kind === 'auctions')).toHaveLength(1));
+    // Content is told up front, so it never attempts it.
+    expect(lastAuctions()).toMatchObject([{ tradeId: '404', buyable: false }]);
 
     expect((await act({ action: 'buy', tradeId: '404', price: 5_000 })).data).toMatchObject({ ok: false, error: 'listing_entity_unknown' });
     expect(svc.bid).not.toHaveBeenCalled();
@@ -313,6 +329,53 @@ describe('buy via the observable shape', () => {
     const result = await act({ action: 'readResult', tradeId: '1' });
     expect(result.data.ok).toBe(false);
     expect(result.data.error).toMatch(/readResult/);
+  });
+});
+
+describe('observable shape: the human\'s own searches', () => {
+  it('records the entities of a search the page runs itself, so its listings are buyable', async () => {
+    const svc = observableServices();
+    install(svc.services);
+    // Any act call runs the probe, which installs the search hook.
+    await act({ action: 'diagnostics' });
+    posted = [];
+
+    const entity = itemEntity({ tradeId: 601, buyNowPrice: 4_000 });
+    const pageObservable = observable({ success: true, data: { items: [entity] } });
+    svc.searchTransferMarket.mockReturnValueOnce(pageObservable);
+    const pageCallback = vi.fn();
+    // What EA's own UI does when the human clicks Search:
+    const returned = (svc.services.Item.searchTransferMarket as (c: unknown, p: number) => typeof pageObservable)({ maxBuy: 5_000 }, 1);
+    expect(returned).toBe(pageObservable);
+    returned.observe({}, pageCallback);
+
+    await vi.waitFor(() => expect(pageCallback).toHaveBeenCalledWith(pageObservable, { success: true, data: { items: [entity] } }));
+    await vi.waitFor(() => expect(lastAuctions()).toMatchObject([{ tradeId: '601', buyable: true }]));
+    expect(svc.searchTransferMarket).toHaveBeenCalledWith({ maxBuy: 5_000 }, 1);
+
+    expect((await act({ action: 'buy', tradeId: '601', price: 4_000 })).data).toMatchObject({ ok: true });
+    expect(svc.bid.mock.calls[0]![0]).toBe(entity);
+  });
+
+  it('leaves the page\'s search alone when the response is not one it can read', async () => {
+    const svc = observableServices();
+    install(svc.services);
+    await act({ action: 'diagnostics' });
+    posted = [];
+    const pageObservable = observable({ success: false, status: 500 });
+    svc.searchTransferMarket.mockReturnValueOnce(pageObservable);
+    const pageCallback = vi.fn();
+    (svc.services.Item.searchTransferMarket as (c: unknown, p: number) => typeof pageObservable)({}, 1).observe({}, pageCallback);
+    await vi.waitFor(() => expect(pageCallback).toHaveBeenCalled());
+    for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 5));
+    expect(posted.filter((m) => m.kind === 'auctions')).toHaveLength(0);
+  });
+
+  it('reports the hook in diagnostics', async () => {
+    install(observableServices().services);
+    await act({ action: 'diagnostics' });
+    const report = (await act({ action: 'diagnostics' })).data.diagnostics as { globals: Record<string, string> };
+    expect(report.globals.searchHook).toBe('installed');
   });
 });
 

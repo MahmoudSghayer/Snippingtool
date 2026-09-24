@@ -184,3 +184,17 @@ describe('rotateFilters', () => {
     expect(result.active).toEqual(['a', 'b']);
   });
 });
+
+describe('rankCandidates: buyable', () => {
+  const candidate: OpportunityCandidate = {
+    resourceId: 1,
+    tradeId: 'b1',
+    price: 8000,
+    summary: summary({ median: 10_000, sellThrough: 0.6 }),
+  };
+
+  it('drops a listing the adapter said it cannot buy, and keeps one with no flag', () => {
+    const ranked = rankCandidates([{ ...candidate, tradeId: 'nope', buyable: false }, candidate, { ...candidate, tradeId: 'yes', buyable: true }]);
+    expect(ranked.map((r) => r.tradeId).sort()).toEqual(['b1', 'yes']);
+  });
+});

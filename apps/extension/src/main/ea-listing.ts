@@ -13,10 +13,14 @@
  *     fields on the entity, auction fields behind `getAuctionData()` or on
  *     `_auction`;
  * and the card id may be called `resourceId`, `definitionId` or
- * `maskedDefId`. Each field is read defensively: an entry that does not
+ * `maskedDefId`. Never `assetId`: that is the base player, shared by every
+ * version of a card, so pricing a listing by it would mix a special card's
+ * listings in with the base card's. Each field is read defensively: an entry that does not
  * yield a tradeId, a positive card id and numeric prices is `null`, never a
  * half-filled listing with zeroes in it.
  */
+
+import { ShapeError } from './ea-response.js';
 
 const toNumber = Number;
 const toStr = String;
@@ -82,7 +86,7 @@ export function normaliseListing(entry: unknown): NormalisedListing | null {
   const tradeIdRaw = auction.tradeId;
   if ((typeof tradeIdRaw !== 'number' && typeof tradeIdRaw !== 'string') || toStr(tradeIdRaw) === '') return null;
 
-  const resourceId = num(firstPresent(item.resourceId, item.definitionId, item.maskedDefId, item.assetId), 0);
+  const resourceId = num(firstPresent(item.resourceId, item.definitionId, item.maskedDefId), 0);
   const listing: NormalisedListing = {
     tradeId: toStr(tradeIdRaw),
     resourceId,
@@ -107,15 +111,18 @@ export function normaliseListing(entry: unknown): NormalisedListing | null {
 
 /** Every readable listing in a page of results. An empty page is an empty
  * list; a non-empty page none of which can be read is a shape change, and
- * throws — reporting "no results" there would be a silent success. */
-export function normaliseListings(entries: unknown[]): NormalisedListing[] {
+ * throws — reporting "no results" there would be a silent success. On a
+ * mixed page, `onSkipped` hears how many entries were unreadable, so a
+ * partial shape change is visible rather than just thinner results. */
+export function normaliseListings(entries: unknown[], onSkipped?: (count: number) => void): NormalisedListing[] {
   const out: NormalisedListing[] = [];
   for (let i = 0; i < entries.length; i++) {
     const listing = normaliseListing(entries[i]);
     if (listing) out[out.length] = listing;
   }
   if (entries.length > 0 && out.length === 0) {
-    throw new Error(`none of the ${entries.length} search results could be read as a listing`);
+    throw new ShapeError(`none of the ${entries.length} search results could be read as a listing`);
   }
+  if (out.length < entries.length) onSkipped?.(entries.length - out.length);
   return out;
 }

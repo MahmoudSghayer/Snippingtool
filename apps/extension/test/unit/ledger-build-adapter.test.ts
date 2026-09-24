@@ -12,7 +12,7 @@
 // without the nonce", not "absent".
 
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -99,6 +99,20 @@ function loadPage(nonce: string | null): Page {
 async function settle(): Promise<void> {
   for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 5));
 }
+
+describe('dist/ledger contents', () => {
+  // The same rule as test/e2e/extension.spec.ts's "ledger build contents"
+  // suite, run here too so a unit run catches it: the listable build must
+  // not mention the autobuyer anywhere — not even as a feature-key string.
+  it('never mentions "autobuyer", in any file', () => {
+    const files = readdirSync(outDir, { recursive: true, withFileTypes: true }).filter((e) => e.isFile());
+    expect(files.length).toBeGreaterThan(0);
+    for (const file of files) {
+      const full = path.join(file.parentPath, file.name);
+      expect(readFileSync(full, 'utf8').toLowerCase().includes('autobuyer'), `${path.relative(outDir, full)} mentions autobuyer`).toBe(false);
+    }
+  });
+});
 
 describe('dist/ledger manifest', () => {
   it('runs the ISOLATED-world nonce handoff at document_start, ahead of the MAIN-world adapter', () => {

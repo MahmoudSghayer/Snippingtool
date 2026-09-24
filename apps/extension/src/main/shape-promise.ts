@@ -14,7 +14,7 @@
  * into a silent success.
  */
 import { normaliseListing } from './ea-listing.js';
-import { extractListingArray, settle } from './ea-response.js';
+import { ShapeError, extractListingArray, settle } from './ea-response.js';
 
 import type { BuyTarget, ServiceShape } from './shapes.js';
 import type { FilterCriteria } from '@sl/shared';
@@ -56,7 +56,7 @@ export function promiseSearchCriteria(filter: FilterCriteria): Obj {
 
 async function callSearch(services: Obj, criteria: Obj, timeoutMs: number): Promise<{ response: unknown; entries: unknown[] }> {
   const search = method(services, 'Item', 'search');
-  if (!search) throw new Error('services.Item.repository.search vanished after the probe passed');
+  if (!search) throw new ShapeError('services.Item.repository.search vanished after the probe passed');
   const response = await settle(apply(search.fn, search.target, [criteria]), timeoutMs);
   return { response, entries: extractListingArray(response) };
 }
@@ -74,14 +74,14 @@ export function createPromiseShape(timeoutMs: number): ServiceShape {
     search: (services, filter) => callSearch(services, promiseSearchCriteria(filter), timeoutMs),
     async buy(services, target: BuyTarget) {
       const buyNow = method(services, 'Transfer', 'buyNow');
-      if (!buyNow) throw new Error('services.Transfer.repository.buyNow vanished after the probe passed');
-      const result = await settle(apply(buyNow.fn, buyNow.target, [target.tradeId]), timeoutMs);
+      if (!buyNow) throw new ShapeError('services.Transfer.repository.buyNow vanished after the probe passed');
       // Assumed: resolving means the app accepted the click. An explicit
       // `success: false` (should EA resolve failures rather than reject)
       // is a failure. Day-one checklist: confirm what a failed buyNow does.
-      if (result && typeof result === 'object' && (result as Obj).success === false) {
-        throw new Error('buyNow resolved with success: false');
-      }
+      const accepted = (result: unknown): boolean => !(result && typeof result === 'object' && (result as Obj).success === false);
+      const onLate = target.onLate ? (result: unknown) => target.onLate!(accepted(result)) : undefined;
+      const result = await settle(apply(buyNow.fn, buyNow.target, [target.tradeId]), timeoutMs, onLate);
+      if (!accepted(result)) throw new ShapeError('buyNow resolved with success: false');
     },
     async readResult(services, tradeId) {
       const { entries } = await callSearch(services, { tradeIds: [tradeId] }, timeoutMs);

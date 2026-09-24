@@ -227,15 +227,33 @@ never `ok` with no listings. An empty list is still a real "no results".
 
 Shape-specific limits, all to confirm on day one:
 
-- The observable shape's search criteria map only `resourceId`
-  (`maskedDefId`), `minPrice`/`maxPrice` (`minBuy`/`maxBuy`) and
-  `minRating`/`maxRating` (field names guessed). A saved filter using any
-  other field is refused (`cannot search by …`) rather than searched wider.
-  It builds the page's own `UTSearchCriteriaDTO` when one exists.
-- The observable shape buys on the item entity, so it can only buy listings
-  the extension's own search returned; one seen only passively is refused
-  with `listing_entity_unknown`. The entity's price is re-checked too, on
-  top of the Task 2 price check.
+- The observable shape's search criteria use the community-known
+  `UTSearchCriteriaDTO` field names, none verified: `type: 'player'`,
+  `resourceId` → `maskedDefId`, `minPrice`/`maxPrice` → `minBuy`/`maxBuy`,
+  `position` → `position`, `nationality` → `nation`, `league` → `league`,
+  `club` → `club`, `quality` → `level` (`bronze`/`silver`/`gold`, and
+  `special` → `SP`). Rating has no known DTO field: `minRating`/`maxRating`
+  are a pure guess. Any other field is refused (`cannot search by …`)
+  rather than searched wider. It builds the page's own
+  `UTSearchCriteriaDTO` when one exists.
+- The observable shape buys on the item entity. It gets entities from its
+  own searches and, through a hook on `services.Item.searchTransferMarket`
+  (`main/search-hook.ts`), from searches the human runs in EA's UI: the
+  hook calls the original, adds one observer of its own, and hands the
+  page the original observable untouched. A listing seen only passively
+  (no entity) is sent to content with `buyable: false`, the ranker drops
+  it, and it is never attempted; asked anyway, the adapter refuses with
+  `listing_entity_unknown`. The entity's price is re-checked too, on top of
+  the Task 2 price check. A search response must carry `success: true`.
+- A buy EA has not answered within 12 s is reported as `timeout_unknown`,
+  not as a failure: it may have gone through. It is recorded as
+  `attempted`, stays charged to the governor, is never retried, and if
+  EA's answer arrives later the adapter sends a second, signed `late`
+  result that records the trade. An adapter *refusal* (price mismatch,
+  unknown listing, no entity, no act key) never reached EA, so the
+  governor refunds what it charged for it.
+- The card id is `resourceId`, `definitionId` or `maskedDefId`, never
+  `assetId` (the base player, shared by every version of a card).
 - The observable shape has no verified trade-status call, so `readResult`
   fails loud. (Nothing calls `readResult` today.)
 - The promise shape treats a resolved `buyNow` as success unless it says
@@ -256,6 +274,9 @@ reachable:
    - **Good, observable shape:** `probe.ok: true`, `probe.shape:
      "observable"`; `servicesKeys.Item` lists `searchTransferMarket` and
      `bid` as `"function"`; `globals.UTSearchCriteriaDTO` is `"function"`;
+     `globals.searchHook` is `"installed"`, and the log has `search hook
+     installed`; after the human's own search the log shows no `hook:`
+     errors and `lastMarketResponse.source` is `"hook:search"`;
      `lastMarketResponse.shape` (after an act search) has `success:
      "boolean"` and `data.items["[0]"]` with `getAuctionData: "function"`
      or an `_auction` object, plus one of
@@ -278,12 +299,22 @@ reachable:
    `search ok (<shape>): N listings`, and `lastMarketResponse.source` should
    be `"act:search"`. `search failed: …` there, or `N` at 0 when EA's own UI
    shows results for the same filter, means the criteria field names are
-   wrong: fix the shape's criteria builder.
-6. Only once 1–5 pass: flip a test account to a `ledger-auto`-entitled plan
+   wrong: fix the shape's criteria builder. Repeat with a filter for each
+   of position, nation, league, club and quality, and compare against the
+   same search in EA's UI (the `level`/`SP` and rating names are the
+   likeliest to be wrong). `skipped N unreadable entries` in the log means
+   part of the item shape changed.
+6. Check that the card id lines up: the `resourceId` the panel shows for a
+   listing must be the same number EA's UI uses for that exact card
+   version (not the base player's `assetId`).
+7. Only once 1–6 pass: flip a test account to a `ledger-auto`-entitled plan
    and watch one real, human-confirmed `assist.confirmBuy()` (M2, not M3) go
    through (`buy ok (<shape>)` in the log) before trusting the automated
    loop at all. Confirm what a *failed* buy looks like too (outbid or
-   expired listing): it must show as `buy failed`, never `buy ok`.
+   expired listing): it must show as `buy failed`, never `buy ok`. Note
+   how long a real `bid` takes to answer: a `timeout_unknown` in the log
+   means EA took over 12 s, and a following `late buy answer` line says
+   how it went. Several of those mean the limit is too short.
 
 ## 5. Safety governor: thresholds and math
 
@@ -332,6 +363,12 @@ falls back to the shipped default:
   `buy` actions specifically (added to `GovernorSettings` for this file —
   see `packages/shared/src/schemas/settings.ts`, additive/backward-
   compatible).
+
+An allowed buy the adapter then *refuses* before calling EA (price
+mismatch, unknown listing, no entity, no act key) is refunded with
+`Governor.refund(decision)`: it never reached EA, so it must not use up the
+action, buy or coin budget. A buy EA saw, or may have seen
+(`timeout_unknown`), stays charged.
 
 `actionsPerHour` and `sessionLengthMinutes` are **hard stops**: exceeding
 either puts the governor into a cooldown (`cooldownSeconds`, default 20,

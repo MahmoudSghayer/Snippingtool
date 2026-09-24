@@ -23,7 +23,7 @@
 import { ACT_ERROR } from '../lib/act-auth.js';
 
 import { normaliseListing } from './ea-listing.js';
-import { assertSucceeded, extractListingArray, settle } from './ea-response.js';
+import { ShapeError, assertSucceeded, extractListingArray, settle } from './ea-response.js';
 
 import type { BuyTarget, ServiceShape } from './shapes.js';
 import type { FilterCriteria } from '@sl/shared';
@@ -47,26 +47,40 @@ function method(services: unknown, name: string): { target: Obj; fn: (...args: u
 }
 
 /** Filter fields this shape's criteria builder maps, and the criteria
- * field each becomes. Deliberately minimal: price band, card and rating.
- * The rating field names are a guess (day-one checklist). */
+ * field each becomes. Every name is the community-known one on EA's
+ * `UTSearchCriteriaDTO`, none verified (docs/06-extension.md §4): card
+ * (`maskedDefId`), buy-now band (`minBuy`/`maxBuy`), `position`, `nation`,
+ * `league`, `club`, and quality as `level`. Rating has no known DTO field;
+ * `minRating`/`maxRating` are a guess. `minBid`/`maxBid` exist on the DTO
+ * but no filter field feeds them. */
 const CRITERIA_FIELDS: Record<string, string> = {
   resourceId: 'maskedDefId',
   minPrice: 'minBuy',
   maxPrice: 'maxBuy',
   minRating: 'minRating',
   maxRating: 'maxRating',
+  position: 'position',
+  nationality: 'nation',
+  league: 'league',
+  club: 'club',
+  quality: 'level',
 };
+
+/** `quality` values onto `level`: the three metals by name, and special
+ * cards as `SP` (community autobuyers; unverified). */
+const LEVELS: Record<string, string> = { bronze: 'bronze', silver: 'silver', gold: 'gold', special: 'SP' };
 
 /** The search criteria for `filter`: an instance of the app's own
  * `UTSearchCriteriaDTO` when the page has one (what its search form
- * builds), else a plain object. A filter field this builder cannot map is
- * refused rather than dropped — dropping it would search wider than the
- * filter says. */
+ * builds), else a plain object, with `type: 'player'` (every filter is a
+ * player search). A filter field this builder cannot map is refused rather
+ * than dropped — dropping it would search wider than the filter says. */
 export function observableSearchCriteria(filter: FilterCriteria): Obj {
   const f = filter as Obj;
   const unmapped = objectKeys(f).filter((key) => f[key] != null && !apply(hasOwn, CRITERIA_FIELDS, [key]));
+  if (f.quality != null && !apply(hasOwn, LEVELS, [String(f.quality)])) unmapped.push(`quality=${String(f.quality)}`);
   if (unmapped.length > 0) {
-    throw new Error(`the observable shape cannot search by ${unmapped.join(', ')} yet (maps only ${objectKeys(CRITERIA_FIELDS).join(', ')})`);
+    throw new ShapeError(`the observable shape cannot search by ${unmapped.join(', ')} yet (maps only ${objectKeys(CRITERIA_FIELDS).join(', ')})`);
   }
   const Dto = (window as unknown as Obj).UTSearchCriteriaDTO;
   let criteria: Obj = {};
@@ -77,8 +91,10 @@ export function observableSearchCriteria(filter: FilterCriteria): Obj {
       criteria = {};
     }
   }
+  criteria.type = 'player';
   for (const key of objectKeys(CRITERIA_FIELDS)) {
-    if (f[key] != null) criteria[CRITERIA_FIELDS[key]!] = f[key];
+    if (f[key] == null) continue;
+    criteria[CRITERIA_FIELDS[key]!] = key === 'quality' ? LEVELS[String(f[key])] : f[key];
   }
   return criteria;
 }
@@ -88,12 +104,17 @@ function isAsync(value: unknown): boolean {
   return typeof (value as Obj).observe === 'function' || typeof (value as Obj).then === 'function';
 }
 
-async function call(services: Obj, name: string, args: unknown[], timeoutMs: number): Promise<unknown> {
+async function call(services: Obj, name: string, args: unknown[], timeoutMs: number, onLate?: (response: unknown) => void): Promise<unknown> {
   const m = method(services, name);
-  if (!m) throw new Error(`services.Item.${name} vanished after the probe passed`);
+  if (!m) throw new ShapeError(`services.Item.${name} vanished after the probe passed`);
   const returned = apply(m.fn, m.target, args);
-  if (!isAsync(returned)) throw new Error(`services.Item.${name} returned neither an observable nor a promise`);
-  return settle(returned, timeoutMs);
+  if (!isAsync(returned)) throw new ShapeError(`services.Item.${name} returned neither an observable nor a promise`);
+  return settle(returned, timeoutMs, onLate);
+}
+
+/** Only an explicit `success: true` is a bought item. */
+function bidSucceeded(response: unknown): boolean {
+  return response !== null && typeof response === 'object' && (response as Obj).success === true;
 }
 
 export function createObservableShape(timeoutMs: number): ServiceShape {
@@ -108,23 +129,29 @@ export function createObservableShape(timeoutMs: number): ServiceShape {
     async search(services, filter) {
       const criteria = observableSearchCriteria(filter);
       const response = await call(services, 'searchTransferMarket', [criteria, 1], timeoutMs);
-      return { response, entries: extractListingArray(response) };
+      // `success` must be there and true: a list with no verdict is not one.
+      return { response, entries: extractListingArray(response, { requireSuccess: true }) };
     },
     async buy(services, target: BuyTarget) {
       // The price re-check against the adapter's last-seen listing has
       // passed; re-check the entity too, since it is what `bid` acts on.
       const listing = normaliseListing(target.entity);
       if (!listing || listing.tradeId !== target.tradeId || listing.buyNowPrice !== target.price) {
-        throw new Error(ACT_ERROR.priceMismatch);
+        throw new ShapeError(ACT_ERROR.priceMismatch);
       }
-      const response = await call(services, 'bid', [target.entity, target.price], timeoutMs);
-      const r = assertSucceeded(response, 'bid');
-      if (r.success !== true) throw new Error('bid did not report success: true');
+      // A bid EA answers after the adapter stopped waiting is reported
+      // late, through `onLate`: the buy may well have gone through.
+      const onLate = target.onLate ? (response: unknown) => target.onLate!(bidSucceeded(response)) : undefined;
+      // A TimeoutUnknownError propagates as-is: the adapter reports it as
+      // `timeout_unknown`, not as a failed buy.
+      const response = await call(services, 'bid', [target.entity, target.price], timeoutMs, onLate);
+      const r = assertSucceeded(response, 'bid', true);
+      if (!bidSucceeded(r)) throw new ShapeError('bid did not report success: true');
     },
     async readResult() {
       // No verified call for a single trade's status in this shape (a
       // guess would be `refreshAuctions`); fail loud rather than guess.
-      throw new Error('readResult is not supported by the observable shape (no verified trade-status call)');
+      throw new ShapeError('readResult is not supported by the observable shape (no verified trade-status call)');
     },
   };
 }

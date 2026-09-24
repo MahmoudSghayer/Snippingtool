@@ -39,6 +39,14 @@ describe('describeKeys', () => {
     expect(describeKeys({ items: [{ a: 1 }, { a: 2 }] }, 3)).toEqual({ items: { '#array': 'array(2)', '[0]': { a: 'number' } } });
   });
 
+  it('reads an array\'s first element and length without calling a getter', () => {
+    const first = vi.fn(() => ({ a: 1 }));
+    const arr: unknown[] = [];
+    Object.defineProperty(arr, '0', { get: first, enumerable: true, configurable: true });
+    expect(describeKeys({ items: arr }, 3)).toEqual({ items: { '#array': 'array(1)', '[0]': 'getter' } });
+    expect(first).not.toHaveBeenCalled();
+  });
+
   it('survives cycles and huge objects', () => {
     const a: Record<string, unknown> = {};
     a.self = a;

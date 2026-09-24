@@ -341,3 +341,35 @@ describe('Governor — session reset', () => {
     expect(gov.allow({ kind: 'search' }).allowed).toBe(false);
   });
 });
+
+describe('Governor.refund: an action that never reached EA', () => {
+  it('gives back the action, the buy and the coins an allowed buy was charged', () => {
+    const { gov } = governorAt(START, { buyToSearchRatio: 1 });
+    gov.allow({ kind: 'search' });
+    const before = gov.snapshot();
+    const decision = gov.allow({ kind: 'buy', coins: 5_000 });
+    expect(decision.allowed).toBe(true);
+    expect(gov.snapshot().coinFlowLastHour).toBe(5_000);
+
+    gov.refund(decision);
+    expect(gov.snapshot()).toEqual(before);
+    expect(gov.serialize().buyCount).toBe(0);
+  });
+
+  it('refunds once only, and ignores a denied decision', () => {
+    const { gov } = governorAt(START, { buyToSearchRatio: 1 });
+    gov.allow({ kind: 'search' });
+    gov.allow({ kind: 'search' });
+    const first = gov.allow({ kind: 'buy', coins: 100 });
+    gov.allow({ kind: 'buy', coins: 200 });
+    gov.refund(first);
+    gov.refund(first);
+    expect(gov.serialize().buyCount).toBe(1);
+    expect(gov.snapshot().coinFlowLastHour).toBe(200);
+
+    gov.setKillSwitch(true);
+    const denied = gov.allow({ kind: 'buy', coins: 50 });
+    gov.refund(denied);
+    expect(gov.serialize().buyCount).toBe(1);
+  });
+});

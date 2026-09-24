@@ -52,7 +52,26 @@ export const ACT_ERROR = {
   listingEntityUnknown: 'listing_entity_unknown',
   /** No nonce was handed off, so no act request can be authenticated. */
   unauthenticated: 'adapter_unauthenticated',
+  /** Not a refusal: the buy reached EA, and EA had not answered when the
+   * adapter stopped waiting. It may have gone through; a late answer is
+   * reported as a second, `late: true` result. Never retried. */
+  timeoutUnknown: 'timeout_unknown',
 } as const;
+
+/** The refusals: the adapter said no before anything reached EA. Such a
+ * buy used none of the governor's budget, and asking again cannot change
+ * the answer (engine/assist.ts and engine/autobuyer.ts refund and do not
+ * retry). `timeout_unknown` is deliberately not one of them. */
+const REFUSALS: ReadonlySet<string> = new Set([
+  ACT_ERROR.priceMismatch,
+  ACT_ERROR.listingUnknown,
+  ACT_ERROR.listingEntityUnknown,
+  ACT_ERROR.unauthenticated,
+]);
+
+export function isAdapterRefusal(error: string | undefined): boolean {
+  return error !== undefined && REFUSALS.has(error);
+}
 
 const NONCE_PATTERN = /^[0-9a-f]{64}$/;
 

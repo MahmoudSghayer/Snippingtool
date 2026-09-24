@@ -83,6 +83,9 @@ export interface GovernorDecision {
    * which of these to actually flush as telemetry (see `snapshot()` for the
    * always-on "current utilization" view the risk meter reads instead). */
   events: RiskBudgetEventInput[];
+  /** What an allowed decision recorded, so `refund()` can take exactly that
+   * back if the action never reached EA. Absent on a denial. */
+  charge?: { kind: ActionKind; at: number; coins?: number };
 }
 
 export interface RiskSnapshot {
@@ -163,6 +166,8 @@ function freshState(now: number): GovernorState {
 }
 
 export class Governor {
+  /** Decisions already refunded (`refund()` is once per decision). */
+  private readonly refunded = new WeakSet<GovernorDecision>();
   private settings: GovernorSettings;
   private state: GovernorState;
   private readonly now: () => number;
@@ -315,7 +320,35 @@ export class Governor {
       if (action.coins) this.state.coinFlow.push({ at: now, coins: action.coins });
     }
 
-    return { allowed: true, events };
+    return { allowed: true, events, charge: { kind: action.kind, at: now, coins: action.coins } };
+  }
+
+  /** Take back what an allowed decision charged, for an action that never
+   * reached EA: the adapter refused it before calling anything (a price
+   * mismatch, an unknown listing, no act-channel key — lib/act-auth.ts's
+   * `isAdapterRefusal`). Only a refusal: an action EA saw, or might have
+   * seen (a timeout), stays charged. Each decision refunds at most once; a
+   * denied one has nothing to refund. */
+  refund(decision: GovernorDecision): void {
+    const charge = decision.charge;
+    if (!decision.allowed || !charge || this.refunded.has(decision)) return;
+    this.refunded.add(decision);
+    const at = this.state.actionTimestamps.lastIndexOf(charge.at);
+    if (at !== -1) this.state.actionTimestamps.splice(at, 1);
+    if (charge.kind === 'search') {
+      this.state.searchCount = Math.max(0, this.state.searchCount - 1);
+      return;
+    }
+    this.state.buyCount = Math.max(0, this.state.buyCount - 1);
+    if (charge.coins) {
+      for (let i = this.state.coinFlow.length - 1; i >= 0; i--) {
+        const entry = this.state.coinFlow[i]!;
+        if (entry.at === charge.at && entry.coins === charge.coins) {
+          this.state.coinFlow.splice(i, 1);
+          break;
+        }
+      }
+    }
   }
 
   /** Current utilization against every threshold — what the panel/popup's

@@ -44,6 +44,9 @@ export interface BuyTarget {
   /** The item entity an act search returned for this tradeId, for shapes
    * that buy on the entity rather than the tradeId. */
   entity: unknown;
+  /** Called if EA answers after `buy` already rejected with
+   * `TimeoutUnknownError`: `true` if that late answer says it bought. */
+  onLate?: (bought: boolean) => void;
 }
 
 export interface ServiceShape {

@@ -14,10 +14,10 @@
  * longer matches reality, and continuing to act on stale assumptions is
  * exactly the failure mode this whole architecture exists to avoid.
  */
-import { ACT_ERROR } from '../lib/act-auth.js';
+import { ACT_ERROR, isAdapterRefusal } from '../lib/act-auth.js';
 import { backoffMs, sleep } from '../lib/http.js';
 
-import type { Governor } from './governor.js';
+import type { Governor, GovernorDecision } from './governor.js';
 import type { ScoredOpportunity } from './ranker.js';
 import type { AttemptInput, TradeInput } from './types.js';
 import type { AdapterClient } from '../content/adapter-client.js';
@@ -47,11 +47,6 @@ export type StopReason = 'probe_failure' | 'shape_mismatch' | 'manual' | 'sessio
  * `adapter.ts`'s ASSUMED SHAPE once real error text is known. */
 const NON_RETRYABLE_PATTERN = /sold|no longer available|expired|not found/i;
 
-/** The adapter's own refusals (lib/act-auth.ts's `ACT_ERROR`): it never
- * called buyNow, and asking again cannot change the answer — the listing's
- * price, or the missing nonce, is what it is. A failed attempt, not a
- * retry and not `too_slow`. */
-const ADAPTER_REFUSALS: ReadonlySet<string> = new Set(Object.values(ACT_ERROR));
 
 export class Autobuyer {
   private running = false;
@@ -106,6 +101,9 @@ export class Autobuyer {
 
     for (const candidate of candidates) {
       if (this.stopped) break;
+      // Never attempt what the adapter already said it cannot buy (the
+      // ranker drops these too): no governor charge, no failed attempt.
+      if (candidate.buyable === false) continue;
 
       if (this.deps.sessionCoinBudget != null && this.coinsSpent + candidate.price > this.deps.sessionCoinBudget) {
         continue; // try a cheaper candidate rather than stopping the whole cycle
@@ -128,7 +126,7 @@ export class Autobuyer {
         continue;
       }
 
-      const ok = await this.attemptWithRetry(candidate);
+      const ok = await this.attemptWithRetry(candidate, decision);
       if (ok) {
         this.coinsSpent += candidate.price;
         successes++;
@@ -139,7 +137,20 @@ export class Autobuyer {
     return successes;
   }
 
-  private async attemptWithRetry(candidate: ScoredOpportunity): Promise<boolean> {
+  private recordSuccess(candidate: ScoredOpportunity, latencyMs: number): void {
+    this.deps.onAttempt({
+      resourceId: candidate.resourceId,
+      tradeId: candidate.tradeId,
+      targetPrice: candidate.price,
+      listedPrice: candidate.price,
+      outcome: 'success',
+      latencyMs,
+      errorCode: null,
+    });
+    this.deps.onTrade({ tradeId: candidate.tradeId, resourceId: candidate.resourceId, buyPrice: candidate.price });
+  }
+
+  private async attemptWithRetry(candidate: ScoredOpportunity, decision: GovernorDecision): Promise<boolean> {
     const maxRetries = this.deps.maxRetriesPerCandidate ?? 2;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -148,20 +159,37 @@ export class Autobuyer {
       const result = await this.deps.adapter.buy(candidate.tradeId, candidate.price);
 
       if (result.ok) {
+        this.recordSuccess(candidate, result.latencyMs);
+        return true;
+      }
+
+      if (result.error === ACT_ERROR.timeoutUnknown) {
+        // It reached EA, which had not answered in time: it may have
+        // bought. Never retried (a retry could buy twice), still charged to
+        // the governor, and settled by EA's late answer if one comes.
         this.deps.onAttempt({
           resourceId: candidate.resourceId,
           tradeId: candidate.tradeId,
           targetPrice: candidate.price,
           listedPrice: candidate.price,
-          outcome: 'success',
+          outcome: 'attempted',
           latencyMs: result.latencyMs,
-          errorCode: null,
+          errorCode: ACT_ERROR.timeoutUnknown,
         });
-        this.deps.onTrade({ tradeId: candidate.tradeId, resourceId: candidate.resourceId, buyPrice: candidate.price });
-        return true;
+        void result.late?.then((late) => {
+          if (!late.ok) return;
+          this.coinsSpent += candidate.price;
+          this.recordSuccess(candidate, late.latencyMs);
+        });
+        return false;
       }
 
-      const refused = ADAPTER_REFUSALS.has(result.error ?? '');
+      // The adapter's own refusals (lib/act-auth.ts): it never called EA,
+      // and asking again cannot change the answer. A failed attempt, not a
+      // retry. If nothing of this candidate reached EA (a refusal on the
+      // first try), the governor gets back what it charged.
+      const refused = isAdapterRefusal(result.error);
+      if (refused && attempt === 0) this.deps.governor.refund(decision);
       const nonRetryable = !refused && NON_RETRYABLE_PATTERN.test(result.error ?? '');
       const isLastAttempt = attempt === maxRetries || refused;
       this.deps.onAttempt({

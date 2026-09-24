@@ -18,6 +18,9 @@ import { ACT_ERROR, canonicalActMessage, createActSigner } from '../lib/act-auth
 import type { AdapterDiagnostics, FilterCriteria, TrimmedAuction } from '@sl/shared';
 
 const ACTION_TIMEOUT_MS = 15_000;
+/** How long a `timeout_unknown` buy waits for EA's late answer before it is
+ * given up as not bought. */
+const LATE_RESULT_WAIT_MS = 5 * 60_000;
 
 export interface ActionOutcome {
   ok: boolean;
@@ -25,6 +28,10 @@ export interface ActionOutcome {
   stillListed?: boolean;
   /** Only for `diagnostics()`. */
   diagnostics?: AdapterDiagnostics;
+  /** Only for a buy that came back `timeout_unknown`: settles with EA's
+   * late answer if the adapter sends one (signed, like every result), or
+   * `ok: false` after a few minutes without one. */
+  late?: Promise<ActionOutcome>;
   latencyMs: number;
 }
 
@@ -75,6 +82,8 @@ export function createAdapterClient(target: Window, nonce: string | null, option
   // an adapter holding the key can produce.
   let adapterReportedUnready = false;
   const pending = new Map<string, Pending>();
+  // `timeout_unknown` buys still waiting for EA's late answer.
+  const lateWaiting = new Map<string, (outcome: ActionOutcome) => void>();
   const probeListeners = new Set<(status: ProbeStatus) => void>();
   const shapeListeners = new Set<(reason: string) => void>();
   const auctionsListeners = new Set<(auctions: TrimmedAuction[]) => void>();
@@ -111,6 +120,17 @@ export function createAdapterClient(target: Window, nonce: string | null, option
       const data = msg.data;
       if (!data.requestId || !signer) return;
       const requestId = data.requestId;
+      if (data.late === true) {
+        // Only for a buy this client is still waiting on, and only signed.
+        if (data.action !== 'buy' || !lateWaiting.has(requestId)) return;
+        void signer.verify(canonicalActMessage('action_result', data), msg.mac).then((valid) => {
+          const settleLate = lateWaiting.get(requestId);
+          if (!valid || !settleLate) return;
+          lateWaiting.delete(requestId);
+          settleLate({ ok: data.ok, error: data.error, latencyMs: data.completedAt - data.requestedAt });
+        });
+        return;
+      }
       if (pending.get(requestId)?.action !== data.action) return;
       void signer.verify(canonicalActMessage('action_result', data), msg.mac).then((valid) => {
         const entry = pending.get(requestId);
@@ -118,15 +138,29 @@ export function createAdapterClient(target: Window, nonce: string | null, option
         adapterReportedUnready = false;
         if (!entry || entry.action !== data.action) return;
         pending.delete(requestId);
-        entry.resolve({
+        const outcome: ActionOutcome = {
           ok: data.ok,
           error: data.error,
           stillListed: data.stillListed,
           diagnostics: data.diagnostics,
           latencyMs: data.completedAt - data.requestedAt,
-        });
+        };
+        if (data.action === 'buy' && !data.ok && data.error === ACT_ERROR.timeoutUnknown) outcome.late = waitForLate(requestId);
+        entry.resolve(outcome);
       });
     }
+  }
+
+  function waitForLate(requestId: string): Promise<ActionOutcome> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        if (lateWaiting.delete(requestId)) resolve({ ok: false, error: 'no_late_answer', latencyMs: LATE_RESULT_WAIT_MS });
+      }, LATE_RESULT_WAIT_MS);
+      lateWaiting.set(requestId, (outcome) => {
+        clearTimeout(timer);
+        resolve(outcome);
+      });
+    });
   }
 
   target.addEventListener('message', onMessage);
@@ -189,6 +223,7 @@ export function createAdapterClient(target: Window, nonce: string | null, option
     dispose: () => {
       target.removeEventListener('message', onMessage);
       pending.clear();
+      lateWaiting.clear();
       probeListeners.clear();
       shapeListeners.clear();
       auctionsListeners.clear();

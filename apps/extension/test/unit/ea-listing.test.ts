@@ -4,10 +4,10 @@
 // item entities — either becomes a list of normalised listings or an error.
 // Never an `ok` with nothing in it because the envelope was not understood.
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { normaliseListing, normaliseListings } from '../../src/main/ea-listing.js';
-import { extractListingArray, settle } from '../../src/main/ea-response.js';
+import { ShapeError, TimeoutUnknownError, describeError, extractListingArray, settle } from '../../src/main/ea-response.js';
 import { itemEntity, observable, utasAuction } from '../fixtures/ea-shapes.js';
 
 describe('normaliseListing', () => {
@@ -53,6 +53,7 @@ describe('normaliseListing', () => {
     ['no tradeId', { buyNowPrice: 100, itemData: { resourceId: 1 } }],
     ['no card id', { tradeId: 1, buyNowPrice: 100, itemData: {} }],
     ['a non-numeric price', { tradeId: 1, buyNowPrice: 'cheap', itemData: { resourceId: 1 } }],
+    ['only an assetId for a card id (not a resourceId)', { tradeId: 1, buyNowPrice: 100, itemData: { assetId: 5 } }],
     ['a getAuctionData that throws', { definitionId: 1, getAuctionData: () => { throw new Error('boom'); } }],
   ])('returns null for %s', (_label, entry) => {
     expect(normaliseListing(entry)).toBeNull();
@@ -66,6 +67,15 @@ describe('normaliseListings', () => {
 
   it('skips unreadable entries among readable ones', () => {
     expect(normaliseListings([utasAuction({ tradeId: 1, buyNowPrice: 1 }), { junk: true }])).toHaveLength(1);
+  });
+
+  it('reports how many unreadable entries it skipped', () => {
+    const onSkipped = vi.fn();
+    normaliseListings([utasAuction({ tradeId: 1, buyNowPrice: 1 }), { junk: true }, 'junk'], onSkipped);
+    expect(onSkipped).toHaveBeenCalledWith(2);
+    const quiet = vi.fn();
+    normaliseListings([utasAuction({ tradeId: 1, buyNowPrice: 1 })], quiet);
+    expect(quiet).not.toHaveBeenCalled();
   });
 
   it('throws when not one of several results can be read', () => {
@@ -94,6 +104,12 @@ describe('extractListingArray', () => {
     expect(() => extractListingArray(response)).toThrow();
   });
 
+  it('accepts a list with no success key by default, and refuses it when success is required', () => {
+    expect(extractListingArray({ data: { items: [] } })).toEqual([]);
+    expect(() => extractListingArray({ data: { items: [] } }, { requireSuccess: true })).toThrow(/success/);
+    expect(extractListingArray({ success: true, data: { items: [] } }, { requireSuccess: true })).toEqual([]);
+  });
+
   it('throws when the response says it failed, even with a list', () => {
     expect(() => extractListingArray({ success: false, status: 512, data: { items: [] } })).toThrow(/success.*512|512.*success/);
   });
@@ -119,7 +135,49 @@ describe('settle', () => {
     await expect(settle(observable({}, false), 20)).rejects.toThrow(/did not call back/);
   });
 
+  it('rejects when a promise never settles', async () => {
+    await expect(settle(new Promise(() => undefined), 20)).rejects.toThrow(/did not settle/);
+  });
+
+  it('shares one deadline between a promise and the observable it resolves to', async () => {
+    const slow = new Promise((resolve) => setTimeout(() => resolve(observable({ ok: 1 }, false)), 15));
+    const started = Date.now();
+    await expect(settle(slow, 30)).rejects.toThrow();
+    expect(Date.now() - started).toBeLessThan(200);
+  });
+
+  it('reports a late observable callback through onLate, after rejecting with TimeoutUnknownError', async () => {
+    let callback: ((sender: unknown, response: unknown) => void) | undefined;
+    const late = { observe: (_scope: unknown, cb: (sender: unknown, response: unknown) => void) => (callback = cb), unobserve: vi.fn() };
+    const onLate = vi.fn();
+    await expect(settle(late, 10, onLate)).rejects.toBeInstanceOf(TimeoutUnknownError);
+    callback!(late, { success: true });
+    expect(onLate).toHaveBeenCalledWith({ success: true });
+    expect(late.unobserve).toHaveBeenCalled();
+  });
+
   it('passes a plain value through', async () => {
     await expect(settle({ plain: true }, 1000)).resolves.toEqual({ plain: true });
+  });
+});
+
+describe('describeError', () => {
+  it('keeps the adapter\'s own messages', () => {
+    expect(describeError(new ShapeError('search response has no list'))).toBe('search response has no list');
+  });
+
+  it('never repeats the text of an error EA\'s code threw', () => {
+    const text = describeError(Object.assign(new TypeError('coins 7654321 for someone@example.com'), { code: 'E_BUSY', status: 461 }));
+    expect(text).not.toContain('7654321');
+    expect(text).not.toContain('example.com');
+    expect(text).toContain('TypeError');
+    expect(text).toContain('461');
+    expect(text).toContain('E_BUSY');
+  });
+
+  it('describes a non-Error rejection by its allowlisted fields only', () => {
+    expect(describeError({ success: false, status: 470, credits: 7654321 })).toMatch(/success: false.*470|470.*success: false/);
+    expect(describeError({ success: false, status: 470, credits: 7654321 })).not.toContain('7654321');
+    expect(describeError('free text 7654321')).not.toContain('7654321');
   });
 });
