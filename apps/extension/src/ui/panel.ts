@@ -42,6 +42,12 @@ const css = `
     box-shadow: 0 12px 32px -12px rgba(0,0,0,.7);
     overflow: hidden;
   }
+  .bot-open {
+    display: block; width: 100%; margin: 0 0 10px; padding: 7px 10px; border: 0; border-radius: var(--sl-radius-sm, 6px);
+    background: #1d9bf0; color: #fff; font: inherit; font-weight: 600; cursor: pointer;
+  }
+  .bot-open[hidden] { display: none; }
+  .bot-open:focus-visible { outline: 2px solid var(--sl-fg); outline-offset: 2px; }
   .head {
     display: flex; align-items: center; gap: 8px;
     padding: 9px 12px; background: var(--sl-card); border-bottom: 1px solid var(--sl-border);
@@ -121,8 +127,18 @@ export interface Panel {
   setSessionPnl(pnl: SessionPnl): void;
   setRiskSnapshot(snapshot: RiskSnapshot): void;
   setRanked(candidates: ScoredOpportunity[]): void;
+  /** Shows an "Open Sniping Bot" button that calls `open`; null hides it. */
+  setBotLauncher(open: (() => void) | null): void;
   destroy(): void;
 }
+
+/** The "Open Sniping Bot" button: automation builds only. The listable
+ * `ledger` build has no Sniping Bot, so its panel does not carry the button
+ * at all (constant-folded at build time). */
+const BOT_LAUNCHER_HTML =
+  import.meta.env.VITE_AUTOMATION === '1'
+    ? '<button type="button" class="bot-open" id="bot-open" hidden>Open Sniping Bot ▸</button>'
+    : '';
 
 export function createPanel(doc: Document = document): Panel {
   const host = doc.createElement('div');
@@ -142,6 +158,7 @@ export function createPanel(doc: Document = document): Panel {
     </div>
     <div class="body">
       <div class="status" id="status">Waiting for a market search…</div>
+      ${BOT_LAUNCHER_HTML}
       <div class="row"><span class="k">Auctions recorded</span><span class="v" id="total">—</span></div>
       <div class="row"><span class="k">Players seen today</span><span class="v" id="players">—</span></div>
       <div class="row"><span class="k">Searches this session</span><span class="v" id="searches">0</span></div>
@@ -317,6 +334,12 @@ export function createPanel(doc: Document = document): Panel {
       );
     },
 
+    setBotLauncher(open) {
+      const btn = root.getElementById('bot-open') as HTMLButtonElement | null;
+      if (!btn) return;
+      btn.hidden = open == null;
+      btn.onclick = open;
+    },
     destroy() {
       host.remove();
     },

@@ -274,3 +274,63 @@ describe('a late result that overtakes its timeout_unknown', () => {
     await expect(promise).resolves.toMatchObject({ ok: true });
   });
 });
+
+describe('the Sniping Bot catalog (same authenticated channel as act calls)', () => {
+  const CATALOG = {
+    players: [{ id: 158023, name: 'Messi', rating: 88 }],
+    levels: [{ id: 2, value: 'gold', label: 'Gold' }],
+    rarities: [],
+    positions: [],
+    playStyles: [],
+    nations: [],
+    leagues: [],
+    clubs: {},
+    capturedAt: 1,
+  };
+
+  async function signedCatalog(data: Record<string, unknown>) {
+    return { channel: ADAPTER_CHANNEL, kind: 'catalog', data, mac: await signer.sign(canonicalActMessage('catalog', data)) };
+  }
+
+  it('asks for it with a signed act request, never with the nonce itself', async () => {
+    client.requestCatalog();
+    const request = await lastRequest();
+    expect(request).toMatchObject({ channel: ADAPTER_CHANNEL, kind: 'act_request', data: { action: 'catalog' } });
+    expect(await signer.verify(canonicalActMessage('act_request', request.data), request.mac)).toBe(true);
+    expect(JSON.stringify(request)).not.toContain(NONCE);
+  });
+
+  it('sends nothing without a nonce', async () => {
+    const keyless = createAdapterClient(window, null);
+    keyless.requestCatalog();
+    await flush();
+    expect(sent).toHaveLength(0);
+    keyless.dispose();
+  });
+
+  it('delivers a catalog only when its MAC verifies', async () => {
+    const cb = vi.fn();
+    client.onCatalog(cb);
+    deliver({ channel: ADAPTER_CHANNEL, kind: 'catalog', data: { catalog: CATALOG } });
+    deliver({ channel: ADAPTER_CHANNEL, kind: 'catalog', data: { catalog: CATALOG }, mac: 'f'.repeat(64) });
+    const forger = createActSigner(generateNonce())!;
+    const forgedData = { catalog: CATALOG };
+    deliver({ channel: ADAPTER_CHANNEL, kind: 'catalog', data: forgedData, mac: await forger.sign(canonicalActMessage('catalog', forgedData)) });
+    // An action_result's MAC does not pass for a catalog.
+    deliver({ channel: ADAPTER_CHANNEL, kind: 'catalog', data: forgedData, mac: await signer.sign(canonicalActMessage('action_result', forgedData)) });
+    await flush();
+    expect(cb).not.toHaveBeenCalled();
+
+    deliver(await signedCatalog({ catalog: CATALOG }));
+    await vi.waitFor(() => expect(cb).toHaveBeenCalledWith(CATALOG));
+  });
+
+  it('drops a signed catalog that does not match the schema', async () => {
+    const cb = vi.fn();
+    client.onCatalog(cb);
+    deliver(await signedCatalog({ catalog: { ...CATALOG, players: [{ id: -1, name: '', rating: 200 }] } }));
+    deliver(await signedCatalog({ catalog: { ...CATALOG, injected: '<img onerror=alert(1)>' } }));
+    await flush();
+    expect(cb).not.toHaveBeenCalled();
+  });
+});

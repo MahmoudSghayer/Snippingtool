@@ -790,6 +790,12 @@ p {
 
 /* ---- Install steps ---------------------------------------------------- */
 
+.install-alt {
+  margin-top: 1.5rem;
+  color: var(--sl-ink-2);
+  font-size: 0.925rem;
+}
+
 .steps {
   list-style: none;
   counter-reset: step;

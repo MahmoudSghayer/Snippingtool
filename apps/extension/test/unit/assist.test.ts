@@ -30,6 +30,8 @@ function fakeAdapter(overrides: Partial<AdapterClient> = {}): AdapterClient {
     onShape: () => () => undefined,
     onBuyable: () => () => undefined,
     onAuctions: () => () => undefined,
+    onCatalog: () => () => undefined,
+    requestCatalog: () => undefined,
     dispose: () => undefined,
     ...overrides,
   };

@@ -10,4 +10,17 @@ declare module 'virtual:autobuyer-loader' {
   // An ambient module declaration can't hoist a named type import above itself.
   // eslint-disable-next-line @typescript-eslint/consistent-type-imports
   export function loadAutobuyer(): Promise<typeof import('../engine/autobuyer.js') | null>;
+  // eslint-disable-next-line @typescript-eslint/consistent-type-imports
+  export function loadSniper(): Promise<typeof import('../engine/sniper.js') | null>;
+}
+
+/**
+ * `virtual:adapter-source` exists only in the userscript build: the
+ * already-built MAIN-world adapter IIFE (`src/main/adapter.ts`) as a string,
+ * which `src/userscript/setup.ts` injects into the page. Provided by a
+ * plugin in `scripts/build.mjs`.
+ */
+declare module 'virtual:adapter-source' {
+  const source: string;
+  export default source;
 }

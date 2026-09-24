@@ -47,23 +47,28 @@ function method(services: unknown, name: string): { target: Obj; fn: (...args: u
 }
 
 /** Filter fields this shape's criteria builder maps, and the criteria
- * field each becomes. Every name is the community-known one on EA's
- * `UTSearchCriteriaDTO`, none verified (docs/06-extension.md §4): card
- * (`maskedDefId`), buy-now band (`minBuy`/`maxBuy`), `position`, `nation`,
- * `league`, `club`, and quality as `level`. Rating has no known DTO field;
- * `minRating`/`maxRating` are a guess. `minBid`/`maxBid` exist on the DTO
- * but no filter field feeds them. */
+ * field each becomes on EA's `UTSearchCriteriaDTO`, as the FC 27 web app's
+ * own search panel sets them (checked against its code, 2026-09-23 — see
+ * docs/06-extension.md "Web app shape"): card (`maskedDefId`), buy-now band
+ * (`minBuy`/`maxBuy`), rating band (`ovrMin`/`ovrMax`), `position` or a
+ * position group (`zone`), `nation`, `league`, `club`, chemistry style
+ * (`playStyle`), rarity (`rarities`, a one-element list) and quality as
+ * `level`. `minBid`/`maxBid` exist on the DTO but no filter field feeds
+ * them. */
 const CRITERIA_FIELDS: Record<string, string> = {
   resourceId: 'maskedDefId',
   minPrice: 'minBuy',
   maxPrice: 'maxBuy',
-  minRating: 'minRating',
-  maxRating: 'maxRating',
+  minRating: 'ovrMin',
+  maxRating: 'ovrMax',
   position: 'position',
+  zone: 'zone',
   nationality: 'nation',
   league: 'league',
   club: 'club',
   quality: 'level',
+  rarity: 'rarities',
+  chemistryStyle: 'playStyle',
 };
 
 /** `quality` values onto `level`: the three metals by name, and special
@@ -72,9 +77,11 @@ const LEVELS: Record<string, string> = { bronze: 'bronze', silver: 'silver', gol
 
 /** The search criteria for `filter`: an instance of the app's own
  * `UTSearchCriteriaDTO` when the page has one (what its search form
- * builds), else a plain object, with `type: 'player'` (every filter is a
- * player search). A filter field this builder cannot map is refused rather
- * than dropped — dropping it would search wider than the filter says. */
+ * builds), else a plain object, with `type` set to a player search FIRST —
+ * the DTO's `type` setter resets nation, position, rarities and play style.
+ * A filter field this builder cannot map is refused rather than dropped —
+ * dropping it would search wider than the filter says. A position group
+ * (`zone`) is searched instead of a single `position`, as EA's panel does. */
 export function observableSearchCriteria(filter: FilterCriteria): Obj {
   const f = filter as Obj;
   const unmapped = objectKeys(f).filter((key) => f[key] != null && !apply(hasOwn, CRITERIA_FIELDS, [key]));
@@ -91,10 +98,13 @@ export function observableSearchCriteria(filter: FilterCriteria): Obj {
       criteria = {};
     }
   }
-  criteria.type = 'player';
+  const searchType = ((window as unknown as Obj).SearchType as Obj | undefined)?.PLAYER;
+  criteria.type = typeof searchType === 'string' && searchType !== '' ? searchType : 'player';
   for (const key of objectKeys(CRITERIA_FIELDS)) {
     if (f[key] == null) continue;
-    criteria[CRITERIA_FIELDS[key]!] = key === 'quality' ? LEVELS[String(f[key])] : f[key];
+    if (key === 'position' && f.zone != null) continue;
+    const value = key === 'quality' ? LEVELS[String(f[key])] : key === 'rarity' ? [f[key]] : f[key];
+    criteria[CRITERIA_FIELDS[key]!] = value;
   }
   return criteria;
 }

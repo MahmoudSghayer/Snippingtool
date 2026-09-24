@@ -1,4 +1,6 @@
-// entries.mjs — what an extension build emits, in one place. Imported by
+// entries.mjs — what an extension build emits, in one place (every target:
+// `ledger`, `ledger-auto` and their shared entries below, and the
+// userscript's at the end). Imported by
 // scripts/build.mjs and by tests/e2e/build-extension.mjs (the e2e suite's own
 // build of the `ledger` target), so the two cannot drift apart again: the
 // e2e build once lacked handoff.js, which the manifest lists, and Chrome
@@ -24,4 +26,21 @@ export const ES_GROUP_INPUTS = Object.freeze({
   background: 'src/background/index.ts',
   popup: 'src/popup/index.html',
   options: 'src/options/index.html',
+});
+
+/** The userscript target (`build.mjs userscript [--template]`): one
+ * Tampermonkey file. `adapter` is built first, exactly as the extension's
+ * adapter.js, and embedded in `main` as a string (`virtual:adapter-source`),
+ * which src/userscript/setup.ts injects into the page after handing it the
+ * act-channel nonce. `metaFileName` is the header-only file Tampermonkey
+ * polls for updates. Both names are what apps/api serves
+ * (apps/api/src/lib/extension-download.ts). */
+export const USERSCRIPT_ENTRIES = Object.freeze({
+  adapter: { entry: 'src/main/adapter.ts', globalName: 'SLAdapter' },
+  main: {
+    entry: 'src/userscript/main.ts',
+    globalName: 'SLUserscript',
+    fileName: 'nova-trade.user.js',
+    metaFileName: 'nova-trade.meta.js',
+  },
 });

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { ADAPTER_CHANNEL } from './adapter-channel.js';
 import { activityEventSchema } from './schemas/activity.js';
 import { emailSchema, passwordSchema } from './schemas/auth.js';
+import { botDailyUsageSchema, botSettingsSchema } from './schemas/bot.js';
 import { filterCriteriaSchema, filterStatsSchema, savedFilterSchema } from './schemas/filters.js';
 import { riskBudgetEventSchema } from './schemas/risk.js';
 import { snipingAttemptSchema } from './schemas/sniping.js';
@@ -105,6 +106,47 @@ export const adapterListingsBuyableMessageSchema = z.object({
   kind: z.literal('listings_buyable'),
   data: z.object({ tradeIds: z.array(z.string().min(1).max(40)).max(500) }),
 });
+
+const catalogOptionSchema = z
+  .object({
+    id: z.number().int(),
+    value: z.string().max(40),
+    label: z.string().min(1).max(120),
+    img: z.string().max(600).optional(),
+    levels: z.boolean().optional(),
+  })
+  .strict();
+
+/** The Sniping Bot's Snipe Targets choices, as the EA web app's own search
+ * panel lists them (apps/extension `model/catalog.ts`): built in the page
+ * by the adapter (automation builds only), sent to content in a signed
+ * `catalog` message, and stored by background (`catalog.save`). Strict and
+ * bounded everywhere: it crosses the page's `window.postMessage`. */
+export const adapterCatalogSchema = z
+  .object({
+    players: z
+      .array(
+        z
+          .object({
+            id: z.number().int().positive(),
+            name: z.string().min(1).max(80),
+            rating: z.number().int().min(0).max(99).nullable(),
+          })
+          .strict(),
+      )
+      .max(100_000),
+    portrait: z.string().max(600).optional(),
+    levels: z.array(catalogOptionSchema).max(20),
+    rarities: z.array(catalogOptionSchema).max(1_000),
+    positions: z.array(catalogOptionSchema).max(50),
+    playStyles: z.array(catalogOptionSchema).max(100),
+    nations: z.array(catalogOptionSchema).max(1_000),
+    leagues: z.array(catalogOptionSchema).max(1_000),
+    clubs: z.record(z.string().regex(/^\d+$/), z.array(catalogOptionSchema).max(500)),
+    capturedAt: z.number().int(),
+    notes: z.array(z.string().max(500)).max(50).optional(),
+  })
+  .strict();
 
 /** HMAC-SHA256 (hex) of an act-channel message under the per-page-load
  * nonce (apps/extension/src/lib/act-auth.ts). Optional in these schemas so
@@ -232,10 +274,31 @@ export const adapterActRequestMessageSchema = z.object({
       action: z.literal('diagnostics'),
       requestId: z.string().min(1),
     }),
+    /** Automation builds: (re-)send the Sniping Bot's catalog if the
+     * adapter has one (it may have been built before the content script was
+     * listening). Authenticated like every other act request; the adapter
+     * answers with a signed `catalog` message, not an `action_result`. */
+    z.object({
+      action: z.literal('catalog'),
+      requestId: z.string().min(1),
+    }),
   ]),
   mac: adapterMessageMacSchema.optional(),
 });
 export type AdapterActRequestMessage = z.infer<typeof adapterActRequestMessageSchema>;
+
+/** Automation builds: the Sniping Bot's catalog, adapter -> content, in
+ * reply to a `catalog` act request or when the adapter has built a newer
+ * one. Signed like `action_result` (the MAC covers `kind` and `data`), and
+ * the MAC is required: content drops a catalog without a valid one, so no
+ * page script can choose what the bot's target form offers. */
+export const adapterCatalogMessageSchema = z.object({
+  channel: z.literal(ADAPTER_CHANNEL),
+  kind: z.literal('catalog'),
+  data: z.object({ catalog: adapterCatalogSchema }).strict(),
+  mac: adapterMessageMacSchema,
+});
+export type AdapterCatalogMessage = z.infer<typeof adapterCatalogMessageSchema>;
 
 export const adapterMessageSchema = z.discriminatedUnion('kind', [
   adapterReadyMessageSchema,
@@ -244,6 +307,7 @@ export const adapterMessageSchema = z.discriminatedUnion('kind', [
   adapterAuctionsMessageSchema,
   adapterListingsBuyableMessageSchema,
   adapterActionResultMessageSchema,
+  adapterCatalogMessageSchema,
 ]);
 export type AdapterMessage = z.infer<typeof adapterMessageSchema>;
 
@@ -315,6 +379,23 @@ export const backgroundMessageTypeSchema = z.enum([
   /** Exports `lib/logger.ts`'s ring buffer for the options page's "Export
    * logs" button — local only, no network call. */
   'logs.export',
+  /** The Sniping Bot page's settings (`BotSettings`, `storage.local`). Local
+   * only: nothing about how a user paces their bot goes to the server. */
+  'bot.settingsGet',
+  'bot.settingsSet',
+  /** The bot's active time today, for its hours-per-day limit
+   * (`BotDailyUsage`, `storage.local`). Local only. */
+  'bot.usageGet',
+  'bot.usageSet',
+  /** Player names for resource ids, for the bot log and search results.
+   * Background resolves them from `/api/v1/market/cards/:id` and caches
+   * them in `storage.local`. */
+  'cards.names',
+  /** EA's own player list and club/league/nation names, captured from the
+   * web app's search data (`apps/extension` `model/catalog.ts`) and kept in
+   * `storage.local` for the Snipe Targets form. */
+  'catalog.get',
+  'catalog.save',
 ]);
 export type BackgroundMessageType = z.infer<typeof backgroundMessageTypeSchema>;
 
@@ -331,7 +412,9 @@ export type BackgroundMessageEnvelope = z.infer<typeof backgroundMessageEnvelope
 
 export const backgroundResponseSchema = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(true), data: z.unknown() }),
-  z.object({ ok: z.literal(false), error: z.string() }),
+  /** `code` is the API's error code when the failure came from `apps/api`
+   * (`AUTH_INVALID_CREDENTIALS`, `RATE_LIMITED`...), so a UI can explain it. */
+  z.object({ ok: z.literal(false), error: z.string(), code: z.string().optional() }),
 ]);
 export type BackgroundResponse = z.infer<typeof backgroundResponseSchema>;
 
@@ -424,6 +507,20 @@ export const extBackgroundLicenseHeartbeatPayloadSchema = z
 
 /** `filters.save` — the *locally-persisted* `SavedFilter[]` (id, filterHash,
  * etc. already computed), not a creation request. */
+export const extBackgroundBotSettingsSetPayloadSchema = botSettingsSchema;
+export const extBackgroundBotUsageSetPayloadSchema = botDailyUsageSchema;
+
+/** `catalog.save`: the Snipe Targets form's choices, as the EA web app's own
+ * search panel lists them (apps/extension `model/catalog.ts`). The same
+ * shape the adapter sends content in a signed `catalog` message. */
+export const extBackgroundCatalogSavePayloadSchema = adapterCatalogSchema;
+
+export const extBackgroundCardNamesPayloadSchema = z
+  .object({
+    resourceIds: z.array(z.number().int().positive()).max(50),
+  })
+  .strict();
+
 export const extBackgroundFiltersSavePayloadSchema = z
   .object({
     filters: z.array(savedFilterSchema).max(200),

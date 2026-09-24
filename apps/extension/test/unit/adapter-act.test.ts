@@ -9,6 +9,7 @@
 // script, not a library), so this file imports it exactly once, after
 // setting up the page it expects to find.
 
+import { adapterCatalogMessageSchema } from '@sl/shared';
 import { ADAPTER_CHANNEL } from '@sl/shared/adapter-channel.js';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -234,5 +235,43 @@ describe('passive observation only trusts real EA market responses', () => {
     xhr.dispatchEvent(new Event('load'));
     await settle();
     expect(posted.filter((m) => m.kind === 'auctions')).toHaveLength(0);
+  });
+});
+
+describe('the Sniping Bot catalog', () => {
+  function catalogs(): Posted[] {
+    return posted.filter((m) => m.kind === 'catalog');
+  }
+
+  beforeAll(() => {
+    const w = window as unknown as Record<string, unknown>;
+    // The web app has started: its list factory and asset helpers exist,
+    // with no `fut_*` globals, so the adapter fills an empty catalog with
+    // the web app's own player list.
+    w.factories = { DataProvider: {} };
+    w.AssetLocationUtils = {
+      FILTER: {},
+      getFilterImage: () => '',
+      getPlayerSearchFileUri: () => 'https://www.ea.com/fc/players.json',
+      getPortraitImageUri: () => '',
+    };
+  });
+
+  it('ignores a catalog request without a valid MAC', async () => {
+    deliver({ channel: ADAPTER_CHANNEL, kind: 'act_request', data: { action: 'catalog', requestId: 'cat-no-mac' } });
+    await settle();
+    expect(catalogs()).toHaveLength(0);
+  });
+
+  it('answers an authenticated request with a catalog signed under the nonce', async () => {
+    nativeFetch.mockResolvedValueOnce(new Response(JSON.stringify({ Players: [{ id: 158023, f: 'Lionel', l: 'Messi', r: 88 }] })));
+    deliver(await signedRequest({ action: 'catalog', requestId: 'cat-1' }));
+    await vi.waitFor(() => expect(catalogs()).toHaveLength(1));
+    const message = catalogs()[0]!;
+    expect(message.data.catalog).toMatchObject({ players: [{ id: 158023, name: 'Lionel Messi', rating: 88 }] });
+    expect(adapterCatalogMessageSchema.safeParse(message).success).toBe(true);
+    expect(await signer.verify(canonicalActMessage('catalog', message.data), message.mac)).toBe(true);
+    // Nothing else about it: no action_result for a catalog request.
+    expect(results()).toHaveLength(0);
   });
 });

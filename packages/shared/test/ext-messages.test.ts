@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   adapterActionResultMessageSchema,
   adapterActRequestMessageSchema,
+  adapterCatalogMessageSchema,
+  adapterMessageSchema,
   adapterProbeMessageSchema,
   backgroundMessageEnvelopeSchema,
   extBackgroundEngineStateSetPayloadSchema,
@@ -252,11 +254,19 @@ describe('adapter diagnostics result', () => {
     probe: { ok: true, shape: 'observable', checkedAt: 1 },
     candidates: [
       { shape: 'observable', present: true },
-      { shape: 'promise', present: false, reason: 'window.services.Item.repository.search is not a function' },
+      {
+        shape: 'promise',
+        present: false,
+        reason: 'window.services.Item.repository.search is not a function',
+      },
     ],
     servicesKeys: { Item: { searchTransferMarket: 'function', bid: 'function' } },
     globals: { UTSearchCriteriaDTO: 'undefined' },
-    lastMarketResponse: { source: 'act:search', at: 2, shape: { success: 'boolean', data: { items: { '#array': 'array(1)' } } } },
+    lastMarketResponse: {
+      source: 'act:search',
+      at: 2,
+      shape: { success: 'boolean', data: { items: { '#array': 'array(1)' } } },
+    },
     stats: { seen: 0, parsed: 1, failed: 0 },
     log: ['line'],
   };
@@ -265,7 +275,14 @@ describe('adapter diagnostics result', () => {
     const result = adapterActionResultMessageSchema.safeParse({
       channel: 'ledger:v2',
       kind: 'action_result',
-      data: { action: 'diagnostics', requestId: 'r1', ok: true, requestedAt: 1, completedAt: 2, diagnostics },
+      data: {
+        action: 'diagnostics',
+        requestId: 'r1',
+        ok: true,
+        requestedAt: 1,
+        completedAt: 2,
+        diagnostics,
+      },
     });
     expect(result.success).toBe(true);
     expect(result.success && result.data.data.diagnostics).toEqual(diagnostics);
@@ -285,5 +302,112 @@ describe('adapter diagnostics result', () => {
       },
     });
     expect(result.success).toBe(false);
+  });
+});
+
+describe('catalog.save payload', () => {
+  it("accepts EA's filter lists, including rarity id 0 (Common) and clubs keyed by league id", async () => {
+    const { extBackgroundCatalogSavePayloadSchema } = await import('../src/ext-messages.js');
+    const option = (id: number, label: string) => ({
+      id,
+      value: String(id),
+      label,
+      img: `https://www.ea.com/x/${id}.png`,
+    });
+    const payload = {
+      players: [{ id: 158023, name: 'Messi', rating: 88 }],
+      portrait: 'https://www.ea.com/x/portraits/{id}.png',
+      levels: [{ id: 2, value: 'gold', label: 'Gold' }],
+      rarities: [{ ...option(0, 'Common'), levels: true }],
+      positions: [{ id: 130, value: '130', label: 'Defenders' }],
+      playStyles: [option(250, 'Basic')],
+      nations: [option(18, 'France')],
+      leagues: [option(16, 'Ligue 1 (FRA 1)')],
+      clubs: { '16': [option(73, 'Paris SG')] },
+      capturedAt: 1,
+    };
+    expect(extBackgroundCatalogSavePayloadSchema.safeParse(payload).success).toBe(true);
+    expect(
+      extBackgroundCatalogSavePayloadSchema.safeParse({ ...payload, clubs: { x: [] } }).success,
+    ).toBe(false);
+  });
+});
+
+describe('the Sniping Bot catalog on the adapter channel', () => {
+  const MAC = 'a'.repeat(64);
+  const catalog = {
+    players: [{ id: 158023, name: 'Messi', rating: 88 }],
+    levels: [{ id: 2, value: 'gold', label: 'Gold' }],
+    rarities: [],
+    positions: [],
+    playStyles: [],
+    nations: [{ id: 18, value: '18', label: 'France', img: 'https://www.ea.com/x/18.png' }],
+    leagues: [],
+    clubs: {},
+    capturedAt: 1,
+  };
+
+  it('accepts a catalog act request, like every other act request', () => {
+    const result = adapterActRequestMessageSchema.safeParse({
+      channel: 'ledger:v2',
+      kind: 'act_request',
+      data: { action: 'catalog', requestId: 'r1' },
+      mac: MAC,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts a signed catalog message, and keeps every key the MAC covers', () => {
+    const result = adapterMessageSchema.safeParse({
+      channel: 'ledger:v2',
+      kind: 'catalog',
+      data: { catalog },
+      mac: MAC,
+    });
+    expect(result.success).toBe(true);
+    expect(result.success && result.data.kind === 'catalog' && result.data.data.catalog).toEqual(
+      catalog,
+    );
+  });
+
+  it('requires the MAC on a catalog message', () => {
+    expect(
+      adapterCatalogMessageSchema.safeParse({
+        channel: 'ledger:v2',
+        kind: 'catalog',
+        data: { catalog },
+      }).success,
+    ).toBe(false);
+    expect(
+      adapterCatalogMessageSchema.safeParse({
+        channel: 'ledger:v2',
+        kind: 'catalog',
+        data: { catalog },
+        mac: 'nope',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects a catalog with unknown keys or entries past the bounds', () => {
+    const post = (c: unknown) =>
+      adapterCatalogMessageSchema.safeParse({
+        channel: 'ledger:v2',
+        kind: 'catalog',
+        data: { catalog: c },
+        mac: MAC,
+      }).success;
+    expect(post({ ...catalog, script: 'x' })).toBe(false);
+    expect(post({ ...catalog, nations: [{ id: 1, value: '1', label: 'x'.repeat(121) }] })).toBe(
+      false,
+    );
+    expect(post({ ...catalog, notes: Array.from({ length: 51 }, () => 'n') })).toBe(false);
+    expect(
+      adapterCatalogMessageSchema.safeParse({
+        channel: 'ledger:v2',
+        kind: 'catalog',
+        data: { catalog, extra: 1 },
+        mac: MAC,
+      }).success,
+    ).toBe(false);
   });
 });

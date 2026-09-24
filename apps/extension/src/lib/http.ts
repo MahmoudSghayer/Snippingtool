@@ -7,6 +7,20 @@
  */
 export const API_ORIGIN = import.meta.env.VITE_API_ORIGIN;
 
+type FetchImpl = (input: string, init: RequestInit) => Promise<Response>;
+
+let fetchImpl: FetchImpl = (input, init) => fetch(input, init);
+
+/** Swaps the transport every API call goes through. The extension builds
+ * never call this — their pages reach the API with the manifest's
+ * host_permissions. The userscript build runs on ea.com's origin, where a
+ * plain `fetch` to the API is a cross-origin request, so it installs a
+ * `GM_xmlhttpRequest`-backed implementation instead
+ * (`src/userscript/gm-fetch.ts`). */
+export function setFetchImpl(impl: FetchImpl): void {
+  fetchImpl = impl;
+}
+
 export function backoffMs(attempt: number): number {
   return Math.min(30_000, 500 * 2 ** attempt) + Math.random() * 250;
 }
@@ -37,7 +51,7 @@ export async function retryFetch(path: string, init: RequestInit = {}, opts: Ret
     if (opts.authorize) await opts.authorize(headers);
 
     try {
-      const res = await fetch(`${API_ORIGIN}${path}`, { ...init, headers });
+      const res = await fetchImpl(`${API_ORIGIN}${path}`, { ...init, headers });
       if ((res.status === 429 || res.status >= 500) && attempt < maxRetries) {
         await sleep(backoffMs(attempt));
         attempt++;
@@ -94,10 +108,17 @@ export async function toApiError(res: Response): Promise<ApiError> {
   try {
     const body = (await res.json()) as ApiErrorBody;
     // Top-level first: that is what the API sends. Reading only `error.*`
-    // made every code 'INTERNAL'.
+    // made every code 'INTERNAL'. The message is never empty: over HTTP/2
+    // the status text is, and a failed sign-in then showed nothing.
     const fields = body.error ?? body;
-    return new ApiError(res.status, fields.code ?? 'INTERNAL', fields.message ?? res.statusText, requestId, fields.details);
+    return new ApiError(
+      res.status,
+      fields.code ?? 'INTERNAL',
+      fields.message ?? (res.statusText || `Request failed (HTTP ${res.status})`),
+      requestId,
+      fields.details,
+    );
   } catch {
-    return new ApiError(res.status, 'INTERNAL', res.statusText, requestId);
+    return new ApiError(res.status, 'INTERNAL', res.statusText || `Request failed (HTTP ${res.status})`, requestId);
   }
 }

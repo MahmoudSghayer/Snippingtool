@@ -135,9 +135,13 @@ export function canonicalize(value: unknown): string {
   return '{' + out + '}';
 }
 
+/** The message kinds that carry a MAC: content's requests, and the
+ * adapter's results and catalog (the Sniping Bot's target choices). */
+export type SignedMessageKind = 'act_request' | 'action_result' | 'catalog';
+
 /** What a MAC covers: the message kind (so a request's MAC can never pass as
- * a result's, or vice versa) plus the whole `data` payload. */
-export function canonicalActMessage(kind: 'act_request' | 'action_result', data: unknown): string {
+ * a result's or a catalog's, or vice versa) plus the whole `data` payload. */
+export function canonicalActMessage(kind: SignedMessageKind, data: unknown): string {
   return canonicalize({ kind, data });
 }
 
@@ -188,10 +192,30 @@ export function handOffNonce(doc: Document = document, isolatedGlobal: object = 
   return nonce;
 }
 
+/*
+ * The userscript build (src/userscript/setup.ts) does the same handoff, with
+ * one difference: content's copy of the nonce. Its "ISOLATED world" is
+ * Tampermonkey's sandbox, whose global object may be the page's own window
+ * (depending on Tampermonkey's sandbox mode), so a property on it is not
+ * private. But the userscript is one bundle — setup and content share this
+ * module — so the copy is kept in this module's closure instead. The <html>
+ * attribute half is unchanged: setup.ts sets it and injects adapter.js
+ * synchronously, which takes and removes it before any page script runs.
+ */
+let bundleNonceHolder: object | null = null;
+
+/** Userscript only: `handOffNonce` with content's copy kept in this
+ * module's closure (see above). Call before injecting the adapter. */
+export function handOffNonceWithinBundle(doc: Document = document): string {
+  bundleNonceHolder = {};
+  return handOffNonce(doc, bundleNonceHolder);
+}
+
 /** ISOLATED world, content.js: the nonce handoff.ts minted for this page
  * load, or `null` if it never ran. Read once — the copy is deleted so
- * nothing loaded later picks it up. */
-export function readHandedOffNonce(isolatedGlobal: object = globalThis): string | null {
+ * nothing loaded later picks it up. In the userscript, the copy
+ * `handOffNonceWithinBundle` kept. */
+export function readHandedOffNonce(isolatedGlobal: object = bundleNonceHolder ?? globalThis): string | null {
   const holder = isolatedGlobal as Record<string, unknown>;
   const nonce = holder[HANDOFF_GLOBAL_KEY];
   delete holder[HANDOFF_GLOBAL_KEY];

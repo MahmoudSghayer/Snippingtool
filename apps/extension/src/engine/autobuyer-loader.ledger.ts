@@ -11,3 +11,8 @@
 export async function loadAutobuyer(): Promise<null> {
   return null;
 }
+
+/** Same guarantee for the Sniping Bot loop: no reference to it here. */
+export async function loadSniper(): Promise<null> {
+  return null;
+}

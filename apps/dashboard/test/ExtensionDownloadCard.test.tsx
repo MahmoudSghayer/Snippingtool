@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -21,6 +21,9 @@ const ENTITLED: ExtensionDownloadInfo = {
   sizeBytes: 3.5 * 1024 * 1024,
 };
 
+const INSTALL_URL =
+  'https://api.example.test/api/v1/downloads/userscript/0190.sig/nova-trade.user.js';
+
 type Props = Parameters<typeof ExtensionDownloadCard>[0];
 
 /** Mocks `api.GET`: the info endpoint answers with `info`; the zip endpoint
@@ -38,6 +41,13 @@ function mockApi(
       });
     }
     if (path === '/api/v1/downloads/extension' && download) return download();
+    if (path === '/api/v1/downloads/userscript/link') {
+      return Promise.resolve({
+        data: { installUrl: INSTALL_URL },
+        error: undefined,
+        response: new Response(null, { status: 200 }),
+      });
+    }
     return Promise.resolve({
       data: undefined,
       error: { code: 'FORBIDDEN', message: 'Your pass does not include the extension.' },
@@ -100,12 +110,41 @@ describe('ExtensionDownloadCard', () => {
       await screen.findByRole('button', { name: /Download Nova Trade v2\.4\.1/ }),
     ).toBeInTheDocument();
     expect(screen.getByText('3.5 MB zip')).toBeInTheDocument();
-    const steps = screen.getAllByRole('listitem');
+    const steps = within(
+      screen.getByRole('list', { name: 'Install the zip in Chrome' }),
+    ).getAllByRole('listitem');
     expect(steps).toHaveLength(5);
     expect(steps[0]).toHaveTextContent('Unzip the file.');
     expect(steps[1]).toHaveTextContent('chrome://extensions');
     expect(steps[3]).toHaveTextContent('nova-trade-extension');
     expect(screen.getByText(/When a new version comes out, download it again/)).toBeInTheDocument();
+  });
+
+  it('offers Tampermonkey as a one-click alternative under the zip', async () => {
+    const spy = mockApi(ENTITLED);
+    renderCard();
+
+    expect(
+      await screen.findByRole('heading', { name: 'Prefer one-click install? Use Tampermonkey' }),
+    ).toBeInTheDocument();
+    const steps = within(
+      screen.getByRole('list', { name: 'Install with Tampermonkey' }),
+    ).getAllByRole('listitem');
+    expect(steps).toHaveLength(3);
+    expect(within(steps[0]!).getByRole('link', { name: 'Tampermonkey extension' })).toHaveAttribute(
+      'href',
+      'https://www.tampermonkey.net/',
+    );
+    const install = await within(steps[1]!).findByRole('link', {
+      name: 'Install Nova Trade script',
+    });
+    expect(install).toHaveAttribute('href', INSTALL_URL);
+    expect(install).toHaveAttribute('target', '_blank');
+    expect(steps[2]).toHaveTextContent('Open the EA FC web app.');
+    expect(screen.getByText(/updates the script automatically/)).toHaveTextContent(
+      'Chrome, Edge, Firefox and Opera',
+    );
+    expect(spy).toHaveBeenCalledWith('/api/v1/downloads/userscript/link');
   });
 
   it('points users without the autobuyer to the plans', async () => {

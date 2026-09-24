@@ -14,7 +14,7 @@ afterEach(() => {
 });
 
 describe('observableSearchCriteria', () => {
-  it('maps every filter field onto the community-known UTSearchCriteriaDTO names', () => {
+  it("maps every filter field onto the web app's UTSearchCriteriaDTO names", () => {
     expect(
       observableSearchCriteria({
         resourceId: 7,
@@ -27,20 +27,30 @@ describe('observableSearchCriteria', () => {
         league: 13,
         club: 10,
         quality: 'gold',
+        rarity: 3,
+        chemistryStyle: 250,
       }),
     ).toEqual({
       type: 'player',
       maskedDefId: 7,
       minBuy: 100,
       maxBuy: 900,
-      minRating: 84,
-      maxRating: 86,
+      ovrMin: 84,
+      ovrMax: 86,
       position: 'ST',
       nation: 18,
       league: 13,
       club: 10,
       level: 'gold',
+      rarities: [3],
+      playStyle: 250,
     });
+  });
+
+  it('searches a position group as zone, instead of a single position', () => {
+    const criteria = observableSearchCriteria({ position: 'ST', zone: 132 });
+    expect(criteria).toMatchObject({ zone: 132 });
+    expect(criteria).not.toHaveProperty('position');
   });
 
   it('maps the special quality to the special level', () => {
@@ -48,7 +58,7 @@ describe('observableSearchCriteria', () => {
   });
 
   it('refuses a field it cannot map rather than dropping it', () => {
-    expect(() => observableSearchCriteria({ maxPrice: 900, chemistryStyle: 3 } as never)).toThrow(/chemistryStyle/);
+    expect(() => observableSearchCriteria({ maxPrice: 900, playerRole: 3 } as never)).toThrow(/playerRole/);
   });
 
   it('fills an instance of the page\'s own criteria class when there is one', () => {

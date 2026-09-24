@@ -47,7 +47,9 @@
  * Settings are clamped to `GOVERNOR_ABSOLUTE_LIMITS` on the way in (the
  * constructor, `setSettings`, and therefore `hydrate`): a cached settings
  * document or a hand-edited `storage.local` value must never be able to
- * loosen the governor past the absolute ceiling.
+ * loosen the governor past the absolute ceiling. The one exception is the
+ * Sniping Bot's own governor, which runs on the user's bot settings and
+ * passes `BOT_GOVERNOR_BOUNDS` as its `bounds` (engine/sniper.ts).
  *
  * The kill switch (`setKillSwitch(true, reason)`, driven by
  * `lib/license.ts`'s bootstrap/heartbeat and the WS `kill_switch` push,
@@ -132,23 +134,30 @@ const ONE_HOUR_MS = 60 * 60 * 1000;
  * stricter, never looser. */
 export const OBSERVED_SEARCH_DEDUPE_MS = 1_500;
 
-function clampSetting(key: keyof GovernorSettings, value: number): number {
+/** The floor/ceiling a governor clamps every threshold into. */
+export type GovernorBounds = Record<keyof GovernorSettings, { min: number; max: number }>;
+
+function clampSetting(key: keyof GovernorSettings, value: number, bounds: GovernorBounds): number {
   // A non-finite value (a corrupt cache) has no meaningful clamp — fall
   // back to the shipped default rather than letting NaN disable a check
   // (every `x > NaN` comparison is false).
   if (!Number.isFinite(value)) return DEFAULT_GOVERNOR_SETTINGS[key];
-  const { min, max } = GOVERNOR_ABSOLUTE_LIMITS[key];
+  const { min, max } = bounds[key];
   return Math.min(max, Math.max(min, value));
 }
 
-/** Clamp every threshold into `GOVERNOR_ABSOLUTE_LIMITS`. */
-export function clampGovernorSettings(settings: GovernorSettings): GovernorSettings {
+/** Clamp every threshold into `bounds` (`GOVERNOR_ABSOLUTE_LIMITS` except
+ * for the Sniping Bot's own governor, see `engine/sniper.ts`). */
+export function clampGovernorSettings(
+  settings: GovernorSettings,
+  bounds: GovernorBounds = GOVERNOR_ABSOLUTE_LIMITS,
+): GovernorSettings {
   return {
-    actionsPerHour: clampSetting('actionsPerHour', settings.actionsPerHour),
-    sessionLengthMinutes: clampSetting('sessionLengthMinutes', settings.sessionLengthMinutes),
-    buyToSearchRatio: clampSetting('buyToSearchRatio', settings.buyToSearchRatio),
-    cooldownSeconds: clampSetting('cooldownSeconds', settings.cooldownSeconds),
-    maxCoinFlowPerHour: clampSetting('maxCoinFlowPerHour', settings.maxCoinFlowPerHour),
+    actionsPerHour: clampSetting('actionsPerHour', settings.actionsPerHour, bounds),
+    sessionLengthMinutes: clampSetting('sessionLengthMinutes', settings.sessionLengthMinutes, bounds),
+    buyToSearchRatio: clampSetting('buyToSearchRatio', settings.buyToSearchRatio, bounds),
+    cooldownSeconds: clampSetting('cooldownSeconds', settings.cooldownSeconds, bounds),
+    maxCoinFlowPerHour: clampSetting('maxCoinFlowPerHour', settings.maxCoinFlowPerHour, bounds),
   };
 }
 
@@ -169,6 +178,7 @@ export class Governor {
   /** Decisions already refunded (`refund()` is once per decision). */
   private readonly refunded = new WeakSet<GovernorDecision>();
   private settings: GovernorSettings;
+  private bounds: GovernorBounds;
   private state: GovernorState;
   private readonly now: () => number;
   /** When the last search was counted (gated or observed) — in memory only;
@@ -179,14 +189,20 @@ export class Governor {
    * counted by `allow`) and are not counted again. */
   private engineSearchesInFlight = 0;
 
-  constructor(settings: GovernorSettings, opts: { now?: () => number; state?: GovernorState } = {}) {
-    this.settings = clampGovernorSettings(settings);
+  constructor(
+    settings: GovernorSettings,
+    opts: { now?: () => number; state?: GovernorState; bounds?: GovernorBounds } = {},
+  ) {
+    this.bounds = opts.bounds ?? GOVERNOR_ABSOLUTE_LIMITS;
+    this.settings = clampGovernorSettings(settings, this.bounds);
     this.now = opts.now ?? Date.now;
     this.state = opts.state ?? freshState(this.now());
   }
 
-  setSettings(settings: GovernorSettings): void {
-    this.settings = clampGovernorSettings(settings);
+  /** `bounds` changes the clamp too; omitted, the current bounds stay. */
+  setSettings(settings: GovernorSettings, bounds?: GovernorBounds): void {
+    if (bounds) this.bounds = bounds;
+    this.settings = clampGovernorSettings(settings, this.bounds);
   }
 
   getSettings(): GovernorSettings {

@@ -1,9 +1,10 @@
 /*
  * adapter.ts — the ONLY file that knows anything about EA's internals.
  *
- * Runs in the page's MAIN world (manifest: world "MAIN", document_start) so
+ * Runs in the page's MAIN world (manifest: world "MAIN", document_start;
+ * the userscript injects it at document-start, src/userscript/setup.ts) so
  * it can see the web app's own network calls and, from M2 onward, its own
- * service layer. Two jobs, both governed by the same rule — never issue a
+ * service layer. Three jobs, all governed by the same rule — never issue a
  * request the app's own UI would not have issued, never touch the session
  * token, never forge or replay anything:
  *
@@ -19,6 +20,11 @@
  *      with a MAC under the per-page-load nonce (lib/act-auth.ts) — any
  *      script on the page can post on this channel. A buy is also refused
  *      unless its price matches the listing this file last saw.
+ *   3. The catalog (automation builds only): the Sniping Bot's Snipe
+ *      Targets choices, built with the app's own lists and images
+ *      (main/catalog-builder.ts). Asked for with an authenticated
+ *      `act_request`, and sent back only as a `catalog` message signed
+ *      under the same nonce, so no page script can feed the bot's form.
  *
  * When EA reshuffles their bundle, this is the one file that breaks — and it
  * is written to break LOUDLY. Passive observation reports every market call
@@ -36,13 +42,22 @@ import { ADAPTER_CHANNEL } from '@sl/shared/adapter-channel.js';
 import { ACT_ERROR, canonicalActMessage, canonicalize, createActSigner, takeHandedOffNonce, type ActSigner } from '../lib/act-auth.js';
 import { scrubText } from '../lib/redact.js';
 
+import { createCatalogBuilder } from './catalog-builder.js';
 import { createAdapterLog, describeKeys } from './diagnostics.js';
 import { normaliseListing, normaliseListings, type NormalisedListing } from './ea-listing.js';
 import { TimeoutUnknownError, describeError, extractListingArray } from './ea-response.js';
 import { createSearchHook } from './search-hook.js';
 import { selectShape, type ServiceShape, type ShapeName, type ShapeSelection } from './shapes.js';
 
+import type { Catalog } from '../model/catalog.js';
 import type { AdapterDiagnostics, FilterCriteria, TrimmedAuction } from '@sl/shared';
+
+/** The userscript build injects this file into the page itself; see the
+ * act channel listener at the bottom for the one thing that changes. */
+const USERSCRIPT_BUILD = import.meta.env.VITE_BUILD_TARGET === 'userscript';
+/** Only automation builds have the Sniping Bot page the catalog is for:
+ * the listable `ledger` build never builds one or fetches EA's data files. */
+const CATALOG_ENABLED = import.meta.env.VITE_AUTOMATION === '1';
 
 // ---- act-channel authentication (docs/09-security.md §13) --------------------
 // Taken first thing, at `document_start`, before any page script exists:
@@ -197,6 +212,25 @@ function postResult(data: ActionResult): void {
     (mac) => {
       try {
         window.postMessage({ channel: ADAPTER_CHANNEL, kind: 'action_result', data, mac }, window.location.origin);
+      } catch {
+        /* a page that has torn down its origin is not our problem */
+      }
+    },
+    () => undefined,
+  );
+}
+
+/** The catalog goes out signed too, like `action_result`: it fills the
+ * Sniping Bot's target form, and a page script must not be able to choose
+ * what the user picks from. No key, nothing sent. */
+function postCatalog(catalog: Catalog): void {
+  const s = signer;
+  if (!s) return;
+  const data = { catalog };
+  s.sign(canonicalActMessage('catalog', data)).then(
+    (mac) => {
+      try {
+        window.postMessage({ channel: ADAPTER_CHANNEL, kind: 'catalog', data, mac }, window.location.origin);
       } catch {
         /* a page that has torn down its origin is not our problem */
       }
@@ -607,6 +641,35 @@ if (typeof nativeFetch === 'function' && responseClone && responseText) {
   };
 }
 
+// ---- the catalog (main/catalog-builder.ts) ----------------------------------
+
+/** One of the web app's public JSON files, through the `fetch` captured at
+ * load (same-origin, so the page's own; not a market call). */
+async function getJson(url: string): Promise<unknown> {
+  const res = (await apply(nativeFetch, window, [url, { credentials: 'same-origin' }])) as Response;
+  if (!res.ok) throw new Error(`${url.split('?')[0]} -> HTTP ${res.status}`);
+  // Some of the web app's JSON files start with a byte-order mark.
+  return parseJson((await res.text()).replace(/^\uFEFF/, ''));
+}
+
+const catalogBuilder = CATALOG_ENABLED ? createCatalogBuilder(getJson) : null;
+let catalogComplete = !CATALOG_ENABLED;
+let catalogPostedOnce = false;
+
+/** Builds what it can now and sends it (signed): always when content asked
+ * (`force`), else only when there is something new — the first catalog, or
+ * the one with EA's own lists in. */
+async function refreshCatalog(force: boolean): Promise<void> {
+  if (!catalogBuilder) return;
+  const { catalog, complete } = await catalogBuilder.refresh();
+  if (!catalog) return;
+  const changed = !catalogPostedOnce || complete !== catalogComplete;
+  catalogComplete = complete;
+  if (!force && !changed) return;
+  catalogPostedOnce = true;
+  postCatalog(catalog);
+}
+
 // ---- act surface (M2/M3) ---------------------------------------------------
 //
 // Each act call re-runs the probe, then goes through the selected shape
@@ -767,7 +830,8 @@ type ActRequest =
   | { action: 'search'; requestId: string; filter: FilterCriteria }
   | { action: 'buy'; requestId: string; tradeId: string; price: number }
   | { action: 'readResult'; requestId: string; tradeId: string }
-  | { action: 'diagnostics'; requestId: string };
+  | { action: 'diagnostics'; requestId: string }
+  | { action: 'catalog'; requestId: string };
 
 // Keep in sync with `adapterActRequestMessageSchema` (packages/shared/src/
 // ext-messages.ts): this file stays zod-free, so it re-checks the same shape
@@ -776,7 +840,7 @@ function asActRequest(value: unknown): ActRequest | null {
   const d = value as Record<string, unknown> | null;
   if (!d || typeof d !== 'object' || typeof d.requestId !== 'string' || d.requestId === '') return null;
   if (d.action === 'search') return d.filter && typeof d.filter === 'object' ? (d as unknown as ActRequest) : null;
-  if (d.action === 'diagnostics') return d as unknown as ActRequest;
+  if (d.action === 'diagnostics' || d.action === 'catalog') return d as unknown as ActRequest;
   if (typeof d.tradeId !== 'string' || d.tradeId === '') return null;
   if (d.action === 'readResult') return d as unknown as ActRequest;
   if (d.action === 'buy') return isInteger(d.price) && (d.price as number) > 0 ? (d as unknown as ActRequest) : null;
@@ -799,11 +863,18 @@ async function handleActRequest(data: unknown, mac: unknown): Promise<void> {
   if (request.action === 'search') await actSearch(request.requestId, request.filter);
   else if (request.action === 'buy') await actBuy(request.requestId, request.tradeId, request.price);
   else if (request.action === 'readResult') await actReadResult(request.requestId, request.tradeId);
+  else if (request.action === 'catalog') await refreshCatalog(true);
   else actDiagnostics(request.requestId);
 }
 
 window.addEventListener('message', (event: MessageEvent) => {
-  if (event.source !== window) return;
+  // The extension's content script shares this window, so its messages come
+  // from this exact window object; anything else is dropped. The userscript
+  // posts from Tampermonkey's sandbox through `unsafeWindow`, whose
+  // messages need not carry this object as their source, so that build
+  // (and only that build) checks the origin instead. Either way the MAC
+  // below is what authenticates a request.
+  if (USERSCRIPT_BUILD ? event.origin !== window.location.origin : event.source !== window) return;
   const msg = event.data as { channel?: string; kind?: string; data?: unknown; mac?: unknown } | null;
   if (!msg || msg.channel !== ADAPTER_CHANNEL || msg.kind !== 'act_request') return;
   // Snapshot synchronously, before any page listener on this same event
@@ -833,3 +904,26 @@ setTimer(function recheck() {
   }
   setTimer(recheck, SEARCH_HOOK_RECHECK_MS);
 }, SEARCH_HOOK_RECHECK_MS);
+
+// The web app starts after this script (document_start), and its data only
+// loads after login; content.js starts listening at document_idle. So the
+// probe is reported again as soon as it passes (or after a while, so a
+// failure is reported too), and the catalog is sent as soon as its first
+// layer can be built and again once the web app's own lists are in.
+const STARTUP_POLL_MS = 2_000;
+const STARTUP_GIVE_UP_MS = 10 * 60_000;
+const startedAt = now();
+let startupProbeReported = false;
+const startup = setInterval(() => {
+  try {
+    const expired = now() - startedAt > STARTUP_GIVE_UP_MS;
+    if (!startupProbeReported && (probe().result.ok || expired)) {
+      startupProbeReported = true;
+      runProbeAndReport();
+    }
+    if (!catalogComplete) void refreshCatalog(false).catch(() => undefined);
+    if ((startupProbeReported && catalogComplete) || expired) clearInterval(startup);
+  } catch {
+    /* never break the page */
+  }
+}, STARTUP_POLL_MS);

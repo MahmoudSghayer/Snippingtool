@@ -15,6 +15,7 @@ import { ADAPTER_CHANNEL, adapterMessageSchema } from '@sl/shared';
 
 import { ACT_ERROR, canonicalActMessage, createActSigner } from '../lib/act-auth.js';
 
+import type { Catalog } from '../model/catalog.js';
 import type { AdapterDiagnostics, FilterCriteria, TrimmedAuction } from '@sl/shared';
 
 const ACTION_TIMEOUT_MS = 15_000;
@@ -66,7 +67,27 @@ export interface AdapterClient {
   onAuctions(cb: (auctions: TrimmedAuction[]) => void): () => void;
   /** Already-reported listings the adapter can now buy. Not a search. */
   onBuyable(cb: (tradeIds: string[]) => void): () => void;
+  /** The Snipe Targets form's choices, built with the web app's own lists
+   * (model/catalog.ts). Only a catalog whose MAC verifies under this page
+   * load's nonce, and that passed the schema, reaches `cb`. */
+  onCatalog(cb: (catalog: Catalog) => void): () => void;
+  /** Asks the adapter for them, over the authenticated act channel (it
+   * sends them once the web app is ready). Nothing is sent without a key. */
+  requestCatalog(): void;
   dispose(): void;
+}
+
+/**
+ * The page's own window. In the extension's ISOLATED world `window` already
+ * is it. In the userscript, Tampermonkey hands the script a sandboxed
+ * `window` stand-in, and messages the page posts come from the real window
+ * (`unsafeWindow`): comparing them against the stand-in would drop every
+ * one. The real window is what this client listens and posts on.
+ */
+export function pageWindow(): Window {
+  // Tampermonkey provides `unsafeWindow` as a variable in the script's
+  // scope, not as a property of its global object: it has to be named.
+  return typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
 }
 
 type ActAction = 'search' | 'buy' | 'readResult' | 'diagnostics';
@@ -102,6 +123,7 @@ export function createAdapterClient(target: Window, nonce: string | null, option
   const probeListeners = new Set<(status: ProbeStatus) => void>();
   const shapeListeners = new Set<(reason: string) => void>();
   const auctionsListeners = new Set<(auctions: TrimmedAuction[]) => void>();
+  const catalogListeners = new Set<(catalog: Catalog) => void>();
   let probeStatus: ProbeStatus | null = null;
 
   function onMessage(event: MessageEvent): void {
@@ -128,6 +150,18 @@ export function createAdapterClient(target: Window, nonce: string | null, option
     }
     if (msg.kind === 'listings_buyable') {
       for (const cb of buyableListeners) cb(msg.data.tradeIds);
+      return;
+    }
+    if (msg.kind === 'catalog') {
+      // Signed, like an action result: it fills the Sniping Bot's target
+      // form, so a page script must not be able to choose its entries.
+      if (!signer || catalogListeners.size === 0) return;
+      const data = msg.data;
+      void signer.verify(canonicalActMessage('catalog', data), msg.mac).then((valid) => {
+        if (!valid) return;
+        adapterReportedUnready = false;
+        for (const cb of catalogListeners) cb(data.catalog);
+      });
       return;
     }
     if (msg.kind === 'action_result') {
@@ -198,6 +232,17 @@ export function createAdapterClient(target: Window, nonce: string | null, option
 
   target.addEventListener('message', onMessage);
 
+  /** A request with no result to wait for: the adapter answers a catalog
+   * request with a (signed) `catalog` message, if it has one. */
+  function notify(data: Record<string, unknown> & { action: 'catalog' }): void {
+    if (!signer) return;
+    const request = { ...data, requestId: crypto.randomUUID() };
+    signer.sign(canonicalActMessage('act_request', request)).then(
+      (mac) => target.postMessage({ channel: ADAPTER_CHANNEL, kind: 'act_request', data: request, mac }, target.location.origin),
+      () => undefined,
+    );
+  }
+
   function call(data: Record<string, unknown> & { action: ActAction }): Promise<ActionOutcome> {
     if (!signer) return Promise.resolve({ ok: false, error: ACT_ERROR.unauthenticated, latencyMs: 0 });
     const requestId = crypto.randomUUID();
@@ -257,6 +302,11 @@ export function createAdapterClient(target: Window, nonce: string | null, option
       buyableListeners.add(cb);
       return () => buyableListeners.delete(cb);
     },
+    onCatalog: (cb) => {
+      catalogListeners.add(cb);
+      return () => catalogListeners.delete(cb);
+    },
+    requestCatalog: () => notify({ action: 'catalog' }),
     dispose: () => {
       target.removeEventListener('message', onMessage);
       pending.clear();
@@ -266,6 +316,7 @@ export function createAdapterClient(target: Window, nonce: string | null, option
       probeListeners.clear();
       shapeListeners.clear();
       auctionsListeners.clear();
+      catalogListeners.clear();
     },
   };
 }

@@ -40,6 +40,11 @@ function method(services: unknown, domain: 'Item' | 'Transfer', name: string): {
  * is optional both sides: an empty filter is the app's own "browse
  * everything" search. */
 export function promiseSearchCriteria(filter: FilterCriteria): Obj {
+  // No known field names for these in this shape: refused rather than
+  // dropped, which would search wider than the filter says (the observable
+  // shape maps them, main/shape-observable.ts).
+  const unmapped = (['zone', 'rarity', 'chemistryStyle'] as const).filter((key) => filter[key] != null);
+  if (unmapped.length > 0) throw new ShapeError(`the promise shape cannot search by ${unmapped.join(', ')}`);
   const criteria: Obj = {};
   if (filter.resourceId != null) criteria.resourceId = filter.resourceId;
   if (filter.minPrice != null) criteria.minBuy = filter.minPrice;

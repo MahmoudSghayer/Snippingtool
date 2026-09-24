@@ -38,6 +38,8 @@ function fakeAdapter(clock: { now: number }) {
     onProbe: () => () => undefined,
     onShape: () => () => undefined,
     onBuyable: () => () => undefined,
+    onCatalog: () => () => undefined,
+    requestCatalog: () => undefined,
     onAuctions: (cb) => {
       auctionListeners.add(cb);
       return () => auctionListeners.delete(cb);

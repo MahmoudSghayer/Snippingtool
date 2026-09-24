@@ -12,6 +12,10 @@
  */
 import {
   backgroundMessageEnvelopeSchema,
+  extBackgroundBotSettingsSetPayloadSchema,
+  extBackgroundBotUsageSetPayloadSchema,
+  extBackgroundCardNamesPayloadSchema,
+  extBackgroundCatalogSavePayloadSchema,
   extBackgroundEngineStateSetPayloadSchema,
   extBackgroundFiltersSavePayloadSchema,
   extBackgroundGovernorSnapshotPushPayloadSchema,
@@ -33,6 +37,15 @@ import { margin, maxSnipePrice, summarise } from '../model/prices.js';
 import * as db from '../store/db.js';
 
 import { handleAuthLogin, handleAuthLogout, handleAuthMfaVerify, handleAuthRegister, handleAuthResendVerification, handleAuthStatus } from './auth.js';
+import {
+  handleBotSettingsGet,
+  handleBotSettingsSet,
+  handleBotUsageGet,
+  handleBotUsageSet,
+  handleCardNames,
+  handleCatalogGet,
+  handleCatalogSave,
+} from './bot.js';
 import { installGlobalErrorHandlers, handleErrorsReport, ensureErrorFlushAlarm, onErrorFlushAlarm } from './errors.js';
 import { handleEngineStateGet, handleEngineStateSet, handleGovernorSnapshotGet, handleGovernorSnapshotPush } from './governor.js';
 import { handleKillSwitchGet } from './kill-switch.js';
@@ -114,6 +127,14 @@ const handlers: Record<string, Handler> = {
   async 'engine.state'() {
     return { ok: true };
   },
+
+  'bot.settingsGet': () => handleBotSettingsGet(),
+  'bot.settingsSet': (payload) => handleBotSettingsSet(payload as never),
+  'bot.usageGet': () => handleBotUsageGet(),
+  'bot.usageSet': (payload) => handleBotUsageSet(payload as never),
+  'cards.names': (payload) => handleCardNames((payload as { resourceIds: number[] }).resourceIds),
+  'catalog.get': () => handleCatalogGet(),
+  'catalog.save': (payload) => handleCatalogSave(payload as never),
 };
 
 // Per-type payload validation (docs/09-security.md "Extension"): every
@@ -145,6 +166,10 @@ const payloadSchemas: Partial<Record<string, { safeParse: (v: unknown) => { succ
   'telemetry.enqueue': extBackgroundTelemetryEnqueuePayloadSchema,
   'governor.snapshotPush': extBackgroundGovernorSnapshotPushPayloadSchema,
   'engine.stateSet': extBackgroundEngineStateSetPayloadSchema,
+  'bot.settingsSet': extBackgroundBotSettingsSetPayloadSchema,
+  'bot.usageSet': extBackgroundBotUsageSetPayloadSchema,
+  'cards.names': extBackgroundCardNamesPayloadSchema,
+  'catalog.save': extBackgroundCatalogSavePayloadSchema,
 };
 
 // webextension-polyfill's promise-based `onMessage` API: a listener that
@@ -178,7 +203,8 @@ browser.runtime.onMessage.addListener((message: unknown, sender: Runtime.Message
     .then((data): BackgroundResponse => ({ ok: true, data }))
     .catch((err): BackgroundResponse => {
       logger.error(`handler '${type}' threw: ${String(err)}`, 'background');
-      return { ok: false, error: String((err as Error)?.message ?? err) };
+      const code = (err as { code?: unknown })?.code;
+      return { ok: false, error: String((err as Error)?.message ?? err), ...(typeof code === 'string' ? { code } : {}) };
     });
 });
 

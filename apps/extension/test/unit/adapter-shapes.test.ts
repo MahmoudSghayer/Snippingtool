@@ -143,7 +143,7 @@ describe('observable shape: search', () => {
     expect(result.data.ok).toBe(true);
     const [criteria, page] = svc.searchTransferMarket.mock.calls[0]!;
     expect(page).toBe(1);
-    expect(criteria).toMatchObject({ type: 'player', maskedDefId: 7, minBuy: 1_000, maxBuy: 10_000, minRating: 85, maxRating: 87 });
+    expect(criteria).toMatchObject({ type: 'player', maskedDefId: 7, minBuy: 1_000, maxBuy: 10_000, ovrMin: 85, ovrMax: 87 });
     expect(lastAuctions().map((a) => [a.tradeId, a.buyNow, a.resourceId, a.rating, a.buyable])).toEqual([
       ['101', 9_000, 7, 86, true],
       ['102', 9_500, 7, 86, true],
@@ -156,14 +156,30 @@ describe('observable shape: search', () => {
   it('refuses a filter field its criteria builder does not map, instead of searching wider', async () => {
     const svc = observableServices();
     install(svc.services);
-    const result = await act({ action: 'search', filter: { maxPrice: 5_000, chemistryStyle: 3 } });
+    const result = await act({ action: 'search', filter: { maxPrice: 5_000, playerRole: 3 } });
     expect(result.data.ok).toBe(false);
-    expect(result.data.error).toMatch(/chemistryStyle/);
+    expect(result.data.error).toMatch(/playerRole/);
     expect(svc.searchTransferMarket).not.toHaveBeenCalled();
+  });
+
+  it("searches the Sniping Bot's rarity, position group and chemistry style the way EA's panel does", async () => {
+    const svc = observableServices();
+    install(svc.services);
+    expect((await act({ action: 'search', filter: { rarity: 3, zone: 131, chemistryStyle: 250 } })).data.ok).toBe(true);
+    expect(svc.searchTransferMarket.mock.calls[0]![0]).toMatchObject({ type: 'player', rarities: [3], zone: 131, playStyle: 250 });
   });
 });
 
 describe('promise shape: search', () => {
+  it('refuses the filter fields it has no names for, instead of searching wider', async () => {
+    const svc = promiseServices();
+    install(svc.services);
+    const result = await act({ action: 'search', filter: { maxPrice: 5_000, rarity: 3 } });
+    expect(result.data.ok).toBe(false);
+    expect(result.data.error).toMatch(/rarity/);
+    expect(svc.search).not.toHaveBeenCalled();
+  });
+
   it('normalises an auctionInfo envelope', async () => {
     const svc = promiseServices();
     svc.search.mockResolvedValueOnce({ auctionInfo: [utasAuction({ tradeId: 201, buyNowPrice: 1_100, resourceId: 5 })] });

@@ -52,7 +52,11 @@ export const OFFLINE_GRACE_MS = 24 * 60 * 60 * 1000;
 export const CACHE_CLOCK_SKEW_MS = 5 * 60 * 1000;
 
 const EXTENSION_VERSION = import.meta.env.VITE_EXTENSION_VERSION;
-const BUILD_TARGET = import.meta.env.VITE_BUILD_TARGET;
+// The userscript carries the same M1–M3 surface as `ledger-auto` and reports
+// itself as such, so it works against an API deployed before `userscript`
+// joined `bootstrapRequestSchema`'s enum. The server only validates this
+// field. Send `userscript` once every deployed API accepts it.
+const BUILD_TARGET = import.meta.env.VITE_BUILD_TARGET === 'userscript' ? 'ledger-auto' : import.meta.env.VITE_BUILD_TARGET;
 const PUBLIC_KEY_MATERIAL = import.meta.env.VITE_LICENSE_PUBLIC_KEY;
 
 /** What sits in `storage.local`. Unverified: read features and the kill

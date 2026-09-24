@@ -200,6 +200,14 @@ const envSchema = z.object({
     (v) => (v === '' ? undefined : v),
     z.string().min(1).optional(),
   ),
+  // Directory holding the `userscript --template` build (nova-trade.user.js)
+  // that GET /downloads/userscript/:token/... serves. The image ships it at
+  // /app/downloads/userscript-template; in the repo it's
+  // apps/extension/dist/userscript-template. Unset = look in both.
+  USERSCRIPT_TEMPLATE_DIR: z.preprocess(
+    (v) => (v === '' ? undefined : v),
+    z.string().min(1).optional(),
+  ),
 
   // --- Stripe (owned by the subscriptions/payments module) ---
   STRIPE_SECRET_KEY: z.string().optional(),
