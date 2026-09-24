@@ -23,7 +23,7 @@ import { BackgroundError, send } from '../lib/bg-client.js';
 import { onTrusted } from '../ui/trusted-events.js';
 
 import type { RiskSnapshot } from '../engine/governor.js';
-import type { BootstrapResponse, LoginResponse, UserSettings } from '@sl/shared';
+import type { BootstrapResponse, LifecycleSessionPnl, LoginResponse, UserSettings } from '@sl/shared';
 // Type-only: engine/governor.ts is automation-surface code, but a `type`
 // import is fully erased at compile time (no runtime code, nothing for a
 // bundler to pull in) — see extBackgroundGovernorSnapshotPushPayloadSchema's
@@ -244,12 +244,26 @@ async function onLoginSubmit(): Promise<void> {
   }
 }
 
+/** Session P&L from the trade lifecycle (background/lifecycle.ts): sales
+ * net of EA's tax, and what is still listed at its list price. */
+function tradePnlHtml(pnl: LifecycleSessionPnl | null): string {
+  if (!pnl) return '';
+  return `
+    <div class="card">
+      <h4 style="margin:0 0 4px;font-size:13px;color:var(--sl-fg-muted);">Session P&amp;L</h4>
+      <div class="row"><span class="k">Realised (after 5% tax)</span><span class="v">${pnl.realised >= 0 ? '+' : ''}${coins(pnl.realised)}</span></div>
+      <div class="row"><span class="k">Listed value</span><span class="v">${coins(pnl.unrealised)} (${pnl.listed} listed)</span></div>
+      <div class="row"><span class="k">Sales</span><span class="v">${pnl.sales}</span></div>
+    </div>`;
+}
+
 async function renderLoggedIn(): Promise<void> {
-  const [bootstrap, settings, counts, riskSnapshot] = await Promise.all([
+  const [bootstrap, settings, counts, riskSnapshot, tradePnl] = await Promise.all([
     send<BootstrapResponse>('license.bootstrap'),
     send<UserSettings>('settings.get'),
     send<{ auctions: number; playersLast24h: number }>('counts'),
     send<RiskSnapshot | null>('governor.snapshotGet'),
+    send<LifecycleSessionPnl>('lifecycle.sessionPnl'),
   ]);
 
   const planName = bootstrap?.subscription?.plan.name ?? 'No active plan';
@@ -264,6 +278,7 @@ async function renderLoggedIn(): Promise<void> {
       <div class="row"><span class="k">Players seen today</span><span class="v">${(counts?.playersLast24h ?? 0).toLocaleString('en-US')}</span></div>
       ${killSwitch ? '<div class="error">Kill switch active — all actions are blocked.</div>' : ''}
     </div>
+    ${tradePnlHtml(tradePnl ?? null)}
     <div class="card">
       <h4 style="margin:0 0 4px;font-size:13px;color:var(--sl-fg-muted);">Risk budget</h4>
       ${riskGaugeHtml(riskSnapshot ?? null, killSwitch)}

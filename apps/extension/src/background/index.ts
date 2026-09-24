@@ -21,6 +21,8 @@ import {
   extBackgroundFiltersSavePayloadSchema,
   extBackgroundGovernorSnapshotPushPayloadSchema,
   extBackgroundLicenseHeartbeatPayloadSchema,
+  extBackgroundLifecycleBuyPayloadSchema,
+  extBackgroundLifecyclePilePayloadSchema,
   extBackgroundLoginPayloadSchema,
   extBackgroundLogoutPayloadSchema,
   extBackgroundRecordPayloadSchema,
@@ -53,6 +55,7 @@ import { installGlobalErrorHandlers, handleErrorsReport, ensureErrorFlushAlarm, 
 import { handleEngineStateGet, handleEngineStateSet, handleGovernorSnapshotGet, handleGovernorSnapshotPush } from './governor.js';
 import { handleKillSwitchGet } from './kill-switch.js';
 import { ensureHeartbeatAlarm, handleLicenseBootstrap, handleLicenseHeartbeat, onHeartbeatAlarm, runBootstrap } from './license.js';
+import { handleLifecycleBuy, handleLifecyclePile, handleLifecycleSessionPnl } from './lifecycle.js';
 import {
   handleDevicesList,
   handleFiltersList,
@@ -133,6 +136,10 @@ const handlers: Record<string, Handler> = {
   'engine.stateSet': (payload) => handleEngineStateSet(payload as never),
   'engine.stateGet': () => handleEngineStateGet(),
 
+  'lifecycle.buy': (payload) => handleLifecycleBuy(payload as never),
+  'lifecycle.pile': (payload) => handleLifecyclePile(payload as never),
+  'lifecycle.sessionPnl': () => handleLifecycleSessionPnl(),
+
   async 'engine.state'() {
     return { ok: true };
   },
@@ -186,6 +193,8 @@ const payloadSchemas: Partial<Record<string, { safeParse: (v: unknown) => { succ
   'telemetry.enqueue': extBackgroundTelemetryEnqueuePayloadSchema,
   'governor.snapshotPush': extBackgroundGovernorSnapshotPushPayloadSchema,
   'engine.stateSet': extBackgroundEngineStateSetPayloadSchema,
+  'lifecycle.buy': extBackgroundLifecycleBuyPayloadSchema,
+  'lifecycle.pile': extBackgroundLifecyclePilePayloadSchema,
 };
 if (AUTOMATION_ENABLED) {
   Object.assign(payloadSchemas, {

@@ -28,6 +28,7 @@ import { readHandedOffNonce } from '../lib/act-auth.js';
 import { riskLevelChangeEvent } from '../lib/bot-safety.js';
 import { logger } from '../lib/logger.js';
 import { singleFlight } from '../lib/single-flight.js';
+import { buildBoughtTrade } from '../lib/trade-report.js';
 import { setBotPageOpener } from '../ui/bot-opener.js';
 import { createBotPage } from '../ui/bot-page.js';
 import { installNavItem } from '../ui/ea-nav.js';
@@ -51,10 +52,12 @@ import type {
   BackgroundResponse,
   BootstrapResponse,
   FeatureKey,
+  LifecycleSessionPnl,
   RiskBudgetEvent,
   SavedFilter,
   SnipingAttempt,
   Trade,
+  TradePileItem,
   TrimmedAuction,
   UserSettings,
 } from '@sl/shared';
@@ -241,6 +244,13 @@ async function main(): Promise<void> {
   // the bootstrap below has created a governor.
   countObservedSearches(adapter, () => governor);
 
+  // The trader's own trade pile (defect C13): background's trade lifecycle
+  // links each item to the buy it came from and reports its sale once
+  // (lib/trade-lifecycle.ts). Not a search: nothing is counted here.
+  adapter.onTradePile((items: TradePileItem[]) => {
+    void send('lifecycle.pile', { items });
+  });
+
   let probeOk = true;
   adapter.onProbe((status) => {
     probeOk = status.ok;
@@ -358,21 +368,14 @@ async function main(): Promise<void> {
   }
 
   function recordTrade(input: TradeInput): void {
-    const trade: Trade = {
-      id: crypto.randomUUID(),
-      tradeId: input.tradeId,
-      resourceId: input.resourceId,
-      assetId: null,
-      rating: lastRating,
-      buyPrice: input.buyPrice,
-      sellPrice: null,
-      eaTax: 0.05,
-      netProfit: null,
-      status: 'bought',
-      boughtAt: nowIso(),
-      soldAt: null,
-    };
+    // Card fields from the listing that was bought, never the last card
+    // searched for (lib/trade-report.ts); and, when the listing carried the
+    // item's id, the lifecycle entry that later reports its sale against
+    // this same tradeId.
+    const { trade, lifecycle } = buildBoughtTrade(input, tracked.get(input.tradeId), nowIso());
     void send('telemetry.enqueue', { kind: 'trades', items: [trade] satisfies Trade[] });
+    if (lifecycle) void send('lifecycle.buy', lifecycle);
+    else logger.warn(`bought trade ${input.tradeId} carried no item id: its sale cannot be followed`, 'lifecycle');
   }
 
   function recordRiskEvents(events: { kind: RiskBudgetEvent['kind']; value: number; threshold: number }[]): void {
@@ -667,6 +670,9 @@ async function main(): Promise<void> {
   // ---- risk meter / session P&L UI tick ------------------------------------
 
   setInterval(() => {
+    // Sales and listings, whatever bought them: shown with or without an
+    // engine running.
+    void send<LifecycleSessionPnl>('lifecycle.sessionPnl').then((pnl) => pnl && panel.setTradePnl(pnl));
     if (!governor) return;
     const snapshot = governor.snapshot();
     panel.setRiskSnapshot(snapshot);

@@ -63,6 +63,18 @@ describe('page -> content message validation', () => {
     expect(cb).toHaveBeenCalledWith([AUCTION]);
   });
 
+  it('hands trade-pile items to onTradePile, and drops malformed ones', async () => {
+    const cb = vi.fn();
+    client.onTradePile(cb);
+    const item = { itemId: '11', tradeId: '7011', resourceId: 42, rating: 88, tradeState: 'closed', currentBid: 13_500, buyNowPrice: 14_000, expires: 0 };
+    deliver({ channel: ADAPTER_CHANNEL, kind: 'tradepile', data: { url: '/ut/game/fc25/tradepile', seenAt: 1, items: [{ ...item, tradeState: 'sold' }] } });
+    await flush();
+    expect(cb).not.toHaveBeenCalled();
+    deliver({ channel: ADAPTER_CHANNEL, kind: 'tradepile', data: { url: '/ut/game/fc25/tradepile', seenAt: 1, items: [item] } });
+    await flush();
+    expect(cb).toHaveBeenCalledWith([item]);
+  });
+
   it('drops malformed probe and shape messages', async () => {
     const onProbe = vi.fn();
     const onShape = vi.fn();

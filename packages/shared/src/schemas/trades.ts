@@ -75,10 +75,10 @@ export const reportTradesRequestSchema = z
 export type ReportTradesRequest = z.infer<typeof reportTradesRequestSchema>;
 
 /** `POST /trades/:id/close` — records the sale of a trade the extension
- * logged as `bought`/`listed`. The extension cannot observe a sale on its
- * own (it only ever sees listings, never the trader's own transfer list —
- * see `docs/06-extension.md`), so the dashboard offers this as the manual
- * step that turns a bought card into a closed, profit-bearing trade. The
+ * logged as `bought`/`listed`. The extension reports the sales it sees on
+ * the trader's own trade pile itself (`/trades/batch`, status `sold`,
+ * apps/extension/src/lib/trade-lifecycle.ts); this is the manual step for
+ * the rest, e.g. a card sold while the extension was not running. The
  * API computes tax and net profit itself; the caller supplies only the
  * price and, optionally, when it sold (defaults to now). */
 export const closeTradeRequestSchema = z

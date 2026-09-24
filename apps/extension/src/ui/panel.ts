@@ -18,6 +18,7 @@ import type { SessionPnl } from '../engine/assist.js';
 import type { RiskSnapshot } from '../engine/governor.js';
 import type { ScoredOpportunity } from '../engine/ranker.js';
 import type { PriceSummary } from '../model/prices.js';
+import type { LifecycleSessionPnl } from '@sl/shared';
 
 /* `tokensCss` is `styles/tokens.css`'s *text*, inlined at build time
  * (Vite's `?raw` import) — this IS "packages/ui/src/tokens.css copied into
@@ -127,6 +128,9 @@ export interface Panel {
   setCard(result: CardResult): void;
   setSparkline(prices: number[]): void;
   setSessionPnl(pnl: SessionPnl): void;
+  /** Sales and listings from the trade lifecycle (lib/trade-lifecycle.ts),
+   * assist and autobuyer buys alike. */
+  setTradePnl(pnl: LifecycleSessionPnl): void;
   setRiskSnapshot(snapshot: RiskSnapshot): void;
   setRanked(candidates: ScoredOpportunity[]): void;
   /** Shows an "Open Sniping Bot" button that calls `open`; null hides it. */
@@ -182,10 +186,13 @@ export function createPanel(doc: Document = document): Panel {
 
       <div class="sec" id="pnl-sec" hidden>
         <h4>Session P&amp;L</h4>
-        <div class="row"><span class="k">Coins spent</span><span class="v" id="pnl-spent">—</span></div>
-        <div class="row"><span class="k">Coins earned</span><span class="v" id="pnl-earned">—</span></div>
-        <div class="row"><span class="k">Net profit</span><span class="v" id="pnl-net">—</span></div>
-        <div class="row"><span class="k">Trades</span><span class="v" id="pnl-trades">—</span></div>
+        <div class="row"><span class="k">Realised (after 5% tax)</span><span class="v" id="pnl-realised">—</span></div>
+        <div class="row"><span class="k">Listed value</span><span class="v" id="pnl-unrealised">—</span></div>
+        <div class="row"><span class="k">Sales</span><span class="v" id="pnl-sales">—</span></div>
+        <div class="row"><span class="k">Coins spent (assist)</span><span class="v" id="pnl-spent">—</span></div>
+        <div class="row"><span class="k">Coins earned (assist)</span><span class="v" id="pnl-earned">—</span></div>
+        <div class="row"><span class="k">Coin flow (assist)</span><span class="v" id="pnl-net">—</span></div>
+        <div class="row"><span class="k">Trades (assist)</span><span class="v" id="pnl-trades">—</span></div>
       </div>
 
       <div class="sec" id="risk-sec" hidden>
@@ -293,6 +300,15 @@ export function createPanel(doc: Document = document): Panel {
           return bar;
         }),
       );
+    },
+
+    setTradePnl(pnl) {
+      $('pnl-sec').removeAttribute('hidden');
+      const realised = $('pnl-realised');
+      realised.textContent = (pnl.realised >= 0 ? '+' : '') + coins(pnl.realised);
+      realised.className = 'v ' + (pnl.realised >= 0 ? 'pos' : 'neg');
+      $('pnl-unrealised').textContent = `${coins(pnl.unrealised)} (${pnl.listed} listed)`;
+      $('pnl-sales').textContent = String(pnl.sales);
     },
 
     setSessionPnl(pnl) {
