@@ -86,11 +86,27 @@ let cachedPublicKey: Promise<CryptoKey | null> | undefined;
 
 /** Accepts the API's `ENTITLEMENT_PUBLIC_KEY` as-is (SPKI PEM, with real
  * newlines or the `\n` escapes `.env` files use), bare base64 SPKI DER, or a
- * bare base64 32-byte raw Ed25519 key. */
-async function importPublicKey(): Promise<CryptoKey | null> {
-  if (!PUBLIC_KEY_MATERIAL) return null;
+ * bare base64/base64url 32-byte raw Ed25519 key — the last is what the API's
+ * extension download (apps/api/src/lib/extension-download.ts) writes into the
+ * template build: the key's JWK `x`. `null` (never throws) when there is no
+ * usable key. */
+export async function importLicensePublicKey(material: string | undefined): Promise<CryptoKey | null> {
+  if (!material) return null;
+  // A downloadable-template build (scripts/build.mjs --template) whose key
+  // placeholder the API never filled in. Matched on a fragment, never the
+  // whole placeholder: the API replaces every occurrence of the full token
+  // in the bundle, so spelling it out here would turn this check into a
+  // comparison against the real key.
+  if (/PLACEHOLDER/.test(material)) {
+    logger.error(
+      'this build still carries the download template\'s licence key placeholder (the API did not fill it in): the entitlement blob cannot be verified',
+      'license',
+    );
+    return null;
+  }
   try {
-    const body = PUBLIC_KEY_MATERIAL.replace(/\\n/g, '\n')
+    const body = material
+      .replace(/\\n/g, '\n')
       .replace(/-----(BEGIN|END) PUBLIC KEY-----/g, '')
       .replace(/\s+/g, '');
     const der = fromBase64(body);
@@ -100,6 +116,10 @@ async function importPublicKey(): Promise<CryptoKey | null> {
     logger.warn(`failed to import license public key: ${String(err)}`, 'license');
     return null;
   }
+}
+
+function importPublicKey(): Promise<CryptoKey | null> {
+  return importLicensePublicKey(PUBLIC_KEY_MATERIAL);
 }
 
 function publicKey(): Promise<CryptoKey | null> {

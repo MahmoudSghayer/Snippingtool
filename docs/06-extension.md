@@ -154,6 +154,14 @@ public key. Exceptions: `pnpm dev` (`--watch`) only warns, and
 checks and tests use it). The release workflow reads the key from the
 repository variable `ENTITLEMENT_PUBLIC_KEY`.
 
+The dashboard-download template (`pnpm --filter @sl/extension
+build:template`, i.e. `ledger-auto --template`, built by the API image) is
+exempt: it bakes in a placeholder that `apps/api/src/lib/extension-download.ts`
+replaces, when it serves the zip, with the raw Ed25519 key from the API's own
+`ENTITLEMENT_PUBLIC_KEY` (the JWK `x`, base64url). `lib/license.ts` imports
+that form as well as PEM. A template whose placeholder was never filled in
+verifies nothing and logs an error saying so, rather than throwing.
+
 ```
 pnpm --filter @sl/extension build:ledger    # dist/ledger      — listable
 pnpm --filter @sl/extension build:auto      # dist/ledger-auto — self-hosted
