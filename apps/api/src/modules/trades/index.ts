@@ -75,8 +75,9 @@ function touchedDays(row: { boughtAt: Date | null; soldAt: Date | null }): strin
 
 const TERMINAL_STATUSES: ReadonlySet<TradeRow['status']> = new Set(['sold', 'expired', 'unsold']);
 
-/** Column values for a batch-reported trade. The extension never sees a
- * sale (see the file header), so its local copy of a trade can still say
+/** Column values for a batch-reported trade. The extension reports the
+ * sales it sees on the trade pile (status `sold`, on the buy's tradeId),
+ * but not a sale it missed, so its local copy of a trade can still say
  * `bought` after the dashboard recorded the sale with `/close`. A report
  * that would move a finished trade back to `bought`/`listed` keeps the
  * stored sale instead of erasing it. */
