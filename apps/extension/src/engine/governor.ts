@@ -48,9 +48,8 @@
  * constructor, `setSettings`, and therefore `hydrate`): a cached settings
  * document or a hand-edited `storage.local` value must never be able to
  * loosen the governor past the absolute ceiling. The one exception is the
- * Sniping Bot's own governor when the user has turned the recommended limits
- * off (and acknowledged the ban risk): it passes `BOT_SAFETY_LIMITS` as its
- * `bounds` (engine/sniper.ts).
+ * Sniping Bot's own governor, which runs on the user's bot settings and
+ * passes `BOT_GOVERNOR_BOUNDS` as its `bounds` (engine/sniper.ts).
  *
  * The kill switch (`setKillSwitch(true, reason)`, driven by
  * `lib/license.ts`'s bootstrap/heartbeat and the WS `kill_switch` push,
@@ -144,8 +143,8 @@ function clampSetting(key: keyof GovernorSettings, value: number, bounds: Govern
   return Math.min(max, Math.max(min, value));
 }
 
-/** Clamp every threshold into `bounds` (`GOVERNOR_ABSOLUTE_LIMITS` unless
- * the Sniping Bot runs in acknowledged custom mode, see `engine/sniper.ts`). */
+/** Clamp every threshold into `bounds` (`GOVERNOR_ABSOLUTE_LIMITS` except
+ * for the Sniping Bot's own governor, see `engine/sniper.ts`). */
 export function clampGovernorSettings(
   settings: GovernorSettings,
   bounds: GovernorBounds = GOVERNOR_ABSOLUTE_LIMITS,
@@ -195,8 +194,7 @@ export class Governor {
     this.state = opts.state ?? freshState(this.now());
   }
 
-  /** `bounds` changes the clamp too (the Sniping Bot switching between
-   * recommended and custom limits); omitted, the current bounds stay. */
+  /** `bounds` changes the clamp too; omitted, the current bounds stay. */
   setSettings(settings: GovernorSettings, bounds?: GovernorBounds): void {
     if (bounds) this.bounds = bounds;
     this.settings = clampGovernorSettings(settings, this.bounds);

@@ -1,33 +1,31 @@
 /*
- * bot-safety.ts — reporting a Sniping Bot safety-mode change to the server.
+ * bot-safety.ts — reporting the Sniping Bot's risk level to the server.
  *
- * Admins need to see who turned the recommended limits off. There is no
+ * Admins need to see who runs the bot on risky settings. There is no
  * dedicated telemetry kind for it, and adding one would need an API change,
  * so it travels as the generic `settings_change` activity event with a
- * self-describing field name: `bot.safetyMode=custom` or
- * `bot.safetyMode=recommended`.
+ * self-describing field name: `bot.riskLevel=<low|moderate|high|very_high>`,
+ * sent when a save changes the level.
  */
-import { effectiveSafetyMode, type ActivityEvent, type BotSettings } from '@sl/shared';
+import { botRiskLevel, type ActivityEvent, type BotSettings } from '@sl/shared';
 
-export const SAFETY_MODE_FIELD_PREFIX = 'bot.safetyMode=';
+export const RISK_LEVEL_FIELD_PREFIX = 'bot.riskLevel=';
 
-type ModeFields = Pick<BotSettings, 'safetyMode' | 'customRiskAcknowledgedAt'>;
-
-/** The event to enqueue when the effective safety mode changed between two
- * saves, or null when it did not. */
-export function safetyModeChangeEvent(
-  prev: ModeFields | null,
-  next: ModeFields,
+/** The event to enqueue when a save changed the risk level, or null when it
+ * did not. `prev` null = nothing saved before (the defaults, which are low). */
+export function riskLevelChangeEvent(
+  prev: BotSettings | null,
+  next: BotSettings,
   occurredAt: string,
   deviceId?: string | null,
 ): ActivityEvent | null {
-  const before = prev ? effectiveSafetyMode(prev) : 'recommended';
-  const after = effectiveSafetyMode(next);
+  const before = prev ? botRiskLevel(prev).level : 'low';
+  const after = botRiskLevel(next).level;
   if (before === after) return null;
   return {
     type: 'settings_change',
     occurredAt,
     ...(deviceId ? { deviceId } : {}),
-    metadata: { fields: [`${SAFETY_MODE_FIELD_PREFIX}${after}`] },
+    metadata: { fields: [`${RISK_LEVEL_FIELD_PREFIX}${after}`] },
   };
 }

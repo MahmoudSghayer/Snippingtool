@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { ADAPTER_CHANNEL } from './adapter-channel.js';
 import { activityEventSchema } from './schemas/activity.js';
 import { emailSchema, passwordSchema } from './schemas/auth.js';
-import { botSettingsSchema } from './schemas/bot.js';
+import { botDailyUsageSchema, botSettingsSchema } from './schemas/bot.js';
 import { filterCriteriaSchema, filterStatsSchema, savedFilterSchema } from './schemas/filters.js';
 import { riskBudgetEventSchema } from './schemas/risk.js';
 import { snipingAttemptSchema } from './schemas/sniping.js';
@@ -221,6 +221,10 @@ export const backgroundMessageTypeSchema = z.enum([
    * only: nothing about how a user paces their bot goes to the server. */
   'bot.settingsGet',
   'bot.settingsSet',
+  /** The bot's active time today, for its hours-per-day limit
+   * (`BotDailyUsage`, `storage.local`). Local only. */
+  'bot.usageGet',
+  'bot.usageSet',
   /** Player names for resource ids, for the bot log and search results.
    * Background resolves them from `/api/v1/market/cards/:id` and caches
    * them in `storage.local`. */
@@ -342,6 +346,7 @@ export const extBackgroundLicenseHeartbeatPayloadSchema = z
 /** `filters.save` — the *locally-persisted* `SavedFilter[]` (id, filterHash,
  * etc. already computed), not a creation request. */
 export const extBackgroundBotSettingsSetPayloadSchema = botSettingsSchema;
+export const extBackgroundBotUsageSetPayloadSchema = botDailyUsageSchema;
 
 const catalogOptionSchema = z
   .object({

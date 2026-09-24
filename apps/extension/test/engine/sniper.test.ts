@@ -5,10 +5,10 @@
 // `sleep` advances the clock instantly.
 
 import {
+  BOT_LIMITS,
   DEFAULT_BOT_SETTINGS,
-  DEFAULT_GOVERNOR_SETTINGS,
+  type BotDailyUsage,
   type BotSettings,
-  type GovernorSettings,
   type TrimmedAuction,
 } from '@sl/shared';
 import { describe, expect, it, vi } from 'vitest';
@@ -39,6 +39,9 @@ interface Harness {
   sniper: Sniper;
   clock: { t: number };
   searches: unknown[];
+  /** Clock time of each search. */
+  searchTimes: number[];
+  savedUsage: BotDailyUsage[];
   buys: string[];
   waits: { phase: string; ms: number }[];
   killSwitch: { active: boolean };
@@ -55,19 +58,18 @@ function setup(opts: {
   sellPrice?: number | null;
   /** Stop the bot after this many searches (at the wait that follows). */
   maxSearches?: number;
-  /** The user's governor settings (recommended mode's caps). */
-  governor?: GovernorSettings | null;
+  /** Today's active time as an earlier page saved it. */
+  usage?: BotDailyUsage | null;
 }): Harness {
   // Ratio 1 so a buy on the very first search is allowed; the ratio itself
-  // is the governor's concern and is covered in governor.test.ts.
-  // Custom limits (acknowledged) unless a test says otherwise, so the pacing
-  // tests below see the user's own numbers; the "safety mode" block covers
-  // recommended mode.
+  // is the governor's concern and is covered in governor.test.ts. No
+  // cooldown after a buy, unless a test sets one. The risk is acknowledged,
+  // so the pacing tests can use fast delays; the "limits" block covers the
+  // unacknowledged case.
   const settings: BotSettings = {
     ...DEFAULT_BOT_SETTINGS,
-    safetyMode: 'custom',
-    customRiskAcknowledgedAt: '2026-09-24T00:00:00.000Z',
-    safety: { ...DEFAULT_BOT_SETTINGS.safety, buyToSearchRatio: 1 },
+    riskAcknowledgedAt: '2026-09-24T00:00:00.000Z',
+    safety: { ...DEFAULT_BOT_SETTINGS.safety, buyToSearchRatio: 1, cooldownSeconds: 0 },
     ...opts.settings,
   };
   const clock = { t: 1_000_000 };
@@ -76,6 +78,8 @@ function setup(opts: {
     (s: { ok: boolean; checkedAt: number; reason?: string }) => void
   >();
   const searches: unknown[] = [];
+  const searchTimes: number[] = [];
+  const savedUsage: BotDailyUsage[] = [];
   const buys: string[] = [];
   const waits: { phase: string; ms: number }[] = [];
   const killSwitch = { active: false };
@@ -87,6 +91,7 @@ function setup(opts: {
     adapter: {
       search: async (filter) => {
         searches.push(filter);
+        searchTimes.push(clock.t);
         const batch = results[Math.min(searches.length - 1, results.length - 1)]!;
         for (const cb of auctionsListeners) cb(batch);
         return { ok: true, latencyMs: 5 };
@@ -109,7 +114,8 @@ function setup(opts: {
     getFilters: () =>
       opts.filters ?? [{ id: 'f1', name: 'Target', filter: { resourceId: 100, maxPrice: 10_000 } }],
     estimateSellPrice: async () => (opts.sellPrice === undefined ? 20_000 : opts.sellPrice),
-    getGovernorSettings: () => (opts.governor === undefined ? DEFAULT_GOVERNOR_SETTINGS : opts.governor),
+    loadUsage: async () => opts.usage ?? null,
+    saveUsage: (u) => void savedUsage.push(u),
     killSwitch: () => ({
       active: killSwitch.active,
       reason: killSwitch.active ? 'test kill switch' : undefined,
@@ -138,6 +144,8 @@ function setup(opts: {
     sniper,
     clock,
     searches,
+    searchTimes,
+    savedUsage,
     buys,
     waits,
     killSwitch,
@@ -284,8 +292,8 @@ describe('Sniper — pacing', () => {
         safety: {
           ...DEFAULT_BOT_SETTINGS.safety,
           buyToSearchRatio: 1,
-          actionsPerHour: 2,
-          cooldownSeconds: 600,
+          maxSearchesPerHour: 2,
+          cooldownSeconds: 0,
         },
       },
       maxSearches: 3,
@@ -293,7 +301,8 @@ describe('Sniper — pacing', () => {
     h.sniper.start();
     await h.done();
     const blocked = h.waits.find((w) => w.phase === 'blocked');
-    expect(blocked!.ms).toBe(600_000);
+    // Two searches, 1 s delay each; the third waits until the first is an hour old.
+    expect(blocked!.ms).toBe(3_600_000 - 2_000);
     expect(h.sniper.getLog().some((e) => e.kind === 'blocked')).toBe(true);
   });
 });
@@ -358,135 +367,144 @@ describe('Sniper — stops', () => {
   });
 });
 
-describe('Sniper — safety mode', () => {
-  const fast = {
-    searchDelay: { min: 0.5, max: 1 },
+describe('Sniper — the user\'s limits', () => {
+  const quick = {
+    searchDelay: { min: 1, max: 1 },
     breaks: { ...DEFAULT_BOT_SETTINGS.breaks, enabled: false },
     rest: { ...DEFAULT_BOT_SETTINGS.rest, enabled: false },
-    // A stored value far above the recommended caps (a tampered storage.local).
-    safety: {
-      actionsPerHour: 7_200,
-      sessionLengthMinutes: 1_440,
-      buyToSearchRatio: 1,
-      cooldownSeconds: 0,
-      maxCoinFlowPerHour: 1_000_000_000,
-    },
   } satisfies Partial<BotSettings>;
+  const safety = (patch: Partial<BotSettings['safety']>): BotSettings['safety'] => ({
+    ...DEFAULT_BOT_SETTINGS.safety,
+    buyToSearchRatio: 1,
+    cooldownSeconds: 0,
+    ...patch,
+  });
 
-  it('recommended mode clamps a tampered stored value to the governor caps', async () => {
+  it('keeps searches inside max searches per hour', async () => {
     const h = setup({
-      settings: { ...fast, safetyMode: 'recommended', customRiskAcknowledgedAt: null },
-      maxSearches: 2,
+      settings: { ...quick, safety: safety({ maxSearchesPerHour: 3 }) },
+      maxSearches: 4,
     });
     h.sniper.start();
-    const limits = h.sniper.getGovernor()!.getSettings();
-    expect(limits).toEqual({
-      actionsPerHour: DEFAULT_GOVERNOR_SETTINGS.actionsPerHour,
-      sessionLengthMinutes: DEFAULT_GOVERNOR_SETTINGS.sessionLengthMinutes,
-      buyToSearchRatio: DEFAULT_GOVERNOR_SETTINGS.buyToSearchRatio,
-      cooldownSeconds: DEFAULT_GOVERNOR_SETTINGS.cooldownSeconds,
-      maxCoinFlowPerHour: DEFAULT_GOVERNOR_SETTINGS.maxCoinFlowPerHour,
-    });
     await h.done();
-    // The 0.5 s delay is raised so searches (and the buys they may bring)
-    // fit in 30 actions an hour: 3600 * 1.35 / 30 = 162 s.
-    const waits = h.waits.filter((w) => w.phase === 'waiting');
-    expect(waits.length).toBeGreaterThan(0);
-    for (const w of waits) expect(w.ms).toBeGreaterThanOrEqual(162_000);
+    const [first, , third, fourth] = h.searchTimes;
+    expect(third! - first!).toBeLessThan(3_600_000);
+    expect(fourth! - first!).toBeGreaterThanOrEqual(3_600_000);
+    expect(h.sniper.getLog().some((e) => e.message.includes('3 searches in the last hour'))).toBe(
+      true,
+    );
   });
 
-  it('recommended mode never goes past GOVERNOR_ABSOLUTE_LIMITS, even with a tampered governor cache', () => {
+  it('keeps buys inside max buys per hour', async () => {
     const h = setup({
-      settings: { ...fast, safetyMode: 'recommended', customRiskAcknowledgedAt: null },
-      governor: {
-        actionsPerHour: 100_000,
-        sessionLengthMinutes: 100_000,
-        buyToSearchRatio: 5,
-        cooldownSeconds: -5,
-        maxCoinFlowPerHour: 1e12,
-      },
-    });
-    h.sniper.start();
-    expect(h.sniper.getGovernor()!.getSettings()).toEqual({
-      actionsPerHour: 120,
-      sessionLengthMinutes: 240,
-      buyToSearchRatio: 1,
-      cooldownSeconds: 0,
-      maxCoinFlowPerHour: 5_000_000,
-    });
-    h.sniper.stop();
-  });
-
-  it('recommended mode paces searches so the actions-per-hour cap is never hit', async () => {
-    const h = setup({
-      settings: { ...fast, safetyMode: 'recommended', customRiskAcknowledgedAt: null },
-      governor: { ...DEFAULT_GOVERNOR_SETTINGS, actionsPerHour: 2, cooldownSeconds: 600 },
+      settings: { ...quick, safety: safety({ maxBuysPerHour: 2 }) },
+      results: [[auction('t-a', 7_000)], [auction('t-b', 8_000)], [auction('t-c', 9_000)]],
       maxSearches: 3,
     });
     h.sniper.start();
     await h.done();
     expect(h.searches).toHaveLength(3);
-    // 3600 * 1.35 / 2 = 2430 s between searches, so the governor never
-    // has to refuse one.
-    expect(h.waits.some((w) => w.phase === 'blocked')).toBe(false);
-    for (const w of h.waits.filter((x) => x.phase === 'waiting'))
-      expect(w.ms).toBeGreaterThanOrEqual(2_430_000);
+    expect(h.buys).toEqual(['t-a', 't-b']);
+    expect(h.sniper.getLog().some((e) => e.message.startsWith('Buy skipped'))).toBe(true);
   });
 
-  it('custom mode at the same speed runs into the governor instead', async () => {
+  it('waits the cooldown after every buy', async () => {
+    const h = setup({
+      settings: { ...quick, safety: safety({ cooldownSeconds: 10 }) },
+      results: [[auction('t-a', 7_000)], [auction('t-b', 8_000)]],
+      maxSearches: 2,
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.buys).toEqual(['t-a', 't-b']);
+    expect(h.waits.filter((w) => w.phase === 'cooldown').map((w) => w.ms)).toEqual([
+      10_000, 10_000,
+    ]);
+  });
+
+  it('stops at max active hours per day, not counting rests', async () => {
     const h = setup({
       settings: {
-        ...fast,
-        safety: { ...fast.safety, actionsPerHour: 2, cooldownSeconds: 600 },
+        searchDelay: { min: 600, max: 600 },
+        breaks: { ...DEFAULT_BOT_SETTINGS.breaks, enabled: false },
+        rest: { enabled: true, afterMinutes: { min: 30, max: 30 }, minutes: { min: 45, max: 45 } },
+        safety: safety({ maxActiveHoursPerDay: 1 }),
       },
-      maxSearches: 3,
     });
+    const startedAt = h.clock.t;
     h.sniper.start();
     await h.done();
-    expect(h.waits.some((w) => w.phase === 'blocked')).toBe(true);
+    expect(h.sniper.state.stopReason).toBe('daily_limit');
+    // An hour of 10-minute gaps, with one 45-minute rest in between.
+    expect(h.searches).toHaveLength(6);
+    expect(h.waits.filter((w) => w.phase === 'rest')).toHaveLength(1);
+    expect(h.clock.t - startedAt).toBe(60 * 60_000 + 45 * 60_000);
+    expect(h.savedUsage.at(-1)!.activeMs).toBe(3_600_000);
   });
 
-  it('custom mode without an acknowledgment runs as recommended', () => {
+  it('counts active time an earlier page already used today', async () => {
+    const day = new Date(1_000_000);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const today = `${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}`;
     const h = setup({
-      settings: { ...fast, safetyMode: 'custom', customRiskAcknowledgedAt: null },
+      settings: {
+        ...quick,
+        searchDelay: { min: 600, max: 600 },
+        safety: safety({ maxActiveHoursPerDay: 1 }),
+      },
+      usage: { day: today, activeMs: 50 * 60_000 },
     });
     h.sniper.start();
-    expect(h.sniper.getEffectiveSettings().mode).toBe('recommended');
-    expect(h.sniper.getGovernor()!.getSettings().actionsPerHour).toBe(30);
-    h.sniper.stop();
-  });
-
-  it('acknowledged custom mode applies the user limits up to BOT_LIMITS', async () => {
-    const h = setup({ settings: { ...fast }, maxSearches: 2 });
-    h.sniper.start();
-    expect(h.sniper.getEffectiveSettings().mode).toBe('custom');
-    expect(h.sniper.getGovernor()!.getSettings().actionsPerHour).toBe(7_200);
     await h.done();
-    expect(h.waits.filter((w) => w.phase === 'waiting')[0]!.ms).toBe(500);
+    expect(h.sniper.state.stopReason).toBe('daily_limit');
+    expect(h.searches).toHaveLength(1);
   });
 
-  it('switching back to recommended tightens a running bot at once', () => {
-    const h = setup({ settings: { ...fast } });
+  it('clamps a tampered stored value outside BOT_LIMITS', async () => {
+    const tampered = {
+      ...quick,
+      searchDelay: { min: 0, max: 0 },
+      safety: safety({ maxSearchesPerHour: 1e9, maxBuysPerHour: 1e9, maxActiveHoursPerDay: 500 }),
+    } as Partial<BotSettings>;
+    const h = setup({ settings: tampered, maxSearches: 2 });
     h.sniper.start();
-    h.sniper.setSettings({
-      ...DEFAULT_BOT_SETTINGS,
-      ...fast,
-      safetyMode: 'recommended',
-      customRiskAcknowledgedAt: null,
-    });
-    expect(h.sniper.getGovernor()!.getSettings().actionsPerHour).toBe(30);
-    h.sniper.stop();
+    const eff = h.sniper.getEffectiveSettings();
+    expect(eff.safety.maxSearchesPerHour).toBe(BOT_LIMITS.maxSearchesPerHour.max);
+    expect(eff.safety.maxBuysPerHour).toBe(BOT_LIMITS.maxBuysPerHour.max);
+    expect(eff.safety.maxActiveHoursPerDay).toBe(24);
+    expect(h.sniper.getGovernor()!.getSettings().actionsPerHour).toBe(
+      BOT_LIMITS.maxSearchesPerHour.max + BOT_LIMITS.maxBuysPerHour.max,
+    );
+    await h.done();
+    expect(h.waits.filter((w) => w.phase === 'waiting')[0]!.ms).toBe(
+      BOT_LIMITS.searchDelaySeconds.min * 1000,
+    );
   });
 
-  it('the kill switch and a probe failure still stop the bot in custom mode', async () => {
-    const k = setup({ settings: { ...fast }, results: [[auction('t-a', 8_000)]] });
+  it('will not start settings above low risk until the risk is acknowledged', () => {
+    const risky = setup({
+      settings: { ...quick, riskAcknowledgedAt: null },
+    });
+    risky.sniper.start();
+    expect(risky.sniper.isRunning()).toBe(false);
+    expect(risky.sniper.state.stopReason).toBe('risk_unacknowledged');
+
+    // The recommended defaults are low: no acknowledgment needed.
+    const safe = setup({ settings: { ...DEFAULT_BOT_SETTINGS, riskAcknowledgedAt: null } });
+    safe.sniper.start();
+    expect(safe.sniper.isRunning()).toBe(true);
+    safe.sniper.stop();
+  });
+
+  it('the kill switch and a probe failure still stop the bot on any settings', async () => {
+    const k = setup({ settings: { ...quick }, results: [[auction('t-a', 8_000)]] });
     k.killSwitch.active = true;
     k.sniper.start();
     await k.done();
     expect(k.searches).toHaveLength(0);
     expect(k.sniper.state.stopReason).toBe('kill_switch');
 
-    const p = setup({ settings: { ...fast } });
+    const p = setup({ settings: { ...quick } });
     p.sniper.start();
     p.probe(false);
     expect(p.sniper.state.stopReason).toBe('probe_failure');

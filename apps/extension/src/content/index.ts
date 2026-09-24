@@ -24,7 +24,7 @@ import { AssistEngine } from '../engine/assist.js';
 import { Governor, type GovernorState } from '../engine/governor.js';
 import { rankCandidates, type OpportunityCandidate, type ScoredOpportunity } from '../engine/ranker.js';
 import { countObservedSearches, governedSearch } from '../engine/search.js';
-import { safetyModeChangeEvent } from '../lib/bot-safety.js';
+import { riskLevelChangeEvent } from '../lib/bot-safety.js';
 import { logger } from '../lib/logger.js';
 import { singleFlight } from '../lib/single-flight.js';
 import { setBotPageOpener } from '../ui/bot-opener.js';
@@ -41,6 +41,7 @@ import type { Catalog } from '../model/catalog.js';
 import type { PriceSummary } from '../model/prices.js';
 import type {
   ActivityEvent,
+  BotDailyUsage,
   BotSettings,
   BackgroundResponse,
   BootstrapResponse,
@@ -463,8 +464,9 @@ async function main(): Promise<void> {
             const r = await send<{ summary: PriceSummary }>('summary', { resourceId, minProfit: settingsCache.targets.minProfitPerSnipe });
             return r?.summary.median ?? null;
           },
-          // Recommended mode holds the bot to these (engine/sniper.ts).
-          getGovernorSettings: () => settingsCache.governor,
+          // The hours-per-day limit survives a page reload.
+          loadUsage: () => send<BotDailyUsage | null>('bot.usageGet'),
+          saveUsage: (usage) => void send('bot.usageSet', usage),
           killSwitch: () => ({ active: killSwitchActive || !!governor?.isKillSwitchActive() }),
           onChange: () => botPage.refresh(),
           onAttempt: recordAttempt,
@@ -480,11 +482,10 @@ async function main(): Promise<void> {
       getUnavailableReason: () => (sniper ? null : unavailableReason),
       prepare: () => prepareSniper(true),
       getSettings: () => botSettings ?? DEFAULT_BOT_SETTINGS,
-      getGovernorSettings: () => settingsCache.governor,
       saveSettings: async (next) => {
-        // Turning the recommended limits off (or back on) is reported, so
-        // admins can see who runs the bot on custom limits.
-        const modeEvent = safetyModeChangeEvent(botSettings, next, nowIso(), deviceIdCache);
+        // A change of risk level is reported, so admins can see who runs
+        // the bot on risky settings.
+        const modeEvent = riskLevelChangeEvent(botSettings, next, nowIso(), deviceIdCache);
         botSettings = next;
         await send('bot.settingsSet', next);
         if (modeEvent) void send('telemetry.enqueue', { kind: 'activity', items: [modeEvent] });

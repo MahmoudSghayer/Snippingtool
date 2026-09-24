@@ -8,34 +8,28 @@
  * session — profit, searches, top snipes, the countdown to the next action,
  * counters, the bot log and search results.
  *
- * Safety mode: with the recommended limits on (the default), the bot's
- * limits are clamped to the user's governor settings and the delay presets
- * are derived from those caps ("Careful / Balanced / Fastest allowed"). The
- * engine enforces the same clamping (`effectiveBotSettings` in
- * engine/sniper.ts); this page only shows it. Turning the recommended limits
- * off takes an inline confirmation with a required checkbox
- * (`CUSTOM_LIMITS_ACKNOWLEDGMENT`); while they are off, a "Custom limits —
- * higher ban risk" badge with a one-click "Back to recommended" stays in the
- * top bar, and the fields accept anything inside `BOT_LIMITS`.
+ * Risk: the settings start on the recommended limits and every number is
+ * the user's to change within `BOT_LIMITS`. A risk meter (`botRiskLevel` in
+ * @sl/shared) shows the level, the projected searches and buys a day, and
+ * the reasons, live as the user edits. The first time the user saves
+ * settings above low, the page holds them back until they tick
+ * `RISK_ACKNOWLEDGMENT`, and stores `riskAcknowledgedAt`; after that it only
+ * shows the level. "Reset to recommended" restores the defaults.
  *
  * Renders in its own shadow root; EA's styles cannot reach in. All text
  * that comes from data (filter names, card names, error messages) goes
  * through `esc()`.
  */
 import {
-  CUSTOM_LIMITS_ACKNOWLEDGMENT,
-  SAFETY_PRESETS,
+  BOT_RISK_LABELS,
+  RISK_ACKNOWLEDGMENT,
+  SEARCH_DELAY_PRESETS,
   botRiskLevel,
   botSettingsSchema,
-  effectiveBotSettings,
-  estimatedSearchesPerHour,
-  searchDelayPresets,
-  withSafetyMode,
+  withRecommendedLimits,
+  type BotRiskLevel,
   type BotSettings,
-  type EffectiveBotSettings,
   type FilterCriteria,
-  type GovernorSettings,
-  type SafetyPresetKey,
   type SavedFilter,
 } from '@sl/shared';
 
@@ -63,8 +57,6 @@ export interface BotPageDeps {
    * not need a page reload. */
   prepare: () => Promise<void>;
   getSettings: () => BotSettings;
-  /** The user's governor settings: the caps recommended mode applies. */
-  getGovernorSettings: () => GovernorSettings | null;
   saveSettings: (settings: BotSettings) => Promise<void>;
   getFilters: () => SavedFilter[];
   saveFilters: (filters: SavedFilter[]) => Promise<void>;
@@ -133,6 +125,7 @@ const PHASE_LABEL: Record<SniperPhase, string> = {
   idle: 'Ready',
   searching: 'Searching',
   buying: 'Buying',
+  cooldown: 'Cooldown after a buy',
   waiting: 'Next search',
   break: 'On a break',
   rest: 'Resting',
@@ -171,19 +164,35 @@ const CSS = `
   .close { border: 0; background: none; font-size: 20px; line-height: 1; color: #8b919c; padding: 4px 8px; }
   .notice { margin: 10px 18px 0; padding: 10px 12px; border-radius: 8px; background: rgba(245,158,11,.12); color: #fbbf24; }
   .notice[hidden] { display: none; }
-  .mode { display: flex; align-items: center; gap: 8px; }
-  .mode-badge { padding: 3px 10px; border-radius: 6px; font-size: 11px; font-weight: 800; letter-spacing: .3px; }
-  .mode-badge.recommended { background: rgba(34,197,94,.18); color: #4ade80; }
-  .mode-badge.custom { background: #ef4444; color: #fff; }
-  .mode button { border: 1px solid #4ade80; background: none; border-radius: 8px; padding: 4px 10px; color: #4ade80; font-size: 12px; font-weight: 700; }
-  .modebox { border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; background: #181b22; }
-  .modebox.custom { border: 1px solid #ef4444; }
-  .modebox p { margin: 0 0 6px; }
-  .modebox button { border: 1px solid #333844; background: none; border-radius: 8px; padding: 6px 10px; color: #e8eaed; font-weight: 600; margin-right: 6px; }
-  .modebox button.danger { border-color: #ef4444; color: #f87171; }
-  .modebox button:disabled { opacity: .45; cursor: not-allowed; }
-  .modebox label { display: flex; gap: 8px; align-items: flex-start; margin: 8px 0; color: #e8eaed; }
-  .modebox label input { margin-top: 3px; }
+  .riskbox { background: #1e2129; border-radius: 12px; margin-bottom: 12px; padding: 14px 16px; border: 1px solid transparent; }
+  .riskbox.moderate { border-color: rgba(245,158,11,.5); }
+  .riskbox.high, .riskbox.very_high { border-color: rgba(239,68,68,.6); }
+  .riskhead { display: flex; align-items: center; gap: 10px; }
+  .riskhead b { font-size: 17px; }
+  .riskhead .spacer { flex: 1; }
+  .riskhead button, .ackbox button { border: 1px solid #333844; background: none; border-radius: 8px; padding: 6px 10px; color: #e8eaed; font-weight: 600; }
+  .risk.moderate, .lvl.moderate { background: rgba(245,158,11,.18); color: #fbbf24; }
+  .risk.very_high, .lvl.very_high { background: #ef4444; color: #fff; }
+  .lvl { padding: 3px 10px; border-radius: 6px; font-size: 12px; font-weight: 800; }
+  .lvl.low { background: rgba(34,197,94,.18); color: #4ade80; }
+  .lvl.high { background: rgba(239,68,68,.18); color: #f87171; }
+  .riskbar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin: 10px 0 8px; }
+  .riskbar i { height: 6px; border-radius: 3px; background: #333844; }
+  .riskbar.low i:nth-child(-n+1) { background: #22c55e; }
+  .riskbar.moderate i:nth-child(-n+2) { background: #f59e0b; }
+  .riskbar.high i:nth-child(-n+3) { background: #ef4444; }
+  .riskbar.very_high i { background: #ef4444; }
+  .riskbox ul { margin: 6px 0 0; padding-left: 18px; color: #fbbf24; font-size: 12px; }
+  .ackbox { margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: #181b22; border: 1px solid #ef4444; }
+  .ackbox[hidden] { display: none; }
+  .ackbox p { margin: 0 0 6px; }
+  .ackbox label { display: flex; gap: 8px; align-items: flex-start; margin: 8px 0; color: #e8eaed; }
+  .ackbox label input { margin-top: 3px; }
+  .ackbox button.danger { border-color: #ef4444; color: #f87171; margin-right: 6px; }
+  .ackbox button:disabled { opacity: .45; cursor: not-allowed; }
+  .tag-low { background: rgba(34,197,94,.2); color: #4ade80; }
+  .tag-moderate { background: rgba(245,158,11,.2); color: #fbbf24; }
+  .tag-high, .tag-very_high { background: rgba(239,68,68,.2); color: #f87171; }
 
   .body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(360px, 44%) 1fr; }
   .settings { overflow-y: auto; padding: 14px 16px 60px; border-right: 1px solid #262a33; }
@@ -414,7 +423,6 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       <span class="ver" title="Nova Trade version">v${esc(import.meta.env.VITE_EXTENSION_VERSION)}</span>
       <span class="chip" id="phase">Ready</span>
       <span class="risk" id="risk"></span>
-      <span class="mode" id="mode" aria-live="polite"></span>
       <span class="spacer"></span>
       <span class="saved" id="saved" aria-live="polite"></span>
       <button class="ghost" id="reset" type="button">Reset stats</button>
@@ -458,72 +466,57 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     renderKnobs();
   }
 
-  /** The settings the bot will actually run on (the engine computes the
-   * same thing; this is only for display). */
-  function effective(): EffectiveBotSettings {
-    return effectiveBotSettings(settings, deps.getGovernorSettings());
+  /** Settings above low the user has not confirmed yet: shown on the page,
+   * not saved and not given to the bot until the acknowledgment. */
+  let pending: BotSettings | null = null;
+
+  /** What the page shows: the unconfirmed edit, else the saved settings. */
+  function shown(): BotSettings {
+    return pending ?? settings;
   }
 
-  /** Whether the inline "turn off the recommended limits" step is open. */
-  let confirmingCustom = false;
-
-  function renderMode(): void {
-    const eff = effective();
-    $('mode').innerHTML =
-      eff.mode === 'custom'
-        ? `<span class="mode-badge custom">Custom limits — higher ban risk</span>
-           <button type="button" id="back-recommended">Back to recommended</button>`
-        : `<span class="mode-badge recommended">Recommended limits</span>`;
+  /** Whether the acknowledgment is outstanding: an unconfirmed edit, or
+   * saved settings above low that were never confirmed (an older build's). */
+  function ackNeeded(): boolean {
+    const s = shown();
+    return botRiskLevel(s).level !== 'low' && !s.riskAcknowledgedAt;
   }
 
-  function safetyModeHtml(eff: EffectiveBotSettings): string {
-    if (eff.mode === 'custom') {
-      return `<div class="modebox custom">
-        <p><b>Recommended limits are off.</b> The bot runs on your own limits below, up to the maximums. Going faster raises the risk of an EA ban, and a ban is never refundable. The server kill switch still stops the bot.</p>
-        <button type="button" id="mode-recommended">Back to recommended</button></div>`;
-    }
-    const c = eff.caps!;
-    const caps = `${fmt(c.actionsPerHour)} actions an hour, ${fmt(c.sessionLengthMinutes)}-minute sessions, ${c.buyToSearchRatio} buys per search, ${fmt(c.cooldownSeconds)} s cooldown, ${fmt(c.maxCoinFlowPerHour)} coins an hour`;
-    const confirm = confirmingCustom
-      ? `<label><input type="checkbox" id="ack-custom" /> <span>${esc(CUSTOM_LIMITS_ACKNOWLEDGMENT)}</span></label>
-         <button type="button" class="danger" id="mode-custom-confirm" disabled>Turn off recommended limits</button>
-         <button type="button" id="mode-custom-cancel">Cancel</button>`
-      : `<button type="button" class="danger" id="mode-custom">Turn off recommended limits…</button>`;
-    return `<div class="modebox">
-      <p><b>Recommended limits are on.</b> The bot stays inside your safety settings: ${esc(caps)}. You can set tighter limits below, not looser ones.</p>
-      ${confirm}</div>`;
+  function riskBoxHtml(): string {
+    return `<section class="riskbox" id="riskbox" aria-labelledby="risk-title">
+      <div class="riskhead"><b id="risk-title">Risk: <span id="risk-level"></span></b><span class="spacer"></span>
+        <button type="button" id="reset-rec">Reset to recommended</button></div>
+      <div class="riskbar" id="riskbar" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+      <div id="risk-proj"></div>
+      <ul id="risk-reasons"></ul>
+      <div class="ackbox" id="ackbox" hidden>
+        <p><b>These settings are above low risk.</b> Confirm once to save them. A ban is never refundable.</p>
+        <label><input type="checkbox" id="ack-check" /> <span>${esc(RISK_ACKNOWLEDGMENT)}</span></label>
+        <button type="button" class="danger" id="ack-confirm" disabled>Save these settings</button>
+      </div>
+      <div class="hint">Based on limits traders have reported for EA's transfer market. Not a guarantee — EA doesn't publish its rules.</div>
+    </section>`;
   }
 
   function renderKnobs(): void {
-    const s = settings;
-    const eff = effective();
-    const presets = searchDelayPresets(eff.mode, eff.minSearchDelaySeconds);
-    const delayPreset = presets.find(
+    const s = shown();
+    const delayPreset = SEARCH_DELAY_PRESETS.find(
       (p) => p.min === s.searchDelay.min && p.max === s.searchDelay.max,
     )?.key;
-    const delayHint =
-      eff.mode === 'recommended'
-        ? `<div class="hint">Recommended limits keep at least ${fmt(Math.ceil(eff.minSearchDelaySeconds))} seconds between searches; a shorter delay runs at that pace.</div>`
-        : '';
-    const safetyPreset = (Object.keys(SAFETY_PRESETS) as SafetyPresetKey[]).find((k) =>
-      Object.entries(SAFETY_PRESETS[k]).every(
-        ([f, v]) => s.safety[f as keyof BotSettings['safety']] === v,
-      ),
-    );
+    const presetLevel = (p: { min: number; max: number }): BotRiskLevel =>
+      botRiskLevel({ ...s, searchDelay: { min: p.min, max: p.max } }).level;
 
     $('knobs').innerHTML =
+      riskBoxHtml() +
       section(
         'Delay Settings',
         `<div class="row"><div class="label"><b>Search Delay Time</b><span>Delay between searches (seconds)</span></div>
           ${stepper('delay', rangeText(s.searchDelay), 'secs')}</div>
-        <div class="presets">${presets
-          .map(
-            (
-              p,
-            ) => `<button type="button" class="preset" data-delay="${p.key}" data-min="${p.min}" data-max="${p.max}" aria-pressed="${delayPreset === p.key}">
-            <b>${p.min}-${p.max}</b><small class="tag-${p.tone}">${esc(p.label.toUpperCase())}</small></button>`,
-          )
-          .join('')}</div>${delayHint}`,
+        <div class="presets">${SEARCH_DELAY_PRESETS.map((p) => {
+          const level = presetLevel(p);
+          return `<button type="button" class="preset" data-delay="${p.key}" data-min="${p.min}" data-max="${p.max}" aria-pressed="${delayPreset === p.key}">
+            <b>${p.min}-${p.max}</b><small class="tag-${level}">${esc(BOT_RISK_LABELS[level].toUpperCase())}</small></button>`;
+        }).join('')}</div>`,
       ) +
       section(
         'Break Settings',
@@ -534,8 +527,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         `&nbsp;${toggle('b-on', s.breaks.enabled, 'Take breaks')}`,
       ) +
       section(
-        'Rest Settings',
-        `<div class="row"><div class="label"><b>Minutes Before Rest</b><span>Number of minutes before taking a rest</span></div>
+        'Session and Rest',
+        `<div class="row"><div class="label"><b>Session Length</b><span>Minutes of sniping before a rest</span></div>
           ${stepper('r-after', rangeText(s.rest.afterMinutes), 'mins', true)}</div>
         <div class="row"><div class="label"><b>Rest Duration</b><span>Duration of the rest (minutes)</span></div>
           ${stepper('r-minutes', rangeText(s.rest.minutes), 'mins', true)}</div>
@@ -557,35 +550,21 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       ) +
       section(
         'Safety Limits',
-        `${safetyModeHtml(eff)}${
-          eff.mode === 'custom'
-            ? `<div class="presets" style="justify-content:flex-start;padding:0 0 6px">${(
-                ['low', 'medium', 'high'] as const
-              )
-                .map(
-                  (
-                    k,
-                  ) => `<button type="button" class="preset" data-safety="${k}" aria-pressed="${safetyPreset === k}">
-              <b>${k === 'low' ? 'Low' : k === 'medium' ? 'Medium' : 'High'}</b><small class="tag-${k === 'low' ? 'safe' : k === 'medium' ? 'medium' : 'risky'}">${k.toUpperCase()} RISK</small></button>`,
-                )
-                .join('')}</div>`
-            : `<div class="presets" style="justify-content:flex-start;padding:0 0 6px"><button type="button" class="preset" id="use-caps"><b>Use the recommended limits</b></button></div>`
-        }
-        <div class="row"><div class="label"><b>Actions Per Hour</b><span>Searches + buys in any hour before the bot cools down</span></div>
-          ${stepper('s-aph', String(s.safety.actionsPerHour), '/hour')}</div>
-        <div class="row"><div class="label"><b>Session Length</b><span>The bot stops after this long</span></div>
-          ${stepper('s-session', String(s.safety.sessionLengthMinutes), 'mins')}</div>
-        <div class="row"><div class="label"><b>Buys Per Search</b><span>Most buys allowed per search made (0.01–1)</span></div>
-          ${stepper('s-ratio', String(s.safety.buyToSearchRatio), 'ratio')}</div>
-        <div class="row"><div class="label"><b>Cooldown</b><span>Pause when a limit is hit</span></div>
-          ${stepper('s-cooldown', String(s.safety.cooldownSeconds), 'secs')}</div>
+        `<div class="row"><div class="label"><b>Max Searches Per Hour</b><span>Searches in any hour</span></div>
+          ${stepper('s-sph', String(s.safety.maxSearchesPerHour), '/hour')}</div>
+        <div class="row"><div class="label"><b>Max Buys Per Hour</b><span>Buys in any hour</span></div>
+          ${stepper('s-bph', String(s.safety.maxBuysPerHour), '/hour')}</div>
+        <div class="row"><div class="label"><b>Max Active Hours Per Day</b><span>Sniping time a day, rests not counted</span></div>
+          ${stepper('s-hours', String(s.safety.maxActiveHoursPerDay), 'hours')}</div>
         <div class="row"><div class="label"><b>Max Coins Per Hour</b><span>Spending cap over any hour</span></div>
           ${stepper('s-flow', String(s.safety.maxCoinFlowPerHour), 'coins', true)}</div>
-        <div class="hint" id="pace"></div>`,
+        <div class="row"><div class="label"><b>Cooldown After a Buy</b><span>Wait after every purchase</span></div>
+          ${stepper('s-cooldown', String(s.safety.cooldownSeconds), 'secs')}</div>
+        <div class="row"><div class="label"><b>Buys Per Search</b><span>Most buys allowed per search made (0.01–1)</span></div>
+          ${stepper('s-ratio', String(s.safety.buyToSearchRatio), 'ratio')}</div>`,
         '',
-        eff.mode === 'custom' || confirmingCustom,
+        false,
       );
-    renderMode();
     renderRisk();
   }
 
@@ -1169,24 +1148,26 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   }
 
   function renderRisk(): void {
-    const eff = effective();
-    const level = botRiskLevel(eff);
-    const risk = $('risk');
-    risk.className = `risk ${level}`;
-    risk.textContent = `${level.toUpperCase()} RISK`;
-    const perHour = estimatedSearchesPerHour(eff);
-    const limit = eff.safety.actionsPerHour;
-    const pace = root.getElementById('pace');
-    if (pace) {
-      pace.className = perHour > limit ? 'warn' : 'hint';
-      const inForce =
-        eff.mode === 'recommended' && limit < settings.safety.actionsPerHour
-          ? ` The recommended limits hold it to ${fmt(limit)} actions an hour.`
-          : '';
-      pace.textContent =
-        perHour > limit
-          ? `This pace is about ${fmt(perHour)} searches an hour, above your ${fmt(limit)} actions-per-hour limit — the bot will pause when it reaches the limit.`
-          : `This pace is about ${fmt(perHour)} searches an hour. Faster is riskier: EA can flag or ban accounts that search non-stop.${inForce}`;
+    const risk = botRiskLevel(shown());
+    const label = BOT_RISK_LABELS[risk.level];
+    const chip = $('risk');
+    chip.className = `risk ${risk.level}`;
+    chip.textContent = `Risk: ${label}`;
+    const box = root.getElementById('riskbox');
+    if (!box) return;
+    box.className = `riskbox ${risk.level}`;
+    $('risk-level').textContent = label;
+    $('risk-level').className = `lvl ${risk.level}`;
+    $('riskbar').className = `riskbar ${risk.level}`;
+    $('risk-proj').textContent = `About ${fmt(risk.projectedSearchesPerDay)} searches and ${fmt(risk.projectedBuysPerDay)} buys a day at most.`;
+    $('risk-reasons').innerHTML = risk.reasons.map((r) => `<li>${esc(r)}</li>`).join('');
+    const ack = $('ackbox');
+    const needed = ackNeeded();
+    if (ack.hidden === needed) {
+      ack.hidden = !needed;
+      const check = root.getElementById('ack-check') as HTMLInputElement | null;
+      if (check) check.checked = false;
+      ($('ack-confirm') as HTMLButtonElement).disabled = true;
     }
   }
 
@@ -1212,10 +1193,9 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       mark(id, el.value.trim() !== '' && Number.isFinite(v));
       return Number.isFinite(v) ? v : fallback;
     };
-    const s = settings;
+    const s = shown();
     const next: BotSettings = {
-      safetyMode: s.safetyMode,
-      customRiskAcknowledgedAt: s.customRiskAcknowledgedAt,
+      riskAcknowledgedAt: s.riskAcknowledgedAt,
       searchDelay: rng('delay', false, s.searchDelay),
       breaks: {
         enabled: s.breaks.enabled,
@@ -1234,8 +1214,9 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         sessionCoinBudget: n('t-budget', s.thresholds.sessionCoinBudget),
       },
       safety: {
-        actionsPerHour: n('s-aph', s.safety.actionsPerHour),
-        sessionLengthMinutes: n('s-session', s.safety.sessionLengthMinutes),
+        maxSearchesPerHour: n('s-sph', s.safety.maxSearchesPerHour),
+        maxBuysPerHour: n('s-bph', s.safety.maxBuysPerHour),
+        maxActiveHoursPerDay: n('s-hours', s.safety.maxActiveHoursPerDay),
         buyToSearchRatio: n('s-ratio', s.safety.buyToSearchRatio),
         cooldownSeconds: n('s-cooldown', s.safety.cooldownSeconds),
         maxCoinFlowPerHour: n('s-flow', s.safety.maxCoinFlowPerHour),
@@ -1254,8 +1235,9 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         'thresholds.minProfit': 't-profit',
         'thresholds.stopAfterPurchases': 't-buys',
         'thresholds.sessionCoinBudget': 't-budget',
-        'safety.actionsPerHour': 's-aph',
-        'safety.sessionLengthMinutes': 's-session',
+        'safety.maxSearchesPerHour': 's-sph',
+        'safety.maxBuysPerHour': 's-bph',
+        'safety.maxActiveHoursPerDay': 's-hours',
         'safety.buyToSearchRatio': 's-ratio',
         'safety.cooldownSeconds': 's-cooldown',
         'safety.maxCoinFlowPerHour': 's-flow',
@@ -1271,7 +1253,18 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     return ok ? parsed.data : null;
   }
 
+  /** Applies an edit. Above low and never confirmed: shown, but held back
+   * until the acknowledgment. Otherwise saved and given to the bot. */
   function commit(next: BotSettings, rerender: boolean): void {
+    if (botRiskLevel(next).level !== 'low' && !next.riskAcknowledgedAt) {
+      pending = next;
+      if (saveTimer) clearTimeout(saveTimer);
+      if (rerender) renderKnobs();
+      else renderRisk();
+      say('Not saved yet: confirm the risk above');
+      return;
+    }
+    pending = null;
     settings = next;
     deps.getSniper()?.setSettings(next);
     if (rerender) renderKnobs();
@@ -1296,10 +1289,11 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     't-profit': 500,
     't-buys': 1,
     't-budget': 10_000,
-    's-aph': 50,
-    's-session': 15,
+    's-sph': 25,
+    's-bph': 1,
+    's-hours': 1,
     's-ratio': 0.05,
-    's-cooldown': 15,
+    's-cooldown': 5,
     's-flow': 100_000,
   };
 
@@ -1321,56 +1315,29 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     } else if (el.dataset.delay) {
       const min = Number(el.dataset.min);
       const max = Number(el.dataset.max);
-      commit({ ...settings, searchDelay: { min, max } }, true);
-    } else if (el.id === 'use-caps') {
-      const caps = effective().caps;
-      if (caps) commit({ ...settings, safety: { ...caps } }, true);
-    } else if (el.id === 'mode-custom') {
-      confirmingCustom = true;
-      renderKnobs();
-      (root.getElementById('ack-custom') as HTMLInputElement | null)?.focus();
-    } else if (el.id === 'mode-custom-cancel') {
-      confirmingCustom = false;
-      renderKnobs();
-    } else if (el.id === 'mode-custom-confirm') {
-      const ack = root.getElementById('ack-custom') as HTMLInputElement | null;
-      if (!ack?.checked) return;
-      confirmingCustom = false;
-      commit(withSafetyMode(settings, 'custom', { acknowledged: true }), true);
-    } else if (el.id === 'mode-recommended') {
-      backToRecommended();
-    } else if (el.dataset.safety) {
-      commit(
-        { ...settings, safety: { ...SAFETY_PRESETS[el.dataset.safety as SafetyPresetKey] } },
-        true,
-      );
+      commit({ ...shown(), searchDelay: { min, max } }, true);
+    } else if (el.id === 'reset-rec') {
+      commit(withRecommendedLimits(shown()), true);
+      say('Reset to recommended', false);
+    } else if (el.id === 'ack-confirm') {
+      const check = root.getElementById('ack-check') as HTMLInputElement | null;
+      if (!check?.checked) return;
+      commit({ ...shown(), riskAcknowledgedAt: new Date().toISOString() }, true);
     } else if (el.id === 'b-on') {
-      commit(
-        { ...settings, breaks: { ...settings.breaks, enabled: !settings.breaks.enabled } },
-        true,
-      );
+      const s = shown();
+      commit({ ...s, breaks: { ...s.breaks, enabled: !s.breaks.enabled } }, true);
     } else if (el.id === 'r-on') {
-      commit({ ...settings, rest: { ...settings.rest, enabled: !settings.rest.enabled } }, true);
+      const s = shown();
+      commit({ ...s, rest: { ...s.rest, enabled: !s.rest.enabled } }, true);
     }
     // A toggle or preset inside <summary> must not also fold the card.
     if (el.closest('summary')) e.preventDefault();
   });
 
-  function backToRecommended(): void {
-    confirmingCustom = false;
-    commit(withSafetyMode(settings, 'recommended'), true);
-  }
-
-  // The top bar's "Back to recommended" (shown while custom limits are on).
-  $('mode').addEventListener('click', (e) => {
-    if ((e.target as HTMLElement).closest('#back-recommended')) backToRecommended();
-  });
-
   $('settings').addEventListener('change', (e) => {
     const input = e.target as HTMLInputElement;
-    if (input.id === 'ack-custom') {
-      const confirm = root.getElementById('mode-custom-confirm') as HTMLButtonElement | null;
-      if (confirm) confirm.disabled = !input.checked;
+    if (input.id === 'ack-check') {
+      ($('ack-confirm') as HTMLButtonElement).disabled = !input.checked;
       return;
     }
     if (!input.id || input.id.startsWith('nf-')) return;
@@ -1561,9 +1528,10 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     const sniper = deps.getSniper();
     if (!sniper) return;
     if (sniper.isRunning()) sniper.stop('manual');
-    else {
-      const next = readSettings();
-      if (next) settings = next;
+    else if (ackNeeded()) {
+      say('Confirm the risk (or reset to recommended) before starting');
+      return;
+    } else {
       sniper.setSettings(settings);
       sniper.start();
     }
@@ -1582,6 +1550,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     open() {
       if (!page.hidden) return;
       settings = deps.getSettings();
+      pending = null;
       renderSettings();
       page.hidden = false;
       refreshLive();

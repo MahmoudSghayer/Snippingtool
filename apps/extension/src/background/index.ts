@@ -13,6 +13,7 @@
 import {
   backgroundMessageEnvelopeSchema,
   extBackgroundBotSettingsSetPayloadSchema,
+  extBackgroundBotUsageSetPayloadSchema,
   extBackgroundCardNamesPayloadSchema,
   extBackgroundCatalogSavePayloadSchema,
   extBackgroundEngineStateSetPayloadSchema,
@@ -36,7 +37,15 @@ import { margin, maxSnipePrice, summarise } from '../model/prices.js';
 import * as db from '../store/db.js';
 
 import { handleAuthLogin, handleAuthLogout, handleAuthMfaVerify, handleAuthRegister, handleAuthResendVerification, handleAuthStatus } from './auth.js';
-import { handleBotSettingsGet, handleBotSettingsSet, handleCardNames, handleCatalogGet, handleCatalogSave } from './bot.js';
+import {
+  handleBotSettingsGet,
+  handleBotSettingsSet,
+  handleBotUsageGet,
+  handleBotUsageSet,
+  handleCardNames,
+  handleCatalogGet,
+  handleCatalogSave,
+} from './bot.js';
 import { installGlobalErrorHandlers, handleErrorsReport, ensureErrorFlushAlarm, onErrorFlushAlarm } from './errors.js';
 import { handleEngineStateGet, handleEngineStateSet, handleGovernorSnapshotGet, handleGovernorSnapshotPush } from './governor.js';
 import { handleKillSwitchGet } from './kill-switch.js';
@@ -121,6 +130,8 @@ const handlers: Record<string, Handler> = {
 
   'bot.settingsGet': () => handleBotSettingsGet(),
   'bot.settingsSet': (payload) => handleBotSettingsSet(payload as never),
+  'bot.usageGet': () => handleBotUsageGet(),
+  'bot.usageSet': (payload) => handleBotUsageSet(payload as never),
   'cards.names': (payload) => handleCardNames((payload as { resourceIds: number[] }).resourceIds),
   'catalog.get': () => handleCatalogGet(),
   'catalog.save': (payload) => handleCatalogSave(payload as never),
@@ -156,6 +167,7 @@ const payloadSchemas: Partial<Record<string, { safeParse: (v: unknown) => { succ
   'governor.snapshotPush': extBackgroundGovernorSnapshotPushPayloadSchema,
   'engine.stateSet': extBackgroundEngineStateSetPayloadSchema,
   'bot.settingsSet': extBackgroundBotSettingsSetPayloadSchema,
+  'bot.usageSet': extBackgroundBotUsageSetPayloadSchema,
   'cards.names': extBackgroundCardNamesPayloadSchema,
   'catalog.save': extBackgroundCatalogSavePayloadSchema,
 };

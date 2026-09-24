@@ -232,37 +232,43 @@ minutes. It ships through the same `virtual:autobuyer-loader` alias as the
 autobuyer (`loadSniper()`), so the `ledger` build never contains it, and the
 autobuyer does not buy while the bot runs.
 
-**Recommended limits are on by default; the user can turn them off.** Its
-settings (`BotSettings` in `@sl/shared`) live in `storage.local`, never on
-the server. `safetyMode` decides how far they may go:
+**Recommended limits, editable, with a live risk level.** The settings
+(`BotSettings` in `@sl/shared`) live in `storage.local`, never on the
+server. They start on the recommended limits (`RECOMMENDED_BOT_SETTINGS`):
+a random 8–12 s search delay, at most 250 searches and 15 buys an hour, a
+60-minute session then a 20-minute rest, at most 6 active hours a day, at
+most 500,000 coins spent an hour, and a 10 s cooldown after every buy. The
+user can change any of them within `BOT_LIMITS` (the hard technical
+bounds); "Reset to recommended" restores them. Settings saved by older
+builds still parse: missing fields take the recommended values, and the
+retired `safetyMode`, `customRiskAcknowledgedAt`, `safety.actionsPerHour`
+and `safety.sessionLengthMinutes` are accepted and ignored.
 
-- **`recommended`** (the default, and what settings saved before the field
-  existed read as): `effectiveBotSettings()` clamps the bot's actions per
-  hour, session length, buy:search ratio and coin flow per hour to the
-  user's governor settings (the cooldown to the longer of the two), which
-  are themselves bounded by `GOVERNOR_ABSOLUTE_LIMITS`, and raises the search
-  delay to at least `3600 × (1 + ratio) / actionsPerHour` seconds so the
-  pace cannot run past the cap. With the default governor settings (30
-  actions an hour, ratio 0.35) that is 162 s. The engine applies this on
-  every start and settings change, so a hand-edited storage value cannot
-  get around it. The delay presets are derived from the same numbers:
-  Careful (2-3×), Balanced (1.5-2×) and Fastest allowed (1-1.25× the
-  minimum).
-- **`custom`**: the user turned the recommended limits off on the page,
-  after ticking a required checkbox ("I understand that going faster than
-  the recommended limits raises the risk of an EA ban, and that a ban is
-  never refundable"); `customRiskAcknowledgedAt` records when. `BOT_LIMITS`
-  apply, the old Safe / Medium / Risky presets come back, and a "Custom
-  limits — higher ban risk" badge with a one-click "Back to recommended"
-  stays in the page's top bar. A stored `custom` without an acknowledgment
-  runs as recommended. Each switch is reported as a `settings_change`
-  activity event with the field `bot.safetyMode=custom` or
-  `bot.safetyMode=recommended` (`lib/bot-safety.ts`), subject to the usual
-  telemetry opt-out.
+`botRiskLevel(settings)` rates them live: searches a day
+(min(max searches an hour, 3600 / shortest delay) × active hours a day,
+where active hours are the session/rest duty cycle over 24 h, capped by max
+active hours a day), buys a day (max buys an hour × the same hours), and the
+shortest delay. Tiers, the worst factor winning: low up to 2,000 searches /
+100 buys a day with at least 6 s between searches; moderate up to 3,500 /
+150 / 4 s; high up to 5,000 / 250 / 2 s; very high beyond. The recommended
+defaults rate low (1,500 searches, 90 buys a day). The page shows the level,
+the projections and the reasons, and says the thresholds come from limits
+traders have reported, not from EA. The first time the user saves settings
+above low, the page holds them back until they tick "I understand these
+settings raise the risk of an EA ban, and that a ban is never refundable";
+`riskAcknowledgedAt` records when, and the engine will not start settings
+above low without it. Each save that changes the level is reported as a
+`settings_change` activity event with the field `bot.riskLevel=<level>`
+(`lib/bot-safety.ts`), subject to the usual telemetry opt-out.
 
-The bot runs its own governor built from those effective limits (bounded by
-`BOT_SAFETY_LIMITS` in custom mode, `GOVERNOR_ABSOLUTE_LIMITS` otherwise). In
-both modes the server kill switch and adapter probe failures stop it.
+The engine (`engine/sniper.ts`) enforces the user's own numbers, clamped
+into `BOT_LIMITS` first (`clampBotSettings`): searches and buys an hour on
+sliding windows, the session/rest cycle, active hours a day (per local day,
+saved through `bot.usageGet` / `bot.usageSet` so a reload doesn't reset
+it), the cooldown after each buy, and coins an hour and the buy:search
+ratio through its own governor (`botGovernorSettings`, bounded by
+`BOT_GOVERNOR_BOUNDS`). The server kill switch and adapter probe failures
+stop it whatever the settings say.
 
 **Snipe targets are built like EA's own search panel**: OVR range slider
 with Min/Max OVR, "Type Player Name" (with EA portraits), and Quality,

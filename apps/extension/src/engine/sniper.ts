@@ -8,36 +8,41 @@
  * it waits a random delay from the user's range; every N searches it takes a
  * break; every N minutes it rests.
  *
- * Recommended limits (the default, `safetyMode: 'recommended'`): the bot
- * runs on `effectiveBotSettings()` — its safety limits clamped to the user's
- * governor settings and its search delay raised to fit inside them. That
- * happens here, on every start and settings change, not only in the page,
- * so a hand-edited storage value cannot get past it. With the recommended
- * limits turned off (custom mode, acknowledged on the page) the user's own
- * values apply within `BOT_LIMITS`.
+ * The user sets every limit (within `BOT_LIMITS`); the defaults are the
+ * recommended ones, and the page shows a live risk level for whatever the
+ * user picks (`botRiskLevel`). This engine enforces the user's own numbers,
+ * after clamping them into `BOT_LIMITS` (`clampBotSettings`), so a value
+ * that got into storage some other way can never take it further:
  *
- * What the user cannot turn off, in either mode: every search and every buy
- * still goes through `governor.allow()`, the server kill switch stops the
- * loop, and so does an adapter probe failure or market-shape change —
- * acting on an EA app that no longer looks the way `main/adapter.ts`
- * expects is never safe.
+ *   - max searches per hour and max buys per hour: sliding one-hour windows
+ *     here, and their sum as the governor's actions per hour;
+ *   - the session (minutes before a rest) and the rest;
+ *   - max active hours per day: non-rest running time per local calendar
+ *     day, kept across page reloads through `loadUsage` / `saveUsage`;
+ *   - max coins per hour and the buy:search ratio, through the governor;
+ *   - the cooldown after every buy.
  *
- * The bot runs its own governor, created fresh on every start, so its
- * session length counts from when the user pressed Start.
+ * Settings above low risk need the user's one-time acknowledgment
+ * (`riskAcknowledgedAt`), which the page asks for; without it the bot will
+ * not start.
+ *
+ * What the user cannot turn off: every search and every buy still goes
+ * through `governor.allow()`, the server kill switch stops the loop, and so
+ * does an adapter probe failure or market-shape change — acting on an EA
+ * app that no longer looks the way `main/adapter.ts` expects is never safe.
  */
-import { BOT_SAFETY_LIMITS, GOVERNOR_ABSOLUTE_LIMITS, effectiveBotSettings } from '@sl/shared';
+import {
+  BOT_GOVERNOR_BOUNDS,
+  botGovernorSettings,
+  botRiskLevel,
+  clampBotSettings,
+} from '@sl/shared';
 
-import { Governor, type GovernorBounds } from './governor.js';
+import { Governor } from './governor.js';
 
 import type { AttemptInput, TradeInput } from './types.js';
 import type { AdapterClient } from '../content/adapter-client.js';
-import type {
-  BotSettings,
-  EffectiveBotSettings,
-  FilterCriteria,
-  GovernorSettings,
-  TrimmedAuction,
-} from '@sl/shared';
+import type { BotDailyUsage, BotSettings, FilterCriteria, TrimmedAuction } from '@sl/shared';
 
 /** EA keeps 5% of every sale. */
 const EA_TAX = 0.05;
@@ -48,6 +53,22 @@ const TOP_SNIPES = 5;
 const MAX_SEARCH_FAILURES_IN_A_ROW = 5;
 /** Shortest wait when the governor refuses a search, so a denied loop never spins. */
 const MIN_BLOCKED_WAIT_MS = 5_000;
+const ONE_HOUR_MS = 3_600_000;
+/** How often the day's active time is written back while running. */
+const USAGE_SAVE_EVERY_MS = 30_000;
+
+/** Local calendar day, YYYY-MM-DD. */
+export function localDay(t: number): string {
+  const d = new Date(t);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function startOfLocalDay(t: number): number {
+  const d = new Date(t);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
 
 export interface SniperFilter {
   id: string;
@@ -56,7 +77,15 @@ export interface SniperFilter {
 }
 
 export type SniperPhase =
-  'idle' | 'searching' | 'buying' | 'waiting' | 'break' | 'rest' | 'blocked' | 'stopped';
+  | 'idle'
+  | 'searching'
+  | 'buying'
+  | 'cooldown'
+  | 'waiting'
+  | 'break'
+  | 'rest'
+  | 'blocked'
+  | 'stopped';
 
 export type SniperStopReason =
   | 'manual'
@@ -67,6 +96,8 @@ export type SniperStopReason =
   | 'purchase_limit'
   | 'coin_budget'
   | 'session_length'
+  | 'daily_limit'
+  | 'risk_unacknowledged'
   | 'search_failing';
 
 export interface SniperLogEntry {
@@ -126,9 +157,9 @@ export interface SniperDeps {
   getFilters: () => SniperFilter[];
   /** Expected resale price for a card, or null if the ledger has no data. */
   estimateSellPrice: (resourceId: number) => Promise<number | null>;
-  /** The user's server-synced governor settings: the caps recommended mode
-   * holds the bot to. Null/absent = the shipped defaults. */
-  getGovernorSettings?: () => GovernorSettings | null;
+  /** Today's active time, as saved by an earlier page (null = none). */
+  loadUsage?: () => Promise<BotDailyUsage | null>;
+  saveUsage?: (usage: BotDailyUsage) => void;
   /** The server kill switch as the content script currently knows it. */
   killSwitch: () => { active: boolean; reason?: string };
   onChange: () => void;
@@ -166,15 +197,17 @@ function emptyStats(): SniperStats {
   };
 }
 
-function boundsFor(e: EffectiveBotSettings): GovernorBounds {
-  return e.mode === 'custom' ? BOT_SAFETY_LIMITS : GOVERNOR_ABSOLUTE_LIMITS;
-}
-
 export class Sniper {
-  /** What the bot runs on: the saved settings after the safety mode's
-   * clamping (`effectiveBotSettings`). */
-  private settings: EffectiveBotSettings;
-  private rawSettings: BotSettings;
+  /** What the bot runs on: the user's settings clamped into BOT_LIMITS. */
+  private settings: BotSettings;
+  /** Sliding one-hour windows of search and buy times. */
+  private searchTimes: number[] = [];
+  private buyTimes: number[] = [];
+  /** Today's active (non-rest) time, and when the current active stretch
+   * began (null while resting or stopped). */
+  private usage: BotDailyUsage = { day: '', activeMs: 0 };
+  private activeSince: number | null = null;
+  private usageSavedAt = 0;
   private governor: Governor | null = null;
   private abort: AbortController | null = null;
   private stats: SniperStats = emptyStats();
@@ -197,8 +230,7 @@ export class Sniper {
     private readonly deps: SniperDeps,
     settings: BotSettings,
   ) {
-    this.rawSettings = settings;
-    this.settings = this.resolve(settings);
+    this.settings = clampBotSettings(settings);
     this.now = deps.now ?? Date.now;
     this.random = deps.random ?? Math.random;
     this.sleep = deps.sleep ?? abortableSleep;
@@ -237,21 +269,21 @@ export class Sniper {
     return this.abort != null;
   }
 
-  /** The settings the bot actually runs on (after the safety mode). */
-  getEffectiveSettings(): EffectiveBotSettings {
+  /** The settings the bot actually runs on (clamped into BOT_LIMITS). */
+  getEffectiveSettings(): BotSettings {
     return this.settings;
   }
 
-  /** Takes effect from the next wait/break/rest; the safety limits apply to
-   * the running governor straight away. */
-  setSettings(settings: BotSettings): void {
-    this.rawSettings = settings;
-    this.settings = this.resolve(settings);
-    this.governor?.setSettings(this.settings.safety, boundsFor(this.settings));
+  /** Active time counted today, in ms (for the page and tests). */
+  getActiveMsToday(): number {
+    return this.usage.activeMs + (this.activeSince == null ? 0 : this.now() - this.activeSince);
   }
 
-  private resolve(settings: BotSettings): EffectiveBotSettings {
-    return effectiveBotSettings(settings, this.deps.getGovernorSettings?.() ?? null);
+  /** Takes effect from the next wait/break/rest; the limits apply to the
+   * running governor straight away. */
+  setSettings(settings: BotSettings): void {
+    this.settings = clampBotSettings(settings);
+    this.governor?.setSettings(botGovernorSettings(this.settings), BOT_GOVERNOR_BOUNDS);
   }
 
   start(): void {
@@ -266,20 +298,23 @@ export class Sniper {
       });
       return;
     }
+    const risk = botRiskLevel(this.settings);
+    if (risk.level !== 'low' && !this.settings.riskAcknowledgedAt) {
+      this.setState({
+        phase: 'stopped',
+        phaseEndsAt: null,
+        stopReason: 'risk_unacknowledged',
+        stopDetail: STOP_MESSAGES.risk_unacknowledged,
+      });
+      return;
+    }
     this.abort = new AbortController();
-    // Re-read the caps: the governor settings may have changed since.
-    this.settings = this.resolve(this.rawSettings);
-    this.governor = new Governor(this.settings.safety, {
+    this.governor = new Governor(botGovernorSettings(this.settings), {
       now: this.now,
-      bounds: boundsFor(this.settings),
+      bounds: BOT_GOVERNOR_BOUNDS,
     });
-    this.addLog({
-      kind: 'info',
-      message:
-        this.settings.mode === 'custom'
-          ? 'Custom limits on — higher ban risk'
-          : `Recommended limits on: at most ${this.settings.safety.actionsPerHour} actions an hour`,
-    });
+    this.searchTimes = [];
+    this.buyTimes = [];
     this.stats = { ...emptyStats(), startedAt: this.now() };
     this.filterIndex = 0;
     this.addLog({ kind: 'info', message: 'Bot started' });
@@ -290,6 +325,7 @@ export class Sniper {
     if (!this.abort) return;
     this.abort.abort();
     this.abort = null;
+    this.pauseActive(true);
     const message = detail ?? STOP_MESSAGES[reason];
     this.addLog({ kind: 'info', message: `Bot stopped: ${message}` });
     this.setState({ phase: 'stopped', phaseEndsAt: null, stopReason: reason, stopDetail: message });
@@ -313,10 +349,20 @@ export class Sniper {
     let restAt = this.now() + this.pickInt(s().rest.afterMinutes) * 60_000;
     let failuresInRow = 0;
 
+    const saved = await this.deps.loadUsage?.().catch(() => null);
+    if (signal.aborted) return;
+    this.usage =
+      saved && saved.day === localDay(this.now()) ? { ...saved } : { day: localDay(this.now()), activeMs: 0 };
+    this.activeSince = this.now();
+
     while (!signal.aborted) {
+      if (this.dailyLimitReached()) return this.stop('daily_limit');
       if (s().rest.enabled && this.now() >= restAt) {
         const restMs = this.pickInt(s().rest.minutes) * 60_000;
+        this.pauseActive(true);
         await this.wait('rest', restMs, signal);
+        if (signal.aborted) return;
+        this.activeSince = this.now();
         restAt = this.now() + this.pickInt(s().rest.afterMinutes) * 60_000;
         continue;
       }
@@ -332,6 +378,16 @@ export class Sniper {
       const target = filters[this.filterIndex++ % filters.length]!;
 
       if (this.applyKillSwitch()) return;
+      // The user's searches-per-hour limit, on its own window.
+      const searchWait = this.windowWait(this.searchTimes, s().safety.maxSearchesPerHour);
+      if (searchWait > 0) {
+        this.addLog({
+          kind: 'blocked',
+          message: `Search paused: ${this.searchTimes.length} searches in the last hour (your limit)`,
+        });
+        await this.wait('blocked', Math.max(searchWait, MIN_BLOCKED_WAIT_MS), signal);
+        continue;
+      }
       const decision = this.governor!.allow({ kind: 'search' });
       if (!decision.allowed) {
         if (decision.reason === 'kill_switch') return this.stop('kill_switch', decision.detail);
@@ -357,6 +413,7 @@ export class Sniper {
       });
       const searchFilter: FilterCriteria =
         cap == null ? target.filter : { ...target.filter, maxPrice: cap };
+      this.searchTimes.push(this.now());
       const outcome = await this.deps.adapter.search(searchFilter);
       off();
       if (signal.aborted) return;
@@ -417,6 +474,17 @@ export class Sniper {
       if (t.minProfit > 0 && profit != null && profit < t.minProfit) continue;
 
       if (this.applyKillSwitch()) return true;
+      if (this.windowWait(this.buyTimes, this.settings.safety.maxBuysPerHour) > 0) {
+        this.addLog({
+          kind: 'blocked',
+          resourceId: m.resourceId,
+          assetId: m.assetId,
+          rating: m.rating,
+          price: m.buyNow,
+          message: `Buy skipped: ${this.buyTimes.length} buys in the last hour (your limit)`,
+        });
+        return false;
+      }
       const decision = this.governor!.allow({ kind: 'buy', coins: m.buyNow });
       if (!decision.allowed) {
         this.deps.onAttempt?.({
@@ -441,6 +509,7 @@ export class Sniper {
         continue;
       }
 
+      this.buyTimes.push(this.now());
       const result = await this.deps.adapter.buy(m.tradeId, m.buyNow);
       if (signal.aborted && !result.ok) return true;
       if (result.ok) {
@@ -468,6 +537,11 @@ export class Sniper {
         if (t.stopAfterPurchases > 0 && this.stats.purchases >= t.stopAfterPurchases) {
           this.stop('purchase_limit');
           return true;
+        }
+        const cooldownMs = this.settings.safety.cooldownSeconds * 1000;
+        if (cooldownMs > 0) {
+          await this.wait('cooldown', cooldownMs, signal);
+          if (signal.aborted) return true;
         }
       } else {
         this.stats.failures++;
@@ -525,6 +599,44 @@ export class Sniper {
     if (f.maxRating != null && a.rating > f.maxRating) return false;
     if (a.expiresAt != null && a.expiresAt <= this.now()) return false;
     return true;
+  }
+
+  /** 0 when another action fits in the window, else ms until one does. */
+  private windowWait(times: number[], limit: number): number {
+    const now = this.now();
+    while (times.length > 0 && times[0]! <= now - ONE_HOUR_MS) times.shift();
+    if (times.length < limit) return 0;
+    return times[0]! + ONE_HOUR_MS - now;
+  }
+
+  /** Adds the current active stretch to today's total (starting a new day's
+   * total at midnight) and saves it every so often, or now when `save`. */
+  private accrueActive(save: boolean): void {
+    const now = this.now();
+    if (this.activeSince != null) {
+      const today = localDay(now);
+      if (today !== this.usage.day) {
+        this.usage = { day: today, activeMs: 0 };
+        this.activeSince = Math.max(this.activeSince, startOfLocalDay(now));
+      }
+      this.usage.activeMs = Math.min(86_400_000, this.usage.activeMs + (now - this.activeSince));
+      this.activeSince = now;
+    }
+    if (save || now - this.usageSavedAt >= USAGE_SAVE_EVERY_MS) {
+      this.usageSavedAt = now;
+      this.deps.saveUsage?.({ day: this.usage.day, activeMs: Math.round(this.usage.activeMs) });
+    }
+  }
+
+  /** Ends the current active stretch (a rest, or the bot stopping). */
+  private pauseActive(save: boolean): void {
+    this.accrueActive(save);
+    this.activeSince = null;
+  }
+
+  private dailyLimitReached(): boolean {
+    this.accrueActive(false);
+    return this.usage.activeMs >= this.settings.safety.maxActiveHoursPerDay * ONE_HOUR_MS;
   }
 
   private applyKillSwitch(): boolean {
@@ -586,5 +698,8 @@ const STOP_MESSAGES: Record<SniperStopReason, string> = {
   purchase_limit: 'purchase limit reached',
   coin_budget: 'coin budget spent',
   session_length: 'session length limit reached',
+  daily_limit: 'active hours per day limit reached — the bot can run again tomorrow',
+  risk_unacknowledged:
+    'these settings are above low risk: confirm the risk on the Sniping Bot page first, or reset to recommended',
   search_failing: 'searches keep failing',
 };

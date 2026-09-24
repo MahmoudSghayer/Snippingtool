@@ -11,7 +11,14 @@
  * for is cached as `null` for a day so a busy bot does not ask again on every
  * search.
  */
-import { DEFAULT_BOT_SETTINGS, botSettingsSchema, type BotSettings, type MarketCardHistoryResponse } from '@sl/shared';
+import {
+  DEFAULT_BOT_SETTINGS,
+  botDailyUsageSchema,
+  botSettingsSchema,
+  type BotDailyUsage,
+  type BotSettings,
+  type MarketCardHistoryResponse,
+} from '@sl/shared';
 
 import { apiJson } from '../lib/api.js';
 import { isAuthenticated } from '../lib/auth.js';
@@ -23,6 +30,7 @@ import type { Catalog } from '../model/catalog.js';
 const SETTINGS_KEY = 'sl.bot.settings.v1';
 const NAMES_KEY = 'sl.cards.names.v1';
 const CATALOG_KEY = 'sl.catalog.v1';
+const USAGE_KEY = 'sl.bot.usage.v1';
 const MISS_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_LOOKUPS_PER_CALL = 10;
 
@@ -45,6 +53,17 @@ export async function handleBotSettingsGet(): Promise<BotSettings> {
 export async function handleBotSettingsSet(settings: BotSettings): Promise<BotSettings> {
   await setLocal(SETTINGS_KEY, settings);
   return settings;
+}
+
+/** Today's active time for the bot's hours-per-day limit (engine/sniper.ts). */
+export async function handleBotUsageGet(): Promise<BotDailyUsage | null> {
+  const parsed = botDailyUsageSchema.safeParse(await getLocal<unknown>(USAGE_KEY, null));
+  return parsed.success ? parsed.data : null;
+}
+
+export async function handleBotUsageSet(usage: BotDailyUsage): Promise<{ ok: true }> {
+  await setLocal(USAGE_KEY, usage);
+  return { ok: true };
 }
 
 export async function handleCatalogGet(): Promise<Catalog | null> {
