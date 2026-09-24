@@ -33,9 +33,29 @@
  * previous, now-dead SW instance had persisted and merges it into the
  * in-memory queue (additively, not overwriting anything enqueued
  * synchronously before hydration resolves).
+ *
+ * Ingest correctness (P0 task 11):
+ *  - Every sniping attempt gets a client `attemptId` when it is queued, and
+ *    keeps it (and its original `occurredAt`) in the persisted queue, so a
+ *    re-sent batch is recognised by the API's unique index and stored once.
+ *  - Each batch type flushes on its own: a failure re-queues only the
+ *    chunks that did not get through, never the batches that did (which
+ *    used to be sent again and duplicated).
+ *  - A batch the API rejects outright (a 4xx other than 401/403/408/429)
+ *    is logged and dropped; re-sending the same payload can only fail the
+ *    same way, and it used to block the queue forever.
+ *  - `enqueue()` — the background's entry point — queues nothing while the
+ *    user is opted out or has no account, so nothing is even stored
+ *    locally for them. `flush()` still re-checks opt-out, for items queued
+ *    before the user opted out.
+ *  - Each batch type holds at most `MAX_QUEUED_PER_KIND` items; the oldest
+ *    go first when a long outage fills it.
  */
 
-import { apiJson } from './api.js';
+import { isWithinIngestWindow } from '@sl/shared';
+
+import { ApiError, apiJson } from './api.js';
+import { hasAccount } from './auth.js';
 import { logger } from './logger.js';
 import { getCachedSettings } from './settings.js';
 import { getLocal, getSession, setLocal, setSession } from './storage.js';
@@ -58,14 +78,30 @@ interface QueuedBatches {
   telemetry: TelemetryEvent[];
 }
 
+type QueueKind = keyof QueuedBatches;
+
 const QUEUE_STORAGE_KEY = 'sl.telemetry.queue.v1';
+
+/** Per batch type. At a flush every 2 minutes this is hours of normal use;
+ * it only fills during a long outage, and then the oldest items go. */
+export const MAX_QUEUED_PER_KIND = 1000;
 
 function emptyBatches(): QueuedBatches {
   return { activity: [], sniping: [], trades: [], filterStats: [], riskEvents: [], telemetry: [] };
 }
 
+/** Trims one batch type to the cap, oldest first. */
+function capKind(q: QueuedBatches, kind: QueueKind): void {
+  const list = q[kind] as unknown[];
+  const over = list.length - MAX_QUEUED_PER_KIND;
+  if (over > 0) {
+    list.splice(0, over);
+    logger.warn(`telemetry queue full: dropped the ${over} oldest ${kind} item(s)`, 'telemetry');
+  }
+}
+
 function mergeInto(target: QueuedBatches, extra: QueuedBatches): QueuedBatches {
-  return {
+  const merged: QueuedBatches = {
     activity: [...extra.activity, ...target.activity],
     sniping: [...extra.sniping, ...target.sniping],
     trades: [...extra.trades, ...target.trades],
@@ -73,6 +109,8 @@ function mergeInto(target: QueuedBatches, extra: QueuedBatches): QueuedBatches {
     riskEvents: [...extra.riskEvents, ...target.riskEvents],
     telemetry: [...extra.telemetry, ...target.telemetry],
   };
+  for (const kind of Object.keys(merged) as QueueKind[]) capKind(merged, kind);
+  return merged;
 }
 
 async function loadPersistedQueue(): Promise<QueuedBatches> {
@@ -163,29 +201,77 @@ export async function whenPersisted(): Promise<void> {
   await persistChain;
 }
 
-export function enqueueActivity(events: ActivityEvent[]): void {
-  queue.activity.push(...events);
+function push<K extends QueueKind>(kind: K, items: QueuedBatches[K]): void {
+  (queue[kind] as unknown[]).push(...items);
+  capKind(queue, kind);
   schedulePersist();
+}
+
+export function enqueueActivity(events: ActivityEvent[]): void {
+  push('activity', events);
 }
 export function enqueueSniping(attempts: SnipingAttempt[]): void {
-  queue.sniping.push(...attempts);
-  schedulePersist();
+  // The id is minted once, here or by the caller, and persisted with the
+  // attempt, so every re-send of it carries the same one.
+  push(
+    'sniping',
+    attempts.map((a) => (a.attemptId ? a : { ...a, attemptId: crypto.randomUUID() })),
+  );
 }
 export function enqueueTrades(trades: Trade[]): void {
-  queue.trades.push(...trades);
-  schedulePersist();
+  push('trades', trades);
 }
 export function enqueueFilterStats(stats: FilterStats[]): void {
-  queue.filterStats.push(...stats);
-  schedulePersist();
+  push('filterStats', stats);
 }
 export function enqueueRiskEvents(events: RiskBudgetEvent[]): void {
-  queue.riskEvents.push(...events);
-  schedulePersist();
+  push('riskEvents', events);
 }
 export function enqueueTelemetry(events: TelemetryEvent[]): void {
-  queue.telemetry.push(...events);
-  schedulePersist();
+  push('telemetry', events);
+}
+
+export type TelemetryEnqueuePayload =
+  | { kind: 'activity'; items: ActivityEvent[] }
+  | { kind: 'sniping'; items: SnipingAttempt[] }
+  | { kind: 'trades'; items: Trade[] }
+  | { kind: 'filterStats'; items: FilterStats[] }
+  | { kind: 'riskEvents'; items: RiskBudgetEvent[] }
+  | { kind: 'event'; items: TelemetryEvent[] };
+
+/** Whether anything may be queued at all: never for a user who opted out
+ * (their data should not even sit in local storage waiting to be sent),
+ * and never without an account (nothing could ever send it). */
+async function mayQueue(): Promise<boolean> {
+  const settings = await getCachedSettings();
+  if (settings.telemetryOptOut) return false;
+  return hasAccount();
+}
+
+/** The background's entry point for `telemetry.enqueue` messages. */
+export async function enqueue(payload: TelemetryEnqueuePayload): Promise<{ queued: number }> {
+  if (!(await mayQueue())) return { queued: 0 };
+  switch (payload.kind) {
+    case 'activity':
+      enqueueActivity(payload.items);
+      break;
+    case 'sniping':
+      enqueueSniping(payload.items);
+      break;
+    case 'trades':
+      enqueueTrades(payload.items);
+      break;
+    case 'filterStats':
+      enqueueFilterStats(payload.items);
+      break;
+    case 'riskEvents':
+      enqueueRiskEvents(payload.items);
+      break;
+    case 'event':
+      enqueueTelemetry(payload.items);
+      break;
+  }
+  return { queued: payload.items.length };
 }
 
 export function pendingCount(): number {
@@ -193,30 +279,91 @@ export function pendingCount(): number {
   return q.activity.length + q.sniping.length + q.trades.length + q.filterStats.length + q.riskEvents.length + q.telemetry.length;
 }
 
-async function postBatch<T>(path: string, body: Record<string, T[]>): Promise<void> {
-  const [key] = Object.keys(body);
-  const list = key ? body[key] : undefined;
-  if (!list || list.length === 0) return;
-  // The API caps every batch endpoint (activity 500, sniping/trades/filters/
-  // risk-events 200 each — packages/shared/src/schemas/*.ts); chunk so one
-  // oversized local queue never fails an entire flush.
-  const CHUNK = path === '/api/v1/activity/batch' ? 500 : 200;
-  for (let i = 0; i < list.length; i += CHUNK) {
-    const chunk = list.slice(i, i + CHUNK);
-    await apiJson(path, { method: 'POST', body: JSON.stringify({ [key as string]: chunk }) });
+/** A 4xx the same payload will always get again. 401 (session expired,
+ * resolved by the next login/refresh), 403 (account state that can change),
+ * 408 and 429 (transient) are worth keeping for the next tick; anything
+ * else in the 4xx range — a validation failure, a batch too large — is
+ * not, and re-queueing it would block every later item of that type. */
+function isPermanentRejection(err: unknown): err is ApiError {
+  return (
+    err instanceof ApiError &&
+    err.status >= 400 &&
+    err.status < 500 &&
+    ![401, 403, 408, 429].includes(err.status)
+  );
+}
+
+interface KindResult<T> {
+  sent: number;
+  /** Items to put back for the next tick (the chunk that failed and every
+   * chunk after it). */
+  unsent: T[];
+  ok: boolean;
+}
+
+/** Sends one batch type in chunks. Stops at the first retryable failure and
+ * hands back what was not sent; a permanently rejected chunk is dropped and
+ * the rest still go. */
+async function postBatch<T>(
+  path: string,
+  key: string,
+  items: T[],
+  chunkSize: number,
+): Promise<KindResult<T>> {
+  let sent = 0;
+  for (let i = 0; i < items.length; i += chunkSize) {
+    const chunk = items.slice(i, i + chunkSize);
+    try {
+      await apiJson(path, { method: 'POST', body: JSON.stringify({ [key]: chunk }) });
+      sent += chunk.length;
+    } catch (err) {
+      if (isPermanentRejection(err)) {
+        logger.warn(
+          `telemetry: ${path} rejected ${chunk.length} item(s) with ${err.status} ${err.code}, dropping them: ${err.message}`,
+          'telemetry',
+        );
+        continue;
+      }
+      logger.warn(`telemetry flush of ${path} failed, re-queueing ${items.length - i} item(s): ${String(err)}`, 'telemetry');
+      return { sent, unsent: items.slice(i), ok: false };
+    }
   }
+  return { sent, unsent: [], ok: true };
+}
+
+/** Drops items whose timestamps the API would reject (more than 7 days old,
+ * or more than 5 minutes ahead — @sl/shared's ingest window), so one stale
+ * item cannot get a whole chunk rejected. Only the batch types the API
+ * bounds are filtered. */
+function dropOutOfWindow(q: QueuedBatches): QueuedBatches {
+  const now = Date.now();
+  // Only drops what is provably outside the window; anything malformed is
+  // left for the API to judge (and a 4xx then drops it anyway).
+  const inWindow = (iso: string | undefined) =>
+    !Number.isFinite(Date.parse(iso ?? '')) || isWithinIngestWindow(iso as string, now);
+  const kept: QueuedBatches = {
+    ...q,
+    activity: q.activity.filter((e) => inWindow(e.occurredAt)),
+    sniping: q.sniping.filter((a) => inWindow(a.occurredAt)),
+    trades: q.trades.filter((t) => inWindow(t.boughtAt) && (t.soldAt == null || inWindow(t.soldAt))),
+  };
+  const dropped =
+    q.activity.length - kept.activity.length +
+    q.sniping.length - kept.sniping.length +
+    q.trades.length - kept.trades.length;
+  if (dropped > 0) logger.warn(`telemetry: dropping ${dropped} queued item(s) too old for the API to accept`, 'telemetry');
+  return kept;
 }
 
 /** Flush every queued batch. Opt-out (checked fresh, not cached at enqueue
  * time) drops everything except risk-budget events and error reports are
  * out of scope here — telemetry opt-out only ever suppresses *this* file's
- * batches, per docs/06-extension.md's itemised "What it sends" list; a
- * batch whose own POST fails keeps only *that* batch queued so the next
- * alarm tick retries it rather than silently dropping data — batches whose
- * POST already succeeded are not re-queued (see the defect fix below).
- * Always waits for hydration first, so a flush called right after a fresh
- * SW start includes whatever the previous instance had queued but never
- * got to send. */
+ * batches, per docs/06-extension.md's itemised "What it sends" list. Each
+ * batch type is sent independently: one that fails is re-queued (only its
+ * unsent chunks) for the next alarm tick, one the API rejects outright is
+ * dropped, and the others are done either way. Always waits for hydration
+ * first, so a flush called right after a fresh SW start includes whatever
+ * the previous instance had queued but never got to send. */
 export async function flush(): Promise<{ ok: boolean; sent: number }> {
   await ensureHydrationStarted();
 
@@ -228,7 +375,7 @@ export async function flush(): Promise<{ ok: boolean; sent: number }> {
     return { ok: true, sent: 0 }; // "sent: 0" is deliberate — nothing left this machine
   }
 
-  const toFlush = queue;
+  const toFlush = dropOutOfWindow(queue);
   queue = emptyBatches();
   schedulePersist();
 
@@ -238,7 +385,9 @@ export async function flush(): Promise<{ ok: boolean; sent: number }> {
   // path) — found and fixed alongside defect #4 while writing
   // apps/api/src/test/qa/__tests__/extension-api-contract.test.ts, which
   // now pins every one of these against apps/api/openapi/openapi.json so
-  // this can't silently regress again.
+  // this can't silently regress again. Chunk sizes are the API's own
+  // per-request caps (packages/shared/src/schemas/*.ts): activity and
+  // telemetry 500, the rest 200.
   //
   // Bug fix: this used to be `Promise.all`, so one rejected POST (e.g. the
   // risk-events endpoint down) threw before the other five settled results
@@ -247,28 +396,25 @@ export async function flush(): Promise<{ ok: boolean; sent: number }> {
   // next alarm tick re-sent them and the API recorded duplicates. Each
   // batch below is independent (different endpoint, different rows), so
   // `Promise.allSettled` lets each one's outcome be judged on its own:
-  // only the batches whose own request failed get put back on the queue.
-  const batches: Array<{ label: string; items: unknown[]; requeue: () => void }> = [
-    { label: 'activity', items: toFlush.activity, requeue: () => queue.activity.unshift(...toFlush.activity) },
-    { label: 'sniping', items: toFlush.sniping, requeue: () => queue.sniping.unshift(...toFlush.sniping) },
-    { label: 'trades', items: toFlush.trades, requeue: () => queue.trades.unshift(...toFlush.trades) },
-    { label: 'filterStats', items: toFlush.filterStats, requeue: () => queue.filterStats.unshift(...toFlush.filterStats) },
-    { label: 'riskEvents', items: toFlush.riskEvents, requeue: () => queue.riskEvents.unshift(...toFlush.riskEvents) },
-    { label: 'telemetry', items: toFlush.telemetry, requeue: () => queue.telemetry.unshift(...toFlush.telemetry) },
+  // only what failed gets put back on the queue. Within a batch type,
+  // `postBatch` hands back just the chunks that did not get through, so a
+  // chunk that already got a 2xx is not re-sent either.
+  const batches: Array<{ label: string; items: unknown[]; requeue: (items: never[]) => void }> = [
+    { label: 'activity', items: toFlush.activity, requeue: (items) => queue.activity.unshift(...items) },
+    { label: 'sniping', items: toFlush.sniping, requeue: (items) => queue.sniping.unshift(...items) },
+    { label: 'trades', items: toFlush.trades, requeue: (items) => queue.trades.unshift(...items) },
+    { label: 'filterStats', items: toFlush.filterStats, requeue: (items) => queue.filterStats.unshift(...items) },
+    { label: 'riskEvents', items: toFlush.riskEvents, requeue: (items) => queue.riskEvents.unshift(...items) },
+    { label: 'telemetry', items: toFlush.telemetry, requeue: (items) => queue.telemetry.unshift(...items) },
   ];
 
   const results = await Promise.allSettled([
-    postBatch('/api/v1/activity/batch', { events: toFlush.activity }),
-    postBatch('/api/v1/sniping/attempts', { attempts: toFlush.sniping }),
-    postBatch('/api/v1/trades/batch', { trades: toFlush.trades }),
-    postBatch('/api/v1/filters/stats', { stats: toFlush.filterStats }),
-    postBatch('/api/v1/risk-events', { events: toFlush.riskEvents }),
-    toFlush.telemetry.length
-      ? apiJson('/api/v1/extension/telemetry', {
-          method: 'POST',
-          body: JSON.stringify({ events: toFlush.telemetry }),
-        })
-      : Promise.resolve(),
+    postBatch('/api/v1/activity/batch', 'events', toFlush.activity, 500),
+    postBatch('/api/v1/sniping/attempts', 'attempts', toFlush.sniping, 200),
+    postBatch('/api/v1/trades/batch', 'trades', toFlush.trades, 200),
+    postBatch('/api/v1/filters/stats', 'stats', toFlush.filterStats, 200),
+    postBatch('/api/v1/risk-events', 'events', toFlush.riskEvents, 200),
+    postBatch('/api/v1/extension/telemetry', 'events', toFlush.telemetry, 500),
   ]);
 
   let sentCount = 0;
@@ -277,16 +423,21 @@ export async function flush(): Promise<{ ok: boolean; sent: number }> {
     const batch = batches[i]; // `results` and `batches` are the same fixed-length, index-aligned arrays above
     if (!batch) return;
     if (result.status === 'rejected') {
+      // postBatch catches its own request failures, so this is something
+      // unexpected; keep the whole batch for the next tick.
       anyFailed = true;
       logger.warn(`telemetry flush: ${batch.label} batch failed, re-queueing: ${String(result.reason)}`, 'telemetry');
-      // Put just this batch back so the next alarm tick retries only it —
-      // batches that already got a 2xx above are not touched here.
-      batch.requeue();
-    } else {
-      sentCount += batch.items.length;
+      batch.requeue(batch.items as never[]);
+      return;
     }
+    sentCount += result.value.sent;
+    if (!result.value.ok) anyFailed = true;
+    // Unsent items are older than anything enqueued while the flush was in
+    // flight, so they go back in front.
+    if (result.value.unsent.length > 0) batch.requeue(result.value.unsent as never[]);
   });
-  if (anyFailed) schedulePersist();
+  for (const kind of Object.keys(queue) as QueueKind[]) capKind(queue, kind);
+  schedulePersist();
 
   return { ok: !anyFailed, sent: sentCount };
 }

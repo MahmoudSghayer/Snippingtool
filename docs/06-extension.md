@@ -464,7 +464,8 @@ word for word (`options/main.ts`'s `WHAT_IT_SENDS`), and the same list
   listing).
 
 **`telemetryOptOut`** (`lib/telemetry.ts`) is checked client-side, before
-anything is even queued for send — an opted-out user's data never leaves
+anything is even queued (`enqueue()` queues nothing while opted out or
+signed out) and again at flush — an opted-out user's data never leaves
 the machine in the first place, it is not a server-side filter on data that
 already arrived. It does **not** affect the license heartbeat
 (`lib/license.ts`), which sends only an install id, the extension version,
@@ -488,6 +489,15 @@ flush also fires on `chrome.runtime.onSuspend` (background/telemetry.ts) —
 not the safety net (the persistence above is), just an earlier send
 attempt when the browser signals it's about to unload the extension's
 background context.
+
+**Retries** (P0 task 11): each batch type flushes independently, and only
+the chunks that failed are re-queued. Every sniping attempt carries a
+client `attemptId` (kept with its original `occurredAt` in the queue), so a
+re-sent attempt is stored once by the API. A batch rejected with a 4xx
+other than 401/403/408/429 is logged and dropped, not retried forever;
+items outside the API's timestamp window (7 days back, 5 minutes ahead)
+are dropped before sending; each batch type holds at most 1,000 items,
+oldest dropped first.
 
 ## 7. Crash recovery
 

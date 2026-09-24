@@ -307,6 +307,9 @@ async function main(): Promise<void> {
 
   function recordAttempt(input: AttemptInput): void {
     const attempt: SnipingAttempt = {
+      // Identifies this attempt through every retry of its flush, so the
+      // API stores it once (lib/telemetry.ts).
+      attemptId: crypto.randomUUID(),
       resourceId: input.resourceId,
       tradeId: input.tradeId,
       targetPrice: input.targetPrice,
