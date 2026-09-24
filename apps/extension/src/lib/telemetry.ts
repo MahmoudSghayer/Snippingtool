@@ -211,10 +211,12 @@ async function postBatch<T>(path: string, body: Record<string, T[]>): Promise<vo
  * time) drops everything except risk-budget events and error reports are
  * out of scope here — telemetry opt-out only ever suppresses *this* file's
  * batches, per docs/06-extension.md's itemised "What it sends" list; a
- * failed flush keeps the queue intact so the next alarm tick retries rather
- * than silently dropping data. Always waits for hydration first, so a
- * flush called right after a fresh SW start includes whatever the previous
- * instance had queued but never got to send. */
+ * batch whose own POST fails keeps only *that* batch queued so the next
+ * alarm tick retries it rather than silently dropping data — batches whose
+ * POST already succeeded are not re-queued (see the defect fix below).
+ * Always waits for hydration first, so a flush called right after a fresh
+ * SW start includes whatever the previous instance had queued but never
+ * got to send. */
 export async function flush(): Promise<{ ok: boolean; sent: number }> {
   await ensureHydrationStarted();
 
@@ -227,48 +229,64 @@ export async function flush(): Promise<{ ok: boolean; sent: number }> {
   }
 
   const toFlush = queue;
-  const sent =
-    toFlush.activity.length +
-    toFlush.sniping.length +
-    toFlush.trades.length +
-    toFlush.filterStats.length +
-    toFlush.riskEvents.length +
-    toFlush.telemetry.length;
   queue = emptyBatches();
   schedulePersist();
 
-  try {
-    // Route paths below must match apps/api's actual registrations exactly
-    // (modules/activity, modules/sniping, modules/trades all register
-    // under a `/batch` or `/attempts` suffix, not the bare collection
-    // path) — found and fixed alongside defect #4 while writing
-    // apps/api/src/test/qa/__tests__/extension-api-contract.test.ts, which
-    // now pins every one of these against apps/api/openapi/openapi.json so
-    // this can't silently regress again.
-    await Promise.all([
-      postBatch('/api/v1/activity/batch', { events: toFlush.activity }),
-      postBatch('/api/v1/sniping/attempts', { attempts: toFlush.sniping }),
-      postBatch('/api/v1/trades/batch', { trades: toFlush.trades }),
-      postBatch('/api/v1/filters/stats', { stats: toFlush.filterStats }),
-      postBatch('/api/v1/risk-events', { events: toFlush.riskEvents }),
-      toFlush.telemetry.length
-        ? apiJson('/api/v1/extension/telemetry', {
-            method: 'POST',
-            body: JSON.stringify({ events: toFlush.telemetry }),
-          })
-        : Promise.resolve(),
-    ]);
-    return { ok: true, sent };
-  } catch (err) {
-    logger.warn(`telemetry flush failed, re-queueing: ${String(err)}`, 'telemetry');
-    // Put everything back so the next alarm tick retries instead of losing it.
-    queue.activity.unshift(...toFlush.activity);
-    queue.sniping.unshift(...toFlush.sniping);
-    queue.trades.unshift(...toFlush.trades);
-    queue.filterStats.unshift(...toFlush.filterStats);
-    queue.riskEvents.unshift(...toFlush.riskEvents);
-    queue.telemetry.unshift(...toFlush.telemetry);
-    schedulePersist();
-    return { ok: false, sent: 0 };
-  }
+  // Route paths below must match apps/api's actual registrations exactly
+  // (modules/activity, modules/sniping, modules/trades all register
+  // under a `/batch` or `/attempts` suffix, not the bare collection
+  // path) — found and fixed alongside defect #4 while writing
+  // apps/api/src/test/qa/__tests__/extension-api-contract.test.ts, which
+  // now pins every one of these against apps/api/openapi/openapi.json so
+  // this can't silently regress again.
+  //
+  // Bug fix: this used to be `Promise.all`, so one rejected POST (e.g. the
+  // risk-events endpoint down) threw before the other five settled results
+  // could be inspected, and the single `catch` below re-queued *all six*
+  // batches — including the ones that had already gotten a 2xx — so the
+  // next alarm tick re-sent them and the API recorded duplicates. Each
+  // batch below is independent (different endpoint, different rows), so
+  // `Promise.allSettled` lets each one's outcome be judged on its own:
+  // only the batches whose own request failed get put back on the queue.
+  const batches: Array<{ label: string; items: unknown[]; requeue: () => void }> = [
+    { label: 'activity', items: toFlush.activity, requeue: () => queue.activity.unshift(...toFlush.activity) },
+    { label: 'sniping', items: toFlush.sniping, requeue: () => queue.sniping.unshift(...toFlush.sniping) },
+    { label: 'trades', items: toFlush.trades, requeue: () => queue.trades.unshift(...toFlush.trades) },
+    { label: 'filterStats', items: toFlush.filterStats, requeue: () => queue.filterStats.unshift(...toFlush.filterStats) },
+    { label: 'riskEvents', items: toFlush.riskEvents, requeue: () => queue.riskEvents.unshift(...toFlush.riskEvents) },
+    { label: 'telemetry', items: toFlush.telemetry, requeue: () => queue.telemetry.unshift(...toFlush.telemetry) },
+  ];
+
+  const results = await Promise.allSettled([
+    postBatch('/api/v1/activity/batch', { events: toFlush.activity }),
+    postBatch('/api/v1/sniping/attempts', { attempts: toFlush.sniping }),
+    postBatch('/api/v1/trades/batch', { trades: toFlush.trades }),
+    postBatch('/api/v1/filters/stats', { stats: toFlush.filterStats }),
+    postBatch('/api/v1/risk-events', { events: toFlush.riskEvents }),
+    toFlush.telemetry.length
+      ? apiJson('/api/v1/extension/telemetry', {
+          method: 'POST',
+          body: JSON.stringify({ events: toFlush.telemetry }),
+        })
+      : Promise.resolve(),
+  ]);
+
+  let sentCount = 0;
+  let anyFailed = false;
+  results.forEach((result, i) => {
+    const batch = batches[i]; // `results` and `batches` are the same fixed-length, index-aligned arrays above
+    if (!batch) return;
+    if (result.status === 'rejected') {
+      anyFailed = true;
+      logger.warn(`telemetry flush: ${batch.label} batch failed, re-queueing: ${String(result.reason)}`, 'telemetry');
+      // Put just this batch back so the next alarm tick retries only it —
+      // batches that already got a 2xx above are not touched here.
+      batch.requeue();
+    } else {
+      sentCount += batch.items.length;
+    }
+  });
+  if (anyFailed) schedulePersist();
+
+  return { ok: !anyFailed, sent: sentCount };
 }
