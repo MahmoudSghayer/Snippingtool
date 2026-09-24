@@ -8938,6 +8938,86 @@
         }
       }
     },
+    "/api/v1/downloads/userscript/link": {
+      "get": {
+        "summary": "The signed-in user's Tampermonkey install link. The script behind it is served only while their pass is active.",
+        "tags": [
+          "downloads"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "installUrl": {
+                      "type": "string",
+                      "format": "uri"
+                    }
+                  },
+                  "required": [
+                    "installUrl"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/downloads/userscript/{token}/nova-trade.user.js": {
+      "get": {
+        "summary": "The Nova Trade userscript for Tampermonkey (signed per-user link). Requires an active pass.",
+        "tags": [
+          "downloads"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "in": "path",
+            "name": "token",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/api/v1/downloads/userscript/{token}/nova-trade.meta.js": {
+      "get": {
+        "summary": "The userscript's header, which Tampermonkey polls for updates (signed per-user link). Requires an active pass.",
+        "tags": [
+          "downloads"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "in": "path",
+            "name": "token",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
     "/api/v1/extension/bootstrap": {
       "post": {
         "tags": [
@@ -10036,6 +10116,11 @@
                             "minLength": 1,
                             "maxLength": 10
                           },
+                          "zone": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000
+                          },
                           "nationality": {
                             "type": "integer",
                             "exclusiveMinimum": true,
@@ -10059,6 +10144,17 @@
                               "gold",
                               "special"
                             ]
+                          },
+                          "rarity": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000
+                          },
+                          "chemistryStyle": {
+                            "type": "integer",
+                            "exclusiveMinimum": true,
+                            "minimum": 0,
+                            "maximum": 1000
                           }
                         },
                         "additionalProperties": false
@@ -10144,6 +10240,11 @@
                         "minLength": 1,
                         "maxLength": 10
                       },
+                      "zone": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 1000
+                      },
                       "nationality": {
                         "type": "integer",
                         "exclusiveMinimum": true,
@@ -10167,6 +10268,17 @@
                           "gold",
                           "special"
                         ]
+                      },
+                      "rarity": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 1000
+                      },
+                      "chemistryStyle": {
+                        "type": "integer",
+                        "exclusiveMinimum": true,
+                        "minimum": 0,
+                        "maximum": 1000
                       }
                     },
                     "additionalProperties": false
@@ -10229,6 +10341,11 @@
                           "minLength": 1,
                           "maxLength": 10
                         },
+                        "zone": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 1000
+                        },
                         "nationality": {
                           "type": "integer",
                           "exclusiveMinimum": true,
@@ -10252,6 +10369,17 @@
                             "gold",
                             "special"
                           ]
+                        },
+                        "rarity": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 1000
+                        },
+                        "chemistryStyle": {
+                          "type": "integer",
+                          "exclusiveMinimum": true,
+                          "minimum": 0,
+                          "maximum": 1000
                         }
                       },
                       "additionalProperties": false
@@ -10338,6 +10466,11 @@
                         "minLength": 1,
                         "maxLength": 10
                       },
+                      "zone": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 1000
+                      },
                       "nationality": {
                         "type": "integer",
                         "exclusiveMinimum": true,
@@ -10361,6 +10494,17 @@
                           "gold",
                           "special"
                         ]
+                      },
+                      "rarity": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 1000
+                      },
+                      "chemistryStyle": {
+                        "type": "integer",
+                        "exclusiveMinimum": true,
+                        "minimum": 0,
+                        "maximum": 1000
                       }
                     },
                     "additionalProperties": false
@@ -10437,6 +10581,11 @@
                           "minLength": 1,
                           "maxLength": 10
                         },
+                        "zone": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 1000
+                        },
                         "nationality": {
                           "type": "integer",
                           "exclusiveMinimum": true,
@@ -10460,6 +10609,17 @@
                             "gold",
                             "special"
                           ]
+                        },
+                        "rarity": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 1000
+                        },
+                        "chemistryStyle": {
+                          "type": "integer",
+                          "exclusiveMinimum": true,
+                          "minimum": 0,
+                          "maximum": 1000
                         }
                       },
                       "additionalProperties": false

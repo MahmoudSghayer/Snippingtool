@@ -77,18 +77,6 @@ dashboard.{$DOMAIN} {
 
 	encode zstd gzip
 
-	# The Tampermonkey build of the extension (`pnpm --filter @sl/extension
-	# build:userscript`). Tampermonkey installs from
-	# /userscript/sniper-ledger.user.js and polls sniper-ledger.meta.js for
-	# updates. The files sit in the caddy_data volume, so publishing a new
-	# version is a file copy (infra/scripts/publish-userscript.sh) with no
-	# restart. no-cache: an update must be visible on Tampermonkey's next poll.
-	handle_path /userscript/* {
-		root * /data/userscript
-		header Cache-Control "no-cache"
-		file_server
-	}
-
 	handle {
 		reverse_proxy dashboard:8080 {
 			health_uri /healthz

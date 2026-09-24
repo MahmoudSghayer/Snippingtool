@@ -48,29 +48,34 @@ if (target === 'userscript' && watch) {
 // The userscript carries the autobuyer, like `ledger-auto` (it is never
 // listed in a store). Every automated action still goes through the governor.
 const automation = target === 'ledger-auto' || target === 'userscript';
+// `--template` builds what the API serves as downloads: the `ledger-auto`
+// zip's files, or the userscript. The API origin, dashboard origin and
+// license public key are placeholders that the API fills in with its own
+// configuration when it serves the download
+// (apps/api/src/lib/extension-download.ts), so one image serves a correct
+// build on any deployment. The userscript template also carries a
+// placeholder download token in its @downloadURL/@updateURL, which the API
+// replaces with the user's signed token. The placeholders are exported from
+// ./template-placeholders.mjs, which the API imports too.
+const template = process.argv.includes('--template');
+if (template && target === 'ledger') {
+  console.error('--template only applies to ledger-auto and userscript');
+  process.exit(1);
+}
+
 // Tampermonkey only installs an update when `@version` goes up, so every
-// userscript build gets its own: the package version plus a UTC build stamp
-// (0.1.0.202609230830 > 0.1.0.202609221900). USERSCRIPT_VERSION pins it.
+// hand-published userscript build gets its own: the package version plus a
+// UTC build stamp (0.1.0.202609230830 > 0.1.0.202609221900).
+// USERSCRIPT_VERSION pins it. The API-served template uses the extension
+// version as is, so the userscript updates when the extension does.
 // The same version is compiled in, so the page can show which one runs.
 const version =
-  target === 'userscript'
+  target === 'userscript' && !template
     ? process.env.USERSCRIPT_VERSION ||
       `${pkg.version}.${new Date().toISOString().replace(/\D/g, '').slice(0, 12)}`
     : pkg.version;
 
-// `--template` builds the downloadable `ledger-auto` zip's template: the
-// API origin, dashboard origin and license public key are placeholders that
-// the API fills in with its own configuration when it serves the download
-// (apps/api/src/lib/extension-download.ts), so one image serves a correct
-// extension on any deployment. The placeholders are exported from
-// ./template-placeholders.mjs, which the API imports too.
-const template = process.argv.includes('--template');
-if (template && target !== 'ledger-auto') {
-  console.error('--template only applies to ledger-auto');
-  process.exit(1);
-}
-
-const outDir = path.join(root, 'dist', template ? 'ledger-auto-template' : target);
+const outDir = path.join(root, 'dist', template ? `${target}-template` : target);
 
 const env = {
   VITE_AUTOMATION: automation ? '1' : '0',
@@ -256,13 +261,17 @@ async function buildUserscript() {
     version,
     apiOrigin: env.VITE_API_ORIGIN,
     // Where the published file will live, if known — Tampermonkey then
-    // checks the small .meta.js for new versions and installs updates.
-    downloadUrl: process.env.USERSCRIPT_DOWNLOAD_URL || '',
+    // checks the small .meta.js for new versions and installs updates. The
+    // template points at the API's per-user download route
+    // (apps/api/src/modules/downloads), token still a placeholder.
+    downloadUrl: template
+      ? `${TEMPLATE_PLACEHOLDERS.apiOrigin}/api/v1/downloads/userscript/${TEMPLATE_PLACEHOLDERS.userscriptToken}/nova-trade.user.js`
+      : process.env.USERSCRIPT_DOWNLOAD_URL || '',
   });
 
   mkdirSync(outDir, { recursive: true });
-  writeFileSync(path.join(outDir, 'sniper-ledger.user.js'), `${header}\n\n${code}`);
-  writeFileSync(path.join(outDir, 'sniper-ledger.meta.js'), `${header}\n`);
+  writeFileSync(path.join(outDir, 'nova-trade.user.js'), `${header}\n\n${code}`);
+  writeFileSync(path.join(outDir, 'nova-trade.meta.js'), `${header}\n`);
 }
 
 async function main() {

@@ -173,8 +173,24 @@ which runs even without a browser (a plain filesystem scan).
 
 `pnpm --filter @sl/extension build:userscript` builds the M1–M3 code (same
 feature set as `ledger-auto`, `VITE_BUILD_TARGET=userscript`) into one
-Tampermonkey file, `dist/userscript/sniper-ledger.user.js`, plus the
-header-only `sniper-ledger.meta.js` Tampermonkey polls for updates. No
+Tampermonkey file, `dist/userscript/nova-trade.user.js`, plus the
+header-only `nova-trade.meta.js` Tampermonkey polls for updates.
+
+Customers install it from the API, not from a static host: the chrome zip
+stays the main install, and "My account" offers Tampermonkey as the
+optional one-click alternative. `build:userscript-template` builds it once
+with the zip's placeholder origins (`scripts/template-placeholders.mjs`)
+plus a placeholder download token; the API image ships that file, and
+`GET /api/v1/downloads/userscript/:token/nova-trade.user.js` (and
+`.../nova-trade.meta.js`) fills in APP_ORIGIN, DASHBOARD_ORIGIN, the
+license key and the token. The token is an HMAC of the user id (key derived
+from COOKIE_SECRET, purpose `userscript-download:v1`), never stored;
+Tampermonkey fetches without cookies, so the signed URL is what identifies
+the user, and each request checks their pass (403 once it no longer
+includes the autobuyer). `@version` is the extension version, and
+`@downloadURL`/`@updateURL` are the same signed URLs, so updates follow
+extension releases. `GET /api/v1/downloads/userscript/link` gives the
+signed-in user their `installUrl`. No
 extension code forks for it; `src/userscript/` supplies what the manifest
 and the browser would otherwise provide:
 
