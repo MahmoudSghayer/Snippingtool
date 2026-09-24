@@ -71,7 +71,7 @@ export default fp(
           await fastify.db.transaction(async (tx) => {
             // The extension re-sends a batch whose flush failed, with the
             // same `attemptId` and `occurredAt` per attempt; the unique
-            // index on (user_id, attempt_id, occurred_at) (migration 0033)
+            // index on (user_id, attempt_id, occurred_at) (migration 0032)
             // turns the repeat into a no-op instead of a second snipe.
             // Attempts from older extensions carry no id and are inserted
             // as before.

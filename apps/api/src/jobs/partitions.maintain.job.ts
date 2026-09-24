@@ -75,7 +75,7 @@ export default defineJob({
       // They are still queryable, but they block creating the partition
       // that covers them, so they need moving by hand (docs/02-database.md,
       // partition maintenance runbook). `default_partition_row_count` is
-      // migration 0033's helper; it quotes the identifier itself.
+      // migration 0032's helper; it quotes the identifier itself.
       try {
         const [row] = (await db.execute(
           sql.join([sql`SELECT default_partition_row_count(`, sql.param(table), sql`) AS n`]),

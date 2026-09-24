@@ -545,7 +545,7 @@ One row per snipe attempt outcome, computed by the extension.
 | `target_price`, `listed_price` | integer, ≥ 0      |                                                                                  |
 | `outcome`                      | `sniping_outcome` | attempted/success/failed/too_slow/blocked/error — `blocked` = governor denied it |
 | `latency_ms`, `error_code`     | —                 |                                                                                  |
-| `attempt_id`                   | uuid, nullable    | client-generated per attempt (0033); NULL from extensions that predate it        |
+| `attempt_id`                   | uuid, nullable    | client-generated per attempt (0032); NULL from extensions that predate it        |
 
 **Indexes:** `(user_id, occurred_at desc)`, `(device_id, occurred_at desc)`,
 `(resource_id, occurred_at desc)`, partial `trade_id`, `(outcome,
@@ -794,7 +794,7 @@ what used to put them there. `partitions.maintain` tries each table on its
 own, logs `partitions.maintain: could not create partitions for table` for
 one that fails, then fails the job naming it; it also logs
 `partitions.maintain: rows in DEFAULT partition` with `{table,
-defaultRows}` (from `default_partition_row_count()`, migration 0033)
+defaultRows}` (from `default_partition_row_count()`, migration 0032)
 whenever a default partition is not empty. To clear it, move those rows
 out (`DELETE … RETURNING` from `<table>_default` into a holding table),
 rerun the job, then reinsert them through the parent.

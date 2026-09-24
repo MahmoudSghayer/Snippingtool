@@ -111,7 +111,7 @@ export const snipingActivity = pgTable(
     outcome: snipingOutcomeEnum('outcome').notNull(),
     latencyMs: integer('latency_ms'),
     errorCode: text('error_code'),
-    // Client-generated per attempt (0033); NULL from older extensions.
+    // Client-generated per attempt (0032); NULL from older extensions.
     attemptId: uuid('attempt_id'),
 
     occurredAt: timestamptz('occurred_at').notNull().defaultNow(),
