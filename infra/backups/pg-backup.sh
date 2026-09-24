@@ -20,7 +20,12 @@
 # S3 upload (optional — skipped, not failed, if unset): BACKUP_S3_REMOTE is
 # an rclone "on-the-fly" remote spec, e.g. `s3,provider=AWS,env_auth=true`
 # (reads AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY automatically) or
-# `s3,provider=Cloudflare,endpoint=https://<acct>.r2.cloudflarestorage.com,env_auth=true`
+# `s3,provider=Cloudflare,endpoint=<acct>.r2.cloudflarestorage.com,env_auth=true,no_check_bucket=true`
+# Two things that make an R2 upload fail: the endpoint must NOT include
+# `https://` (the `:` ends the remote name, so rclone sees an endpoint of
+# just "https"; it uses HTTPS by default anyway), and a token scoped to one
+# bucket can't create buckets, so `no_check_bucket=true` stops rclone from
+# trying.
 # for R2; BACKUP_S3_BUCKET is `bucket[/prefix]`. See
 # infra/env/.env.{staging,production}.example.
 #
