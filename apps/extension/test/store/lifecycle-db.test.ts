@@ -13,10 +13,12 @@ describe('store/lifecycle-db', () => {
   it('persists lifecycle state so a sale is reported once across restarts', async () => {
     const reported: Trade[] = [];
     const run = () => new TradeLifecycle({ store: idbLifecycleStore, reportSale: (t) => void reported.push(t) });
-    const sold = { itemId: '42', tradeId: '8001', resourceId: 7, rating: 80, tradeState: 'closed' as const, currentBid: 2_000, buyNowPrice: 2_000, expires: 0 };
+    const listed = { itemId: '42', tradeId: '8001', resourceId: 7, rating: 80, tradeState: 'active' as const, currentBid: 0, buyNowPrice: 2_000, expires: 3600 };
+    const sold = { ...listed, tradeState: 'closed' as const, currentBid: 2_000, expires: 0 };
 
     const first = run();
     await first.recordBuy({ itemId: '42', tradeId: '5001', resourceId: 7, rating: 80, buyPrice: 1_000, boughtAt: new Date(Date.now() - 60_000).toISOString() });
+    await first.observePile([listed]);
     await first.observePile([sold]);
     expect(reported).toHaveLength(1);
 

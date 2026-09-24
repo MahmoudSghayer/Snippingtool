@@ -78,7 +78,8 @@ export interface AdapterClient {
    * sends them once the web app is ready). Nothing is sent without a key. */
   requestCatalog(): void;
   /** The trader's own trade-pile items the adapter read. Not a search. */
-  onTradePile(cb: (items: TradePileItem[]) => void): () => void;
+  /** `full`: a plain GET of the whole trade pile (see the message schema). */
+  onTradePile(cb: (items: TradePileItem[], full: boolean) => void): () => void;
   dispose(): void;
 }
 
@@ -129,7 +130,7 @@ export function createAdapterClient(target: Window, nonce: string | null, option
   const shapeListeners = new Set<(reason: string) => void>();
   const auctionsListeners = new Set<(auctions: TrimmedAuction[]) => void>();
   const catalogListeners = new Set<(catalog: Catalog) => void>();
-  const pileListeners = new Set<(items: TradePileItem[]) => void>();
+  const pileListeners = new Set<(items: TradePileItem[], full: boolean) => void>();
   let probeStatus: ProbeStatus | null = null;
 
   function onMessage(event: MessageEvent): void {
@@ -155,7 +156,7 @@ export function createAdapterClient(target: Window, nonce: string | null, option
       return;
     }
     if (msg.kind === 'tradepile') {
-      for (const cb of pileListeners) cb(msg.data.items);
+      for (const cb of pileListeners) cb(msg.data.items, msg.data.full === true);
       return;
     }
     if (msg.kind === 'listings_buyable') {

@@ -72,7 +72,10 @@ describe('page -> content message validation', () => {
     expect(cb).not.toHaveBeenCalled();
     deliver({ channel: ADAPTER_CHANNEL, kind: 'tradepile', data: { url: '/ut/game/fc25/tradepile', seenAt: 1, items: [item] } });
     await flush();
-    expect(cb).toHaveBeenCalledWith([item]);
+    expect(cb).toHaveBeenCalledWith([item], false);
+    deliver({ channel: ADAPTER_CHANNEL, kind: 'tradepile', data: { url: '/ut/game/fc25/tradepile', seenAt: 2, items: [], full: true } });
+    await flush();
+    expect(cb).toHaveBeenLastCalledWith([], true);
   });
 
   it('drops malformed probe and shape messages', async () => {

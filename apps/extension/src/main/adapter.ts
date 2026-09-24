@@ -182,13 +182,15 @@ const EA_HOST = /(^|\.)ea\.com$/i;
 // The trader's own items (defect C13: sales, relists and expiries were
 // never seen). Every one of these paths is an assumption until the market
 // opens (docs/06-extension.md, day-one checklist), and all of them sit
-// behind the same https + EA host check as the market. `LOUD` paths are
+// behind the same https + EA host check as the market. `/tradepile` is
 // expected to carry a list of auctions: one that does not is a shape
 // change, reported like a market one. The item-move and relist responses
 // may well carry no auction at all, so for those an unreadable body is
-// only logged.
-const PILE_PATH = /\/ut\/game\/[^/]+\/(tradepile|watchlist|trade\/status|auctionhouse\/relist|item)\/?$/i;
-const LOUD_PILE_PATH = /\/(tradepile|watchlist|trade\/status)\/?$/i;
+// only logged. Deliberately NOT `/watchlist` or `/trade/status`: those
+// show auctions the trader bid on or bought, and a won auction reads as
+// `closed` at the price paid, which is a purchase, not a sale.
+const PILE_PATH = /\/ut\/game\/[^/]+\/(tradepile|auctionhouse\/relist|item)\/?$/i;
+const FULL_PILE_PATH = /\/tradepile\/?$/i;
 
 const stats = { seen: 0, parsed: 0, failed: 0 };
 
@@ -196,7 +198,7 @@ function post(kind: 'ready', data: { channel: string }): void;
 function post(kind: 'probe', data: { ok: boolean; checkedAt: number; reason?: string; shape?: ShapeName; actReady: boolean }): void;
 function post(kind: 'shape', data: { seen: number; parsed: number; failed: number; reason: string }): void;
 function post(kind: 'listings_buyable', data: { tradeIds: string[] }): void;
-function post(kind: 'tradepile', data: { url: string; seenAt: number; items: TradePileItem[] }): void;
+function post(kind: 'tradepile', data: { url: string; seenAt: number; items: TradePileItem[]; full?: boolean }): void;
 function post(
   kind: 'auctions',
   data: { url: string; seenAt: number; auctions: TrimmedAuction[]; stats: { seen: number; parsed: number; failed: number } },
@@ -551,8 +553,8 @@ function handleBody(url: string, body: unknown, actIssued: boolean): void {
 
 /** A trade-pile response: its items go out as one `tradepile` message
  * (never `auctions`: this is not a search, and nothing is counted). */
-function handlePileBody(path: string, body: unknown): void {
-  const loud = LOUD_PILE_PATH.test(path);
+function handlePileBody(path: string, body: unknown, method: string): void {
+  const loud = FULL_PILE_PATH.test(path);
   const failure = (reason: string): void => {
     if (loud) shapeFailure(`trade pile: ${reason}`);
     else adapterLog.add(`passive: trade pile ${path.replace(/^.*\/ut\/game\/[^/]+/, '')}: ${reason}`);
@@ -576,7 +578,12 @@ function handlePileBody(path: string, body: unknown): void {
   } catch (err) {
     return failure(err instanceof Error ? err.message : String(err));
   }
-  if (items.length > 0) post('tradepile', { url: path, seenAt: now(), items });
+  // A plain GET of the trade pile is plausibly the whole transfer list:
+  // the lifecycle may then retire followed items missing from it. Any
+  // other method, path or envelope is a partial view. Sent even when
+  // empty, since an empty full pile is news too.
+  const full = loud && method.toUpperCase() === 'GET' && Array.isArray(r.auctionInfo);
+  if (items.length > 0 || full) post('tradepile', { url: path, seenAt: now(), items, full });
 }
 
 function shapeFailure(reason: string): void {
@@ -609,9 +616,9 @@ function pathOf(url: string): string {
 }
 
 /** Route one response body the network really delivered. */
-function handleResponse(kind: 'market' | 'pile', url: string, body: unknown, actIssued: boolean): void {
+function handleResponse(kind: 'market' | 'pile', url: string, body: unknown, actIssued: boolean, method: string): void {
   if (kind === 'market') handleBody(url, body, actIssued);
-  else handlePileBody(pathOf(url), body);
+  else handlePileBody(pathOf(url), body, method);
 }
 
 // ---- XMLHttpRequest --------------------------------------------------------
@@ -629,9 +636,10 @@ function readXhr(getter: ((this: unknown) => unknown) | undefined, xhr: XMLHttpR
   return getter ? apply(getter, xhr, []) : undefined;
 }
 
-proto.open = function (this: XMLHttpRequest & { __ledgerUrl?: string }, method: string, url: string | URL, ...rest: unknown[]) {
+proto.open = function (this: XMLHttpRequest & { __ledgerUrl?: string; __ledgerMethod?: string }, method: string, url: string | URL, ...rest: unknown[]) {
   try {
     this.__ledgerUrl = typeof url === 'string' ? url : String(url);
+    this.__ledgerMethod = typeof method === 'string' ? method : 'GET';
   } catch {
     /* ignore */
   }
@@ -639,7 +647,7 @@ proto.open = function (this: XMLHttpRequest & { __ledgerUrl?: string }, method: 
   return nativeOpen.call(this, method, url, ...rest);
 };
 
-proto.send = function (this: XMLHttpRequest & { __ledgerUrl?: string }, ...args: unknown[]) {
+proto.send = function (this: XMLHttpRequest & { __ledgerUrl?: string; __ledgerMethod?: string }, ...args: unknown[]) {
   try {
     const kind = classify(this.__ledgerUrl);
     if (kind) {
@@ -657,9 +665,9 @@ proto.send = function (this: XMLHttpRequest & { __ledgerUrl?: string }, ...args:
           if (xhrResponseURL && classify(finalUrl) !== kind) return;
           const type = readXhr(xhrResponseType, this);
           if (type === '' || type === 'text') {
-            handleResponse(kind, this.__ledgerUrl as string, readXhr(xhrResponseText, this), actIssued);
+            handleResponse(kind, this.__ledgerUrl as string, readXhr(xhrResponseText, this), actIssued, this.__ledgerMethod ?? 'GET');
           } else if (type === 'json' && readXhr(xhrResponse, this)) {
-            handleResponse(kind, this.__ledgerUrl as string, stringifyJson(readXhr(xhrResponse, this)), actIssued);
+            handleResponse(kind, this.__ledgerUrl as string, stringifyJson(readXhr(xhrResponse, this)), actIssued, this.__ledgerMethod ?? 'GET');
           } else if (kind === 'market') {
             shapeFailure('unreadable responseType: ' + type);
           }
@@ -684,8 +692,10 @@ const responseText = ResponseProto?.text;
 if (typeof nativeFetch === 'function' && responseClone && responseText) {
   window.fetch = function (input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
     let url = '';
+    let method = 'GET';
     try {
       url = typeof input === 'string' ? input : input instanceof Request ? input.url : input instanceof URL ? input.toString() : '';
+      method = typeof init?.method === 'string' ? init.method : input instanceof Request ? input.method : 'GET';
     } catch {
       /* ignore */
     }
@@ -712,7 +722,7 @@ if (typeof nativeFetch === 'function' && responseClone && responseText) {
           if (classify(finalUrl) !== kind) return;
           const body = apply(responseText, apply(responseClone, res, []) as Response, []) as Promise<string>;
           apply(promiseThen, body, [
-            (text: string) => handleResponse(kind, url, text, actIssued),
+            (text: string) => handleResponse(kind, url, text, actIssued, method),
             () => {
               stats.failed++;
             },

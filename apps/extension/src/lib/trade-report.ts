@@ -17,7 +17,7 @@ export function buildBoughtTrade(
   input: TradeInput,
   listing: TrimmedAuction | undefined,
   boughtAt: string,
-): { trade: Trade; lifecycle: LifecycleBuy | null } {
+): { trade: Trade; lifecycle: LifecycleBuy } {
   const bought = listing && listing.tradeId === input.tradeId ? listing : undefined;
   const resourceId = bought && bought.resourceId > 0 ? bought.resourceId : input.resourceId;
   const rating = bought && Number.isInteger(bought.rating) && bought.rating >= 0 && bought.rating <= 99 ? bought.rating : null;
@@ -36,8 +36,8 @@ export function buildBoughtTrade(
     boughtAt,
     soldAt: null,
   };
-  const lifecycle: LifecycleBuy | null = bought?.itemId
-    ? { itemId: bought.itemId, tradeId: input.tradeId, resourceId, rating, buyPrice: input.buyPrice, boughtAt }
-    : null;
+  // `itemId: null` when the listing carried none: the buy cannot be
+  // followed, and background counts it for the diagnostics report.
+  const lifecycle: LifecycleBuy = { itemId: bought?.itemId ?? null, tradeId: input.tradeId, resourceId, rating, buyPrice: input.buyPrice, boughtAt };
   return { trade, lifecycle };
 }

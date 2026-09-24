@@ -10,6 +10,14 @@
  *
  *   bought -> listed(price) -> sold(price, soldAt)
  *                          \-> expired -> listed again (a relist) -> ...
+ *   listed/expired -> gone (missing from a full trade pile: sold unseen,
+ *                          quick-sold, or moved to the club)
+ *
+ * Only a listing it saw listed can be a sale: a `closed` item counts only
+ * when its tradeId is the card's current listing, which is never the
+ * tradeId the card was bought on. The bought auction itself shows as
+ * `closed` at the price paid (watch list, trade status), and reading that
+ * as a sale would report the purchase as a zero-profit sale.
  *
  * A sale is reported through the same path as the buy (`/trades/batch`,
  * via telemetry) with the buy's own `tradeId`, `status: 'sold'`,
@@ -26,9 +34,9 @@
  * IndexedDB one, store/lifecycle-db.ts), so the userscript build can reuse
  * this module as-is.
  */
-import { computeTradeProfit, EA_TAX_RATE, type LifecycleBuy, type LifecycleSessionPnl, type Trade, type TradePileItem } from '@sl/shared';
+import { computeTradeProfit, EA_TAX_RATE, MAX_COIN_PRICE, type LifecycleBuy, type LifecycleSessionPnl, type LifecycleStats, type Trade, type TradePileItem } from '@sl/shared';
 
-export type LifecycleState = 'bought' | 'listed' | 'expired' | 'sold';
+export type LifecycleState = 'bought' | 'listed' | 'expired' | 'sold' | 'gone';
 
 export interface LifecycleRecord {
   itemId: string;
@@ -54,15 +62,41 @@ export interface LifecycleRecord {
 export interface LifecycleStore {
   get(itemId: string): Promise<LifecycleRecord | undefined>;
   put(record: LifecycleRecord): Promise<void>;
+  delete(itemId: string): Promise<void>;
   all(): Promise<LifecycleRecord[]>;
 }
 
 export interface LifecycleDeps {
   store: LifecycleStore;
-  /** Queue the sale for `/trades/batch`. May throw: the sale stays
-   * unreported and `resumeUnreported` sends it again. */
+  /** Queue the sale for `/trades/batch`, durably. Throws when it was not
+   * queued: the sale stays unreported and `resumeUnreported` sends it
+   * again. */
   reportSale: (trade: Trade) => void | Promise<void>;
   now?: () => number;
+}
+
+/** Reported sales and gone items are kept this long, then pruned. */
+export const LIFECYCLE_RETENTION_MS = 30 * 24 * 3600_000;
+const PRUNE_EVERY_MS = 3600_000;
+
+/** The `reportSale` background gives the lifecycle: queue the sale for
+ * `/trades/batch` and wait until the queue is persisted before it counts
+ * as reported. Nothing queued (no account yet, say) throws, so the sale
+ * stays unreported and is retried; the one exception is a user who opted
+ * out of telemetry, whose sale must never be sent at all. */
+export function queueSale(deps: {
+  enqueue: (trade: Trade) => Promise<{ queued: number }>;
+  persisted: () => Promise<void>;
+  optedOut: () => Promise<boolean>;
+}): (trade: Trade) => Promise<void> {
+  return async (trade) => {
+    const { queued } = await deps.enqueue(trade);
+    if (queued === 0) {
+      if (await deps.optedOut()) return;
+      throw new Error('sale not queued');
+    }
+    await deps.persisted();
+  };
 }
 
 /** A store in memory: tests, and a fallback where IndexedDB is missing. */
@@ -76,8 +110,15 @@ export function createMemoryLifecycleStore(): LifecycleStore {
     put: async (record) => {
       rows.set(record.itemId, { ...record });
     },
+    delete: async (itemId) => {
+      rows.delete(itemId);
+    },
     all: async () => Array.from(rows.values(), (r) => ({ ...r })),
   };
+}
+
+function inCoinRange(price: number): boolean {
+  return Number.isInteger(price) && price > 0 && price <= MAX_COIN_PRICE;
 }
 
 /** What a sold listing sold for. EA's `currentBid` on a `closed` listing
@@ -91,6 +132,11 @@ function salePrice(item: TradePileItem): number {
 export class TradeLifecycle {
   private readonly now: () => number;
   private queue: Promise<unknown> = Promise.resolve();
+  /** Every record, loaded once and kept in step with the store (all writes
+   * go through this instance). Bounded by pruning. */
+  private cache: Map<string, LifecycleRecord> | null = null;
+  private lastPruneAt = 0;
+  private buysWithoutItemId = 0;
 
   constructor(private readonly deps: LifecycleDeps) {
     this.now = deps.now ?? Date.now;
@@ -103,16 +149,36 @@ export class TradeLifecycle {
     return run;
   }
 
+  private async records(): Promise<Map<string, LifecycleRecord>> {
+    if (!this.cache) {
+      const rows = await this.deps.store.all();
+      this.cache = new Map(rows.map((r) => [r.itemId, r]));
+    }
+    if (this.now() - this.lastPruneAt >= PRUNE_EVERY_MS) await this.pruneNow();
+    return this.cache;
+  }
+
+  private async put(record: LifecycleRecord): Promise<void> {
+    await this.deps.store.put(record);
+    this.cache?.set(record.itemId, record);
+  }
+
   /** A card the engine bought. The first buy recorded for an item stands:
-   * the same item cannot be bought twice without being sold in between,
-   * so a second report is a duplicate. A sold item bought again starts a
-   * fresh record. */
+   * the same item cannot be bought twice without leaving the trader in
+   * between, so a second report is a duplicate. A reported sale or a gone
+   * item bought again starts a fresh record; a sale not yet reported is
+   * never overwritten. A buy with no item id is only counted. */
   recordBuy(buy: LifecycleBuy): Promise<void> {
     return this.serial(async () => {
-      const existing = await this.deps.store.get(buy.itemId);
-      if (existing && existing.state !== 'sold') return;
-      await this.deps.store.put({
-        itemId: buy.itemId,
+      const itemId = buy.itemId;
+      if (!itemId) {
+        this.buysWithoutItemId++;
+        return;
+      }
+      const existing = (await this.records()).get(itemId);
+      if (existing && !(existing.state === 'gone' || (existing.state === 'sold' && existing.saleReported))) return;
+      await this.put({
+        itemId,
         buyTradeId: buy.tradeId,
         resourceId: buy.resourceId,
         rating: buy.rating,
@@ -132,41 +198,72 @@ export class TradeLifecycle {
 
   /** Trade-pile items the adapter read. Returns how many sales it
    * reported. Items with no recorded buy are ignored: without the buy
-   * there is no trade on the server to close. */
-  observePile(items: TradePileItem[]): Promise<number> {
+   * there is no trade on the server to close. With `full` (a plain GET of
+   * the whole trade pile), a listed or expired item missing from it has
+   * left the pile and becomes `gone`. */
+  observePile(items: TradePileItem[], options: { full?: boolean } = {}): Promise<number> {
     return this.serial(async () => {
+      const records = await this.records();
       let reported = 0;
       for (const item of items) {
-        const record = await this.deps.store.get(item.itemId);
+        const record = records.get(item.itemId);
         if (!record || record.state === 'sold') continue;
         const next = this.advance(record, item);
         if (!next) continue;
-        await this.deps.store.put(next);
+        await this.put(next);
         if (next.state === 'sold' && (await this.report(next))) reported++;
+      }
+      if (options.full) {
+        const present = new Set(items.map((i) => i.itemId));
+        for (const record of Array.from(records.values())) {
+          if ((record.state === 'listed' || record.state === 'expired') && !present.has(record.itemId)) {
+            await this.put({ ...record, state: 'gone', updatedAt: this.now() });
+          }
+        }
       }
       return reported;
     });
   }
 
   /** Re-send every sale persisted as sold but never handed over (a report
-   * that threw, or a reload between the two writes). Run on start-up. */
+   * that threw, or a reload between the two writes). */
   resumeUnreported(): Promise<number> {
     return this.serial(async () => {
       let sent = 0;
-      for (const record of await this.deps.store.all()) {
+      for (const record of Array.from((await this.records()).values())) {
         if (record.state === 'sold' && !record.saleReported && (await this.report(record))) sent++;
       }
       return sent;
     });
   }
 
+  /** Drop reported sales and gone items not touched for 30 days. */
+  prune(): Promise<void> {
+    return this.serial(async () => {
+      await this.records();
+      await this.pruneNow();
+    });
+  }
+
+  private async pruneNow(): Promise<void> {
+    this.lastPruneAt = this.now();
+    const cutoff = this.now() - LIFECYCLE_RETENTION_MS;
+    for (const record of Array.from(this.cache!.values())) {
+      const finished = record.state === 'gone' || (record.state === 'sold' && record.saleReported);
+      if (finished && record.updatedAt < cutoff) {
+        await this.deps.store.delete(record.itemId);
+        this.cache!.delete(record.itemId);
+      }
+    }
+  }
+
   /** Realised profit from sales since `since` (net of EA's tax, the same
    * formula the server applies), and what the cards still listed are
-   * listed at. */
+   * listed at. Reads the in-memory records, never the whole store. */
   sessionPnl(since: number): Promise<LifecycleSessionPnl> {
     return this.serial(async () => {
       const pnl: LifecycleSessionPnl = { realised: 0, unrealised: 0, sales: 0, listed: 0, since };
-      for (const r of await this.deps.store.all()) {
+      for (const r of (await this.records()).values()) {
         if (r.state === 'sold' && r.sellPrice != null && r.soldAt && Date.parse(r.soldAt) >= since) {
           pnl.realised += computeTradeProfit(r.buyPrice, r.sellPrice).netProfit;
           pnl.sales++;
@@ -179,28 +276,49 @@ export class TradeLifecycle {
     });
   }
 
+  /** Counters for the diagnostics report. */
+  stats(): Promise<LifecycleStats> {
+    return this.serial(async () => {
+      const out: LifecycleStats = { buysWithoutItemId: this.buysWithoutItemId, followed: 0, salesReported: 0 };
+      for (const r of (await this.records()).values()) {
+        if (r.state === 'bought' || r.state === 'listed' || r.state === 'expired') out.followed++;
+        else if (r.state === 'sold' && r.saleReported) out.salesReported++;
+      }
+      return out;
+    });
+  }
+
   /** The record after `item`, or null when nothing changed. */
   private advance(record: LifecycleRecord, item: TradePileItem): LifecycleRecord | null {
+    // The auction the card was bought on (EA shows it closed at the price
+    // paid) says nothing about the card's own listings.
+    if (item.tradeId === null || item.tradeId === record.buyTradeId) return null;
     const at = this.now();
     switch (item.tradeState) {
       case 'active': {
+        if (!inCoinRange(item.buyNowPrice)) return null;
         if (record.state === 'listed' && record.listTradeId === item.tradeId && record.listPrice === item.buyNowPrice) return null;
-        // A new listing after one expired is a relist.
-        const relisted = record.state === 'expired' || (record.state === 'listed' && record.listTradeId !== null && record.listTradeId !== item.tradeId);
+        // A new listing after an earlier one is a relist.
+        const relisted = record.listTradeId !== null && record.listTradeId !== item.tradeId;
         return { ...record, state: 'listed', listTradeId: item.tradeId, listPrice: item.buyNowPrice, relists: record.relists + (relisted ? 1 : 0), updatedAt: at };
       }
       case 'expired':
-        if (record.state === 'expired') return null;
-        return { ...record, state: 'expired', listTradeId: item.tradeId ?? record.listTradeId, updatedAt: at };
+        if (record.state === 'expired' && record.listTradeId === item.tradeId) return null;
+        return { ...record, state: 'expired', listTradeId: item.tradeId, updatedAt: at };
       case 'closed': {
+        // Only the listing it saw listed (or expired, or last saw before
+        // it left a full pile) can have sold.
+        if (record.state !== 'listed' && record.state !== 'expired' && record.state !== 'gone') return null;
+        if (item.tradeId !== record.listTradeId) return null;
         const price = salePrice(item);
-        if (!(price > 0)) return null;
+        if (!inCoinRange(price)) return null;
         // Never before the purchase: the server rejects a sale that
         // precedes its buy, and the buy's time may come from a clock
-        // slightly ahead of this one.
+        // slightly ahead of this one. Otherwise the time the sale was
+        // seen, not when it happened (EA gives no sale time).
         const boughtAt = Date.parse(record.boughtAt);
         const soldAt = new Date(Number.isFinite(boughtAt) ? Math.max(at, boughtAt) : at).toISOString();
-        return { ...record, state: 'sold', listTradeId: item.tradeId ?? record.listTradeId, sellPrice: price, soldAt, saleReported: false, updatedAt: at };
+        return { ...record, state: 'sold', sellPrice: price, soldAt, saleReported: false, updatedAt: at };
       }
       default:
         // On the pile, not listed: nothing to record.
@@ -231,7 +349,7 @@ export class TradeLifecycle {
     } catch {
       return false;
     }
-    await this.deps.store.put({ ...record, saleReported: true, updatedAt: this.now() });
+    await this.put({ ...record, saleReported: true, updatedAt: this.now() });
     return true;
   }
 }

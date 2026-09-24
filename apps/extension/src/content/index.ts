@@ -247,8 +247,8 @@ async function main(): Promise<void> {
   // The trader's own trade pile (defect C13): background's trade lifecycle
   // links each item to the buy it came from and reports its sale once
   // (lib/trade-lifecycle.ts). Not a search: nothing is counted here.
-  adapter.onTradePile((items: TradePileItem[]) => {
-    void send('lifecycle.pile', { items });
+  adapter.onTradePile((items: TradePileItem[], full: boolean) => {
+    void send('lifecycle.pile', { items, full });
   });
 
   let probeOk = true;
@@ -374,8 +374,9 @@ async function main(): Promise<void> {
     // this same tradeId.
     const { trade, lifecycle } = buildBoughtTrade(input, tracked.get(input.tradeId), nowIso());
     void send('telemetry.enqueue', { kind: 'trades', items: [trade] satisfies Trade[] });
-    if (lifecycle) void send('lifecycle.buy', lifecycle);
-    else logger.warn(`bought trade ${input.tradeId} carried no item id: its sale cannot be followed`, 'lifecycle');
+    // Sent even with no item id: background counts those (diagnostics).
+    void send('lifecycle.buy', lifecycle);
+    if (!lifecycle.itemId) logger.warn(`bought trade ${input.tradeId} carried no item id: its sale cannot be followed`, 'lifecycle');
   }
 
   function recordRiskEvents(events: { kind: RiskBudgetEvent['kind']; value: number; threshold: number }[]): void {
@@ -676,7 +677,6 @@ async function main(): Promise<void> {
     if (!governor) return;
     const snapshot = governor.snapshot();
     panel.setRiskSnapshot(snapshot);
-    if (assist) panel.setSessionPnl(assist.sessionPnl);
     // Defect (docs/10-design-system.md §15 "Known gap"): the popup showed
     // no live risk gauge at all — only this in-page panel did. Pushing the
     // same snapshot the panel just rendered to background (cached in

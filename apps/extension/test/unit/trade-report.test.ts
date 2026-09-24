@@ -36,8 +36,8 @@ describe('buildBoughtTrade', () => {
   it('leaves rating null rather than guessing when the listing is unknown, and cannot follow it without an item id', () => {
     const { trade, lifecycle } = buildBoughtTrade({ tradeId: '5001', resourceId: 7, buyPrice: 500 }, undefined, BOUGHT_AT);
     expect(trade).toMatchObject({ resourceId: 7, rating: null, assetId: null });
-    expect(lifecycle).toBeNull();
-    expect(buildBoughtTrade({ tradeId: '5001', resourceId: 7, buyPrice: 500 }, listing({ itemId: undefined }), BOUGHT_AT).lifecycle).toBeNull();
+    expect(lifecycle.itemId).toBeNull();
+    expect(buildBoughtTrade({ tradeId: '5001', resourceId: 7, buyPrice: 500 }, listing({ itemId: undefined }), BOUGHT_AT).lifecycle.itemId).toBeNull();
   });
 
   it('ignores a listing for a different trade', () => {

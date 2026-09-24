@@ -14,7 +14,6 @@ import tokensCss from '../styles/tokens.css?raw';
 
 import { onTrusted } from './trusted-events.js';
 
-import type { SessionPnl } from '../engine/assist.js';
 import type { RiskSnapshot } from '../engine/governor.js';
 import type { ScoredOpportunity } from '../engine/ranker.js';
 import type { PriceSummary } from '../model/prices.js';
@@ -127,9 +126,10 @@ export interface Panel {
   setSearches(n: number): void;
   setCard(result: CardResult): void;
   setSparkline(prices: number[]): void;
-  setSessionPnl(pnl: SessionPnl): void;
   /** Sales and listings from the trade lifecycle (lib/trade-lifecycle.ts),
-   * assist and autobuyer buys alike. */
+   * assist and autobuyer buys alike. (The assist engine's own spent/earned
+   * tally is no longer shown next to it: it only ever counted assist buys,
+   * so its "net" read as a loss beside real realised profit.) */
   setTradePnl(pnl: LifecycleSessionPnl): void;
   setRiskSnapshot(snapshot: RiskSnapshot): void;
   setRanked(candidates: ScoredOpportunity[]): void;
@@ -189,10 +189,6 @@ export function createPanel(doc: Document = document): Panel {
         <div class="row"><span class="k">Realised (after 5% tax)</span><span class="v" id="pnl-realised">—</span></div>
         <div class="row"><span class="k">Listed value</span><span class="v" id="pnl-unrealised">—</span></div>
         <div class="row"><span class="k">Sales</span><span class="v" id="pnl-sales">—</span></div>
-        <div class="row"><span class="k">Coins spent (assist)</span><span class="v" id="pnl-spent">—</span></div>
-        <div class="row"><span class="k">Coins earned (assist)</span><span class="v" id="pnl-earned">—</span></div>
-        <div class="row"><span class="k">Coin flow (assist)</span><span class="v" id="pnl-net">—</span></div>
-        <div class="row"><span class="k">Trades (assist)</span><span class="v" id="pnl-trades">—</span></div>
       </div>
 
       <div class="sec" id="risk-sec" hidden>
@@ -309,16 +305,6 @@ export function createPanel(doc: Document = document): Panel {
       realised.className = 'v ' + (pnl.realised >= 0 ? 'pos' : 'neg');
       $('pnl-unrealised').textContent = `${coins(pnl.unrealised)} (${pnl.listed} listed)`;
       $('pnl-sales').textContent = String(pnl.sales);
-    },
-
-    setSessionPnl(pnl) {
-      $('pnl-sec').removeAttribute('hidden');
-      $('pnl-spent').textContent = coins(pnl.coinsSpent);
-      $('pnl-earned').textContent = coins(pnl.coinsEarned);
-      const net = $('pnl-net');
-      net.textContent = (pnl.netProfit >= 0 ? '+' : '') + coins(pnl.netProfit);
-      net.className = 'v ' + (pnl.netProfit >= 0 ? 'pos' : 'neg');
-      $('pnl-trades').textContent = String(pnl.trades);
     },
 
     setRiskSnapshot(snapshot) {

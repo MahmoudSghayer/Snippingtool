@@ -315,7 +315,7 @@ describe('passive observation of the trade pile', () => {
     };
   }
 
-  for (const path of ['/tradepile', '/watchlist', '/auctionhouse/relist', '/trade/status?tradeIds=1']) {
+  for (const path of ['/tradepile', '/auctionhouse/relist', '/item']) {
     it(`posts the items of an EA ${path.split('?')[0]} response`, async () => {
       const url = EA + path;
       nativeFetch.mockResolvedValueOnce(networkResponse({ auctionInfo: [pileEntry(11, 'closed', 13_500), pileEntry(12, null)] }, url));
@@ -329,6 +329,39 @@ describe('passive observation of the trade pile', () => {
       expect(posted.filter((m) => m.kind === 'auctions')).toHaveLength(0);
     });
   }
+
+  // Won and bought auctions show there as `closed` at the price paid: a
+  // purchase, never a sale (review finding C1).
+  for (const path of ['/watchlist', '/trade/status?tradeIds=5001']) {
+    it(`never reads ${path.split('?')[0]}: a bought auction there is not a sale`, async () => {
+      const url = EA + path;
+      nativeFetch.mockResolvedValueOnce(networkResponse({ auctionInfo: [pileEntry(15, 'closed', 10_000)] }, url));
+      await window.fetch(url);
+      await settle();
+      expect(posted.filter((m) => m.kind === 'tradepile')).toHaveLength(0);
+    });
+  }
+
+  it('marks a plain GET of the trade pile as the full pile, even when empty, and nothing else', async () => {
+    const url = EA + '/tradepile';
+    nativeFetch.mockResolvedValueOnce(networkResponse({ auctionInfo: [] }, url));
+    await window.fetch(url);
+    await vi.waitFor(() => expect(posted.filter((m) => m.kind === 'tradepile')).toHaveLength(1));
+    expect(posted.find((m) => m.kind === 'tradepile')!.data).toMatchObject({ items: [], full: true });
+
+    posted = [];
+    nativeFetch.mockResolvedValueOnce(networkResponse({ auctionInfo: [pileEntry(16, 'active')] }, url));
+    await window.fetch(url, { method: 'PUT' });
+    await vi.waitFor(() => expect(posted.filter((m) => m.kind === 'tradepile')).toHaveLength(1));
+    expect(posted.find((m) => m.kind === 'tradepile')!.data.full).toBe(false);
+
+    posted = [];
+    const relist = EA + '/auctionhouse/relist';
+    nativeFetch.mockResolvedValueOnce(networkResponse({ auctionInfo: [pileEntry(17, 'active')] }, relist));
+    await window.fetch(relist);
+    await vi.waitFor(() => expect(posted.filter((m) => m.kind === 'tradepile')).toHaveLength(1));
+    expect(posted.find((m) => m.kind === 'tradepile')!.data.full).toBe(false);
+  });
 
   it('ignores a trade-pile-shaped response from a non-EA host', async () => {
     nativeFetch.mockResolvedValueOnce(networkResponse({ auctionInfo: [pileEntry(13, 'closed', 13_500)] }, 'https://evil.example/ut/game/fc25/tradepile'));

@@ -91,7 +91,16 @@ function batchValues(t: ReportTradesRequest['trades'][number], existing: TradeRo
     boughtAt: new Date(t.boughtAt),
   };
 
-  if (existing && TERMINAL_STATUSES.has(existing.status) && !TERMINAL_STATUSES.has(t.status)) {
+  // A stored sale also stands against a later `sold` report: the
+  // dashboard's /close is the trader's own word on the price, and the
+  // extension's report (seen on the trade pile) must not overwrite it. An
+  // identical re-send changes nothing either way; `expired`/`unsold` can
+  // still move to `sold`.
+  if (
+    existing &&
+    TERMINAL_STATUSES.has(existing.status) &&
+    (existing.status === 'sold' || !TERMINAL_STATUSES.has(t.status))
+  ) {
     // The stored sale stands, so the purchase must still precede it: a
     // stale report whose purchase time is after the recorded sale keeps the
     // stored purchase time (trades_sold_after_bought would otherwise 500

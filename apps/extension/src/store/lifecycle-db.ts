@@ -55,5 +55,8 @@ export const idbLifecycleStore: LifecycleStore = {
   put: async (record) => {
     await request('readwrite', (s) => s.put(record));
   },
+  delete: async (itemId) => {
+    await request('readwrite', (s) => s.delete(itemId));
+  },
   all: () => request('readonly', (s) => s.getAll() as IDBRequest<LifecycleRecord[]>),
 };

@@ -5,30 +5,38 @@
  * one record per item, so a sale is still reported once.
  *
  * A sale goes into the same telemetry queue as the buy (`trades` ->
- * `/trades/batch`), which already persists, retries and re-sends it.
+ * `/trades/batch`), which already persists, retries and re-sends it. It
+ * counts as reported only once that queue has it on disk; a sale that
+ * could not be queued is retried on every heartbeat.
  */
+import { getCachedSettings } from '../lib/settings.js';
 import { getSession, setSession } from '../lib/storage.js';
-import { TradeLifecycle } from '../lib/trade-lifecycle.js';
+import * as telemetry from '../lib/telemetry.js';
+import { queueSale, TradeLifecycle } from '../lib/trade-lifecycle.js';
 import { idbLifecycleStore } from '../store/lifecycle-db.js';
 
-import { handleTelemetryEnqueue } from './telemetry.js';
-
-import type { LifecycleBuy, LifecycleSessionPnl, TradePileItem } from '@sl/shared';
+import type { LifecycleBuy, LifecycleSessionPnl, LifecycleStats, TradePileItem } from '@sl/shared';
 
 const SESSION_START_KEY = 'sl.lifecycle.sessionStart.v1';
 
 const lifecycle = new TradeLifecycle({
   store: idbLifecycleStore,
-  reportSale: async (trade) => {
-    await handleTelemetryEnqueue({ kind: 'trades', items: [trade] });
-  },
+  reportSale: queueSale({
+    enqueue: (trade) => telemetry.enqueue({ kind: 'trades', items: [trade] }),
+    persisted: () => telemetry.whenPersisted(),
+    optedOut: async () => (await getCachedSettings()).telemetryOptOut,
+  }),
 });
 
+/** Re-send any sale persisted but not yet handed over: once when the
+ * service worker starts, and again on every heartbeat alarm. */
+export function retryUnreportedSales(): Promise<number> {
+  return lifecycle.resumeUnreported().catch(() => 0);
+}
+
 let resumed: Promise<unknown> | null = null;
-/** Once per service-worker start: re-send any sale a previous run
- * persisted but did not hand over. */
 function resumeOnce(): Promise<unknown> {
-  resumed ??= lifecycle.resumeUnreported().catch(() => 0);
+  resumed ??= retryUnreportedSales();
   return resumed;
 }
 
@@ -48,12 +56,16 @@ export async function handleLifecycleBuy(payload: LifecycleBuy): Promise<{ ok: t
   return { ok: true };
 }
 
-export async function handleLifecyclePile(payload: { items: TradePileItem[] }): Promise<{ reported: number }> {
+export async function handleLifecyclePile(payload: { items: TradePileItem[]; full?: boolean }): Promise<{ reported: number }> {
   await resumeOnce();
-  return { reported: await lifecycle.observePile(payload.items) };
+  return { reported: await lifecycle.observePile(payload.items, { full: payload.full === true }) };
 }
 
 export async function handleLifecycleSessionPnl(): Promise<LifecycleSessionPnl> {
   await resumeOnce();
   return lifecycle.sessionPnl(await sessionStart());
+}
+
+export function handleLifecycleStats(): Promise<LifecycleStats> {
+  return lifecycle.stats();
 }

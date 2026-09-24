@@ -139,6 +139,14 @@ describe('content diagnostics responder', () => {
 describe('collectDiagnostics', () => {
   const base = { version: '0.1.0', buildTarget: 'ledger-auto', now: () => Date.UTC(2026, 8, 24) };
 
+  it('includes the trade lifecycle counters, even with no EA tab open', async () => {
+    const lifecycle = { buysWithoutItemId: 2, followed: 3, salesReported: 1 };
+    const report = await collectDiagnostics({ ...base, queryTabs: async () => [], sendToTab: vi.fn(), lifecycleStats: async () => lifecycle });
+    expect(report.lifecycle).toEqual(lifecycle);
+    const failing = await collectDiagnostics({ ...base, queryTabs: async () => [], sendToTab: vi.fn(), lifecycleStats: async () => { throw new Error('no background'); } });
+    expect(failing.lifecycle).toBeNull();
+  });
+
   it('reports the extension alone when no EA tab is open', async () => {
     const report = await collectDiagnostics({ ...base, queryTabs: async () => [], sendToTab: vi.fn() });
     expect(report).toMatchObject({

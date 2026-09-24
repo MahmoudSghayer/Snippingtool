@@ -12,6 +12,7 @@ import {
   targetsSchema,
   type BootstrapResponse,
   type DeviceDto,
+  type LifecycleStats,
   type SavedFilter,
   type UserSettings,
 } from '@sl/shared';
@@ -363,6 +364,7 @@ async function render(): Promise<void> {
       buildTarget: import.meta.env.VITE_BUILD_TARGET,
       queryTabs: () => browser.tabs.query({ url: [...EA_WEB_APP_MATCHES] }),
       sendToTab: (tabId, message) => browser.tabs.sendMessage(tabId, message),
+      lifecycleStats: () => send<LifecycleStats>('lifecycle.stats'),
     });
     const text = JSON.stringify(report, null, 2);
     // Shown as well as copied: something to select by hand if the

@@ -5,6 +5,7 @@ import { activityEventSchema } from './schemas/activity.js';
 import { emailSchema, passwordSchema } from './schemas/auth.js';
 import { botDailyUsageSchema, botSettingsSchema } from './schemas/bot.js';
 import { filterCriteriaSchema, filterStatsSchema, savedFilterSchema } from './schemas/filters.js';
+import { coinPriceSchema, MAX_COIN_PRICE } from './schemas/ingest-bounds.js';
 import { riskBudgetEventSchema } from './schemas/risk.js';
 import { snipingAttemptSchema } from './schemas/sniping.js';
 import { tradeIngestSchema } from './schemas/trades.js';
@@ -176,8 +177,10 @@ export const tradePileItemSchema = z.object({
   resourceId: z.number().int().positive(),
   rating: z.number().int().min(0).max(99).nullable(),
   tradeState: z.enum(TRADE_PILE_STATES).nullable(),
-  currentBid: z.number().int().min(0),
-  buyNowPrice: z.number().int().min(0),
+  // Bounded like every price the API takes: an out-of-range one would
+  // otherwise reach /trades/batch and 400 the whole chunk the sale is in.
+  currentBid: coinPriceSchema,
+  buyNowPrice: coinPriceSchema,
   /** Seconds left on the listing when read, or null if unknown. */
   expires: z.number().nullable(),
 });
@@ -196,6 +199,10 @@ export const adapterTradePileMessageSchema = z.object({
     url: z.string().max(500),
     seenAt: z.number(),
     items: z.array(tradePileItemSchema).max(500),
+    /** A plain GET of `/tradepile`: plausibly the whole transfer list, so
+     * a followed item missing from it has left the pile (sold while not
+     * watched, quick-sold or moved to the club). */
+    full: z.boolean().optional(),
   }),
 });
 
@@ -454,6 +461,7 @@ export const backgroundMessageTypeSchema = z.enum([
   'lifecycle.buy',
   'lifecycle.pile',
   'lifecycle.sessionPnl',
+  'lifecycle.stats',
 ]);
 /** Every message type background handles in every build: the core types
  * above plus the automation builds' own (`AUTOMATION_BACKGROUND_MESSAGE_TYPES`,
@@ -538,11 +546,13 @@ export const extBackgroundRecordPayloadSchema = z
  * `/trades/batch`, so the later sale report updates that same trade. */
 export const extBackgroundLifecycleBuyPayloadSchema = z
   .object({
-    itemId: z.string().min(1).max(40),
+    /** Null when the bought listing carried no item id: the buy cannot be
+     * followed, and is only counted (diagnostics). */
+    itemId: z.string().min(1).max(40).nullable(),
     tradeId: z.string().min(1).max(64),
     resourceId: z.number().int().positive(),
     rating: z.number().int().min(0).max(99).nullable(),
-    buyPrice: z.number().int().min(1),
+    buyPrice: z.number().int().min(1).max(MAX_COIN_PRICE),
     boughtAt: z.string().datetime(),
   })
   .strict();
@@ -550,8 +560,17 @@ export type LifecycleBuy = z.infer<typeof extBackgroundLifecycleBuyPayloadSchema
 
 /** `lifecycle.pile` — trade-pile items the adapter read. */
 export const extBackgroundLifecyclePilePayloadSchema = z
-  .object({ items: z.array(tradePileItemSchema).max(500) })
+  .object({ items: z.array(tradePileItemSchema).max(500), full: z.boolean().optional() })
   .strict();
+
+/** `lifecycle.stats` reply, for the diagnostics report: buys that carried
+ * no item id (since background last started), items being followed, and
+ * sales reported (kept 30 days). */
+export interface LifecycleStats {
+  buysWithoutItemId: number;
+  followed: number;
+  salesReported: number;
+}
 
 /** `lifecycle.sessionPnl` reply. `realised` is net of EA's tax
  * (`computeTradeProfit`); `unrealised` is what the items still listed are
