@@ -178,8 +178,38 @@ describe('ingest correctness', () => {
         attempts: [attempt({ occurredAt: new Date(Date.now() + 10 * MINUTE).toISOString() })],
       });
       expect(res.statusCode).toBe(400);
-      expect(res.json().code).toBe('VALIDATION_FAILED');
+      expect(res.json().code).toBe('TIMESTAMP_OUT_OF_WINDOW');
+      expect(res.json().details.indices).toEqual([0]);
       expect(res.body).toContain('occurredAt');
+    });
+
+    it('names exactly the out-of-window items of a batch, so the client can drop only those', async () => {
+      const { token } = await createUser(app, 'window-indices@example.com');
+      const res = await post('/api/v1/sniping/attempts', token, {
+        attempts: [
+          attempt(),
+          attempt({ occurredAt: new Date(Date.now() + 10 * MINUTE).toISOString() }),
+          attempt(),
+          attempt({ occurredAt: new Date(Date.now() - 8 * DAY).toISOString() }),
+        ],
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toMatchObject({
+        code: 'TIMESTAMP_OUT_OF_WINDOW',
+        details: { indices: [1, 3] },
+      });
+    });
+
+    it('a batch with any other validation error is still VALIDATION_FAILED', async () => {
+      const { token } = await createUser(app, 'window-mixed@example.com');
+      const res = await post('/api/v1/sniping/attempts', token, {
+        attempts: [
+          attempt({ occurredAt: new Date(Date.now() + 10 * MINUTE).toISOString() }),
+          attempt({ targetPrice: -1 }),
+        ],
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().code).toBe('VALIDATION_FAILED');
     });
 
     it('rejects a sniping attempt dated more than 7 days in the past with a 400', async () => {
@@ -211,25 +241,69 @@ describe('ingest correctness', () => {
       expect(res.statusCode).toBe(400);
     });
 
-    it('rejects a trade bought in the future or sold before the 7-day window with a 400', async () => {
+    it('rejects a trade bought in the future or more than 400 days ago with a 400', async () => {
       const { token } = await createUser(app, 'future-trade@example.com');
       const future = await post('/api/v1/trades/batch', token, {
         trades: [trade({ boughtAt: new Date(Date.now() + DAY).toISOString() })],
       });
       expect(future.statusCode).toBe(400);
+      expect(future.json().code).toBe('TIMESTAMP_OUT_OF_WINDOW');
       expect(future.body).toContain('boughtAt');
 
+      const ancient = await post('/api/v1/trades/batch', token, {
+        trades: [trade({ boughtAt: new Date(Date.now() - 401 * DAY).toISOString() })],
+      });
+      expect(ancient.statusCode).toBe(400);
+    });
+
+    // trades is not partitioned; the 7-day bound is only for the
+    // partitioned activity tables. A card held for weeks must still get its
+    // status updates, and the dashboard must still record an old sale.
+    it('accepts a trade bought and sold more than 7 days ago, and a close of an old sale', async () => {
+      const { userId, token } = await createUser(app, 'old-trade@example.com');
       const old = await post('/api/v1/trades/batch', token, {
         trades: [
           trade({
             status: 'sold',
-            sellPrice: 1000,
-            boughtAt: new Date(Date.now() - 9 * DAY).toISOString(),
-            soldAt: new Date(Date.now() - 8 * DAY).toISOString(),
+            sellPrice: 30000,
+            boughtAt: new Date(Date.now() - 40 * DAY).toISOString(),
+            soldAt: new Date(Date.now() - 20 * DAY).toISOString(),
           }),
+          trade({ tradeId: 'held', boughtAt: new Date(Date.now() - 40 * DAY).toISOString() }),
         ],
       });
-      expect(old.statusCode).toBe(400);
+      expect(old.statusCode, old.body).toBe(200);
+
+      const held = await app.db.query.trades.findFirst({ where: eq(trades.tradeId, 'held') });
+      const close = await post(`/api/v1/trades/${held!.id}/close`, token, {
+        sellPrice: 25000,
+        soldAt: new Date(Date.now() - 30 * DAY).toISOString(),
+      });
+      expect(close.statusCode, close.body).toBe(200);
+      const rows = await app.db.query.trades.findMany({ where: eq(trades.userId, userId) });
+      expect(rows.every((r) => r.status === 'sold')).toBe(true);
+    });
+
+    // M1: the stale-report guard keeps a recorded sale, but used to take the
+    // report's purchase time even when that is after the recorded sale, and
+    // trades_sold_after_bought then 500'd the whole batch.
+    it('a stale report whose purchase time is after the recorded sale keeps the stored purchase time', async () => {
+      const { userId, token } = await createUser(app, 'stale-bought@example.com');
+      const boughtAt = new Date(Date.now() - 3 * DAY).toISOString();
+      await post('/api/v1/trades/batch', token, { trades: [trade({ tradeId: 'x', boughtAt })] });
+      const row = await app.db.query.trades.findFirst({ where: eq(trades.userId, userId) });
+      const soldAt = new Date(Date.now() - 2 * DAY).toISOString();
+      const close = await post(`/api/v1/trades/${row!.id}/close`, token, { sellPrice: 30000, soldAt });
+      expect(close.statusCode, close.body).toBe(200);
+
+      const stale = await post('/api/v1/trades/batch', token, {
+        trades: [trade({ tradeId: 'x', status: 'bought', boughtAt: new Date(Date.now() - MINUTE).toISOString() })],
+      });
+      expect(stale.statusCode, stale.body).toBe(200);
+      const after = await app.db.query.trades.findFirst({ where: eq(trades.userId, userId) });
+      expect(after).toMatchObject({ status: 'sold', sellPrice: 30000 });
+      expect(after!.boughtAt!.toISOString()).toBe(boughtAt);
+      expect(after!.soldAt!.toISOString()).toBe(soldAt);
     });
 
     it('rejects an oversized price with a 400 instead of a 500', async () => {

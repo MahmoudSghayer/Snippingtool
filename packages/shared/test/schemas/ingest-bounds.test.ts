@@ -3,7 +3,11 @@ import { describe, expect, it } from 'vitest';
 import {
   INGEST_MAX_FUTURE_MS,
   INGEST_MAX_PAST_MS,
+  closeTradeRequestSchema,
+  isWithinTradeWindow,
   MAX_COIN_PRICE,
+  TIMESTAMP_OUT_OF_WINDOW,
+  TRADE_MAX_PAST_MS,
   reportSnipingAttemptsRequestSchema,
   reportTradesRequestSchema,
   snipingAttemptSchema,
@@ -52,6 +56,7 @@ describe('ingest bounds', () => {
   it('uses the agreed limits', () => {
     expect(INGEST_MAX_FUTURE_MS).toBe(5 * MINUTE);
     expect(INGEST_MAX_PAST_MS).toBe(7 * DAY);
+    expect(TRADE_MAX_PAST_MS).toBe(400 * DAY);
     expect(MAX_COIN_PRICE).toBe(15_000_000);
   });
 
@@ -78,6 +83,9 @@ describe('ingest bounds', () => {
     expect(old.success).toBe(false);
     expect(old.error?.issues[0]?.path).toEqual(['attempts', 0, 'occurredAt']);
     expect(old.error?.issues[0]?.message).toMatch(/7 days/);
+    // Tagged, so the API can answer TIMESTAMP_OUT_OF_WINDOW with the item's
+    // index instead of a generic validation failure.
+    expect(old.error?.issues[0]).toMatchObject({ code: 'custom', params: { code: TIMESTAMP_OUT_OF_WINDOW } });
   });
 
   it('sniping: prices are integers up to 15,000,000', () => {
@@ -97,11 +105,29 @@ describe('ingest bounds', () => {
     expect(tradeIngestSchema.safeParse(trade({ sellPrice: 0, soldAt: iso(0) })).success).toBe(true);
     expect(tradeIngestSchema.safeParse(trade({ sellPrice: 15_000_001 })).success).toBe(false);
     expect(tradeIngestSchema.safeParse(trade({ boughtAt: iso(DAY) })).success).toBe(false);
-    expect(tradeIngestSchema.safeParse(trade({ soldAt: iso(-8 * DAY) })).success).toBe(false);
+    expect(tradeIngestSchema.safeParse(trade({ soldAt: iso(6 * MINUTE) })).success).toBe(false);
+    expect(tradeIngestSchema.safeParse(trade({ soldAt: iso(-401 * DAY) })).success).toBe(false);
     expect(tradeIngestSchema.safeParse(trade({ extra: 1 })).success).toBe(false);
     expect(reportTradesRequestSchema.safeParse({ trades: [trade({ buyPrice: 0 })] }).success).toBe(
       false,
     );
+  });
+
+  // Trades are not partitioned, and a card can sit on the transfer list for
+  // weeks: a status update or a dashboard-recorded sale for a trade bought
+  // more than 7 days ago must still be accepted. 400 days back, 5 minutes
+  // ahead.
+  it('trades: timestamps may be up to 400 days old', () => {
+    expect(
+      tradeIngestSchema.safeParse(trade({ boughtAt: iso(-30 * DAY), sellPrice: 2000, soldAt: iso(-8 * DAY) }))
+        .success,
+    ).toBe(true);
+    expect(tradeIngestSchema.safeParse(trade({ boughtAt: iso(-399 * DAY) })).success).toBe(true);
+    expect(tradeIngestSchema.safeParse(trade({ boughtAt: iso(-401 * DAY) })).success).toBe(false);
+    expect(closeTradeRequestSchema.safeParse({ sellPrice: 1, soldAt: iso(-30 * DAY) }).success).toBe(true);
+    expect(closeTradeRequestSchema.safeParse({ sellPrice: 1, soldAt: iso(6 * MINUTE) }).success).toBe(false);
+    expect(isWithinTradeWindow(iso(-30 * DAY))).toBe(true);
+    expect(isWithinTradeWindow(iso(6 * MINUTE))).toBe(false);
   });
 
   it('the trade read model is not bounded: old trades must still serialise', () => {

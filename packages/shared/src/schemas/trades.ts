@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { granularitySchema } from './analytics.js';
-import { coinPriceSchema, ingestTimestampSchema, MAX_COIN_PRICE } from './ingest-bounds.js';
+import { coinPriceSchema, MAX_COIN_PRICE, tradeTimestampSchema } from './ingest-bounds.js';
 
 export const TRADE_STATUSES = ['bought', 'listed', 'sold', 'expired', 'unsold'] as const;
 export type TradeStatus = (typeof TRADE_STATUSES)[number];
@@ -63,8 +63,8 @@ export type Trade = z.infer<typeof tradeSchema>;
 export const tradeIngestSchema = tradeSchema.extend({
   buyPrice: z.number().int().min(1).max(MAX_COIN_PRICE),
   sellPrice: coinPriceSchema.nullable(),
-  boughtAt: ingestTimestampSchema,
-  soldAt: ingestTimestampSchema.nullable(),
+  boughtAt: tradeTimestampSchema,
+  soldAt: tradeTimestampSchema.nullable(),
 });
 
 export const reportTradesRequestSchema = z
@@ -84,7 +84,7 @@ export type ReportTradesRequest = z.infer<typeof reportTradesRequestSchema>;
 export const closeTradeRequestSchema = z
   .object({
     sellPrice: coinPriceSchema,
-    soldAt: ingestTimestampSchema.optional(),
+    soldAt: tradeTimestampSchema.optional(),
   })
   .strict();
 export type CloseTradeRequest = z.infer<typeof closeTradeRequestSchema>;

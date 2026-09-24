@@ -4,6 +4,7 @@
 // request fails schema validation) map to VALIDATION_FAILED; anything else
 // is logged and reported as INTERNAL without leaking internals.
 
+import { TIMESTAMP_OUT_OF_WINDOW } from '@sl/shared';
 import fp from 'fastify-plugin';
 import { hasZodFastifySchemaValidationErrors } from 'fastify-type-provider-zod';
 
@@ -31,6 +32,19 @@ export default fp(async function errorHandlerPlugin(fastify: FastifyInstance) {
       }
 
       if (hasZodFastifySchemaValidationErrors(error)) {
+        // Every issue is an out-of-window timestamp (schemas/ingest-bounds.ts
+        // tags those): say so, with the indices of the offending items, so
+        // the extension can drop just those and resend the rest of the batch
+        // instead of losing all of it.
+        const windowIndices = outOfWindowIndices(error.validation);
+        if (windowIndices) {
+          return reply.status(400).send({
+            code: TIMESTAMP_OUT_OF_WINDOW,
+            message: 'A timestamp is outside the window the API accepts.',
+            details: { indices: windowIndices, issues: error.validation },
+            requestId: request.id,
+          });
+        }
         return reply.status(400).send({
           code: 'VALIDATION_FAILED',
           message: 'Request validation failed.',
@@ -75,3 +89,22 @@ export default fp(async function errorHandlerPlugin(fastify: FastifyInstance) {
     });
   });
 });
+
+interface ValidationEntry {
+  params?: { issue?: { path?: (string | number)[]; params?: { code?: unknown } } };
+}
+
+/** The sorted, distinct item indices (`<array>.<index>.<field>`) of a
+ * validation failure whose issues are all out-of-window timestamps, or
+ * `null` if any issue is something else. A non-array body (e.g. a close's
+ * `soldAt`) gives an empty list. */
+function outOfWindowIndices(validation: readonly unknown[]): number[] | null {
+  const indices = new Set<number>();
+  for (const entry of validation as ValidationEntry[]) {
+    const issue = entry.params?.issue;
+    if (issue?.params?.code !== TIMESTAMP_OUT_OF_WINDOW) return null;
+    const index = issue.path?.[1];
+    if (typeof index === 'number') indices.add(index);
+  }
+  return [...indices].sort((a, b) => a - b);
+}

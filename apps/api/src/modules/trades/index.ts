@@ -91,8 +91,19 @@ function batchValues(t: ReportTradesRequest['trades'][number], existing: TradeRo
   };
 
   if (existing && TERMINAL_STATUSES.has(existing.status) && !TERMINAL_STATUSES.has(t.status)) {
+    // The stored sale stands, so the purchase must still precede it: a
+    // stale report whose purchase time is after the recorded sale keeps the
+    // stored purchase time (trades_sold_after_bought would otherwise 500
+    // the whole batch). Not a 400: the extension cannot fix a report the
+    // dashboard's /close made stale, and rejecting it would fail every other
+    // trade in the batch with it.
+    const boughtAt =
+      existing.soldAt && buySide.boughtAt > existing.soldAt
+        ? (existing.boughtAt ?? buySide.boughtAt)
+        : buySide.boughtAt;
     return {
       ...buySide,
+      boughtAt,
       status: existing.status,
       sellPrice: existing.sellPrice,
       soldAt: existing.soldAt,
