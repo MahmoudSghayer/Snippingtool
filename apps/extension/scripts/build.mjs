@@ -29,6 +29,7 @@ import { fileURLToPath } from 'node:url';
 
 import { build } from 'vite';
 
+import { ES_GROUP_INPUTS, LIB_ENTRIES } from './entries.mjs';
 import { buildManifest } from './generate-manifest.mjs';
 import { licenseKeyProblem } from './license-key.mjs';
 import { TEMPLATE_PLACEHOLDERS } from './template-placeholders.mjs';
@@ -170,11 +171,7 @@ async function buildEsGroup(first) {
       ...baseConfig(first).build,
       rollupOptions: {
         treeshake: TREESHAKE,
-        input: {
-          background: path.join(root, 'src/background/index.ts'),
-          popup: path.join(root, 'src/popup/index.html'),
-          options: path.join(root, 'src/options/index.html'),
-        },
+        input: Object.fromEntries(Object.entries(ES_GROUP_INPUTS).map(([name, entry]) => [name, path.join(root, entry)])),
         output: {
           entryFileNames: '[name].js',
           chunkFileNames: 'assets/[name]-[hash].js',
@@ -193,9 +190,9 @@ function writeManifest() {
 
 async function main() {
   rmSync(outDir, { recursive: true, force: true });
-  await buildLibEntry('src/main/adapter.ts', 'adapter.js', 'SLAdapter', true);
-  await buildLibEntry('src/content/handoff.ts', 'handoff.js', 'SLHandoff', false);
-  await buildLibEntry('src/content/index.ts', 'content.js', 'SLContent', false);
+  for (const [i, { entry, fileName, globalName }] of LIB_ENTRIES.entries()) {
+    await buildLibEntry(entry, fileName, globalName, i === 0);
+  }
   await buildEsGroup(false);
   writeManifest();
   console.warn(`[build] ${target} -> ${path.relative(root, outDir)}`);
