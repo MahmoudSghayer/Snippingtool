@@ -273,6 +273,9 @@ services:
     command: ['--config=/etc/otel-collector-config.yaml']
     volumes:
       - ./monitoring/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    deploy:
+      resources:
+        limits: { cpus: '0.5', memory: 256M }
 
   prometheus:
     image: prom/prometheus:v3.1.0
@@ -289,6 +292,28 @@ services:
       resources:
         limits: { memory: 1G }
 
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    <<: *restart-always
+    # Alertmanager can't read secrets from the environment, so the webhook
+    # URL is written to a file its config points at (webhook_url_file in
+    # monitoring/alertmanager/alertmanager.yml). Without the variable the
+    # service still starts, and says loudly that nothing will be delivered.
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - |
+        printf '%s' "$$ALERT_DISCORD_WEBHOOK_URL" > /tmp/discord-webhook-url
+        [ -n "$$ALERT_DISCORD_WEBHOOK_URL" ] || echo 'WARNING: ALERT_DISCORD_WEBHOOK_URL is not set; alerts will not be delivered anywhere' >&2
+        exec /bin/alertmanager --config.file=/etc/alertmanager/alertmanager.yml --storage.path=/alertmanager
+    environment:
+      ALERT_DISCORD_WEBHOOK_URL: ${ALERT_DISCORD_WEBHOOK_URL:-}
+    volumes:
+      - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanagerdata:/alertmanager
+    deploy:
+      resources:
+        limits: { cpus: '0.25', memory: 128M }
+
   postgres-exporter:
     image: prometheuscommunity/postgres-exporter:v0.15.0
     <<: *restart-always
@@ -297,6 +322,9 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    deploy:
+      resources:
+        limits: { cpus: '0.25', memory: 128M }
 
   redis-exporter:
     image: oliver006/redis_exporter:v1.66.0
@@ -312,6 +340,9 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    deploy:
+      resources:
+        limits: { cpus: '0.25', memory: 64M }
 
   node-exporter:
     image: prom/node-exporter:v1.8.2
@@ -333,6 +364,9 @@ services:
       - '--path.rootfs=/rootfs'
       - '--collector.textfile.directory=/textfile'
       - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    deploy:
+      resources:
+        limits: { cpus: '0.25', memory: 64M }
 
   grafana:
     image: grafana/grafana:11.4.0
@@ -355,6 +389,9 @@ services:
     depends_on:
       - prometheus
       - loki
+    deploy:
+      resources:
+        limits: { cpus: '0.5', memory: 256M }
 
   loki:
     image: grafana/loki:3.3.2
@@ -363,6 +400,9 @@ services:
     volumes:
       - ./monitoring/loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
       - lokidata:/loki
+    deploy:
+      resources:
+        limits: { cpus: '0.5', memory: 512M }
 
   promtail:
     image: grafana/promtail:3.3.2
@@ -374,6 +414,9 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       - loki
+    deploy:
+      resources:
+        limits: { cpus: '0.25', memory: 128M }
 
 volumes:
   pgdata:
@@ -383,4 +426,5 @@ volumes:
   caddy_config:
   promdata:
   grafanadata:
+  alertmanagerdata:
   lokidata:

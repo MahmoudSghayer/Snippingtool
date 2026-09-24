@@ -607,6 +607,17 @@ _not_ trigger this alert; if the alert _is_ firing, the local dump itself
 failed). Run `docker compose exec backup /app/pg-backup.sh` by hand to see
 the failure live.
 
+#### backup-not-offsite
+
+`BackupNotOffsite` — the latest Postgres backup was not copied to S3, so
+it exists only on the VM it is protecting. **Response**: if
+`BACKUP_S3_REMOTE`/`BACKUP_S3_BUCKET` are blank in `.env.production`, set
+them (any S3-compatible bucket; R2 and Backblaze B2 are cheap) and
+recreate the `backup` service. Otherwise `docker compose logs backup` for
+`WARNING: S3 upload failed` and fix the credentials or bucket. Then run
+`docker compose exec backup /app/pg-backup.sh` by hand and confirm the
+alert clears.
+
 #### backup-verify-failed
 
 `BackupVerifyFailed` — the latest backup restored into a scratch database

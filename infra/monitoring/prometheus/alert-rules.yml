@@ -100,6 +100,14 @@ groups:
           summary: 'Last successful Postgres backup is over 26 hours old'
           description: 'The daily backup (infra/backups/pg-backup.sh, scheduled 02:00 UTC) has not succeeded in the last 26 hours. Runbook: docs/11-devops.md#backup-too-old.'
 
+      - alert: BackupNotOffsite
+        expr: sl_backup_last_offsite_status{type="postgres"} == 0
+        for: 1h
+        labels: { severity: critical }
+        annotations:
+          summary: 'Latest Postgres backup exists only on this machine'
+          description: 'infra/backups/pg-backup.sh did not copy the latest dump to S3 (BACKUP_S3_REMOTE/BACKUP_S3_BUCKET unset, rclone missing, or the upload failed). Losing this VM would lose the database and every backup together. Set the S3 variables in .env.production. Runbook: docs/11-devops.md#backup-not-offsite.'
+
       - alert: BackupVerifyFailed
         expr: sl_backup_last_verify_status{type="postgres"} == 0
         for: 5m

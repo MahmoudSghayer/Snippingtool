@@ -14,9 +14,11 @@ on:
     branches: [main]
     tags: ['v*.*.*']
 
+# Read-only by default. Only the two jobs that publish something get write
+# access, so the jobs that hold SSH keys and database URLs (migrate-*,
+# deploy-*) never also hold a token that can push code or images.
 permissions:
-  contents: write # create the GitHub Release + upload assets
-  packages: write # push images to GHCR
+  contents: read
 
 env:
   NODE_VERSION: '22'
@@ -28,6 +30,9 @@ jobs:
   # -------------------------------------------------------------------------
   build-and-push:
     name: Build & push images (${{ matrix.image }})
+    permissions:
+      contents: read
+      packages: write # push images to GHCR
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -48,7 +53,7 @@ jobs:
             dockerfile: infra/docker/dashboard.Dockerfile
             target: ''
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: check apps/dashboard exists (dashboard image only)
         id: guard
@@ -59,10 +64,10 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
         if: steps.guard.outputs.skip == 'false'
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         if: steps.guard.outputs.skip == 'false'
         with:
           registry: ${{ env.REGISTRY }}
@@ -72,7 +77,7 @@ jobs:
       - name: metadata (tags + OCI labels)
         if: steps.guard.outputs.skip == 'false'
         id: meta
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.image }}
           tags: |
@@ -84,7 +89,7 @@ jobs:
 
       - name: build & push
         if: steps.guard.outputs.skip == 'false'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: ${{ matrix.dockerfile }}
@@ -108,10 +113,12 @@ jobs:
   # EXTENSION_UPDATE_URL's self-hosted update manifest.
   extension-release-assets:
     name: Extension release zips
+    permissions:
+      contents: write # create the GitHub Release + upload assets
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/setup-pnpm
       - run: pnpm exec turbo run build --filter=@sl/extension...
       - name: zip both targets
@@ -120,7 +127,7 @@ jobs:
           zip -r "../../../sniper-ledger-extension-ledger-${GITHUB_REF_NAME}.zip" ledger
           zip -r "../../../sniper-ledger-extension-ledger-auto-${GITHUB_REF_NAME}.zip" ledger-auto
       - name: upload as release assets
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           files: |
             sniper-ledger-extension-ledger-${{ github.ref_name }}.zip
@@ -170,7 +177,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: staging
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/setup-pnpm
       - run: pnpm --filter @sl/db migrate
         env:
@@ -182,7 +189,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: production # requires the reviewers configured on this GitHub Environment
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/setup-pnpm
       - run: pnpm --filter @sl/db migrate
         env:
@@ -197,7 +204,7 @@ jobs:
     environment: staging
     steps:
       - name: docker compose pull && up -d (over SSH)
-        uses: appleboy/ssh-action@v1.2.5
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
         with:
           host: ${{ secrets.STAGING_SSH_HOST }}
           username: ${{ secrets.STAGING_SSH_USER }}
@@ -218,7 +225,7 @@ jobs:
     environment: production # requires the reviewers configured on this GitHub Environment — see docs/11-devops.md
     steps:
       - name: docker compose pull && up -d (over SSH, zero-downtime — see docs/11-devops.md)
-        uses: appleboy/ssh-action@v1.2.5
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
         with:
           host: ${{ secrets.PRODUCTION_SSH_HOST }}
           username: ${{ secrets.PRODUCTION_SSH_USER }}

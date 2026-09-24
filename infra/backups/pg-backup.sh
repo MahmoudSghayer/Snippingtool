@@ -110,6 +110,11 @@ prune_tier "$WEEKLY_DIR" "$RETAIN_WEEKLY"
 prune_tier "$MONTHLY_DIR" "$RETAIN_MONTHLY"
 
 # --- optional S3(-compatible) upload -----------------------------------
+# offsite_ok feeds sl_backup_last_offsite_status below: a backup that exists
+# only on this VM is lost with the VM, so BackupNotOffsite
+# (infra/monitoring/prometheus/alert-rules.yml) alerts whenever the latest
+# run did not reach S3, including when no bucket is configured at all.
+offsite_ok=0
 if [ -n "${BACKUP_S3_REMOTE:-}" ] && [ -n "${BACKUP_S3_BUCKET:-}" ]; then
   if command -v rclone >/dev/null 2>&1; then
     echo "[pg-backup] uploading to :${BACKUP_S3_REMOTE}:${BACKUP_S3_BUCKET}/postgres/daily/"
@@ -121,10 +126,13 @@ if [ -n "${BACKUP_S3_REMOTE:-}" ] && [ -n "${BACKUP_S3_BUCKET:-}" ]; then
       echo "[pg-backup] WARNING: S3 upload failed — local backup is still valid" >&2
     else
       rclone copyto "${final_dump}.sha256" ":${BACKUP_S3_REMOTE}:${BACKUP_S3_BUCKET}/postgres/daily/$(basename "${final_dump}.sha256")" 2>&1 || true
+      offsite_ok=1
     fi
   else
     echo "[pg-backup] WARNING: BACKUP_S3_REMOTE/BACKUP_S3_BUCKET set but rclone not found on PATH — skipping upload" >&2
   fi
+else
+  echo "[pg-backup] WARNING: no BACKUP_S3_REMOTE/BACKUP_S3_BUCKET — this backup exists only on this machine" >&2
 fi
 
 # --- Prometheus textfile metric (node-exporter --collector.textfile.directory) ---
@@ -143,6 +151,9 @@ sl_backup_last_success_timestamp_seconds{type="postgres"} $(date -u +%s)
 # HELP sl_backup_last_size_bytes Size in bytes of the last successful backup's compressed dump.
 # TYPE sl_backup_last_size_bytes gauge
 sl_backup_last_size_bytes{type="postgres"} ${size_bytes}
+# HELP sl_backup_last_offsite_status 1 if the last backup was copied off this machine (S3), 0 if it exists only locally.
+# TYPE sl_backup_last_offsite_status gauge
+sl_backup_last_offsite_status{type="postgres"} ${offsite_ok}
 EOF
 mv "$metrics_tmp" "${BACKUP_DIR}/backup_postgres.prom"
 

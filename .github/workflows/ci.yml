@@ -27,7 +27,7 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/setup-pnpm
       - run: pnpm -r lint
       - run: pnpm format:check
@@ -36,7 +36,7 @@ jobs:
     name: Typecheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/setup-pnpm
       # turbo's typecheck task depends on ^build, so workspace deps (@sl/shared,
       # @sl/db, @sl/ui) are compiled to dist before their consumers typecheck.
@@ -50,7 +50,7 @@ jobs:
     name: Unit tests (shared / ui / extension)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/setup-pnpm
       - run: pnpm exec turbo run test --filter=@sl/shared --filter=@sl/ui --filter=@sl/extension
 
@@ -75,7 +75,7 @@ jobs:
       SEED_ADMIN_EMAIL: admin@sniperledger.local
       SEED_ADMIN_PASSWORD: ci-only-not-a-real-secret
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/setup-pnpm
       - name: create test database
         run: PGPASSWORD=sl psql -h localhost -U sl -d sniper_ledger -c "CREATE DATABASE sniper_ledger_test;"
@@ -113,7 +113,7 @@ jobs:
           --health-cmd "redis-cli ping"
           --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/setup-pnpm
       - name: create test database
         run: PGPASSWORD=sl psql -h localhost -U sl -d sniper_ledger -c "CREATE DATABASE sniper_ledger_test;"
@@ -154,7 +154,7 @@ jobs:
           --health-cmd "redis-cli ping"
           --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/setup-pnpm
       - name: create this package's own test database (see tests/security/src/setup.ts)
         run: PGPASSWORD=sl psql -h localhost -U sl -d sniper_ledger -c "CREATE DATABASE sniper_ledger_test_security;"
@@ -173,7 +173,7 @@ jobs:
     name: Extension build (both targets) + no-autobuyer-in-ledger check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/setup-pnpm
       - run: pnpm exec turbo run build --filter=@sl/extension...
       - name: ledger (listable) build must never contain "autobuyer"
@@ -194,7 +194,7 @@ jobs:
     name: Dashboard build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/setup-pnpm
       - name: build (skipped if apps/dashboard doesn't exist yet)
         run: |
@@ -214,7 +214,7 @@ jobs:
       contents: read
       pull-requests: read # gitleaks-action lists the PR's commits
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0 # gitleaks needs full history to scan every commit on the PR
       - uses: ./.github/actions/setup-pnpm
@@ -224,7 +224,7 @@ jobs:
         continue-on-error: false
 
       - name: gitleaks (secret scanning — rules + allowlist in .gitleaks.toml)
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # The default GITHUB_TOKEN cannot post PR comments from a
@@ -246,11 +246,11 @@ jobs:
     name: Docker build (api server/worker, dashboard, caddy) — no push
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: build api (server target)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: infra/docker/api.Dockerfile
@@ -261,7 +261,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=api-server
 
       - name: build api (worker target)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: infra/docker/api.Dockerfile
@@ -272,7 +272,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=api-worker
 
       - name: build db-migrator
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: infra/docker/db-migrator.Dockerfile
@@ -285,7 +285,7 @@ jobs:
       # previously unbuilt anywhere, which let a nonexistent plugin version
       # sit in its Dockerfile undetected.
       - name: build caddy
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: infra/docker/caddy.Dockerfile
@@ -300,7 +300,7 @@ jobs:
 
       - name: build dashboard
         if: steps.dashboard-check.outputs.exists == 'true'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: infra/docker/dashboard.Dockerfile
@@ -341,7 +341,7 @@ jobs:
       DATABASE_URL: postgres://sl:sl@localhost:5432/sniper_ledger
       REDIS_URL: redis://localhost:6379
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/setup-pnpm
       - uses: ./.github/actions/setup-playwright-chromium
         with:
@@ -360,7 +360,7 @@ jobs:
         run: xvfb-run -a pnpm --filter @sl/dashboard test:e2e
         env:
           PLAYWRIGHT_BROWSERS_PATH: /opt/pw-browsers
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: failure()
         with:
           name: dashboard-e2e-report
@@ -380,7 +380,7 @@ jobs:
     name: E2E — extension (Playwright, xvfb, built artifacts)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/setup-pnpm
       - uses: ./.github/actions/setup-playwright-chromium
         with:
@@ -392,7 +392,7 @@ jobs:
         env:
           PLAYWRIGHT_BROWSERS_PATH: /opt/pw-browsers
           PLAYWRIGHT_CHROMIUM_PATH: /opt/pw-browsers/chromium
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: failure()
         with:
           name: extension-e2e-report
@@ -441,7 +441,7 @@ jobs:
       SEED_ADMIN_EMAIL: admin@sniperledger.local
       SEED_ADMIN_PASSWORD: 'Admin-Passw0rd!'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/setup-pnpm
       - uses: ./.github/actions/setup-playwright-chromium
         with:
@@ -455,7 +455,7 @@ jobs:
         env:
           PLAYWRIGHT_BROWSERS_PATH: /opt/pw-browsers
           PLAYWRIGHT_CHROMIUM_PATH: /opt/pw-browsers/chromium
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: failure()
         with:
           name: cross-app-e2e-report
@@ -499,7 +499,7 @@ jobs:
       TEST_DATABASE_URL: postgres://sl:sl@localhost:5432/sniper_ledger_test
       NODE_ENV: test
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/setup-pnpm
       - name: create test database
         run: PGPASSWORD=sl psql -h localhost -U sl -d sniper_ledger -c "CREATE DATABASE sniper_ledger_test;"
@@ -515,7 +515,7 @@ jobs:
         run: pnpm --filter @sl/extension exec vitest run --coverage
       - name: apps/api coverage
         run: pnpm --filter @sl/api exec vitest run --coverage
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:
           name: coverage-reports
@@ -573,7 +573,7 @@ jobs:
       RATE_LIMIT_LOGIN_MAX: '5000'
       RATE_LIMIT_GLOBAL_MAX: '100000'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/setup-pnpm
       - name: write apps/api/.env
         run: cp infra/env/.env.development.example apps/api/.env
@@ -605,7 +605,7 @@ jobs:
           cp /tmp/k6-v0.55.0-linux-amd64/k6 .tools/k6 && chmod +x .tools/k6
       - name: load smoke
         run: pnpm --filter @sl/tests load:smoke
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:
           name: load-smoke-summaries
