@@ -174,6 +174,29 @@ describe('profits.rollup job', () => {
     expect(row!.tradesClosed).toBe(2);
   });
 
+  it('also sweeps yesterday, so a late write just before midnight UTC still converges', async () => {
+    const userId = await createVerifiedUser(app, 'rollup-yesterday@example.com');
+    const yesterday = new Date(todayUtc(12).getTime() - 24 * 60 * 60 * 1000);
+    await app.db.insert(trades).values([
+      {
+        id: newId(),
+        userId,
+        tradeId: 't-yesterday',
+        resourceId: 'r-y',
+        status: 'bought',
+        buyPrice: 4_000,
+        boughtAt: yesterday,
+      },
+    ]);
+
+    await runJob(app);
+
+    const rows = await app.db.query.profits.findMany({ where: eq(profits.userId, userId) });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.day).toBe(yesterday.toISOString().slice(0, 10));
+    expect(rows[0]!.coinsSpent).toBe(4_000);
+  });
+
   it('leaves users with no trade/sniping activity today untouched (no stray rows)', async () => {
     await createVerifiedUser(app, 'rollup-inactive@example.com');
     await runJob(app);

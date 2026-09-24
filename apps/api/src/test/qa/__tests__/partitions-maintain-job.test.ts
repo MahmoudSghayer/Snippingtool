@@ -143,4 +143,59 @@ describe('partitions.maintain job', () => {
       `expected the just-inserted row to be routed into "${currentPartition}"`,
     ).toHaveLength(1);
   });
+
+  it('one table failing (rows stranded in its DEFAULT partition) does not stop the tables after it, and is logged', async () => {
+    const { users, userActivity } = await import('@sl/db');
+    const { hashSecret } = await import('../../../lib/crypto.js');
+    const { newId } = await import('../../../lib/ids.js');
+    const userId = newId();
+    await app.db.insert(users).values({
+      id: userId,
+      email: 'partition-poison@example.com',
+      passwordHash: await hashSecret('irrelevant-password-123'),
+      emailVerifiedAt: new Date(),
+    });
+
+    // Recreate the situation a far-future client timestamp used to cause:
+    // a month the job is about to create already has a row sitting in
+    // user_activity's DEFAULT partition, so creating that month's partition
+    // fails. sniping_activity (later in the job's list) is missing the same
+    // month and must still get it.
+    const poisoned = partitionName('user_activity', 2);
+    const later = partitionName('sniping_activity', 2);
+    assertSafePartitionName(poisoned);
+    assertSafePartitionName(later);
+    await app.db.execute(sql.raw(`DROP TABLE IF EXISTS "${poisoned}"`));
+    await app.db.execute(sql.raw(`DROP TABLE IF EXISTS "${later}"`));
+    const now = new Date();
+    const strandedAt = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 2, 15));
+    const rowId = newId();
+    await app.db
+      .insert(userActivity)
+      .values({ id: rowId, userId, type: 'login', occurredAt: strandedAt });
+
+    const errors: unknown[] = [];
+    const log: JobContext['log'] = {
+      info: () => undefined,
+      warn: (obj) => errors.push(obj),
+      error: (obj) => errors.push(obj),
+    };
+    try {
+      await expect(
+        // @ts-expect-error -- this job never reads `job`.
+        partitionsMaintainJob.processor(undefined, { ...jobContext(app), log }),
+      ).rejects.toThrow(/user_activity/);
+
+      expect(await tableExists(app, later)).toBe(true);
+      expect(JSON.stringify(errors)).toContain('user_activity');
+      // …and the stranded row itself is reported, so it can be moved.
+      expect(errors).toContainEqual(
+        expect.objectContaining({ table: 'user_activity', defaultRows: 1 }),
+      );
+    } finally {
+      await app.db.execute(sql.raw(`DELETE FROM user_activity_default`));
+      await runJob(app);
+    }
+    expect(await tableExists(app, poisoned)).toBe(true);
+  });
 });

@@ -6,7 +6,7 @@ import { emailSchema, passwordSchema } from './schemas/auth.js';
 import { filterCriteriaSchema, filterStatsSchema, savedFilterSchema } from './schemas/filters.js';
 import { riskBudgetEventSchema } from './schemas/risk.js';
 import { snipingAttemptSchema } from './schemas/sniping.js';
-import { tradeSchema } from './schemas/trades.js';
+import { tradeIngestSchema } from './schemas/trades.js';
 
 /**
  * Typed message shapes for the extension's two internal channels. These are
@@ -137,9 +137,15 @@ export const adapterDiagnosticsSchema = z.object({
   }),
   /** Every candidate shape the probe tried, in order, and why it was not
    * present — the first thing to read when `probe.ok` is false. */
-  candidates: z.array(
-    z.object({ shape: z.string().max(40), present: z.boolean(), reason: z.string().max(500).optional() }),
-  ).max(10),
+  candidates: z
+    .array(
+      z.object({
+        shape: z.string().max(40),
+        present: z.boolean(),
+        reason: z.string().max(500).optional(),
+      }),
+    )
+    .max(10),
   /** `window.services`, key names down to depth 3. */
   servicesKeys: diagnosticsKeyTreeSchema,
   /** Types of the few page globals a shape relies on (e.g. the search
@@ -453,7 +459,7 @@ const extTelemetryPlainEventSchema = z
 export const extBackgroundTelemetryEnqueuePayloadSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('activity'), items: z.array(activityEventSchema).max(500) }).strict(),
   z.object({ kind: z.literal('sniping'), items: z.array(snipingAttemptSchema).max(500) }).strict(),
-  z.object({ kind: z.literal('trades'), items: z.array(tradeSchema).max(500) }).strict(),
+  z.object({ kind: z.literal('trades'), items: z.array(tradeIngestSchema).max(500) }).strict(),
   z.object({ kind: z.literal('filterStats'), items: z.array(filterStatsSchema).max(200) }).strict(),
   z
     .object({ kind: z.literal('riskEvents'), items: z.array(riskBudgetEventSchema).max(200) })
@@ -524,7 +530,9 @@ export type ExtContentKillSwitchMessage = z.infer<typeof extContentKillSwitchMes
 /** Options page -> an EA tab's content script: collect the adapter's
  * diagnostics report (`content/diagnostics.ts`). Answered with
  * `extContentDiagnosticsResponseSchema`. */
-export const extContentDiagnosticsRequestSchema = z.object({ type: z.literal('diagnostics.collect') }).strict();
+export const extContentDiagnosticsRequestSchema = z
+  .object({ type: z.literal('diagnostics.collect') })
+  .strict();
 export const extContentDiagnosticsResponseSchema = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(true), diagnostics: adapterDiagnosticsSchema }),
   z.object({ ok: z.literal(false), error: z.string().max(2000) }),

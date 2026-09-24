@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { ingestTimestampSchema } from './ingest-bounds.js';
 import { SNIPE_OUTCOMES } from './sniping.js';
 
 /**
@@ -25,7 +26,9 @@ export type ActivityEventType = (typeof ACTIVITY_EVENT_TYPES)[number];
 // an ingest event from the extension is a 400, not a silently-dropped no-op.
 const baseActivityEvent = z
   .object({
-    occurredAt: z.string().datetime(),
+    // Bounded: user_activity and search_activity are partitioned on it
+    // (see ingest-bounds.ts).
+    occurredAt: ingestTimestampSchema,
     deviceId: z.string().uuid().optional(), // absent before device registration completes
   })
   .strict();

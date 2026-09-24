@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { granularitySchema } from './analytics.js';
+import { coinPriceSchema, ingestTimestampSchema, MAX_COIN_PRICE } from './ingest-bounds.js';
 
 export const TRADE_STATUSES = ['bought', 'listed', 'sold', 'expired', 'unsold'] as const;
 export type TradeStatus = (typeof TRADE_STATUSES)[number];
@@ -54,9 +55,21 @@ export const tradeSchema = z
   .strict();
 export type Trade = z.infer<typeof tradeSchema>;
 
+/** A trade as the extension reports it (`POST /trades/batch`): the read
+ * model above plus the ingest bounds (ingest-bounds.ts). Kept separate so
+ * the list endpoint can still serialise trades older than the ingest
+ * window. A buy costs at least one coin; a sale may be a zero-coin quick
+ * sell. */
+export const tradeIngestSchema = tradeSchema.extend({
+  buyPrice: z.number().int().min(1).max(MAX_COIN_PRICE),
+  sellPrice: coinPriceSchema.nullable(),
+  boughtAt: ingestTimestampSchema,
+  soldAt: ingestTimestampSchema.nullable(),
+});
+
 export const reportTradesRequestSchema = z
   .object({
-    trades: z.array(tradeSchema).min(1).max(200),
+    trades: z.array(tradeIngestSchema).min(1).max(200),
   })
   .strict();
 export type ReportTradesRequest = z.infer<typeof reportTradesRequestSchema>;
@@ -70,8 +83,8 @@ export type ReportTradesRequest = z.infer<typeof reportTradesRequestSchema>;
  * price and, optionally, when it sold (defaults to now). */
 export const closeTradeRequestSchema = z
   .object({
-    sellPrice: z.number().int().min(0),
-    soldAt: z.string().datetime().optional(),
+    sellPrice: coinPriceSchema,
+    soldAt: ingestTimestampSchema.optional(),
   })
   .strict();
 export type CloseTradeRequest = z.infer<typeof closeTradeRequestSchema>;
