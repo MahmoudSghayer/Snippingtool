@@ -247,7 +247,13 @@ function trimAuction(a: NormalisedListing, seenAt: number): TrimmedAuction {
  * one privacy seam, regardless of source. `entities`, when given, is the
  * list the listings were read from, kept for shapes that buy on the entity
  * (main/shape-observable.ts). */
-function emitListings(url: string, listings: NormalisedListing[], entities?: Map<string, unknown>): TrimmedAuction[] {
+/** Where a batch of listings came from, for `isSecondSighting`: the
+ * network (passive observation; `actIssued` when the market request went
+ * out while one of the adapter's act searches was in flight, so it is
+ * that search's own), or an act search (with when it started). */
+type BatchSource = { kind: 'passive'; actIssued: boolean } | { kind: 'act'; requestedAt: number };
+
+function emitListings(url: string, listings: NormalisedListing[], source: BatchSource, entities?: Map<string, unknown>): TrimmedAuction[] {
   const seenAt = now();
   const auctions: TrimmedAuction[] = [];
   // `buyable` tells content up front which listings a buy could go through
@@ -261,13 +267,13 @@ function emitListings(url: string, listings: NormalisedListing[], entities?: Map
     auctions[auctions.length] = trimmed;
   }
   stats.parsed++;
-  // One search reaches the adapter by two paths when the adapter issued it
-  // (its act search, and the network response passive observation sees),
-  // in either order. Content counts every `auctions` message as a search
-  // (governor, ledger rows, telemetry, the panel), so the second sighting
-  // of the same result set is not posted again: the listings are
-  // remembered above, and only a buyable upgrade goes out.
-  if (isRepeatBatch(auctions, seenAt)) {
+  // A search the adapter issued itself reaches it twice: as its act search
+  // result, and as the network response passive observation sees, in
+  // either order. Content counts every `auctions` message as a search
+  // (governor, ledger rows, telemetry, the panel), so that second sighting
+  // is not posted again: the listings are remembered above, and only a
+  // buyable upgrade goes out. Nothing else is ever merged.
+  if (isSecondSighting(auctions, seenAt, source)) {
     postBuyable(auctions.filter((a) => a.buyable).map((a) => a.tradeId));
     return auctions;
   }
@@ -275,22 +281,49 @@ function emitListings(url: string, listings: NormalisedListing[], entities?: Map
   return auctions;
 }
 
-/** How long a result set counts as "the same search" when seen again. */
-const REPEAT_BATCH_MS = 5000;
-let recentBatches: { key: string; at: number }[] = [];
+/** How long after an act search completes its own network response may
+ * still arrive (passive observation's load listener can run after the
+ * service's observable has already called back). */
+const ACT_NETWORK_GRACE_MS = 5000;
+/** Act searches in flight right now. A market request *sent* while one is
+ * running is tagged as that search's own (`actIssued`, at send time in the
+ * XHR/fetch patches below). */
+let actSearchesInFlight = 0;
 
-/** Whether an identical set of tradeIds was posted within the window; if
- * not, remember this one. Two genuinely separate searches returning exactly
- * the same listings within 5 s are merged too: that undercounts searches,
- * which only ever tightens the governor's buy/search ratio. */
-function isRepeatBatch(auctions: TrimmedAuction[], at: number): boolean {
+interface RecentBatch {
+  key: string;
+  at: number;
+  kind: 'passive' | 'act';
+  /** Already matched with its other half: a batch pairs once. */
+  paired?: boolean;
+}
+let recentBatches: RecentBatch[] = [];
+
+/**
+ * Whether this batch is the second sighting of one act search: the act
+ * result, and the network response to a market request the act search
+ * itself sent (tagged `actIssued` when it went out), with the same
+ * tradeIds, in either order. Each batch pairs at most once, and an untagged
+ * network response never pairs: passive/passive and act/act are never
+ * merged, so two human searches with the same (often empty) results are
+ * two searches, and every one counts toward the governor's actionsPerHour.
+ */
+function isSecondSighting(auctions: TrimmedAuction[], at: number, source: BatchSource): boolean {
+  if (source.kind === 'passive' && !source.actIssued) return false;
   const key = auctions
     .map((a) => a.tradeId)
     .sort()
     .join(',');
-  recentBatches = recentBatches.filter((b) => at - b.at < REPEAT_BATCH_MS);
-  if (recentBatches.some((b) => b.key === key)) return true;
-  recentBatches.push({ key, at });
+  recentBatches = recentBatches.filter((b) => at - b.at < 30_000);
+  const match =
+    source.kind === 'act'
+      ? recentBatches.find((b) => !b.paired && b.kind === 'passive' && b.key === key && b.at >= source.requestedAt)
+      : recentBatches.find((b) => !b.paired && b.kind === 'act' && b.key === key && at - b.at <= ACT_NETWORK_GRACE_MS);
+  if (match) {
+    match.paired = true;
+    return true;
+  }
+  recentBatches.push({ key, at, kind: source.kind });
   return false;
 }
 
@@ -382,6 +415,10 @@ function onHookedSearch(response: unknown): void {
   const entities = entitiesByTradeId(entries);
   const seenAt = now();
   const upgraded: string[] = [];
+  // Buyable only under a selected shape that buys on entities, as in
+  // `emitListings`: the hook can outlive the shape it was installed for.
+  const shape = selectShape(servicesRoot()).shape;
+  if (!shape || !shape.buysOnEntity) return;
   for (let i = 0; i < listings.length; i++) {
     const trimmed = trimAuction(listings[i]!, seenAt);
     const entity = apply(mapGet, entities, [trimmed.tradeId]);
@@ -410,7 +447,7 @@ function entitiesByTradeId(entries: unknown[]): Map<string, unknown> {
   return entities;
 }
 
-function handleBody(url: string, body: unknown): void {
+function handleBody(url: string, body: unknown, actIssued: boolean): void {
   if (typeof body !== 'string' || body.length === 0) {
     shapeFailure('empty body');
     return;
@@ -440,7 +477,7 @@ function handleBody(url: string, body: unknown): void {
     shapeFailure(err instanceof Error ? err.message : String(err));
     return;
   }
-  emitListings(String(url).split('?')[0] ?? url, listings);
+  emitListings(String(url).split('?')[0] ?? url, listings, { kind: 'passive', actIssued });
 }
 
 function shapeFailure(reason: string): void {
@@ -488,6 +525,9 @@ proto.send = function (this: XMLHttpRequest & { __ledgerUrl?: string }, ...args:
   try {
     if (isMarket(this.__ledgerUrl)) {
       stats.seen++;
+      // Tagged at send time: a request that goes out during one of the
+      // adapter's act searches is that search's own (isSecondSighting).
+      const actIssued = actSearchesInFlight > 0;
       this.addEventListener('load', (event: Event) => {
         try {
           // Only the browser's own load event, for a response that really
@@ -498,9 +538,9 @@ proto.send = function (this: XMLHttpRequest & { __ledgerUrl?: string }, ...args:
           if (xhrResponseURL && !isMarket(finalUrl)) return;
           const type = readXhr(xhrResponseType, this);
           if (type === '' || type === 'text') {
-            handleBody(this.__ledgerUrl as string, readXhr(xhrResponseText, this));
+            handleBody(this.__ledgerUrl as string, readXhr(xhrResponseText, this), actIssued);
           } else if (type === 'json' && readXhr(xhrResponse, this)) {
-            handleBody(this.__ledgerUrl as string, stringifyJson(readXhr(xhrResponse, this)));
+            handleBody(this.__ledgerUrl as string, stringifyJson(readXhr(xhrResponse, this)), actIssued);
           } else {
             shapeFailure('unreadable responseType: ' + type);
           }
@@ -540,6 +580,7 @@ if (typeof nativeFetch === 'function' && responseClone && responseText) {
     if (!isMarket(url)) return promise;
 
     stats.seen++;
+    const actIssued = actSearchesInFlight > 0; // see the XHR patch above
     apply(promiseThen, promise, [
       (res: Response) => {
         try {
@@ -551,7 +592,7 @@ if (typeof nativeFetch === 'function' && responseClone && responseText) {
           if (!isMarket(finalUrl)) return;
           const body = apply(responseText, apply(responseClone, res, []) as Response, []) as Promise<string>;
           apply(promiseThen, body, [
-            (text: string) => handleBody(url, text),
+            (text: string) => handleBody(url, text, actIssued),
             () => {
               stats.failed++;
             },
@@ -596,10 +637,17 @@ async function actSearch(requestId: string, filter: FilterCriteria): Promise<voi
     // recorded right here (the call into EA is synchronous; see
     // main/search-hook.ts).
     const services = servicesRoot() as Record<string, unknown>;
-    const { response, entries } = await searchHook.unhooked(() => shape.search(services, filter));
+    actSearchesInFlight++;
+    let searched: { response: unknown; entries: unknown[] };
+    try {
+      searched = await searchHook.unhooked(() => shape.search(services, filter));
+    } finally {
+      actSearchesInFlight--;
+    }
+    const { response, entries } = searched;
     lastMarketResponse = { source: 'act:search', at: now(), value: response };
     const listings = normaliseListings(entries, skippedEntries('search'));
-    emitListings('act:search', listings, shape.buysOnEntity ? entitiesByTradeId(entries) : undefined);
+    emitListings('act:search', listings, { kind: 'act', requestedAt }, shape.buysOnEntity ? entitiesByTradeId(entries) : undefined);
     adapterLog.add(`search ok (${shape.name}): ${listings.length} listings`);
     postResult({ action: 'search', requestId, ok: true, requestedAt, completedAt: now() });
   } catch (err) {

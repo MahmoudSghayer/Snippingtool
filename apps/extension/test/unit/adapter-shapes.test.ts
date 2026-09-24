@@ -374,6 +374,23 @@ describe('observable shape: the human\'s own searches', () => {
     expect(posted.filter((m) => m.kind === 'auctions')).toHaveLength(0);
   });
 
+  it('marks nothing buyable while no shape is selected', async () => {
+    const svc = observableServices();
+    install(svc.services);
+    await act({ action: 'diagnostics' });
+    posted = [];
+    const hooked = svc.services.Item.searchTransferMarket as (c: unknown, p: number) => ReturnType<typeof observable>;
+    // The page loses `bid`: the probe now selects no shape, but the hook is
+    // still in place on searchTransferMarket.
+    delete (svc.services.Item as Record<string, unknown>).bid;
+    svc.searchTransferMarket.mockReturnValueOnce(observable({ success: true, data: { items: [itemEntity({ tradeId: 621, buyNowPrice: 100 })] } }));
+    const pageCallback = vi.fn();
+    hooked({}, 1).observe({}, pageCallback);
+    await vi.waitFor(() => expect(pageCallback).toHaveBeenCalled());
+    for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 5));
+    expect(posted.filter((m) => m.kind === 'listings_buyable')).toHaveLength(0);
+  });
+
   it('reports the hook in diagnostics', async () => {
     install(observableServices().services);
     await act({ action: 'diagnostics' });
@@ -393,7 +410,9 @@ describe('one search is one search, whichever paths saw it', () => {
     svc.searchTransferMarket.mockImplementation(() => {
       const res = new Response(JSON.stringify({ auctionInfo: tradeIds.map((t) => utasAuction({ tradeId: t, buyNowPrice: 1_000 })) }));
       (res as unknown as { __testUrl: string }).__testUrl = MARKET;
-      nativeFetch.mockResolvedValueOnce(res);
+      // The request goes out now, during the call; only its response is
+      // early or late relative to the observable's answer.
+      nativeFetch.mockImplementationOnce(() => new Promise<Response>((resolve) => setTimeout(() => resolve(res), networkFirst ? 0 : 30)));
       const items = tradeIds.map((t) => itemEntity({ tradeId: t, buyNowPrice: 1_000 }));
       const obs = {
         observe: vi.fn((scope: unknown, cb: (sender: unknown, response: unknown) => void) => {
@@ -401,7 +420,7 @@ describe('one search is one search, whichever paths saw it', () => {
         }),
         unobserve: vi.fn(),
       };
-      setTimeout(() => void window.fetch(MARKET), networkFirst ? 0 : 30);
+      void window.fetch(MARKET);
       return obs;
     });
     return svc;
@@ -414,6 +433,7 @@ describe('one search is one search, whichever paths saw it', () => {
   async function countingClient() {
     const { createAdapterClient } = await import('../../src/content/adapter-client.js');
     const { countObservedSearches } = await import('../../src/engine/search.js');
+    const { createSearchObserver } = await import('../../src/content/search-observer.js');
     const target = Object.assign(new EventTarget(), { location: window.location, postMessage: () => undefined });
     window.addEventListener('message', (e) => {
       const m = e.data as Posted | null;
@@ -425,15 +445,83 @@ describe('one search is one search, whichever paths saw it', () => {
     const batches: unknown[][] = [];
     client.onAuctions((a) => batches.push(a));
     countObservedSearches(client, () => governor as never);
-    return { client, governor, batches };
+    // content/index.ts's own handler, as it wires it: the panel counter,
+    // the telemetry `search` event and the ledger rows.
+    const content = { onSearch: vi.fn(), reportSearch: vi.fn(), record: vi.fn() };
+    client.onAuctions(createSearchObserver({ tracked: new Map(), ...content }));
+    return { client, governor, batches, content };
   }
+
+  /** One search the human runs in EA's UI, seen only by passive observation. */
+  async function passiveSearch(tradeIds: number[]): Promise<void> {
+    const res = new Response(JSON.stringify({ auctionInfo: tradeIds.map((t) => utasAuction({ tradeId: t, buyNowPrice: 1_000 })) }));
+    (res as unknown as { __testUrl: string }).__testUrl = MARKET;
+    nativeFetch.mockResolvedValueOnce(res);
+    await window.fetch(MARKET);
+  }
+
+  async function settleAll(): Promise<void> {
+    for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 10));
+  }
+
+  it.each([
+    ['empty', []],
+    ['identical non-empty', [901, 902]],
+  ])('two %s passive searches in a row are two searches', async (_label, ids) => {
+    install(promiseServices().services);
+    const { client, governor, content } = await countingClient();
+    posted = [];
+    await passiveSearch(ids as number[]);
+    await settleAll();
+    await passiveSearch(ids as number[]);
+    await settleAll();
+    expect(posted.filter((m) => m.kind === 'auctions')).toHaveLength(2);
+    expect(governor.recordObservedSearch).toHaveBeenCalledTimes(2);
+    expect(content.onSearch).toHaveBeenCalledTimes(2);
+    if ((ids as number[]).length > 0) {
+      expect(content.reportSearch).toHaveBeenCalledTimes(2);
+      expect(content.record).toHaveBeenCalledTimes(2);
+    }
+    client.dispose();
+  });
+
+  it('two act searches with the same results are two searches', async () => {
+    const svc = observableServices();
+    const items = [itemEntity({ tradeId: 951, buyNowPrice: 1_000 })];
+    svc.searchTransferMarket.mockImplementation(() => observable({ success: true, data: { items } }));
+    install(svc.services);
+    const { client, governor } = await countingClient();
+    posted = [];
+    await act({ action: 'search', filter: {} });
+    await act({ action: 'search', filter: {} });
+    await settleAll();
+    expect(posted.filter((m) => m.kind === 'auctions')).toHaveLength(2);
+    expect(governor.recordObservedSearch).toHaveBeenCalledTimes(2);
+    client.dispose();
+  });
+
+  it('a human search right after an act search with the same results still counts', async () => {
+    const svc = networkBackedServices([961], true);
+    install(svc.services);
+    const { client, governor } = await countingClient();
+    posted = [];
+    await act({ action: 'search', filter: {} });
+    await settleAll();
+    // The act search and its own network response were one search...
+    expect(governor.recordObservedSearch).toHaveBeenCalledTimes(1);
+    // ...a second, human search after it is another, even with the same results.
+    await passiveSearch([961]);
+    await settleAll();
+    expect(governor.recordObservedSearch).toHaveBeenCalledTimes(2);
+    client.dispose();
+  });
 
   it.each([true, false])('a human search seen by both the hook and passive observation counts once (network first: %s)', async (networkFirst) => {
     const ids = networkFirst ? [701, 702] : [711, 712];
     const svc = networkBackedServices(ids, networkFirst);
     install(svc.services);
     await act({ action: 'diagnostics' });
-    const { client, governor, batches } = await countingClient();
+    const { client, governor, batches, content } = await countingClient();
     posted = [];
 
     (svc.services.Item.searchTransferMarket as (c: unknown, p: number) => { observe: (s: unknown, cb: () => void) => void })({}, 1).observe({}, () => undefined);
@@ -443,6 +531,8 @@ describe('one search is one search, whichever paths saw it', () => {
     expect(posted.filter((m) => m.kind === 'auctions')).toHaveLength(1);
     expect(batches).toHaveLength(1);
     expect(governor.recordObservedSearch).toHaveBeenCalledTimes(1);
+    expect(content.reportSearch).toHaveBeenCalledTimes(1);
+    expect(content.record).toHaveBeenCalledTimes(1);
     // ...and both listings end up buyable, one way or the other.
     const buyable = new Set<string>();
     for (const m of posted) {
@@ -457,7 +547,7 @@ describe('one search is one search, whichever paths saw it', () => {
     // Distinct tradeIds per run: the same result set within 5 s is one search.
     const svc = networkBackedServices(networkFirst ? [801] : [811], networkFirst);
     install(svc.services);
-    const { client, governor, batches } = await countingClient();
+    const { client, governor, batches, content } = await countingClient();
     posted = [];
 
     expect((await act({ action: 'search', filter: {} })).data.ok).toBe(true);
@@ -466,6 +556,8 @@ describe('one search is one search, whichever paths saw it', () => {
     expect(posted.filter((m) => m.kind === 'auctions')).toHaveLength(1);
     expect(batches).toHaveLength(1);
     expect(governor.recordObservedSearch).toHaveBeenCalledTimes(1);
+    expect(content.reportSearch).toHaveBeenCalledTimes(1);
+    expect(content.record).toHaveBeenCalledTimes(1);
     client.dispose();
   });
 });

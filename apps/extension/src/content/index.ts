@@ -31,6 +31,7 @@ import { createPanel, type Panel } from '../ui/panel.js';
 
 import { createAdapterClient } from './adapter-client.js';
 import { createDiagnosticsResponder } from './diagnostics.js';
+import { createSearchObserver } from './search-observer.js';
 
 import type { Autobuyer, StopReason } from '../engine/autobuyer.js';
 import type { AttemptInput, TradeInput } from '../engine/types.js';
@@ -102,7 +103,6 @@ async function main(): Promise<void> {
 
   let recordQueue: TrimmedAuction[] = [];
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
-  let searches = 0;
   let lastResourceId: number | null = null;
   let lastRating: number | null = null;
   const tracked = new Map<string, TrimmedAuction>();
@@ -124,15 +124,6 @@ async function main(): Promise<void> {
   // an `engine.killSwitch` push arriving before the M2 bootstrap finishes
   // is not lost (it is re-applied to the governor once one exists).
   let killSwitchActive = false;
-
-  function dominantResource(auctions: TrimmedAuction[]): number | null {
-    const tally = new Map<number, number>();
-    for (const a of auctions) tally.set(a.resourceId, (tally.get(a.resourceId) ?? 0) + 1);
-    let best: number | null = null;
-    let bestN = 0;
-    for (const [id, n] of tally) if (n > bestN) { best = id; bestN = n; }
-    return best != null && bestN / auctions.length >= 0.5 ? best : null;
-  }
 
   async function flushRecordQueue(): Promise<void> {
     flushTimer = null;
@@ -191,32 +182,27 @@ async function main(): Promise<void> {
     }
   });
 
-  adapter.onAuctions((auctions) => {
-    searches++;
-    panel.setSearches(searches);
-    panel.setHealth(engineHealthState(), engineHealthMessage());
-
-    for (const a of auctions) {
-      tracked.set(a.tradeId, a);
-    }
-    // Prune anything long expired so `tracked` doesn't grow without bound.
-    const cutoff = Date.now() - 10 * 60 * 1000;
-    for (const [id, a] of tracked) if (a.expiresAt != null && a.expiresAt < cutoff) tracked.delete(id);
-
-    if (auctions.length > 0) {
-      const dominant = dominantResource(auctions);
-      if (dominant != null) {
-        lastResourceId = dominant;
-        lastRating = auctions.find((a) => a.resourceId === dominant)?.rating ?? null;
-      }
-      // No real filter is known for a manually-run EA search (the adapter
-      // only sees the response, not the request) — `resource:<id>` is a
-      // coarse, documented stand-in filter hash (docs/06-extension.md).
-      reportSearchActivity(dominant != null ? `resource:${dominant}` : 'mixed', auctions);
-      recordQueue = recordQueue.concat(auctions);
-      scheduleFlush();
-    }
-  });
+  // One `auctions` message is one search (the adapter posts each search
+  // once, main/adapter.ts): content/search-observer.ts does the counting,
+  // tracking, telemetry and ledger recording for it.
+  adapter.onAuctions(
+    createSearchObserver({
+      tracked,
+      onSearch: (count) => {
+        panel.setSearches(count);
+        panel.setHealth(engineHealthState(), engineHealthMessage());
+      },
+      onDominant: (resourceId, rating) => {
+        lastResourceId = resourceId;
+        lastRating = rating;
+      },
+      reportSearch: reportSearchActivity,
+      record: (auctions) => {
+        recordQueue = recordQueue.concat(auctions);
+        scheduleFlush();
+      },
+    }),
+  );
 
   // Every observed search response counts toward the governor's
   // buy/search ratio and actionsPerHour — the human searching in EA's own UI

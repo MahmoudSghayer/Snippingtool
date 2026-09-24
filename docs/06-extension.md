@@ -244,8 +244,12 @@ Shape-specific limits, all to confirm on day one:
   its own (passive observation reports it, once, from the network): it
   only keeps the entities and, if passive already reported those listings,
   sends a `listings_buyable` upgrade that content applies without counting
-  anything. Likewise an act search and its network response are one
-  search: the adapter does not post the same result set twice within 5 s. A listing seen only passively
+  anything. Likewise an act search and its own network response are one
+  search: a market request sent while an act search is in flight is tagged
+  as that search's, and the act result and that tagged response (same
+  tradeIds, in either order) are posted once. Nothing else is ever merged:
+  two human searches with the same, often empty, results are two searches,
+  and each counts toward `actionsPerHour`. A listing seen only passively
   (no entity) is sent to content with `buyable: false`, the ranker drops
   it, and it is never attempted; asked anyway, the adapter refuses with
   `listing_entity_unknown`. The entity's price is re-checked too, on top of
