@@ -22,8 +22,10 @@ Budget about 30 minutes, most of it waiting on builds.
   - bans that reach open sessions
   - fixes for races on trades, profits and trials
   - rate limits on the lookup endpoints
-- **Database:** migrations `0031_payment_claims` and `0032` (from the
-  security branch). Both are additive; see §6.
+- **Database:** migrations `0031_payment_claims`, and
+  `0032_ingest_idempotency` and `0033_trades_bought_at_idx` (from the
+  security branch). All are additive; see §6. **Deploy `0032` off-peak:**
+  it blocks sniping ingest while it builds an index.
 - **Operations:**
   - Alertmanager, which sends alerts to Discord
   - the `BackupNotOffsite` alert
@@ -134,7 +136,22 @@ database backup only for data loss, never to undo a deploy; see
     Mobile $13.99, lifetime → Season $24.99), and `basic` retired
   - Older code ignores the new table and columns, and only displays plan
     names and prices.
-- `0032` (security branch): see its migration file's header. It is additive.
+- `0032_ingest_idempotency` (security branch):
+  - a nullable `sniping_activity.attempt_id` column and a unique index on
+    `(user_id, attempt_id, occurred_at)`, so a retried snipe is stored once
+  - a `default_partition_row_count()` helper for `partitions.maintain`
+  - **Locking:** `sniping_activity` is partitioned, and Postgres cannot
+    build an index on a partitioned table `CONCURRENTLY`. The unique index
+    is built inside the migration's transaction under a SHARE lock, which
+    blocks inserts into `sniping_activity` until the build finishes. Every
+    sniping ingest request waits (and may time out) for that long; the
+    extension re-queues and resends what failed. Run it off-peak, and
+    expect the build to take about as long as a full scan of the table.
+- `0033_trades_bought_at_idx` (security branch): the trade list's
+  `(user_id, bought_at DESC, id)` index, built `CONCURRENTLY` (a
+  `migrate:no-transaction` migration), so trade writes are not blocked. If
+  it fails part-way, re-run the migration: it drops the INVALID leftover
+  and builds again.
 
 ## 7. After launch
 
