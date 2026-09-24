@@ -12,6 +12,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 
+import { adminUsers } from './admin.js';
 import {
   couponTypeEnum,
   createdAt,
@@ -24,7 +25,6 @@ import {
   timestamptz,
   updatedAt,
 } from './common.js';
-import { adminUsers } from './admin.js';
 import { subscriptions } from './subscriptions.js';
 import { users } from './users.js';
 
