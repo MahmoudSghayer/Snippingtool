@@ -45,7 +45,7 @@ const listeners = new Set<(msg: unknown, sender: unknown, sendResponse: (r: unkn
       addListener: (fn: any) => listeners.add(fn),
       removeListener: (fn: any) => listeners.delete(fn),
     },
-    getManifest: () => ({ version: '0.1.0', name: 'Sniper’s Ledger' }),
+    getManifest: () => ({ version: '0.1.0', name: 'Nova Trade' }),
     getURL: (p: string) => `chrome-extension://test-extension-id/${p}`,
     lastError: undefined,
   },

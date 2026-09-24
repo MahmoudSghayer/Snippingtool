@@ -101,7 +101,7 @@ test.describe('popup and options pages', () => {
 
     // Fresh profile, nothing signed in yet — `boot()` resolves to the
     // logged-out form (popup/main.ts's `renderLoggedOut`).
-    await expect(page.locator('h1')).toContainText("Sniper's Ledger");
+    await expect(page.locator('h1')).toContainText('Nova Trade');
     await expect(page.locator('#email')).toBeVisible();
     await expect(page.locator('#password')).toBeVisible();
     await expect(page.locator('#login')).toBeVisible();
@@ -137,7 +137,7 @@ test.describe('popup and options pages', () => {
     await page.keyboard.press('Tab'); // -> #login button
     await expect(page.locator('#login')).toBeFocused();
     await page.keyboard.press('Enter');
-    await expect(page.locator('h1')).toContainText("Sniper's Ledger");
+    await expect(page.locator('h1')).toContainText('Nova Trade');
 
     await page.close();
   });
@@ -157,7 +157,7 @@ test.describe('popup and options pages', () => {
     await page.setViewportSize({ width: 900, height: 1000 });
     await page.goto(`chrome-extension://${extensionId}/src/options/index.html`);
 
-    await expect(page.locator('h1')).toContainText("Sniper's Ledger");
+    await expect(page.locator('h1')).toContainText('Nova Trade');
     for (const heading of [
       'Account & license',
       'Targets & budgets',

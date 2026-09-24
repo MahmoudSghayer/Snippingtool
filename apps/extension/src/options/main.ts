@@ -123,7 +123,7 @@ async function render(): Promise<void> {
   const filterList = filters ?? [];
 
   app.innerHTML = `
-    <h1>Sniper's Ledger — Settings</h1>
+    <h1>Nova Trade — Settings</h1>
     <p class="sub">Everything here applies immediately; budgets and governor thresholds are clamped to the bounds your plan allows.</p>
 
     <section id="account">
@@ -336,7 +336,7 @@ async function render(): Promise<void> {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `sniper-ledger-logs-${Date.now()}.json`;
+    a.download = `nova-trade-logs-${Date.now()}.json`;
     a.click();
     URL.revokeObjectURL(url);
   });

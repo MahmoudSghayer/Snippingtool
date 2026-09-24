@@ -45,7 +45,7 @@ const DASHBOARD_ORIGIN = (import.meta.env.VITE_DASHBOARD_ORIGIN ?? '').replace(/
 
 async function renderLoggedOut(error?: string): Promise<void> {
   h(`
-    <h1><span class="dot"></span> Sniper's Ledger</h1>
+    <h1><span class="dot"></span> Nova Trade</h1>
     ${error ? `<div class="error">${esc(error)}</div>` : ''}
     <input id="email" type="email" placeholder="Email" aria-label="Email" autocomplete="username" />
     <input id="password" type="password" placeholder="Password" aria-label="Password" autocomplete="current-password" />
@@ -157,7 +157,7 @@ async function renderLoggedIn(): Promise<void> {
   const optedOut = settings?.telemetryOptOut ?? false;
 
   h(`
-    <h1><span class="dot ${killSwitch ? 'risk' : 'live'}"></span> Sniper's Ledger</h1>
+    <h1><span class="dot ${killSwitch ? 'risk' : 'live'}"></span> Nova Trade</h1>
     <div class="card">
       <div class="row"><span class="k">Plan</span><span class="v">${esc(planName)}</span></div>
       <div class="row"><span class="k">Auctions recorded</span><span class="v">${(counts?.auctions ?? 0).toLocaleString('en-US')}</span></div>
