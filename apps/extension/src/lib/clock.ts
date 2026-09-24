@@ -23,14 +23,22 @@ const OFFSET_KEY = 'sl.clock.serverOffsetMs.v1';
  * for. */
 const MIN_CORRECTION_MS = 1000;
 
+/** A reading further off than this is a broken response or a wildly wrong
+ * clock, not skew to correct; it is ignored and the previous offset kept. */
+export const MAX_OFFSET_MS = 24 * 60 * 60 * 1000;
+
 let offsetMs = 0;
 let loading: Promise<void> | null = null;
+/** Set once a reading has been recorded in this instance: a stored offset
+ * whose load finishes afterwards is older and must not replace it. */
+let recordedSinceStart = false;
 
 /** Loads the persisted offset once per service-worker instance. */
 export function ensureClockLoaded(): Promise<void> {
   loading ??= getLocal<number>(OFFSET_KEY, 0)
     .then((stored) => {
-      if (typeof stored === 'number' && Number.isFinite(stored)) offsetMs = stored;
+      if (recordedSinceStart) return;
+      if (typeof stored === 'number' && Number.isFinite(stored) && Math.abs(stored) <= MAX_OFFSET_MS) offsetMs = stored;
     })
     .catch(() => undefined);
   return loading;
@@ -42,6 +50,11 @@ export async function recordServerTime(serverTime: string | undefined, sentAt: n
   const server = Date.parse(serverTime ?? '');
   if (!Number.isFinite(server)) return;
   const next = Math.round(server - (sentAt + receivedAt) / 2);
+  if (Math.abs(next) > MAX_OFFSET_MS) {
+    logger.warn(`ignoring a server time ${next} ms off the local clock (over 24 h); keeping the previous offset`, 'clock');
+    return;
+  }
+  recordedSinceStart = true;
   offsetMs = Math.abs(next) < MIN_CORRECTION_MS ? 0 : next;
   if (offsetMs !== 0) logger.debug(`local clock is ${-offsetMs} ms off the server's; correcting ingest timestamps`, 'clock');
   try {
@@ -68,4 +81,5 @@ export function toServerTime(iso: string): string {
 export function resetClockForTests(): void {
   offsetMs = 0;
   loading = null;
+  recordedSinceStart = false;
 }

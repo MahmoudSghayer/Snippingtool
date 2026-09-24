@@ -210,6 +210,25 @@ describe('lib/telemetry.ts: flush and enqueue correctness', () => {
       expect(telemetry.pendingCount()).toBe(0);
     });
 
+    it('a restarted worker whose first act is a flush judges queued items on the server clock', async () => {
+      // This machine runs 10 minutes slow: queued items were moved forward
+      // to server time, i.e. 10 minutes ahead of the local clock.
+      const now = Date.now();
+      await clock.recordServerTime(new Date(now + 10 * MINUTE).toISOString(), now, now);
+      telemetry.enqueueSniping([snipe(), snipe()] as never);
+      await telemetry.whenPersisted();
+
+      // The flush alarm wakes a fresh service worker: nothing has loaded the
+      // offset yet when flush() runs.
+      vi.resetModules();
+      telemetry = await import('../../src/lib/telemetry.js');
+
+      fetchMock.mockImplementation(serverBehindBy(-10 * MINUTE));
+      const result = await telemetry.flush();
+      expect(result).toEqual({ ok: true, sent: 2 });
+      expect(telemetry.pendingCount()).toBe(0);
+    });
+
     it('drops only the out-of-window item of a chunk and still sends the rest', async () => {
       telemetry.enqueueSniping([snipe({ resourceId: 1 }), snipe({ resourceId: 2 }), snipe({ resourceId: 3 })] as never);
       fetchMock

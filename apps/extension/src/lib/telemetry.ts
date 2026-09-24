@@ -422,6 +422,10 @@ function dropOutOfWindow(q: QueuedBatches): QueuedBatches {
  * the previous instance had queued but never got to send. */
 export async function flush(): Promise<{ ok: boolean; sent: number }> {
   await ensureHydrationStarted();
+  // A service worker woken by the flush alarm (or onSuspend) has not loaded
+  // the offset yet; without it dropOutOfWindow would judge server-clock
+  // items against the uncorrected local clock and could drop them all.
+  await ensureClockLoaded();
 
   const settings = await getCachedSettings();
   if (settings.telemetryOptOut) {
