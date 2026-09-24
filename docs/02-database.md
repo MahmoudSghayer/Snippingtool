@@ -765,8 +765,10 @@ partition growing large is a signal maintenance is overdue.
 (`CREATE TABLE IF NOT EXISTS`). Initial migrations call it with `months =
 13` (current month + 12 ahead) for each of the four tables.
 
-**Ongoing maintenance (not yet automated — tracked in `docs/13-roadmap.md`):**
-run, e.g. monthly via a scheduled job or manual runbook step:
+**Ongoing maintenance (automated):** the `partitions.maintain` job
+(`apps/api/src/jobs/partitions.maintain.job.ts`, nightly at 04:00 UTC) keeps
+3 months of partitions ahead for every partitioned table, including
+`price_observations`. By hand, the same thing is:
 
 ```sql
 SELECT create_month_partitions('user_activity', date_trunc('month', now())::date, 13);
@@ -777,9 +779,7 @@ SELECT create_month_partitions('audit_logs', date_trunc('month', now())::date, 1
 
 This is safe to run at any cadence — existing partitions are left alone,
 only missing months in the requested range are created — so "run it monthly
-and always keep ~12 months of headroom" is a reasonable default. A future
-`partitions.maintain` BullMQ job (see `docs/13-roadmap.md`) should call this
-on a schedule instead of a human remembering to.
+and always keep ~12 months of headroom" is a reasonable default.
 
 **Dropping old partitions** (once a retention policy is decided — not
 implemented yet): `DROP TABLE <table>_yYYYY_mMM;` on a partition detaches

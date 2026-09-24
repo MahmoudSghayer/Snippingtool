@@ -17,8 +17,8 @@ sniping, built on a private, per-user record of what the market actually did
 
 Two rules hold across every milestone: the extension only ever **drives the
 game's own service layer**, never forges a request; and the **safety
-governor** sits between every decision and every action so the product stops
-you before you look like a bot — it is never sold as "undetectable". See
+governor** sits between every decision the extension makes and the action it
+takes, so the product stops you before you look like a bot — it is never sold as "undetectable". See
 [`docs/01-architecture.md`](docs/01-architecture.md) for how that is enforced.
 
 ## Build status

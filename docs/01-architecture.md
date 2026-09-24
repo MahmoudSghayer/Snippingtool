@@ -520,7 +520,8 @@ build config level (multi-entry, per-target manifest generation) — see
   `email.send`, `audit.retention`) run in a separate process
   (`apps/api/src/worker.ts`) from the REST/WS process, so a slow analytics
   job never adds latency to a login request. Each queue scales
-  independently by concurrency setting, not by adding API replicas.
+  independently by its `concurrency` (`JobDefinition.concurrency`, default
+  1), not by adding API replicas.
 - **Read path.** `analytics_daily` is a materialised KPI store precisely so
   the admin dashboard's overview never runs an aggregate query against
   `sniping_activity` directly — it reads a small, pre-computed table

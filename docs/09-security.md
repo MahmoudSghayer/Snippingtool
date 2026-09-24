@@ -560,10 +560,13 @@ anything a request body supplies.
 - **Kill switch**: a feature-toggle-driven flag the extension checks on
   every heartbeat; flipping it halts every automated action extension-wide
   within one heartbeat interval, independent of any per-account action.
-- **Account lockout / ban**: `bans` (account/IP/device/hwid) +
-  `users.status` (suspended/banned) — both checked at `authenticate`, so a
-  banned account's existing, still-technically-valid tokens stop working
-  immediately, not just at next login.
+- **Account lockout / ban**: `users.status` (suspended/banned) is checked
+  at `authenticate`. `bans` apply to open sessions as well as new logins:
+  an account ban bumps `row_version` (invalidating every issued access
+  token) and revokes every session; a device ban revokes the sessions
+  opened from that device; an IP ban is checked on every request
+  (`isRequestBanned`, Redis-cached per user and IP, invalidated by any ban
+  or lift). An hwid ban is only known at login, so it is enforced there.
 - **Audit trail**: every admin action (including all of the above) is in
   `audit_logs` with a before/after diff, for after-the-fact review.
 - **Webhook/Stripe incident**: `stripe_webhook_events` + `payment_history`

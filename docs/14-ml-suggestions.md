@@ -10,8 +10,9 @@ sequencing and the data model got argued about first — the expensive
 mistakes in this feature are all made early (entity resolution, what gets
 stored, what "correct" means) and are painful to undo later.
 
-**Phases A, B and C are now built** (§13 has the per-phase detail); D, E, F
-and the chat are not. Two things the build changed, recorded here because
+**Phases A, B, C and D are now built** (§13 has the per-phase detail); E, F
+and the chat are not. Phase D's signals are extracted and stored but nothing
+reads them yet: there is no API route or dashboard view over `news_signals`. Two things the build changed, recorded here because
 they invalidate assumptions this document was written under:
 
 - The third-party price sources in §4a refuse automated access from this
