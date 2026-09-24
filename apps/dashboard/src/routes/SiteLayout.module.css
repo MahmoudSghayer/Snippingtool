@@ -1,0 +1,262 @@
+/*
+ * The public website's header and footer (apps/dashboard/site/site.css,
+ * "Header", "Buttons" and "Footer"), rebuilt for the SPA's customer pages.
+ * site.css itself isn't imported: its global element rules (body, a, h1-h3,
+ * p) would also restyle the admin dashboard. Same tokens, same values, so
+ * the two stay visually identical; change both together.
+ */
+
+.site {
+  --wrap: 72rem;
+  --gutter: clamp(1rem, 4vw, 2rem);
+
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  background: var(--sl-bg);
+  color: var(--sl-fg);
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+.wrap {
+  width: 100%;
+  max-width: var(--wrap);
+  margin-inline: auto;
+  padding-inline: var(--gutter);
+}
+
+.skipLink {
+  position: absolute;
+  left: 1rem;
+  top: -4rem;
+  z-index: 100;
+  padding: 0.6rem 1rem;
+  background: var(--sl-gold);
+  color: var(--sl-gold-ink);
+  font-weight: 600;
+  border-radius: var(--sl-radius-sm);
+  text-decoration: none;
+}
+
+.skipLink:focus {
+  top: 1rem;
+}
+
+/* ---- Header ----------------------------------------------------------- */
+
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: color-mix(in srgb, var(--sl-ground) 88%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--sl-line);
+}
+
+.header .wrap {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  min-height: 4rem;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--sl-ink);
+  text-decoration: none;
+  flex-shrink: 0;
+}
+
+.brand:hover {
+  color: var(--sl-ink);
+}
+
+.brand svg {
+  display: block;
+  width: 2rem;
+  height: 2rem;
+}
+
+.brandName {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+
+.brandName strong {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.brandName small {
+  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
+  font-size: 0.66rem;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--sl-gold);
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  margin-left: auto;
+}
+
+.nav a {
+  color: var(--sl-ink-2);
+  text-decoration: none;
+  font-size: 0.925rem;
+  font-weight: 500;
+}
+
+.nav a:hover {
+  color: var(--sl-ink);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.textLink {
+  color: var(--sl-ink);
+  font-size: 0.925rem;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.textLink:hover {
+  color: color-mix(in srgb, var(--sl-gold) 80%, white);
+}
+
+.textLink[aria-current='page'] {
+  color: var(--sl-gold);
+}
+
+@media (max-width: 860px) {
+  .nav {
+    display: none;
+  }
+  .actions {
+    margin-left: auto;
+  }
+}
+
+/* ---- Buttons ---------------------------------------------------------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 2.25rem;
+  padding: 0.35rem 0.9rem;
+  border-radius: var(--sl-radius-md);
+  border: 1px solid transparent;
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background-color var(--sl-motion-fast) var(--sl-ease),
+    border-color var(--sl-motion-fast) var(--sl-ease),
+    transform var(--sl-motion-fast) var(--sl-ease);
+}
+
+.btnPrimary {
+  background: var(--sl-gold);
+  color: var(--sl-gold-ink);
+}
+
+.btnPrimary:hover {
+  background: color-mix(in srgb, var(--sl-gold) 88%, white);
+  color: var(--sl-gold-ink);
+}
+
+.btnPrimary:active {
+  transform: translateY(1px);
+}
+
+.btnGhost {
+  background: transparent;
+  border-color: var(--sl-line);
+  color: var(--sl-ink);
+}
+
+.btnGhost:hover {
+  border-color: var(--sl-ink-2);
+  color: var(--sl-ink);
+}
+
+/* The landing page drops its header CTA on the narrowest phones too. */
+@media (max-width: 420px) {
+  .hideOnPhone {
+    display: none;
+  }
+}
+
+/* ---- Content ---------------------------------------------------------- */
+
+.main {
+  flex: 1;
+  padding-block: clamp(2rem, 6vw, 3.5rem) clamp(3rem, 7vw, 5rem);
+}
+
+/* ---- Footer ----------------------------------------------------------- */
+
+.footer {
+  border-top: 1px solid var(--sl-line);
+  padding-block: 2.5rem;
+  font-size: 0.875rem;
+  color: var(--sl-ink-2);
+}
+
+.footer .wrap {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1.5rem 2rem;
+}
+
+.footerLegal {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.footerLegal strong {
+  color: var(--sl-ink);
+  font-weight: 700;
+}
+
+.footerLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.footerLinks a {
+  color: var(--sl-ink);
+  text-decoration: none;
+}
+
+.footerLinks a:hover {
+  text-decoration: underline;
+}
+
+.soon {
+  color: var(--sl-ink-2);
+}

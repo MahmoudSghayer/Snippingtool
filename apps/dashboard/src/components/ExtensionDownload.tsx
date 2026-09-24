@@ -1,8 +1,7 @@
 // "Get the extension" card: lets a user with a pass download the Nova Trade
 // extension zip built for this deployment, and explains how to load it
-// unpacked in Chrome. Used at the top of /subscriptions (full) and on the
-// /dashboard home (compact).
-import { Button, Card, CardContent, CardHeader, CardTitle, CopyField } from '@sl/ui';
+// unpacked in Chrome. Used in the "Get the extension" section of /account.
+import { Button, Card, CardContent, CardHeader, CardTitle, CopyField, cn } from '@sl/ui';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Download, Puzzle } from 'lucide-react';
 import { toast } from 'sonner';
@@ -107,17 +106,21 @@ function InstallSteps() {
 }
 
 export interface ExtensionDownloadCardProps {
-  /** `compact` is the /dashboard home version: install steps tucked away. */
+  /** `compact` tucks the install steps away behind a disclosure. */
   variant?: 'full' | 'compact';
   /** Render nothing (instead of the "comes with a pass" card) when the user
    * isn't entitled. */
   hideWhenNotEntitled?: boolean;
+  /** Leave out the card's own "Get the extension" title, for a page that
+   * already heads the section with it. */
+  headless?: boolean;
   className?: string;
 }
 
 export function ExtensionDownloadCard({
   variant = 'full',
   hideWhenNotEntitled = false,
+  headless = false,
   className,
 }: ExtensionDownloadCardProps) {
   const infoQuery = useExtensionDownloadInfo();
@@ -129,16 +132,18 @@ export function ExtensionDownloadCard({
 
   return (
     <Card className={className}>
-      <CardHeader>
-        <CardTitle>Get the extension</CardTitle>
-        <Puzzle className="size-4 text-ink-2" aria-hidden="true" />
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
+      {!headless && (
+        <CardHeader>
+          <CardTitle>Get the extension</CardTitle>
+          <Puzzle className="size-4 text-ink-2" aria-hidden="true" />
+        </CardHeader>
+      )}
+      <CardContent className={cn('flex flex-col gap-4', headless && 'pt-5')}>
         {!info.entitled ? (
           <p className="text-sm text-ink-2">
             The extension comes with a pass.{' '}
             <a
-              href="/subscriptions#pricing"
+              href="/account#buy"
               className="text-gold underline underline-offset-2 hover:text-gold/80"
             >
               See plans and pay

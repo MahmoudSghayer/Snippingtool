@@ -1,12 +1,12 @@
 /*
- * welcome.ts — open the companion site's Bot page the first time this
+ * welcome.ts — open the website's "My account" page the first time this
  * extension is installed.
  *
- * Why the Bot page specifically: the extension can record and rank on its
- * own, but it has nothing to search until at least one saved filter exists,
- * and a filter is built on the website (`/bot`), not in the popup. Landing
- * the user there on install is the shortest path from "loaded the extension"
- * to "the bot has something to do".
+ * Why /account: it is the one customer page on the website. It shows
+ * whether the pass is active, how to buy or extend one, and which devices
+ * are signed in, which is everything a new user needs to check right after
+ * loading the extension. (The old target, /bot, no longer exists; it now
+ * redirects to /account anyway.)
  *
  * Only `reason === 'install'` opens a tab. An update or a browser restart
  * fires `onInstalled` too (`'update'` / `'chrome_update'`), and stealing a
@@ -23,6 +23,9 @@ import { logger } from '../lib/logger.js';
 
 const DASHBOARD_ORIGIN = import.meta.env.VITE_DASHBOARD_ORIGIN;
 
+/** The website page a fresh install opens. */
+export const WELCOME_PATH = '/account';
+
 export function installWelcomeHandler(): void {
   browser.runtime.onInstalled.addListener((details) => {
     if (details.reason !== 'install') return;
@@ -31,7 +34,7 @@ export function installWelcomeHandler(): void {
       return;
     }
 
-    const url = `${DASHBOARD_ORIGIN.replace(/\/$/, '')}/bot`;
+    const url = `${DASHBOARD_ORIGIN.replace(/\/$/, '')}${WELCOME_PATH}`;
     // Never let a failed tab open take the service worker's install path with
     // it: the extension is fully functional without the welcome tab.
     void browser.tabs.create({ url }).catch((err) => {

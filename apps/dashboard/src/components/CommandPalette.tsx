@@ -1,6 +1,6 @@
-// Cmd/Ctrl+K command palette wiring: routes + (admins) user-by-email search
-// -> @sl/ui's presentational CommandPalette. Mounted once by AppLayout; the
-// keyboard shortcut is global while the authenticated shell is mounted
+// Cmd/Ctrl+K command palette wiring: admin pages + user-by-email search
+// -> @sl/ui's presentational CommandPalette. Mounted once by the admin
+// shell (AppLayout); the keyboard shortcut is global while it is mounted
 // (docs/07-dashboard.md "Command palette", PHASE 10).
 import { CommandPalette as UiCommandPalette, type CommandPaletteItem } from '@sl/ui';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
@@ -9,20 +9,16 @@ import {
   BarChart3,
   Ban,
   CreditCard,
-  Crosshair,
   FileClock,
   Flag,
   Gauge,
   Gift,
-  LayoutDashboard,
   Receipt,
   Search,
   Server,
-  Settings as SettingsIcon,
   Sliders,
   Ticket,
   Users as UsersIcon,
-  Wallet,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -38,36 +34,6 @@ interface PaletteRoute {
 }
 
 const ROUTES: PaletteRoute[] = [
-  {
-    key: 'dashboard',
-    label: 'Dashboard',
-    href: '/dashboard',
-    icon: <LayoutDashboard className="size-4" />,
-  },
-  {
-    key: 'bot',
-    label: 'Bot',
-    href: '/bot',
-    icon: <Crosshair className="size-4" />,
-  },
-  {
-    key: 'analytics',
-    label: 'Analytics',
-    href: '/analytics',
-    icon: <BarChart3 className="size-4" />,
-  },
-  {
-    key: 'subscriptions',
-    label: 'Subscription',
-    href: '/subscriptions',
-    icon: <Wallet className="size-4" />,
-  },
-  {
-    key: 'settings',
-    label: 'Settings',
-    href: '/settings',
-    icon: <SettingsIcon className="size-4" />,
-  },
   {
     key: 'admin-overview',
     label: 'Admin · Overview',

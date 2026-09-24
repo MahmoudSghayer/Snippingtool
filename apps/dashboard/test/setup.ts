@@ -24,3 +24,9 @@ if (typeof Element !== 'undefined') {
   Element.prototype.releasePointerCapture ??= () => {};
   Element.prototype.scrollIntoView ??= () => {};
 }
+
+// jsdom doesn't implement scrolling; TanStack Router restores scroll on every
+// navigation in the router tests.
+if (typeof window !== 'undefined') {
+  window.scrollTo = () => {};
+}

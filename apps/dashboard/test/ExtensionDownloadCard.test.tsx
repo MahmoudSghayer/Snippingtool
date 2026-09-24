@@ -115,7 +115,7 @@ describe('ExtensionDownloadCard', () => {
     expect(await screen.findByText(/The extension comes with a pass\./)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'See plans and pay' })).toHaveAttribute(
       'href',
-      '/subscriptions#pricing',
+      '/account#buy',
     );
     expect(screen.queryByRole('button', { name: /Download/ })).not.toBeInTheDocument();
   });
