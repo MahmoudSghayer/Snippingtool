@@ -1,9 +1,12 @@
 // "Get the extension" card: lets a user with a pass download the Nova Trade
 // extension zip built for this deployment, and explains how to load it
-// unpacked in Chrome. Used in the "Get the extension" section of /account.
+// unpacked in Chrome. Under it, the optional one-click alternative: the same
+// build as a Tampermonkey userscript, installed from the user's signed link
+// (`GET /api/v1/downloads/userscript/link`). Used in the "Get the extension"
+// section of /account.
 import { Button, Card, CardContent, CardHeader, CardTitle, CopyField, cn } from '@sl/ui';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Download, Puzzle } from 'lucide-react';
+import { Download, ExternalLink, Puzzle } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { api, apiErrorMessage } from '@/api/client.js';
@@ -24,6 +27,22 @@ export function useExtensionDownloadInfo() {
       const { data, error } = await api.GET('/api/v1/downloads/extension/info');
       if (error) throw error;
       return data;
+    },
+  });
+}
+
+export const USERSCRIPT_LINK_QUERY_KEY = ['downloads', 'userscript', 'link'] as const;
+
+/** The signed-in user's Tampermonkey install link. The API serves the script
+ * behind it only while their pass is active. */
+export function useUserscriptLink(enabled: boolean) {
+  return useQuery({
+    queryKey: USERSCRIPT_LINK_QUERY_KEY,
+    enabled,
+    queryFn: async (): Promise<string> => {
+      const { data, error } = await api.GET('/api/v1/downloads/userscript/link');
+      if (error) throw error;
+      return data.installUrl;
     },
   });
 }
@@ -84,7 +103,10 @@ function useExtensionDownload(version: string | null) {
 function InstallSteps() {
   return (
     <div className="flex flex-col gap-3">
-      <ol className="flex list-decimal flex-col gap-2 pl-5 text-sm text-ink-2 marker:text-ink-2">
+      <ol
+        aria-label="Install the zip in Chrome"
+        className="flex list-decimal flex-col gap-2 pl-5 text-sm text-ink-2 marker:text-ink-2"
+      >
         <li>Unzip the file.</li>
         <li>
           <span>Open this address in Chrome (copy it into the address bar):</span>
@@ -102,6 +124,68 @@ function InstallSteps() {
         chrome://extensions and load the new folder. Your settings stay in your account.
       </p>
     </div>
+  );
+}
+
+const linkClass = 'text-gold underline underline-offset-2 hover:text-gold/80';
+
+/** The secondary install path: Tampermonkey, one click, automatic updates. */
+function TampermonkeyOption() {
+  const link = useUserscriptLink(true);
+  const installUrl = link.data;
+  return (
+    <section
+      aria-labelledby="tampermonkey-title"
+      className="flex flex-col gap-3 border-t border-(--sl-border) pt-4"
+    >
+      <h3 id="tampermonkey-title" className="text-sm font-semibold text-ink">
+        Prefer one-click install? Use Tampermonkey
+      </h3>
+      <ol
+        aria-label="Install with Tampermonkey"
+        className="flex list-decimal flex-col gap-2 pl-5 text-sm text-ink-2 marker:text-ink-2"
+      >
+        <li>
+          Install the{' '}
+          <a
+            href="https://www.tampermonkey.net/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className={linkClass}
+          >
+            Tampermonkey extension
+          </a>
+          .
+        </li>
+        <li className="flex flex-col items-start gap-1.5">
+          <span>Click “Install Nova Trade script”, then confirm in Tampermonkey.</span>
+          {installUrl ? (
+            <a
+              href={installUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex h-8 items-center gap-1.5 rounded-(--sl-radius-sm) border border-(--sl-border) px-3 text-sm font-medium text-ink hover:bg-(--sl-card-2)"
+            >
+              <ExternalLink className="size-4" aria-hidden="true" />
+              Install Nova Trade script
+            </a>
+          ) : link.isError ? (
+            <span className="text-xs text-ink-2">
+              Couldn't load your install link: {apiErrorMessage(link.error)}
+            </span>
+          ) : (
+            <Button variant="outline" size="sm" loading>
+              Install Nova Trade script
+            </Button>
+          )}
+        </li>
+        <li>Open the EA FC web app.</li>
+      </ol>
+      <p className="text-xs text-ink-2">
+        Tampermonkey updates the script automatically. It works in Chrome, Edge, Firefox and
+        Opera. The link is yours alone: it stops working when your pass ends.
+      </p>
+    </section>
   );
 }
 
@@ -177,6 +261,7 @@ export function ExtensionDownloadCard({
                 </div>
               </details>
             )}
+            <TampermonkeyOption />
           </>
         )}
       </CardContent>
