@@ -29,6 +29,7 @@ import { build } from 'vite';
 
 import { buildManifest } from './generate-manifest.mjs';
 import { TEMPLATE_PLACEHOLDERS } from './template-placeholders.mjs';
+import { buildUserscriptHeader } from './userscript-header.mjs';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(dirname, '..');
@@ -36,10 +37,26 @@ const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
 
 const target = process.argv[2];
 const watch = process.argv.includes('--watch');
-if (target !== 'ledger' && target !== 'ledger-auto') {
-  console.error(`usage: node scripts/build.mjs <ledger|ledger-auto> [--watch] [--template]`);
+if (target !== 'ledger' && target !== 'ledger-auto' && target !== 'userscript') {
+  console.error(`usage: node scripts/build.mjs <ledger|ledger-auto|userscript> [--watch] [--template]`);
   process.exit(1);
 }
+if (target === 'userscript' && watch) {
+  console.error('--watch is not supported for the userscript target');
+  process.exit(1);
+}
+// The userscript carries the autobuyer, like `ledger-auto` (it is never
+// listed in a store). Every automated action still goes through the governor.
+const automation = target === 'ledger-auto' || target === 'userscript';
+// Tampermonkey only installs an update when `@version` goes up, so every
+// userscript build gets its own: the package version plus a UTC build stamp
+// (0.1.0.202609230830 > 0.1.0.202609221900). USERSCRIPT_VERSION pins it.
+// The same version is compiled in, so the page can show which one runs.
+const version =
+  target === 'userscript'
+    ? process.env.USERSCRIPT_VERSION ||
+      `${pkg.version}.${new Date().toISOString().replace(/\D/g, '').slice(0, 12)}`
+    : pkg.version;
 
 // `--template` builds the downloadable `ledger-auto` zip's template: the
 // API origin, dashboard origin and license public key are placeholders that
@@ -56,7 +73,7 @@ if (template && target !== 'ledger-auto') {
 const outDir = path.join(root, 'dist', template ? 'ledger-auto-template' : target);
 
 const env = {
-  VITE_AUTOMATION: target === 'ledger-auto' ? '1' : '0',
+  VITE_AUTOMATION: automation ? '1' : '0',
   VITE_BUILD_TARGET: target,
   VITE_API_ORIGIN: template ? TEMPLATE_PLACEHOLDERS.apiOrigin : process.env.VITE_API_ORIGIN || 'https://api.snipersledger.app',
   // Where the companion site lives, for the install-time welcome tab
@@ -66,18 +83,23 @@ const env = {
   // An unpacked (downloaded) extension ignores update_url, so the template
   // doesn't declare one.
   VITE_UPDATE_URL: target === 'ledger-auto' && !template ? process.env.VITE_UPDATE_URL || 'https://updates.snipersledger.app/ledger-auto/update.xml' : '',
-  VITE_EXTENSION_VERSION: pkg.version,
+  VITE_EXTENSION_VERSION: version,
   VITE_LICENSE_PUBLIC_KEY: template ? TEMPLATE_PLACEHOLDERS.licensePublicKey : process.env.VITE_LICENSE_PUBLIC_KEY || '',
 };
 
-const define = Object.fromEntries(Object.entries(env).map(([k, v]) => [`import.meta.env.${k}`, JSON.stringify(v)]));
+const define = Object.fromEntries(
+  Object.entries(env).map(([k, v]) => [`import.meta.env.${k}`, JSON.stringify(v)]),
+);
 
 const sharedAlias = {
-  '@sl/shared/adapter-channel.js': path.resolve(root, '../../packages/shared/src/adapter-channel.ts'),
+  '@sl/shared/adapter-channel.js': path.resolve(
+    root,
+    '../../packages/shared/src/adapter-channel.ts',
+  ),
   '@sl/shared': path.resolve(root, '../../packages/shared/src/index.ts'),
   'virtual:autobuyer-loader': path.resolve(
     root,
-    target === 'ledger-auto' ? 'src/engine/autobuyer-loader.auto.ts' : 'src/engine/autobuyer-loader.ledger.ts',
+    automation ? 'src/engine/autobuyer-loader.auto.ts' : 'src/engine/autobuyer-loader.ledger.ts',
   ),
 };
 
@@ -124,7 +146,12 @@ async function buildLibEntry(entry, fileName, globalName, first) {
     ...baseConfig(first),
     build: {
       ...baseConfig(first).build,
-      lib: { entry: path.join(root, entry), formats: ['iife'], name: globalName, fileName: () => fileName },
+      lib: {
+        entry: path.join(root, entry),
+        formats: ['iife'],
+        name: globalName,
+        fileName: () => fileName,
+      },
       rollupOptions: { treeshake: TREESHAKE, output: { extend: true } },
     },
   });
@@ -153,13 +180,98 @@ async function buildEsGroup(first) {
 }
 
 function writeManifest() {
-  const manifest = buildManifest(target, { version: pkg.version, apiOrigin: env.VITE_API_ORIGIN, updateUrl: env.VITE_UPDATE_URL });
+  const manifest = buildManifest(target, {
+    version: pkg.version,
+    apiOrigin: env.VITE_API_ORIGIN,
+    updateUrl: env.VITE_UPDATE_URL,
+  });
   mkdirSync(outDir, { recursive: true });
   writeFileSync(path.join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
 }
 
+// ---- userscript target -------------------------------------------------------
+//
+// One self-contained Tampermonkey file (src/userscript/main.ts explains the
+// layout). Two builds: the MAIN-world adapter first, exactly as the
+// extension ships it, then everything else with that adapter embedded as a
+// string (`virtual:adapter-source`) and `webextension-polyfill` swapped for
+// src/userscript/browser-shim.ts. Not minified: a userscript is installed by
+// hand, and people should be able to read what they are installing.
+
+// `TREESHAKE` above marks every module side-effect free. The userscript's
+// entry is a list of side-effect imports (setup, background, content), so it
+// keeps side effects for this app's own modules; @sl/shared and zod stay
+// pure, which is what that comment is about.
+const USERSCRIPT_TREESHAKE = {
+  moduleSideEffects: (id) => id.startsWith(path.join(root, 'src') + path.sep),
+};
+
+function adapterSourcePlugin(source) {
+  const id = 'virtual:adapter-source';
+  return {
+    name: 'sl-adapter-source',
+    resolveId: (spec) => (spec === id ? `\0${id}` : null),
+    load: (resolved) =>
+      resolved === `\0${id}` ? `export default ${JSON.stringify(source)};` : null,
+  };
+}
+
+/** Runs a library-mode IIFE build without writing it, returning the code. */
+async function buildIifeInMemory(entry, globalName, extra = {}) {
+  const base = baseConfig(false);
+  const result = await build({
+    ...base,
+    logLevel: 'warn',
+    plugins: extra.plugins ?? [],
+    resolve: { alias: { ...sharedAlias, ...(extra.alias ?? {}) } },
+    build: {
+      ...base.build,
+      write: false,
+      minify: extra.minify ?? true,
+      lib: {
+        entry: path.join(root, entry),
+        formats: ['iife'],
+        name: globalName,
+        fileName: () => 'out.js',
+      },
+      rollupOptions: { treeshake: extra.treeshake ?? TREESHAKE, output: { extend: true } },
+    },
+  });
+  const outputs = Array.isArray(result) ? result : [result];
+  const chunk = outputs.flatMap((o) => o.output).find((o) => o.type === 'chunk');
+  if (!chunk) throw new Error(`no output chunk for ${entry}`);
+  return chunk.code;
+}
+
+async function buildUserscript() {
+  const adapterSource = await buildIifeInMemory('src/main/adapter.ts', 'SLAdapter');
+  const code = await buildIifeInMemory('src/userscript/main.ts', 'SLUserscript', {
+    plugins: [adapterSourcePlugin(adapterSource)],
+    alias: { 'webextension-polyfill': path.join(root, 'src/userscript/browser-shim.ts') },
+    treeshake: USERSCRIPT_TREESHAKE,
+    minify: false,
+  });
+
+  const header = buildUserscriptHeader({
+    version,
+    apiOrigin: env.VITE_API_ORIGIN,
+    // Where the published file will live, if known — Tampermonkey then
+    // checks the small .meta.js for new versions and installs updates.
+    downloadUrl: process.env.USERSCRIPT_DOWNLOAD_URL || '',
+  });
+
+  mkdirSync(outDir, { recursive: true });
+  writeFileSync(path.join(outDir, 'sniper-ledger.user.js'), `${header}\n\n${code}`);
+  writeFileSync(path.join(outDir, 'sniper-ledger.meta.js'), `${header}\n`);
+}
+
 async function main() {
   rmSync(outDir, { recursive: true, force: true });
+  if (target === 'userscript') {
+    await buildUserscript();
+    console.warn(`[build] ${target} -> ${path.relative(root, outDir)}`);
+    return;
+  }
   await buildLibEntry('src/main/adapter.ts', 'adapter.js', 'SLAdapter', true);
   await buildLibEntry('src/content/index.ts', 'content.js', 'SLContent', false);
   await buildEsGroup(false);

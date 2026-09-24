@@ -17,7 +17,7 @@
  * boot here used to take M1 recording down with it (docs/12-testing.md
  * "Defects found" row #10). Nothing in this file touches `lib/storage.ts`.
  */
-import { extContentKillSwitchMessageSchema } from '@sl/shared';
+import { DEFAULT_BOT_SETTINGS, extContentKillSwitchMessageSchema } from '@sl/shared';
 import browser from 'webextension-polyfill';
 
 import { AssistEngine } from '../engine/assist.js';
@@ -26,15 +26,21 @@ import { rankCandidates, type OpportunityCandidate, type ScoredOpportunity } fro
 import { countObservedSearches, governedSearch } from '../engine/search.js';
 import { logger } from '../lib/logger.js';
 import { singleFlight } from '../lib/single-flight.js';
+import { setBotPageOpener } from '../ui/bot-opener.js';
+import { createBotPage } from '../ui/bot-page.js';
+import { installNavItem } from '../ui/ea-nav.js';
 import { createPanel, type Panel } from '../ui/panel.js';
 
 import { createAdapterClient } from './adapter-client.js';
 
 import type { Autobuyer, StopReason } from '../engine/autobuyer.js';
+import type { Sniper } from '../engine/sniper.js';
 import type { AttemptInput, TradeInput } from '../engine/types.js';
+import type { Catalog } from '../model/catalog.js';
 import type { PriceSummary } from '../model/prices.js';
 import type {
   ActivityEvent,
+  BotSettings,
   BackgroundResponse,
   BootstrapResponse,
   FeatureKey,
@@ -81,7 +87,15 @@ function nowIso(): string {
 
 async function main(): Promise<void> {
   const panel: Panel = createPanel();
-  const adapter = createAdapterClient(window);
+  const adapter = createAdapterClient();
+
+  // The Snipe Targets form's choices, built by the adapter with the web
+  // app's own lists once it has started (model/catalog.ts). Asked for now
+  // too, in case it was ready before this script was listening.
+  adapter.onCatalog((catalog) => {
+    void send('catalog.save', catalog);
+  });
+  adapter.requestCatalog();
 
   panel.setHealth('live', 'Recording. Nothing beyond product telemetry (docs/06-extension.md) is sent.');
   send('counts').then((data) => data && panel.setTotals(data as { auctions: number; playersLast24h: number }));
@@ -348,8 +362,11 @@ async function main(): Promise<void> {
   let deviceIdCache: string | null = null;
   const sessionId = crypto.randomUUID();
 
+  // Saved filters: rotated by assist, searched by the Sniping Bot, edited
+  // on the Sniping Bot page. One array so all three see the same list.
+  let filters = (await send<SavedFilter[]>('filters.list')) ?? [];
+
   if (governor && features.includes('assist.ranker')) {
-    const filters = (await send<SavedFilter[]>('filters.list')) ?? [];
     assist = new AssistEngine({
       governor,
       adapter,
@@ -399,6 +416,89 @@ async function main(): Promise<void> {
     }
   }
 
+  // ---- M3: the Sniping Bot page -------------------------------------------
+  //
+  // Automation builds only (the listable build never loads `engine/sniper.ts`
+  // — see `engine/autobuyer-loader.*.ts`). The bot runs its own governor from
+  // the page's Safety limits; the server kill switch still stops it.
+  let sniper: Sniper | null = null;
+  if (AUTOMATION_ENABLED) {
+    let botSettings: BotSettings | null = await send<BotSettings>('bot.settingsGet');
+    let unavailableReason: string | null = null;
+
+    // Called at load and whenever the page opens: a user who signs in from
+    // the SL drawer after the page loaded gets the bot without a reload.
+    const prepareSniper = async (fresh: boolean): Promise<void> => {
+      if (sniper) return;
+      let signedIn = !!authStatus?.authenticated;
+      let allowed = features.includes('automation.autobuyer');
+      if (fresh) {
+        signedIn = !!(await send<{ authenticated: boolean }>('auth.status'))?.authenticated;
+        const boot = signedIn ? await send<BootstrapResponse>('license.bootstrap') : null;
+        allowed = !!boot?.features.includes('automation.autobuyer');
+        if (boot) {
+          killSwitchActive = killSwitchActive || boot.killSwitchActive;
+          deviceIdCache = deviceIdCache ?? boot.deviceId;
+        }
+      }
+      botSettings = botSettings ?? (await send<BotSettings>('bot.settingsGet'));
+      if (!signedIn) unavailableReason = 'Sign in (NT button) to use the Sniping Bot.';
+      else if (!allowed) unavailableReason = 'Your plan does not include the Sniping Bot.';
+      else if (!botSettings) unavailableReason = 'The extension could not load the bot settings. Reload the page.';
+      else unavailableReason = null;
+      if (unavailableReason || !botSettings) return;
+
+      const { loadSniper } = await import('virtual:autobuyer-loader');
+      const mod = await loadSniper();
+      if (!mod) {
+        unavailableReason = 'The Sniping Bot is not available in this build.';
+        return;
+      }
+      sniper = new mod.Sniper(
+        {
+          adapter,
+          getFilters: () => filters.filter((f) => f.isActive).map((f) => ({ id: f.id, name: f.name, filter: f.filter })),
+          estimateSellPrice: async (resourceId) => {
+            const r = await send<{ summary: PriceSummary }>('summary', { resourceId, minProfit: settingsCache.targets.minProfitPerSnipe });
+            return r?.summary.median ?? null;
+          },
+          killSwitch: () => ({ active: killSwitchActive || !!governor?.isKillSwitchActive() }),
+          onChange: () => botPage.refresh(),
+          onAttempt: recordAttempt,
+          onTrade: recordTrade,
+        },
+        botSettings,
+      );
+    };
+    await prepareSniper(false);
+
+    const botPage = createBotPage({
+      getSniper: () => sniper,
+      getUnavailableReason: () => (sniper ? null : unavailableReason),
+      prepare: () => prepareSniper(true),
+      getSettings: () => botSettings ?? DEFAULT_BOT_SETTINGS,
+      saveSettings: async (next) => {
+        botSettings = next;
+        await send('bot.settingsSet', next);
+      },
+      getFilters: () => filters,
+      saveFilters: async (next) => {
+        filters = next;
+        await send('filters.save', { filters: next });
+      },
+      resolveNames: async (resourceIds) => (await send<Record<string, string | null>>('cards.names', { resourceIds })) ?? {},
+      getCatalog: () => send<Catalog | null>('catalog.get'),
+    });
+    const nav = installNavItem({
+      onToggle: () => botPage.toggle(),
+      onEaNavigate: () => botPage.close(),
+      onOffset: (left, top) => botPage.setOffsets(left, top),
+    });
+    botPage.onOpenChange((open) => nav.setActive(open));
+    setBotPageOpener(() => botPage.open());
+    panel.setBotLauncher(() => botPage.open());
+  }
+
   function buildCandidatesFromTracked(): OpportunityCandidate[] {
     // Cap the number of distinct cards summarised per tick — this is a
     // content-script loop (rule 5 allows it here), but it should still be a
@@ -446,7 +546,8 @@ async function main(): Promise<void> {
     rankedCandidates = rankCandidates(candidates, { minEv: settingsCache.targets.minProfitPerSnipe });
     panel.setRanked(rankedCandidates);
 
-    if (autobuyer && !autobuyer.isStopped()) {
+    // The Sniping Bot buys on its own; never let two engines buy at once.
+    if (autobuyer && !autobuyer.isStopped() && !sniper?.isRunning()) {
       await autobuyer.runCycle(rankedCandidates.slice(0, 5));
       const stop = autobuyer.getStopReason();
       if (stop) reportAutobuyerStop(stop.reason, stop.detail);
@@ -529,9 +630,18 @@ async function main(): Promise<void> {
   }
 }
 
-void main().catch((err) => {
-  // M1 recording is wired up synchronously at the top of main() and keeps
-  // working whatever happens below it; a failed M2/M3 bootstrap is reported,
-  // never allowed to become a silent unhandled rejection.
-  logger.error(`content bootstrap failed (recording continues): ${String(err)}`, 'content');
-});
+function start(): void {
+  void main().catch((err) => {
+    // M1 recording is wired up synchronously at the top of main() and keeps
+    // working whatever happens below it; a failed M2/M3 bootstrap is reported,
+    // never allowed to become a silent unhandled rejection.
+    logger.error(`content bootstrap failed (recording continues): ${String(err)}`, 'content');
+  });
+}
+
+// The extension injects this file at document_idle, so the first branch is
+// never taken there. The userscript build evaluates it at document-start (so
+// the MAIN-world adapter is in place before EA's first market call) and the
+// panel needs a <body> to attach to.
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
+else start();

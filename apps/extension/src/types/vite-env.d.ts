@@ -16,12 +16,11 @@ interface ImportMetaEnv {
    * `src/engine/autobuyer-loader.ledger.ts` vs `.auto.ts`), not from this
    * flag alone — this flag additionally gates *invocation* at runtime. */
   readonly VITE_AUTOMATION: '0' | '1';
-  readonly VITE_BUILD_TARGET: 'ledger' | 'ledger-auto';
+  readonly VITE_BUILD_TARGET: 'ledger' | 'ledger-auto' | 'userscript';
   readonly VITE_API_ORIGIN: string;
-  /** Origin of the companion dashboard. `background/welcome.ts` opens
-   * `<origin>/bot` on first install so a new user lands where saved
-   * searches are created — the extension has nothing to search until
-   * one exists. */
+  /** Origin of the companion website. `background/welcome.ts` opens
+   * `<origin>/account` on first install, and the popup's "Create an
+   * account" opens `<origin>/register`. */
   readonly VITE_DASHBOARD_ORIGIN: string;
   /** Only meaningful for `ledger-auto` (self-hosted updates); empty string
    * for `ledger` (Chrome Web Store owns updates, no `update_url` emitted). */

@@ -62,6 +62,8 @@ function fakeAdapter(buyImpl: AdapterClient['buy'] = async () => ({ ok: true, la
       };
     },
     onAuctions: () => () => undefined,
+    onCatalog: () => () => undefined,
+    requestCatalog: () => undefined,
     dispose: () => undefined,
   };
 

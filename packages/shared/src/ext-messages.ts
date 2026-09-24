@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { ADAPTER_CHANNEL } from './adapter-channel.js';
 import { activityEventSchema } from './schemas/activity.js';
 import { emailSchema, passwordSchema } from './schemas/auth.js';
+import { botSettingsSchema } from './schemas/bot.js';
 import { filterCriteriaSchema, filterStatsSchema, savedFilterSchema } from './schemas/filters.js';
 import { riskBudgetEventSchema } from './schemas/risk.js';
 import { snipingAttemptSchema } from './schemas/sniping.js';
@@ -129,6 +130,12 @@ export const adapterActRequestMessageSchema = z.object({
       requestId: z.string().min(1),
       tradeId: z.string().min(1),
     }),
+    /** Re-send EA's player list and names if the adapter has seen them
+     * (they may have loaded before the content script was listening). */
+    z.object({
+      action: z.literal('catalog'),
+      requestId: z.string().min(1),
+    }),
   ]),
 });
 export type AdapterActRequestMessage = z.infer<typeof adapterActRequestMessageSchema>;
@@ -210,6 +217,19 @@ export const backgroundMessageTypeSchema = z.enum([
   /** Exports `lib/logger.ts`'s ring buffer for the options page's "Export
    * logs" button — local only, no network call. */
   'logs.export',
+  /** The Sniping Bot page's settings (`BotSettings`, `storage.local`). Local
+   * only: nothing about how a user paces their bot goes to the server. */
+  'bot.settingsGet',
+  'bot.settingsSet',
+  /** Player names for resource ids, for the bot log and search results.
+   * Background resolves them from `/api/v1/market/cards/:id` and caches
+   * them in `storage.local`. */
+  'cards.names',
+  /** EA's own player list and club/league/nation names, captured from the
+   * web app's search data (`apps/extension` `model/catalog.ts`) and kept in
+   * `storage.local` for the Snipe Targets form. */
+  'catalog.get',
+  'catalog.save',
 ]);
 export type BackgroundMessageType = z.infer<typeof backgroundMessageTypeSchema>;
 
@@ -226,7 +246,9 @@ export type BackgroundMessageEnvelope = z.infer<typeof backgroundMessageEnvelope
 
 export const backgroundResponseSchema = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(true), data: z.unknown() }),
-  z.object({ ok: z.literal(false), error: z.string() }),
+  /** `code` is the API's error code when the failure came from `apps/api`
+   * (`AUTH_INVALID_CREDENTIALS`, `RATE_LIMITED`...), so a UI can explain it. */
+  z.object({ ok: z.literal(false), error: z.string(), code: z.string().optional() }),
 ]);
 export type BackgroundResponse = z.infer<typeof backgroundResponseSchema>;
 
@@ -319,6 +341,48 @@ export const extBackgroundLicenseHeartbeatPayloadSchema = z
 
 /** `filters.save` — the *locally-persisted* `SavedFilter[]` (id, filterHash,
  * etc. already computed), not a creation request. */
+export const extBackgroundBotSettingsSetPayloadSchema = botSettingsSchema;
+
+const catalogOptionSchema = z
+  .object({
+    id: z.number().int(),
+    value: z.string().max(40),
+    label: z.string().min(1).max(120),
+    img: z.string().max(600).optional(),
+    levels: z.boolean().optional(),
+  })
+  .strict();
+
+/** `catalog.save`: the Snipe Targets form's choices, as the EA web app's own
+ * search panel lists them (apps/extension `model/catalog.ts`). */
+export const extBackgroundCatalogSavePayloadSchema = z
+  .object({
+    players: z
+      .array(
+        z
+          .object({ id: z.number().int().positive(), name: z.string().min(1).max(80), rating: z.number().int().min(0).max(99).nullable() })
+          .strict(),
+      )
+      .max(100_000),
+    portrait: z.string().max(600).optional(),
+    levels: z.array(catalogOptionSchema).max(20),
+    rarities: z.array(catalogOptionSchema).max(1_000),
+    positions: z.array(catalogOptionSchema).max(50),
+    playStyles: z.array(catalogOptionSchema).max(100),
+    nations: z.array(catalogOptionSchema).max(1_000),
+    leagues: z.array(catalogOptionSchema).max(1_000),
+    clubs: z.record(z.string().regex(/^\d+$/), z.array(catalogOptionSchema).max(500)),
+    capturedAt: z.number().int(),
+    notes: z.array(z.string().max(500)).max(50).optional(),
+  })
+  .strict();
+
+export const extBackgroundCardNamesPayloadSchema = z
+  .object({
+    resourceIds: z.array(z.number().int().positive()).max(50),
+  })
+  .strict();
+
 export const extBackgroundFiltersSavePayloadSchema = z
   .object({
     filters: z.array(savedFilterSchema).max(200),

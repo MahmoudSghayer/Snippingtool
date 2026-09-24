@@ -11,10 +11,17 @@ export const filterCriteriaSchema = z
     minRating: z.number().int().min(0).max(99).optional(),
     maxRating: z.number().int().min(0).max(99).optional(),
     position: z.string().min(1).max(10).optional(),
+    /** EA's position group (130 defenders, 131 midfielders, 132 attackers),
+     * searched instead of a single position. */
+    zone: z.number().int().min(0).max(1_000).optional(),
     nationality: z.number().int().positive().optional(),
     league: z.number().int().positive().optional(),
     club: z.number().int().positive().optional(),
     quality: z.enum(['bronze', 'silver', 'gold', 'special']).optional(),
+    /** EA's rarity id (0 common, 1 rare, higher ids are promo designs). */
+    rarity: z.number().int().min(0).max(1_000).optional(),
+    /** EA's chemistry style id (250 Basic ... 273 GK Basic). */
+    chemistryStyle: z.number().int().positive().max(1_000).optional(),
   })
   .strict();
 export type FilterCriteria = z.infer<typeof filterCriteriaSchema>;

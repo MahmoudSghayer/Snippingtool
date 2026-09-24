@@ -169,6 +169,94 @@ Verify: `grep -r autobuyer apps/extension/dist/ledger` returns nothing —
 covered by `test/e2e/extension.spec.ts`'s `ledger build contents` suite,
 which runs even without a browser (a plain filesystem scan).
 
+### The `userscript` target
+
+`pnpm --filter @sl/extension build:userscript` builds the M1–M3 code (same
+feature set as `ledger-auto`, `VITE_BUILD_TARGET=userscript`) into one
+Tampermonkey file, `dist/userscript/sniper-ledger.user.js`, plus the
+header-only `sniper-ledger.meta.js` Tampermonkey polls for updates. No
+extension code forks for it; `src/userscript/` supplies what the manifest
+and the browser would otherwise provide:
+
+| Extension                         | Userscript                                                                                                                                                                              |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `adapter.js` in the MAIN world    | The same adapter IIFE, built first and embedded as a string (`virtual:adapter-source`), injected with `GM_addElement` at `document-start` (`setup.ts`)                                  |
+| Service worker + ISOLATED content | `background/index.ts` and `content/index.ts`, imported in that order by `main.ts` and run in Tampermonkey's isolated context                                                            |
+| `webextension-polyfill`           | `browser-shim.ts` (build alias): one in-page message bus with Chrome's first-answer-wins rule and structured cloning; `storage.*` on `GM_*Value`; `alarms` on timers; `tabs` = this tab |
+| `host_permissions` for the API    | `lib/http.ts`'s transport swapped for `gm-fetch.ts` (`GM_xmlhttpRequest`, `anonymous: true` so EA's cookies never go along); the API host is the header's only `@connect`               |
+| Toolbar popup, options page       | `launcher.ts`: a button on the EA page opening a drawer that mounts `popup/app.ts` and `options/app.ts` in their own shadow roots; also in Tampermonkey's menu                          |
+
+Differences that follow from there being no extension process:
+
+- **`storage.session` persists.** It is GM storage under a `session:` prefix,
+  so the access token and saved governor state survive a browser restart. A
+  stale token is refreshed on its first 401, and resuming governor counters
+  is the conservative direction.
+- **Everything runs per tab.** Each EA tab has its own "background": its own
+  alarms, heartbeat and kill-switch listener. Alarms only tick while an EA
+  tab is open.
+- **IndexedDB is ea.com's.** The observation database lives in the EA
+  origin, so clearing ea.com's site data clears it, and EA's page code could
+  read it. It only ever holds trimmed market listings; tokens and settings
+  are in GM storage, which the page cannot reach.
+- **No minification.** People install userscripts by hand and should be able
+  to read what they are installing.
+
+### The Sniping Bot page (automation builds)
+
+`ledger-auto` and `userscript` add a **Sniping Bot** page: an item under
+Transfers in EA's left navigation (`ui/ea-nav.ts`) opens a full page
+(`ui/bot-page.ts`) with the bot's settings on the left and the live session on
+the right. The in-page panel and the userscript's SL menu open it too.
+
+The bot (`engine/sniper.ts`) searches the user's saved filters in turn, buys
+every listing at or under the price cap (cheapest first), then waits a random
+delay from the user's range, with breaks every N searches and rests every N
+minutes. It ships through the same `virtual:autobuyer-loader` alias as the
+autobuyer (`loadSniper()`), so the `ledger` build never contains it, and the
+autobuyer does not buy while the bot runs.
+
+**The user sets every limit.** Its settings (`BotSettings` in
+`@sl/shared`) live in `storage.local`, never on the server, and are bounded
+by `BOT_LIMITS`, which are far wider than `GOVERNOR_ABSOLUTE_LIMITS`: presets
+go from Safe (3-5 s) to Risky (1-2 s), and the page labels the pace LOW,
+MEDIUM or HIGH RISK. The bot runs its own governor built from the page's
+Safety limits; the server kill switch and adapter probe failures stop it
+whatever those say.
+
+**Snipe targets are built like EA's own search panel**: OVR range slider
+with Min/Max OVR, "Type Player Name" (with EA portraits), and Quality,
+Rarity, Position, Chemistry Style, Country/Region, League and Club rows.
+The lists are the web app's own: `main/adapter.ts` calls its
+`UTDataProviderFactory` (`getRareItemLevelDP`, `getItemRarityDP`,
+`getPlayerPositionDP`, `getPlayStyleDP`, `getNationDP`, `getLeagueDP`,
+`getTeamDP` per league) and takes every picture from its
+`AssetLocationUtils.getFilterImage`, so entries, order, labels and images
+match EA's panel, in the user's web-app language. Like EA's panel, Club is
+disabled until a league is chosen, and choosing a quality clears the rarity
+and narrows the rarity list. Players come from the web app's `players.json`
+(`AssetLocationUtils.getPlayerSearchFileUri()`). Stored in `storage.local`
+(`catalog.get` / `catalog.save`, `model/catalog.ts`).
+
+### Web app shape (verified 2026-09-23)
+
+`main/adapter.ts` was checked against the FC 27 web app's own code
+(`js/compiled_1-4.js`, `ocompiled.js`) and public data files:
+
+| What       | The web app's own                                                                                                                                                                                    |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Search     | `services.Item.clearTransferMarketCache()` then `services.Item.searchTransferMarket(new UTSearchCriteriaDTO(), page)` -> observable; `res.data.items`                                                |
+| Buy now    | `services.Item.bid(item, auction.buyNowPrice)`                                                                                                                                                       |
+| Criteria   | `type` (set first), `maskedDefId`, `level` (`bronze`/`silver`/`gold`/`SP`), `rarities`, `position` / `zone` (130-132), `playStyle`, `nation`, `league`, `club`, `minBuy`/`maxBuy`, `ovrMin`/`ovrMax` |
+| Items      | `definitionId`, `databaseId` (base player id), `rating`, `getAuctionData()` -> `tradeId`, `buyNowPrice`, `expires`                                                                                   |
+| Navigation | `.ut-tab-bar-item` buttons, Transfers has `icon-transfer`; top bar `.ut-navigation-bar-view`                                                                                                         |
+
+The adapter waits for the web app to start (and log in) before its first
+probe, and builds the catalog then.
+
+Not yet available: transfer list, sold and unsold counts (the adapter has no
+transfer list access yet).
+
 ## 4. The ASSUMED SHAPE and the day-one verification checklist
 
 The live EA FC web app is unreachable while the market is locked, so
