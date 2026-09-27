@@ -13,7 +13,7 @@ import { buildApp } from '../../../app.js';
 import { hashSecret } from '../../../lib/crypto.js';
 import { newId } from '../../../lib/ids.js';
 import { reseedPlans } from '../../../test/reseed-reference-data.js';
-import { activateManual, expireDueSubscriptions, grantLifetime, startTrial } from '../service.js';
+import { activateManual, expireDueSubscriptions, grantLifetime } from '../service.js';
 
 import type { FastifyInstance } from 'fastify';
 
