@@ -73,6 +73,15 @@ export async function handleLifecycleSessionPnl(): Promise<LifecycleSessionPnl> 
   return lifecycle.sessionPnl(await sessionStart());
 }
 
+/** `lifecycle.todayPnl`: realised profit since local midnight, for the
+ * popup's daily profit goal (`targets.dailyProfitGoal`). */
+export async function handleLifecycleTodayPnl(): Promise<LifecycleSessionPnl> {
+  await resumeOnce();
+  const midnight = new Date();
+  midnight.setHours(0, 0, 0, 0);
+  return lifecycle.sessionPnl(midnight.getTime());
+}
+
 export function handleLifecycleStats(): Promise<LifecycleStats> {
   return lifecycle.stats();
 }

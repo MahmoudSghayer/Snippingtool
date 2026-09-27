@@ -211,3 +211,27 @@ describe('gmFetch', () => {
     expect((await pending).status).toBe(204);
   });
 });
+
+describe('userscript browser shim — storage.onChanged (live settings, P0 Task 13)', () => {
+  it('tells listeners what changed in this tab, with the area name', async () => {
+    const seen: Array<{ changes: Record<string, { newValue?: unknown; oldValue?: unknown }>; area: string }> = [];
+    const listener = (changes: Record<string, { newValue?: unknown; oldValue?: unknown }>, area: string) =>
+      void seen.push({ changes, area });
+    browser.storage.onChanged.addListener(listener);
+    try {
+      await browser.storage.local.set({ 'sl.settings.cache.v1': { version: 2 } });
+      await browser.storage.session.set({ 'sl.engine.lease.v1': { ownerId: 'x' } });
+      await browser.storage.local.remove('sl.settings.cache.v1');
+      expect(seen).toEqual([
+        { changes: { 'sl.settings.cache.v1': { newValue: { version: 2 } } }, area: 'local' },
+        { changes: { 'sl.engine.lease.v1': { newValue: { ownerId: 'x' } } }, area: 'session' },
+        { changes: { 'sl.settings.cache.v1': { oldValue: { version: 2 } } }, area: 'local' },
+      ]);
+      // A listener cannot reach into the store through what it was handed.
+      (seen[0]!.changes['sl.settings.cache.v1']!.newValue as { version: number }).version = 99;
+      expect((await browser.storage.local.get('sl.settings.cache.v1'))['sl.settings.cache.v1']).toBeUndefined();
+    } finally {
+      browser.storage.onChanged.removeListener(listener);
+    }
+  });
+});

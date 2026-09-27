@@ -12,6 +12,8 @@
  */
 import {
   backgroundMessageEnvelopeSchemaFor,
+  extBackgroundEngineLockPayloadSchema,
+  extBackgroundEngineStatePayloadSchema,
   extBackgroundBotBudgetSetPayloadSchema,
   extBackgroundBotSettingsSetPayloadSchema,
   extBackgroundBotUsageSetPayloadSchema,
@@ -35,6 +37,7 @@ import {
 } from '@sl/shared';
 import browser from 'webextension-polyfill';
 
+import { refreshOnStartup } from '../lib/auth.js';
 import { logger } from '../lib/logger.js';
 import { margin, maxSnipePrice, summarise } from '../model/prices.js';
 import * as db from '../store/db.js';
@@ -51,11 +54,24 @@ import {
   handleCatalogGet,
   handleCatalogSave,
 } from './bot.js';
+import {
+  handleEngineLockAcquire,
+  handleEngineLockRelease,
+  handleEngineResetSession,
+  handleEngineState,
+} from './engine-lease.js';
 import { installGlobalErrorHandlers, handleErrorsReport, ensureErrorFlushAlarm, onErrorFlushAlarm } from './errors.js';
 import { handleEngineStateGet, handleEngineStateSet, handleGovernorSnapshotGet, handleGovernorSnapshotPush } from './governor.js';
 import { handleKillSwitchGet } from './kill-switch.js';
 import { ensureHeartbeatAlarm, handleLicenseBootstrap, handleLicenseHeartbeat, onHeartbeatAlarm, runBootstrap } from './license.js';
-import { handleLifecycleBuy, handleLifecyclePile, handleLifecycleSessionPnl, handleLifecycleStats, retryUnreportedSales } from './lifecycle.js';
+import {
+  handleLifecycleBuy,
+  handleLifecyclePile,
+  handleLifecycleSessionPnl,
+  handleLifecycleStats,
+  handleLifecycleTodayPnl,
+  retryUnreportedSales,
+} from './lifecycle.js';
 import {
   handleDevicesList,
   handleFiltersList,
@@ -140,10 +156,14 @@ const handlers: Record<string, Handler> = {
   'lifecycle.pile': (payload) => handleLifecyclePile(payload as never),
   'lifecycle.sessionPnl': () => handleLifecycleSessionPnl(),
   'lifecycle.stats': () => handleLifecycleStats(),
+  'lifecycle.todayPnl': () => handleLifecycleTodayPnl(),
 
-  async 'engine.state'() {
-    return { ok: true };
-  },
+  // The per-profile engine lease and the live engine state (P0 Task 13,
+  // background/engine-lease.ts), and the popup's "New session".
+  'engine.lockAcquire': (payload) => handleEngineLockAcquire(payload as never),
+  'engine.lockRelease': (payload) => handleEngineLockRelease(payload as never),
+  'engine.state': (payload) => handleEngineState(payload as never),
+  'engine.resetSession': () => handleEngineResetSession(),
 
 };
 
@@ -175,7 +195,8 @@ const envelopeSchema = backgroundMessageEnvelopeSchemaFor(Object.keys(handlers))
 // `background/auth.ts` itself). A handler with no payload (`auth.refresh`,
 // `auth.status`, `license.bootstrap`, `settings.get`, `filters.list`,
 // `devices.list`, `logs.export`, `telemetry.flush`, `errors.report`,
-// `governor.snapshotGet`, `engine.stateGet`, `license.killSwitchGet`, `engine.state`, `counts`) has nothing to validate and is deliberately
+// `governor.snapshotGet`, `engine.stateGet`, `license.killSwitchGet`, `engine.resetSession`,
+// `lifecycle.todayPnl`, `counts`) has nothing to validate and is deliberately
 // left out — every handler still gets the envelope-level check above plus
 // the try/catch's crash safety net (an `async` handler's thrown `TypeError`
 // from a malformed payload always becomes a rejected promise, never an
@@ -196,6 +217,9 @@ const payloadSchemas: Partial<Record<string, { safeParse: (v: unknown) => { succ
   'engine.stateSet': extBackgroundEngineStateSetPayloadSchema,
   'lifecycle.buy': extBackgroundLifecycleBuyPayloadSchema,
   'lifecycle.pile': extBackgroundLifecyclePilePayloadSchema,
+  'engine.lockAcquire': extBackgroundEngineLockPayloadSchema,
+  'engine.lockRelease': extBackgroundEngineLockPayloadSchema,
+  'engine.state': extBackgroundEngineStatePayloadSchema,
 };
 if (AUTOMATION_ENABLED) {
   Object.assign(payloadSchemas, {
@@ -268,4 +292,11 @@ startAlarms();
 // re-bootstraps on every wake rather than assuming any in-memory state
 // survived — `runBootstrap` itself is a no-op if not authenticated or if
 // the cache is still fresh (`background/license.ts`).
-runBootstrap().catch((err) => logger.warn(`startup bootstrap failed: ${String(err)}`, 'background'));
+//
+// A browser restart cleared the access token (`storage.session`) but not the
+// refresh token: one refresh first (lib/auth.ts `refreshOnStartup`), so the
+// bootstrap — and every tab asking `auth.status` meanwhile — sees the
+// account that is still signed in.
+refreshOnStartup()
+  .then(() => runBootstrap())
+  .catch((err) => logger.warn(`startup bootstrap failed: ${String(err)}`, 'background'));

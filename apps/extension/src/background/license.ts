@@ -23,6 +23,7 @@ import { logger } from '../lib/logger.js';
 import { applyServerSettings } from '../lib/settings.js';
 import { getLocal, setLocal } from '../lib/storage.js';
 
+import { currentEngineState } from './engine-lease.js';
 import { propagateKillSwitch } from './kill-switch.js';
 
 import type { BootstrapResponse, HeartbeatResponse } from '@sl/shared';
@@ -116,9 +117,12 @@ export async function handleLicenseHeartbeat(engineState: 'idle' | 'running' | '
   return data;
 }
 
-/** Fired from `background/index.ts`'s `alarms.onAlarm` listener. */
+/** Fired from `background/index.ts`'s `alarms.onAlarm` listener. Reports
+ * the engine state the EA tab holding the engine lease last pushed
+ * (`engine.state`, background/engine-lease.ts), or `idle` when no tab has
+ * for as long as a lease lasts. */
 export async function onHeartbeatAlarm(): Promise<void> {
-  await handleLicenseHeartbeat('idle'); // the alarm doesn't know the live engine state — content's own heartbeat calls (via 'engine.state') pass the real one
+  await handleLicenseHeartbeat(await currentEngineState());
 }
 
 export async function checkOfflineGrace() {
