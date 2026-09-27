@@ -9,7 +9,7 @@
  *   service worker      -> `background/index.ts`, running in this script
  *   ISOLATED content    -> `content/index.ts`, running in this script
  *
- * plus `launcher.ts` in place of the toolbar popup and options page. The
+ * plus `launcher.ts` in place of the toolbar popup. The
  * wiring between them is `browser-shim.ts`, aliased in for
  * `webextension-polyfill` at build time.
  *

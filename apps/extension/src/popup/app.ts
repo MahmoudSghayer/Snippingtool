@@ -1,35 +1,16 @@
 /*
- * popup/app.ts — status, login/2FA form, plan/license summary, telemetry
- * toggle, quick links. Vanilla TS (no framework — the popup is small enough
- * that a dependency would cost more than it saves, see
+ * popup/app.ts — the Nova Trade account view: sign in (with 2FA), then the
+ * plan and a Sign out button. The tool itself opens from the "Nova AI" item
+ * in the EA web app's left menu. Vanilla TS (no framework — the popup is
+ * small enough that a dependency would cost more than it saves, see
  * docs/06-extension.md).
- *
- * The *live* risk budget meter (docs/10-design-system.md §15's former
- * "Known gap", docs/12-testing.md "Defects found"): the governor itself
- * still only ever runs inside the content script attached to the active EA
- * tab, so this file never recomputes or reconstructs the numbers — it asks
- * `background/governor.ts` for whatever `content/index.ts` most recently
- * pushed it (`governor.snapshotGet`, a real message handler, addressing
- * what this comment used to call out as file-ownership-boundary future
- * work) and renders it as a segmented gauge (`riskGaugeHtml`/`meterHtml`).
- * If no EA tab has reported a snapshot recently, this shows an honest
- * "no live EA tab" message instead of a fabricated number (see
- * `renderLoggedIn`'s "Risk budget" card).
  */
 import browser from 'webextension-polyfill';
 
 import { BackgroundError, send } from '../lib/bg-client.js';
 import { onTrusted } from '../ui/trusted-events.js';
 
-import type { RiskSnapshot } from '../engine/governor.js';
-import type { BootstrapResponse, LoginResponse, UserSettings } from '@sl/shared';
-// Type-only: engine/governor.ts is automation-surface code, but a `type`
-// import is fully erased at compile time (no runtime code, nothing for a
-// bundler to pull in) — see extBackgroundGovernorSnapshotPushPayloadSchema's
-// own comment in packages/shared/src/ext-messages.ts for why the *runtime*
-// shape is duplicated there instead of imported the same way.
-
-const coins = (n: number): string => Math.round(n).toLocaleString('en-US');
+import type { BootstrapResponse, LoginResponse, SubscriptionStatus } from '@sl/shared';
 
 let app: HTMLElement;
 
@@ -42,7 +23,7 @@ const DASHBOARD_ORIGIN = (import.meta.env.VITE_DASHBOARD_ORIGIN ?? '').replace(/
 let allowAutofill = true;
 
 /** Looks up an element inside whatever root the page was mounted into:
- * `#app` in the extension's popup/options page, or a shadow root on the EA
+ * `#app` in the extension's popup, or a shadow root on the EA
  * page in the userscript build (`src/userscript/launcher.ts`). */
 function byId(id: string): HTMLElement | null {
   return app.querySelector<HTMLElement>(`#${CSS.escape(id)}`);
@@ -142,43 +123,6 @@ async function openDashboardRegister(): Promise<void> {
   if (import.meta.env.VITE_BUILD_TARGET !== 'userscript') window.close();
 }
 
-/** One risk meter: 80% "high" and 100% "over" bands, clamped at 120%. */
-function meterHtml(value: number, limit: number): string {
-  const ratio = limit > 0 ? Math.min(1.2, value / limit) : 0;
-  const cls = ratio >= 1 ? 'meter over' : ratio >= 0.8 ? 'meter high' : 'meter';
-  const widthPct = Math.min(100, ratio * 100);
-  return `<div class="${cls}"><i style="width:${widthPct}%"></i></div>`;
-}
-
-/** The real segmented risk gauge, fed by the live governor snapshot the
- * content script pushes to background (defect fix: docs/10-design-system.md
- * §15 "Known gap" — the popup previously always showed the static
- * "tracked live on the EA page" text, never real numbers). `snapshot` is
- * `null` when no EA tab has reported one recently (none open, or the cache
- * went stale) — the honest fallback for that case, never a fabricated or
- * reconstructed number. */
-function riskGaugeHtml(snapshot: RiskSnapshot | null, killSwitch: boolean): string {
-  if (killSwitch) {
-    return `<div class="row"><span class="k">Risk budget</span><span class="v">Halted</span></div>`;
-  }
-  if (!snapshot) {
-    return `
-      <div class="row"><span class="k">Risk budget</span><span class="v">No live EA tab</span></div>
-      <p class="hint" style="margin:6px 0 0;">Open the EA Web App in a tab while sniping to see actions/hour, buy:search ratio
-        and coin flow live here.</p>
-    `;
-  }
-  return `
-    <div class="row"><span class="k">Actions this hour</span><span class="v">${snapshot.actionsLastHour} / ${snapshot.actionsPerHourLimit}</span></div>
-    ${meterHtml(snapshot.actionsLastHour, snapshot.actionsPerHourLimit)}
-    <div class="row" style="margin-top:8px;"><span class="k">Buy / search ratio</span><span class="v">${snapshot.buyToSearchRatio.toFixed(2)} / ${snapshot.buyToSearchRatioLimit.toFixed(2)}</span></div>
-    ${meterHtml(snapshot.buyToSearchRatio, snapshot.buyToSearchRatioLimit)}
-    <div class="row" style="margin-top:8px;"><span class="k">Coin flow / hour</span><span class="v">${coins(snapshot.coinFlowLastHour)} / ${coins(snapshot.coinFlowLimit)}</span></div>
-    ${meterHtml(snapshot.coinFlowLastHour, snapshot.coinFlowLimit)}
-    ${snapshot.inCooldown ? '<div class="hint" style="margin:6px 0 0;color:var(--sl-warning);">Cooldown active — actions paused briefly.</div>' : ''}
-  `;
-}
-
 function renderMfa(mfaTicket: string, error?: string, email = ''): void {
   h(`
     <h1><span class="dot warn"></span> Verify it's you</h1>
@@ -241,43 +185,46 @@ async function onLoginSubmit(): Promise<void> {
   }
 }
 
-async function renderLoggedIn(): Promise<void> {
-  const [bootstrap, settings, counts, riskSnapshot] = await Promise.all([
-    send<BootstrapResponse>('license.bootstrap'),
-    send<UserSettings>('settings.get'),
-    send<{ auctions: number; playersLast24h: number }>('counts'),
-    send<RiskSnapshot | null>('governor.snapshotGet'),
-  ]);
+const STATUS_LABEL: Record<SubscriptionStatus, string> = {
+  trialing: 'Free trial',
+  active: 'Active',
+  past_due: 'Payment due',
+  canceled: 'Cancelled',
+  suspended: 'Suspended',
+  expired: 'Expired',
+  lifetime: 'Lifetime',
+};
 
-  const planName = bootstrap?.subscription?.plan.name ?? 'No active plan';
+/** Opens a page of the website in a new tab (and closes the toolbar popup). */
+async function openDashboard(path: string): Promise<void> {
+  if (!DASHBOARD_ORIGIN) return;
+  await browser.tabs.create({ url: `${DASHBOARD_ORIGIN}${path}` });
+  if (import.meta.env.VITE_BUILD_TARGET !== 'userscript') window.close();
+}
+
+async function renderLoggedIn(): Promise<void> {
+  const bootstrap = await send<BootstrapResponse>('license.bootstrap');
+  const sub = bootstrap?.subscription ?? null;
   const killSwitch = bootstrap?.killSwitchActive ?? false;
-  const optedOut = settings?.telemetryOptOut ?? false;
+  const usable = sub != null && ['trialing', 'active', 'lifetime'].includes(sub.status);
 
   h(`
-    <h1><span class="dot ${killSwitch ? 'risk' : 'live'}"></span> Nova Trade</h1>
+    <h1><span class="dot ${killSwitch ? 'risk' : usable ? 'live' : 'warn'}"></span> Nova Trade</h1>
     <div class="card">
-      <div class="row"><span class="k">Plan</span><span class="v">${esc(planName)}</span></div>
-      <div class="row"><span class="k">Auctions recorded</span><span class="v">${(counts?.auctions ?? 0).toLocaleString('en-US')}</span></div>
-      <div class="row"><span class="k">Players seen today</span><span class="v">${(counts?.playersLast24h ?? 0).toLocaleString('en-US')}</span></div>
-      ${killSwitch ? '<div class="error">Kill switch active — all actions are blocked.</div>' : ''}
+      <div class="row"><span class="k">Plan</span><span class="v">${esc(sub?.plan.name ?? 'No plan')}</span></div>
+      ${sub ? `<div class="row"><span class="k">Status</span><span class="v">${esc(STATUS_LABEL[sub.status])}</span></div>` : ''}
+      ${
+        usable || !DASHBOARD_ORIGIN
+          ? ''
+          : `<button class="link" id="plan-link">${sub ? 'Renew on the website' : 'Get a pass on the website'}</button>`
+      }
+      ${killSwitch ? '<div class="error">Nova AI is paused by Nova Trade. All actions are blocked.</div>' : ''}
     </div>
-    <div class="card">
-      <h4 style="margin:0 0 4px;font-size:13px;color:var(--sl-fg-muted);">Risk budget</h4>
-      ${riskGaugeHtml(riskSnapshot ?? null, killSwitch)}
-    </div>
-    <div class="card toggle-row">
-      <span>Telemetry</span>
-      <button class="secondary" id="telemetry-toggle">${optedOut ? 'Opted out' : 'Sending'}</button>
-    </div>
-    <button class="secondary" id="options-link">Open settings</button>
-    <button class="secondary" id="logout" style="margin-top:8px;">Sign out</button>
+    <p class="hint">Open Nova AI from the left menu in the EA web app.</p>
+    <button class="secondary" id="logout">Sign out</button>
   `);
 
-  onTrustedById('telemetry-toggle', 'click', async () => {
-    await send('settings.set', { telemetryOptOut: !optedOut });
-    await renderLoggedIn();
-  });
-  onTrustedById('options-link', 'click', () => browser.runtime.openOptionsPage());
+  onTrustedById('plan-link', 'click', () => void openDashboard('/account'));
   onTrustedById('logout', 'click', async () => {
     await send('auth.logout', { allDevices: false });
     await renderLoggedOut();

@@ -28,8 +28,7 @@ import { readHandedOffNonce } from '../lib/act-auth.js';
 import { riskLevelChangeEvent } from '../lib/bot-safety.js';
 import { logger } from '../lib/logger.js';
 import { singleFlight } from '../lib/single-flight.js';
-import { setBotPageOpener } from '../ui/bot-opener.js';
-import { createBotPage } from '../ui/bot-page.js';
+import { createBotPage, type LiveSearch } from '../ui/bot-page.js';
 import { installNavItem } from '../ui/ea-nav.js';
 import { onTrusted } from '../ui/trusted-events.js';
 
@@ -63,7 +62,6 @@ const AUTOMATION_ENABLED = import.meta.env.VITE_AUTOMATION === '1';
 const RECORD_FLUSH_MS = 2000;
 const RECORD_FLUSH_AT = 300;
 const STATE_PERSIST_MS = 5000;
-const RISK_UI_TICK_MS = 3000;
 const AUTOBUYER_TICK_MS = 8000;
 const WATCHDOG_MS = 15000;
 const WATCHDOG_STALE_MS = 60000;
@@ -348,9 +346,8 @@ async function main(): Promise<void> {
   let deviceIdCache: string | null = null;
   const sessionId = crypto.randomUUID();
 
-  // Saved filters: rotated by assist, searched by the Sniping Bot, edited
-  // on the Sniping Bot page. One array so all three see the same list.
-  let filters = (await send<SavedFilter[]>('filters.list')) ?? [];
+  // Saved filters: rotated by assist.
+  const filters = (await send<SavedFilter[]>('filters.list')) ?? [];
 
   if (governor && features.includes('assist.ranker')) {
     assist = new AssistEngine({
@@ -412,9 +409,12 @@ async function main(): Promise<void> {
   if (AUTOMATION_ENABLED) {
     let botSettings: BotSettings | null = await send<BotSettings>('bot.settingsGet');
     let unavailableReason: string | null = null;
+    // The search filled in on the bot page: the only one the bot runs. Never
+    // written to the saved filters (assist and the dashboard use those).
+    let liveSearch: LiveSearch | null = null;
 
     // Called at load and whenever the page opens: a user who signs in from
-    // the SL drawer after the page loaded gets the bot without a reload.
+    // the account view after the page loaded gets the bot without a reload.
     const prepareSniper = async (fresh: boolean): Promise<void> => {
       if (sniper) {
         // A plan lost mid-session (the check below) empties `features`, and
@@ -446,8 +446,8 @@ async function main(): Promise<void> {
       // search or buy. In the userscript that means page scripts had already
       // run when it installed (userscript/setup.ts refuses the handoff then).
       if (!actNonce) unavailableReason = NO_ACT_CHANNEL_REASON;
-      else if (!signedIn) unavailableReason = 'Sign in (NT button) to use the Sniping Bot.';
-      else if (!allowed) unavailableReason = 'Your plan does not include the Sniping Bot.';
+      else if (!signedIn) unavailableReason = 'Sign in to Nova Trade to use Nova AI.';
+      else if (!allowed) unavailableReason = 'Your plan does not include Nova AI.';
       else if (!botSettings) unavailableReason = 'The extension could not load the bot settings. Reload the page.';
       else unavailableReason = null;
       if (unavailableReason || !botSettings) return;
@@ -455,13 +455,13 @@ async function main(): Promise<void> {
       const { loadSniper } = await import('virtual:autobuyer-loader');
       const mod = await loadSniper();
       if (!mod) {
-        unavailableReason = 'The Sniping Bot is not available in this build.';
+        unavailableReason = 'Nova AI is not available in this build.';
         return;
       }
       sniper = new mod.Sniper(
         {
           adapter,
-          getFilters: () => filters.filter((f) => f.isActive).map((f) => ({ id: f.id, name: f.name, filter: f.filter })),
+          getFilters: () => (liveSearch ? [liveSearch] : []),
           estimateSellPrice: async (resourceId) => {
             const r = await send<{ summary: PriceSummary }>('summary', { resourceId, minProfit: settingsCache.targets.minProfitPerSnipe });
             return r?.summary.median ?? null;
@@ -522,10 +522,8 @@ async function main(): Promise<void> {
         await send('bot.settingsSet', next);
         if (modeEvent) void send('telemetry.enqueue', { kind: 'activity', items: [modeEvent] });
       },
-      getFilters: () => filters,
-      saveFilters: async (next) => {
-        filters = next;
-        await send('filters.save', { filters: next });
+      setLiveSearch: (search) => {
+        liveSearch = search;
       },
       resolveNames: async (resourceIds) => (await send<Record<string, string | null>>('cards.names', { resourceIds })) ?? {},
       getCatalog: () => send<Catalog | null>('catalog.get'),
@@ -533,10 +531,9 @@ async function main(): Promise<void> {
     const nav = installNavItem({
       onToggle: () => botPage.toggle(),
       onEaNavigate: () => botPage.close(),
-      onOffset: (left, top) => botPage.setOffsets(left, top),
+      onBounds: (bounds) => botPage.setBounds(bounds),
     });
     botPage.onOpenChange((open) => nav.setActive(open));
-    setBotPageOpener(() => botPage.open());
   }
 
   function buildCandidatesFromTracked(): OpportunityCandidate[] {
@@ -618,16 +615,6 @@ async function main(): Promise<void> {
     setInterval(() => void engineTick(), AUTOBUYER_TICK_MS);
   }
 
-  // ---- risk snapshot push ---------------------------------------------------
-
-  // The popup's risk gauge reads the governor's own snapshot, cached by
-  // background (`storage.session`, `background/governor.ts`), so it never
-  // recomputes a safety-critical number outside the governor's math.
-  setInterval(() => {
-    if (!governor) return;
-    void send('governor.snapshotPush', governor.snapshot());
-  }, RISK_UI_TICK_MS);
-
   // ---- crash recovery: persist governor state via background -------------
 
   async function persistState(): Promise<void> {
@@ -668,9 +655,9 @@ async function main(): Promise<void> {
   }
 }
 
-/** Shown on the Sniping Bot page when no act-channel nonce was handed off. */
+/** Shown on the Nova AI page when no act-channel nonce was handed off. */
 const NO_ACT_CHANNEL_REASON =
-  "Nova Trade could not open a secure connection to EA's web app on this page load, so the Sniping Bot is locked. Reload the page to use it.";
+  "Nova Trade could not open a secure connection to EA's web app on this page load, so Nova AI is locked. Reload the page to use it.";
 
 function start(): void {
   void main().catch((err) => {

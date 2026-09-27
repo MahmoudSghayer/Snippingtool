@@ -1,7 +1,7 @@
 /*
  * browser-shim.ts — stands in for `webextension-polyfill` in the userscript
  * build (`scripts/build.mjs` aliases the import here), so background/*,
- * content/* and the popup/options UIs run unchanged inside one Tampermonkey
+ * content/* and the popup UI run unchanged inside one Tampermonkey
  * script on the EA page. Only the members the extension actually calls are
  * implemented; anything else is a type error at build time, not a silent
  * `undefined` at runtime.
@@ -52,7 +52,6 @@ const alarmTimers = new Map<
   string,
   { timeout?: ReturnType<typeof setTimeout>; interval?: ReturnType<typeof setInterval> }
 >();
-let optionsPageOpener: (() => void) | null = null;
 
 async function dispatch(message: unknown): Promise<unknown> {
   // Chrome never delivers a message synchronously; neither does this.
@@ -105,9 +104,6 @@ const browser = {
     onMessage: {
       addListener: (listener: MessageListener): void => void messageListeners.add(listener),
       removeListener: (listener: MessageListener): void => void messageListeners.delete(listener),
-    },
-    openOptionsPage: async (): Promise<void> => {
-      optionsPageOpener?.();
     },
     onInstalled: {
       // Fires once per Tampermonkey install of the script, the first time
@@ -162,11 +158,5 @@ const browser = {
     },
   },
 };
-
-/** The userscript's settings drawer registers itself here so the popup's
- * "Settings" link (`browser.runtime.openOptionsPage()`) can open it. */
-export function setOptionsPageOpener(open: () => void): void {
-  optionsPageOpener = open;
-}
 
 export default browser;

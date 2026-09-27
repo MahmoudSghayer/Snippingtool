@@ -53,4 +53,22 @@ describe('userscript launcher', () => {
     fab.click();
     expect(drawer.hidden).toBe(false);
   });
+
+  it('is just the account view: the logo button, no tabs, no settings, no bot shortcut', () => {
+    const menu = vi.fn();
+    (globalThis as Record<string, unknown>).GM_registerMenuCommand = menu;
+    return import('../../src/userscript/launcher.js').then(({ installLauncher }) => {
+      const shadows = captureShadowRoots();
+      installLauncher();
+      shadows.restore();
+      const root = shadows.rootOf(document.getElementById('ledger-launcher')!);
+      const fab = root.querySelector<HTMLButtonElement>('.fab')!;
+      expect(fab.getAttribute('aria-label')).toBe('Nova Trade account');
+      expect(fab.querySelector('svg')).not.toBeNull();
+      expect(fab.textContent?.trim()).toBe('');
+      expect(root.querySelector('.tabs')).toBeNull();
+      expect(root.querySelectorAll('.view')).toHaveLength(1);
+      expect(menu.mock.calls.map((c) => c[0])).toEqual(['Open Nova Trade']);
+    });
+  });
 });

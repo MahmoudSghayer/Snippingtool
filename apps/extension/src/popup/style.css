@@ -1,11 +1,27 @@
 /* popup/style.css — consumes the shared tokens from ../styles/tokens.css
  * (linked before this file in index.html), not its own hand-rolled palette,
- * so the popup, options page and dashboard stay one visual
+ * so the popup and dashboard stay one visual
  * system (docs/10-design-system.md). 360×600 is the target popup size (the
  * brief's own number, and comfortably inside Chrome's ~800px popup ceiling)
  * — width is fixed, height grows with content up to 600px and then scrolls,
  * so a long device/filter list never gets clipped without a way to reach
  * the rest of it. */
+
+/* EA FC web app palette, the same values as the Nova AI page's `--ea-*`
+ * tokens (ui/bot-page.ts). Not yet checked against the live web app. */
+:root {
+  --sl-bg: #0d1522;
+  --sl-card: #152033;
+  --sl-card-2: #1c2a42;
+  --sl-border: #34425c;
+  --sl-fg: #ffffff;
+  --sl-fg-muted: #93a0b5;
+  --sl-accent: #25e6d0;
+  --sl-accent-ink: #062521;
+  --sl-positive: #3ddc84;
+  --sl-warning: #f5b83d;
+  --sl-negative: #ff5a64;
+}
 
 * {
   box-sizing: border-box;
@@ -19,12 +35,14 @@ body {
   background: var(--sl-bg);
   color: var(--sl-fg);
   font-family:
-    Inter,
+    'UltimateTeamCondensed',
+    'UltimateTeam',
+    'Segoe UI',
     system-ui,
     -apple-system,
-    'Segoe UI',
     sans-serif;
-  font-size: 13px;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
 }
 
 #app {
@@ -79,9 +97,7 @@ h1 {
   color: var(--sl-fg-muted);
 }
 .row .v {
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
+  font-weight: 700;
 }
 .row .v.pos {
   color: var(--sl-positive);
@@ -165,53 +181,6 @@ button.secondary:hover {
 button:disabled {
   opacity: 0.6;
   cursor: progress;
-}
-
-.meter {
-  position: relative;
-  height: 6px;
-  border-radius: 3px;
-  background: var(--sl-card-2);
-  overflow: hidden;
-  margin-top: 3px;
-}
-.meter i {
-  display: block;
-  height: 100%;
-  background: var(--sl-positive);
-  transition: width var(--sl-motion-base) var(--sl-ease), background-color var(--sl-motion-base) var(--sl-ease);
-}
-/* Two bands (80% "high", 100% "over") for the popup's live risk gauge
- * (docs/10-design-system.md §15). */
-.meter.high i {
-  background: var(--sl-warning);
-}
-.meter.over i {
-  background: var(--sl-negative);
-}
-/* Segment ticks at the 80% ("high") and 100% ("over") thresholds. Purely decorative (the color change + the numeric
- * row above it already carry the status without color alone), so
- * `aria-hidden` isn't needed on a background pseudo-element. */
-.meter::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    to right,
-    transparent calc(80% - 1px),
-    var(--sl-bg) calc(80% - 1px),
-    var(--sl-bg) 80%,
-    transparent 80%,
-    transparent calc(100% - 1px),
-    var(--sl-bg) calc(100% - 1px)
-  );
-  pointer-events: none;
-}
-
-.toggle-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
 }
 
 .link {

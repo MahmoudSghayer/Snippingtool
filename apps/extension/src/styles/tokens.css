@@ -7,13 +7,13 @@
  * pulled in at build time. Keep this file's `:root` block byte-for-byte
  * identical to `packages/ui/src/tokens.css`'s (minus the chart-series ramp,
  * which nothing in the extension renders) whenever that file's palette
- * changes, so the dashboard, popup, options page and userscript drawer read as
+ * changes, so the dashboard, popup and userscript drawer read as
  * one product (docs/10-design-system.md §1 "Color carries meaning,
  * consistently").
  *
  * Consumed two ways:
- *  - `popup/index.html` and `options/index.html` `<link>` this file
- *    directly — both run in the extension's own `chrome-extension://`
+ *  - `popup/index.html` `<link>`s this file
+ *    directly — it runs in the extension's own `chrome-extension://`
  *    origin, an ordinary document `<head>`, no different from any other
  *    page.
  *  - `userscript/launcher.ts` imports this file's text at build time

@@ -65,10 +65,6 @@ export function buildManifest(target, env) {
       default_popup: 'src/popup/index.html',
       default_title: 'Nova Trade',
     },
-    options_ui: {
-      page: 'src/options/index.html',
-      open_in_tab: true,
-    },
     content_security_policy: {
       extension_pages: "script-src 'self'; object-src 'self'; base-uri 'none'; frame-ancestors 'none'",
     },

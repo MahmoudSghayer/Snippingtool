@@ -1,4 +1,4 @@
-// The Sniping Bot page's risk meter (`ui/bot-page.ts`): recommended limits
+// The Nova AI page's risk meter (`ui/bot-page.ts`): recommended limits
 // by default, a live risk level with projections and reasons, a one-time
 // acknowledgment the first time settings above low are saved, "Reset to
 // recommended", and the level reported as telemetry (`lib/bot-safety.ts`).
@@ -31,8 +31,7 @@ function mount(initial: BotSettings = DEFAULT_BOT_SETTINGS, sniper: Sniper | nul
       stored = next;
       saves.push(next);
     },
-    getFilters: () => [],
-    saveFilters: async () => undefined,
+    setLiveSearch: () => undefined,
     resolveNames: async () => ({}),
     getCatalog: async () => null,
   });
@@ -166,6 +165,10 @@ describe('bot page — page scripts cannot drive it', () => {
     );
     const start = vi.spyOn(sniper, 'start');
     const { $, saves, flush, type, current } = mount(DEFAULT_BOT_SETTINGS, sniper);
+    // The user's search: a player id typed into the player box.
+    const player = $<HTMLInputElement>('nf-player')!;
+    player.value = '20801';
+    player.dispatchEvent(new Event('input', { bubbles: true }));
     untrustedEvents(); // from here on, the browser's rule: isTrusted only
 
     // A page script sets a limit and fires `change`: ignored.
