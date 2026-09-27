@@ -14692,7 +14692,7 @@
     },
     "/api/v1/subscriptions/trial": {
       "post": {
-        "summary": "Start a 7-day trial. Denied with TRIAL_ABUSE_DETECTED on abuse signals.",
+        "summary": "Start a 7-day trial, once per account. Denied with TRIAL_ALREADY_USED after a past trial, TRIAL_ABUSE_DETECTED on abuse signals.",
         "tags": [
           "subscriptions"
         ],

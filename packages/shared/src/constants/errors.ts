@@ -23,6 +23,7 @@ export const ERROR_CODES = [
   'SUBSCRIPTION_REQUIRED',
   'FEATURE_NOT_ENTITLED',
   'TRIAL_ABUSE_DETECTED',
+  'TRIAL_ALREADY_USED',
   // Cross-cutting
   'RATE_LIMITED',
   'VALIDATION_FAILED',
@@ -63,6 +64,8 @@ export const ERROR_STATUS: Readonly<Record<ErrorCode, number>> = {
   SUBSCRIPTION_REQUIRED: 402,
   FEATURE_NOT_ENTITLED: 403,
   TRIAL_ABUSE_DETECTED: 403,
+  // This account has already had its one trial (any status, ever).
+  TRIAL_ALREADY_USED: 403,
   RATE_LIMITED: 429,
   VALIDATION_FAILED: 400,
   // An ingest timestamp outside its window (schemas/ingest-bounds.ts);

@@ -1,8 +1,10 @@
 // Integration tests: GET /subscriptions/me, POST /subscriptions/trial
 // (happy path + trial-abuse protection via email and via device
-// fingerprint), POST /subscriptions/cancel, POST /subscriptions/resume.
+// fingerprint), permanent trial history (no second trial after the first
+// one expired, for the same account or a linked one), POST
+// /subscriptions/cancel, POST /subscriptions/resume.
 
-import { flags, users } from '@sl/db';
+import { flags, subscriptions, users } from '@sl/db';
 import { resetDatabase } from '@sl/db/test-utils';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -11,7 +13,7 @@ import { buildApp } from '../../../app.js';
 import { hashSecret } from '../../../lib/crypto.js';
 import { newId } from '../../../lib/ids.js';
 import { reseedPlans } from '../../../test/reseed-reference-data.js';
-import { startTrial } from '../service.js';
+import { expireDueSubscriptions, startTrial } from '../service.js';
 
 import type { FastifyInstance } from 'fastify';
 
@@ -339,6 +341,146 @@ describe('subscriptions module', () => {
       headers: { authorization: `Bearer ${tokenSecond}` },
     });
     expect(startSecond.statusCode).toBe(201);
+  });
+
+  describe('trial history survives the trial ending', () => {
+    // Each account below sits on its own /24 unless a test shares one on
+    // purpose, so only the detector under test can match.
+    async function startTrialVia(token: string, ip: string) {
+      return app.inject({
+        method: 'POST',
+        url: '/api/v1/subscriptions/trial',
+        remoteAddress: ip,
+        headers: { authorization: `Bearer ${token}` },
+      });
+    }
+
+    /** Backdates the user's running trial and runs the real expiry path
+     * (`subscriptions.expire`'s `expireDueSubscriptions`), which clears
+     * `trial_ends_at` as the status leaves 'trialing'. */
+    async function expireTrialOf(email: string) {
+      const user = await app.db.query.users.findFirst({ where: eq(users.email, email) });
+      await app.db
+        .update(subscriptions)
+        .set({ trialEndsAt: new Date(Date.now() - 60_000) })
+        .where(eq(subscriptions.userId, user!.id));
+      const { expiredCount } = await expireDueSubscriptions(app.db, app.redis);
+      expect(expiredCount).toBe(1);
+      const sub = await app.db.query.subscriptions.findFirst({
+        where: eq(subscriptions.userId, user!.id),
+      });
+      expect(sub!.status).toBe('expired');
+      expect(sub!.trialEndsAt).toBeNull();
+      return user!.id;
+    }
+
+    async function flagDetectors(email: string) {
+      const user = await app.db.query.users.findFirst({ where: eq(users.email, email) });
+      const rows = await app.db.query.flags.findMany({ where: eq(flags.userId, user!.id) });
+      return rows.map((r) => (r.evidence as { detectors: string[] }).detectors);
+    }
+
+    it('the same account cannot start a second trial after its first one expired', async () => {
+      const token = await registerVerifyLogin(
+        'retrial-self@example.com',
+        '203.0.113.10',
+        'fp-retrial-self-000000001',
+      );
+      expect((await startTrialVia(token, '203.0.113.10')).statusCode).toBe(201);
+      await expireTrialOf('retrial-self@example.com');
+
+      const again = await startTrialVia(token, '203.0.113.10');
+      expect(again.statusCode).toBe(403);
+      expect(again.json().code).toBe('TRIAL_ALREADY_USED');
+      // Asking again for your own trial is not cross-account abuse: no flag.
+      expect(await flagDetectors('retrial-self@example.com')).toEqual([]);
+    });
+
+    it('the same normalised email on another account is denied after the first trial expired', async () => {
+      const tokenA = await registerVerifyLogin(
+        'history.email@gmail.com',
+        '203.0.113.20',
+        'fp-history-email-a-00001',
+      );
+      expect((await startTrialVia(tokenA, '203.0.113.20')).statusCode).toBe(201);
+      await expireTrialOf('history.email@gmail.com');
+
+      const tokenB = await registerVerifyLogin(
+        'historyemail+second@gmail.com',
+        '192.0.2.20',
+        'fp-history-email-b-00002',
+      );
+      const startB = await startTrialVia(tokenB, '192.0.2.20');
+      expect(startB.statusCode).toBe(403);
+      expect(startB.json().code).toBe('TRIAL_ABUSE_DETECTED');
+      expect(await flagDetectors('historyemail+second@gmail.com')).toEqual([['email']]);
+    });
+
+    it('the same device on another account is denied after the first trial expired', async () => {
+      const sharedFingerprint = 'fp-history-device-shared-01';
+      const tokenA = await registerVerifyLogin(
+        'history-device-a@example.com',
+        '203.0.113.30',
+        sharedFingerprint,
+      );
+      expect((await startTrialVia(tokenA, '203.0.113.30')).statusCode).toBe(201);
+      await expireTrialOf('history-device-a@example.com');
+
+      const tokenB = await registerVerifyLogin(
+        'history-device-b@example.com',
+        '192.0.2.30',
+        sharedFingerprint,
+      );
+      const startB = await startTrialVia(tokenB, '192.0.2.30');
+      expect(startB.statusCode).toBe(403);
+      expect(startB.json().code).toBe('TRIAL_ABUSE_DETECTED');
+      expect(await flagDetectors('history-device-b@example.com')).toEqual([['device']]);
+    });
+
+    it('the same IPv4 /24 on another account is denied after the first trial expired', async () => {
+      const tokenA = await registerVerifyLogin(
+        'history-ip-a@example.com',
+        '203.0.113.40',
+        'fp-history-ip-a-000000001',
+      );
+      expect((await startTrialVia(tokenA, '203.0.113.40')).statusCode).toBe(201);
+      await expireTrialOf('history-ip-a@example.com');
+
+      const tokenB = await registerVerifyLogin(
+        'history-ip-b@example.com',
+        '203.0.113.41',
+        'fp-history-ip-b-000000002',
+      );
+      const startB = await startTrialVia(tokenB, '203.0.113.41');
+      expect(startB.statusCode).toBe(403);
+      expect(await flagDetectors('history-ip-b@example.com')).toEqual([['ip']]);
+    });
+
+    it('matches IPv6 addresses on the same prefix as ipToAbusePrefix computes it, and nothing wider', async () => {
+      const tokenA = await registerVerifyLogin(
+        'history-ip6-a@example.com',
+        '2001:db8:7::10',
+        'fp-history-ip6-a-00000001',
+      );
+      expect((await startTrialVia(tokenA, '2001:db8:7::10')).statusCode).toBe(201);
+
+      // Another prefix entirely: allowed (and not flagged).
+      const tokenOther = await registerVerifyLogin(
+        'history-ip6-other@example.com',
+        '2001:db8:8::10',
+        'fp-history-ip6-o-00000003',
+      );
+      expect((await startTrialVia(tokenOther, '2001:db8:8::10')).statusCode).toBe(201);
+
+      const tokenB = await registerVerifyLogin(
+        'history-ip6-b@example.com',
+        '2001:db8:7::99',
+        'fp-history-ip6-b-00000002',
+      );
+      const startB = await startTrialVia(tokenB, '2001:db8:7::99');
+      expect(startB.statusCode).toBe(403);
+      expect(await flagDetectors('history-ip6-b@example.com')).toEqual([['ip']]);
+    });
   });
 
   it('cancel sets cancelAtPeriodEnd, resume clears it', async () => {

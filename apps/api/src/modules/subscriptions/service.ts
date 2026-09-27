@@ -19,9 +19,23 @@ import {
   TRIAL_LENGTH_DAYS,
   type SubscriptionStatus,
 } from '@sl/shared';
-import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, ne } from 'drizzle-orm';
+import {
+  and,
+  desc,
+  eq,
+  exists,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  ne,
+  sql,
+  type AnyColumn,
+  type SQL,
+} from 'drizzle-orm';
 
-import { AppErrors, isUniqueViolation } from '../../lib/errors.js';
+import { AppError, AppErrors, isUniqueViolation } from '../../lib/errors.js';
 import { newId } from '../../lib/ids.js';
 import { upsertIpActivity } from '../../lib/ip-activity.js';
 import { publishToUser } from '../../ws/publish.js';
@@ -154,9 +168,49 @@ export interface TrialAbuseMatch {
 
 const TRIAL_ABUSE_WINDOW_MS = 30 * DAY_MS;
 
+/** SQL twin of `ipToAbusePrefix` over `ip_activity.ip`, so the IP check
+ * matches in the database instead of loading every recent `ip_activity`
+ * row. `host()` gives the address without a mask, the same text the driver
+ * hands back for a single-host inet. A constant `sql.raw()`, per the house
+ * rule against interpolating into a `sql` template. */
+const IP_ACTIVITY_ABUSE_PREFIX = sql.raw(`CASE
+    WHEN strpos(host(ip_activity.ip), ':') > 0
+      THEN array_to_string((array_remove(string_to_array(host(ip_activity.ip), ':'), ''))[1:3], ':')
+    WHEN array_length(string_to_array(host(ip_activity.ip), '.'), 1) = 4
+      THEN array_to_string((string_to_array(host(ip_activity.ip), '.'))[1:3], '.')
+    ELSE host(ip_activity.ip)
+  END`);
+
+/** A user's trials: every subscription on the `trial` plan, whatever its
+ * status and even if soft-deleted. This is the permanent trial history;
+ * `trial_ends_at` is not, because it is cleared whenever a trial expires,
+ * is upgraded or is suspended (constraint
+ * `subscriptions_trial_ends_only_when_trialing`). Rows are never
+ * hard-deleted, and an upgrade inserts a new row for the paid plan, so the
+ * trial row stays. Indexed by `subscriptions_user_id_plan_id_idx` (0035). */
+function trialSubscriptionsOf(db: Database, userId: AnyColumn | string) {
+  return db
+    .select({ one: sql`1` })
+    .from(subscriptions)
+    .innerJoin(plans, eq(plans.id, subscriptions.planId))
+    .where(and(eq(subscriptions.userId, userId), eq(plans.code, 'trial')));
+}
+
+function hadTrialSql(db: Database, userId: AnyColumn): SQL {
+  return exists(trialSubscriptionsOf(db, userId));
+}
+
+async function hasHadTrial(db: Database, userId: string): Promise<boolean> {
+  const rows = await trialSubscriptionsOf(db, userId).limit(1);
+  return rows.length > 0;
+}
+
 /** Runs all four checks (docs §5) and returns every one that matched — the
  * caller decides what to do with them (deny + flag). Never throws for "no
- * match"; an empty array means clean. */
+ * match"; an empty array means clean. The email, device and IP checks
+ * match only other accounts that have ever had a trial (`hadTrialSql`), with
+ * every filter in SQL. The Stripe-customer check is legacy and left as it
+ * was (Stripe is being removed). */
 export async function checkTrialAbuse(
   db: Database,
   input: {
@@ -177,22 +231,20 @@ export async function checkTrialAbuse(
   const matches: TrialAbuseMatch[] = [];
 
   // Check 1 (email): an indexed equality lookup against the generated
-  // `users.email_normalised` column (migrations/0025) instead of scanning
-  // every user who has ever had a trial and normalising each one in
-  // application code — the previous approach, dropped once the index
-  // existed (docs/05-subscriptions.md §5's "scaling note").
+  // `users.email_normalised` column (migrations/0025). Soft-deleted
+  // accounts count too, so deleting an account and signing up again with
+  // the same inbox does not earn a new trial.
   const emailMatchRows = await db
-    .select({ userId: subscriptions.userId })
-    .from(subscriptions)
-    .innerJoin(users, eq(users.id, subscriptions.userId))
+    .select({ userId: users.id })
+    .from(users)
     .where(
       and(
-        isNotNull(subscriptions.trialEndsAt),
         eq(users.emailNormalised, input.normalisedEmail),
-        ne(subscriptions.userId, input.excludeUserId),
+        ne(users.id, input.excludeUserId),
+        hadTrialSql(db, users.id),
       ),
     );
-  const emailMatches = [...new Set(emailMatchRows.map((r) => r.userId))];
+  const emailMatches = emailMatchRows.map((r) => r.userId);
   if (emailMatches.length > 0) matches.push({ detector: 'email', matchedUserIds: emailMatches });
 
   // Check 4 (Stripe customer): only runs when the requester's own account
@@ -215,57 +267,44 @@ export async function checkTrialAbuse(
       matches.push({ detector: 'stripe_customer', matchedUserIds: stripeCustomerMatches });
   }
 
-  // Every user who has ever had a trial (trial_ends_at set at some point),
-  // regardless of that subscription's current status — the unbounded-
-  // lookback set checks 2/3 (device/IP) filter their own matches against
-  // (only a *prior trial* counts, never a prior paid subscription — the
-  // false-positive guard, docs §5).
-  const trialHistory = await db
-    .select({ userId: subscriptions.userId })
-    .from(subscriptions)
-    .where(
-      and(isNotNull(subscriptions.trialEndsAt), ne(subscriptions.userId, input.excludeUserId)),
-    );
-  const trialUserIds = new Set(trialHistory.map((r) => r.userId));
-
+  // Checks 2/3 (device/IP) are windowed on when the device or IP was seen,
+  // but the trial they point at can be any age: only a *prior trial*
+  // counts, never a prior paid subscription (the false-positive guard,
+  // docs §5).
   const windowStart = new Date(Date.now() - TRIAL_ABUSE_WINDOW_MS);
 
   if (input.fingerprintHash) {
-    const deviceRows = await db.query.devices.findMany({
-      where: and(
-        eq(devices.fingerprintHash, input.fingerprintHash),
-        gte(devices.firstSeenAt, windowStart),
-        isNull(devices.deletedAt),
-      ),
-    });
-    const deviceMatches = [
-      ...new Set(
-        deviceRows
-          .map((d) => d.userId)
-          .filter((id) => id !== input.excludeUserId && trialUserIds.has(id)),
-      ),
-    ];
+    const deviceRows = await db
+      .selectDistinct({ userId: devices.userId })
+      .from(devices)
+      .where(
+        and(
+          eq(devices.fingerprintHash, input.fingerprintHash),
+          gte(devices.firstSeenAt, windowStart),
+          isNull(devices.deletedAt),
+          ne(devices.userId, input.excludeUserId),
+          hadTrialSql(db, devices.userId),
+        ),
+      );
+    const deviceMatches = deviceRows.map((r) => r.userId);
     if (deviceMatches.length > 0)
       matches.push({ detector: 'device', matchedUserIds: deviceMatches });
   }
 
   if (input.ipPrefix) {
-    const ipRows = await db.query.ipActivity.findMany({
-      where: gte(ipActivity.lastSeen, windowStart),
-    });
-    const ipMatches = [
-      ...new Set(
-        ipRows
-          .filter(
-            (r): r is typeof r & { userId: string } =>
-              r.userId !== null &&
-              r.userId !== input.excludeUserId &&
-              trialUserIds.has(r.userId) &&
-              ipToAbusePrefix(r.ip) === input.ipPrefix,
-          )
-          .map((r) => r.userId),
-      ),
-    ];
+    const ipRows = await db
+      .selectDistinct({ userId: ipActivity.userId })
+      .from(ipActivity)
+      .where(
+        and(
+          gte(ipActivity.lastSeen, windowStart),
+          isNotNull(ipActivity.userId),
+          ne(ipActivity.userId, input.excludeUserId),
+          sql.join([IP_ACTIVITY_ABUSE_PREFIX, sql` = `, sql.param(input.ipPrefix)]),
+          hadTrialSql(db, ipActivity.userId),
+        ),
+      );
+    const ipMatches = ipRows.flatMap((r) => (r.userId === null ? [] : [r.userId]));
     if (ipMatches.length > 0) matches.push({ detector: 'ip', matchedUserIds: ipMatches });
   }
 
@@ -320,6 +359,16 @@ export async function startTrial(
 ): Promise<StartTrialResult> {
   const existingLive = await getLiveSubscriptionForUser(db, input.userId);
   if (existingLive) throw AppErrors.conflict('You already have an active subscription.');
+
+  // One trial per account, ever. Not abuse (no flag): the account is simply
+  // not eligible any more. A concurrent request (a double-click) may have
+  // started this very trial since the live check above; that is still the
+  // conflict it would have got a moment later, so look again first.
+  if (await hasHadTrial(db, input.userId)) {
+    if (await getLiveSubscriptionForUser(db, input.userId))
+      throw AppErrors.conflict('You already have an active subscription.');
+    throw new AppError('TRIAL_ALREADY_USED', 'This account has already used its free trial.');
+  }
 
   const normalisedEmail = normaliseEmailForAbuseCheck(input.email);
   const ipPrefix = input.ip ? ipToAbusePrefix(input.ip) : null;
