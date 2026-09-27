@@ -5,7 +5,9 @@
     "build": {
       "dependsOn": ["^build"],
       "outputs": ["dist/**", ".turbo/**"],
-      "inputs": ["src/**", "package.json", "tsconfig*.json"]
+      "inputs": ["src/**", "package.json", "tsconfig*.json"],
+      "env": ["VITE_LICENSE_PUBLIC_KEY"],
+      "passThroughEnv": ["SL_ALLOW_NO_LICENSE_KEY"]
     },
     "lint": {
       "dependsOn": [],

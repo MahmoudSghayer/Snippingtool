@@ -1,12 +1,15 @@
 import { z } from 'zod';
 
-import { ADAPTER_CHANNEL } from './adapter-channel.js';
+import { ADAPTER_CHANNEL, isEaAssetUrl } from './adapter-channel.js';
 import { activityEventSchema } from './schemas/activity.js';
 import { emailSchema, passwordSchema } from './schemas/auth.js';
+import { botDailyUsageSchema, botSettingsSchema } from './schemas/bot.js';
 import { filterCriteriaSchema, filterStatsSchema, savedFilterSchema } from './schemas/filters.js';
 import { riskBudgetEventSchema } from './schemas/risk.js';
 import { snipingAttemptSchema } from './schemas/sniping.js';
-import { tradeSchema } from './schemas/trades.js';
+import { tradeIngestSchema } from './schemas/trades.js';
+
+import type { AutomationBackgroundMessageType } from './automation-messages.js';
 
 /**
  * Typed message shapes for the extension's two internal channels. These are
@@ -21,7 +24,7 @@ import { tradeSchema } from './schemas/trades.js';
 // and the `act` surface (search/buy/readResult) alongside passive observation.
 // Re-exported from `./adapter-channel.js` (zod-free — see that file) so
 // every existing `import { ADAPTER_CHANNEL } from '@sl/shared'` keeps working.
-export { ADAPTER_CHANNEL };
+export { ADAPTER_CHANNEL, EA_ASSET_DOMAINS, isEaAssetUrl } from './adapter-channel.js';
 
 export const trimmedAuctionSchema = z.object({
   tradeId: z.string(),
@@ -34,6 +37,12 @@ export const trimmedAuctionSchema = z.object({
   offers: z.number(),
   expiresAt: z.number().nullable(),
   seenAt: z.number(),
+  /** Whether the adapter could buy this listing if asked: false when the
+   * EA service-layer shape it selected buys on an item entity it has not
+   * seen for this listing, or when it selected no shape at all
+   * (apps/extension/src/main/adapter.ts). Absent means unknown (older
+   * records); the ranker only drops an explicit `false`. */
+  buyable: z.boolean().optional(),
 });
 export type TrimmedAuction = z.infer<typeof trimmedAuctionSchema>;
 
@@ -53,6 +62,16 @@ export const adapterProbeMessageSchema = z.object({
     ok: z.boolean(),
     checkedAt: z.number(),
     reason: z.string().optional(),
+    /** `false` when the adapter never received this page load's act-channel
+     * nonce, so it can authenticate no act request. Unsigned, so only a
+     * hint: content reports a call that then times out as
+     * `adapter_unauthenticated` (not retried), and never fails a call on
+     * this flag alone. */
+    actReady: z.boolean().optional(),
+    /** Which candidate EA service-layer shape the probe selected
+     * (`main/adapter.ts`, docs/06-extension.md §4). Absent when `ok` is
+     * false: no shape, no act. */
+    shape: z.enum(['promise', 'observable']).optional(),
   }),
 });
 
@@ -78,6 +97,123 @@ export const adapterAuctionsMessageSchema = z.object({
   }),
 });
 
+/** Listings already reported in an `auctions` message that the adapter can
+ * now buy (the observable shape saw their item entities through its search
+ * hook, main/search-hook.ts). Not a search: content marks the tracked
+ * listings buyable and counts or records nothing. Unsigned, like
+ * `auctions`: a forged one can at worst make content try a listing the
+ * adapter then refuses with a signed `listing_entity_unknown`. */
+export const adapterListingsBuyableMessageSchema = z.object({
+  channel: z.literal(ADAPTER_CHANNEL),
+  kind: z.literal('listings_buyable'),
+  data: z.object({ tradeIds: z.array(z.string().min(1).max(40)).max(500) }),
+});
+
+/** An image URL in the catalog: https on an EA host only
+ * (`isEaAssetUrl`). The catalog is built in the page's MAIN world from
+ * page globals, so anything else is refused, never shown. */
+const eaAssetUrlSchema = z
+  .string()
+  .max(600)
+  .refine(isEaAssetUrl, { message: 'must be an https URL on an EA host' });
+
+const catalogOptionSchema = z
+  .object({
+    id: z.number().int(),
+    value: z.string().max(40),
+    label: z.string().min(1).max(120),
+    img: eaAssetUrlSchema.optional(),
+    levels: z.boolean().optional(),
+  })
+  .strict();
+
+/** The Sniping Bot's Snipe Targets choices, as the EA web app's own search
+ * panel lists them (apps/extension `model/catalog.ts`): built in the page
+ * by the adapter (automation builds only), sent to content in a signed
+ * `catalog` message, and stored by background (`catalog.save`). Strict and
+ * bounded everywhere: it crosses the page's `window.postMessage`. */
+export const adapterCatalogSchema = z
+  .object({
+    players: z
+      .array(
+        z
+          .object({
+            id: z.number().int().positive(),
+            name: z.string().min(1).max(80),
+            rating: z.number().int().min(0).max(99).nullable(),
+          })
+          .strict(),
+      )
+      .max(100_000),
+    portrait: eaAssetUrlSchema.optional(),
+    levels: z.array(catalogOptionSchema).max(20),
+    rarities: z.array(catalogOptionSchema).max(1_000),
+    positions: z.array(catalogOptionSchema).max(50),
+    playStyles: z.array(catalogOptionSchema).max(100),
+    nations: z.array(catalogOptionSchema).max(1_000),
+    leagues: z.array(catalogOptionSchema).max(1_000),
+    clubs: z.record(z.string().regex(/^\d+$/), z.array(catalogOptionSchema).max(500)),
+    capturedAt: z.number().int(),
+    notes: z.array(z.string().max(500)).max(50).optional(),
+  })
+  .strict();
+
+/** HMAC-SHA256 (hex) of an act-channel message under the per-page-load
+ * nonce (apps/extension/src/lib/act-auth.ts). Optional in these schemas so
+ * the shapes stay additive, but both ends of the extension require it: the
+ * adapter ignores an `act_request` without a valid one, and content drops
+ * an `action_result` without one — any page script can post on this
+ * channel, and the MAC is what tells the extension's own messages apart. */
+export const adapterMessageMacSchema = z.string().regex(/^[0-9a-f]{64}$/);
+
+/** A description of an object by key names and value types only — never
+ * values (`main/diagnostics.ts`'s `describeKeys`). A leaf is a type name
+ * (`'function'`, `'number'`, `'object'` past the depth limit, ...). */
+export type DiagnosticsKeyTree = string | { [key: string]: DiagnosticsKeyTree };
+export const diagnosticsKeyTreeSchema: z.ZodType<DiagnosticsKeyTree> = z.lazy(() =>
+  z.union([z.string().max(200), z.record(z.string().max(200), diagnosticsKeyTreeSchema)]),
+);
+
+/** What the adapter knows about the page's EA service layer, for the
+ * options page's "Copy diagnostics" (docs/06-extension.md §4, day-one
+ * checklist). Read-only, and carries no values from the page: key names,
+ * types, the adapter's own counters and its own (scrubbed) log lines.
+ * Every field is spelled out, not `.passthrough()`: content verifies the
+ * MAC over the *parsed* result, so a key zod stripped would fail it. */
+export const adapterDiagnosticsSchema = z.object({
+  probe: z.object({
+    ok: z.boolean(),
+    reason: z.string().max(2000).optional(),
+    shape: z.enum(['promise', 'observable']).nullable(),
+    checkedAt: z.number(),
+  }),
+  /** Every candidate shape the probe tried, in order, and why it was not
+   * present — the first thing to read when `probe.ok` is false. */
+  candidates: z
+    .array(
+      z.object({
+        shape: z.string().max(40),
+        present: z.boolean(),
+        reason: z.string().max(500).optional(),
+      }),
+    )
+    .max(10),
+  /** `window.services`, key names down to depth 3. */
+  servicesKeys: diagnosticsKeyTreeSchema,
+  /** Types of the few page globals a shape relies on (e.g. the search
+   * criteria constructor). */
+  globals: z.record(z.string().max(80), z.string().max(40)),
+  /** The last market response the adapter saw (passive or act search),
+   * keys and types only. */
+  lastMarketResponse: z
+    .object({ source: z.string().max(40), at: z.number(), shape: diagnosticsKeyTreeSchema })
+    .nullable(),
+  stats: z.object({ seen: z.number(), parsed: z.number(), failed: z.number() }),
+  /** The adapter's last 50 log lines, already scrubbed. */
+  log: z.array(z.string().max(1000)).max(50),
+});
+export type AdapterDiagnostics = z.infer<typeof adapterDiagnosticsSchema>;
+
 /** Result of an `act()` call (`search`/`buy`/`readResult`) driven through
  * the web app's own service layer — never a forged request. Only present in
  * builds where M2/M3 act surface is enabled. `requestId` (added
@@ -89,7 +225,7 @@ export const adapterActionResultMessageSchema = z.object({
   channel: z.literal(ADAPTER_CHANNEL),
   kind: z.literal('action_result'),
   data: z.object({
-    action: z.enum(['search', 'buy', 'readResult']),
+    action: z.enum(['search', 'buy', 'readResult', 'diagnostics']),
     requestId: z.string().min(1).optional(),
     ok: z.boolean(),
     requestedAt: z.number(),
@@ -99,7 +235,14 @@ export const adapterActionResultMessageSchema = z.object({
      * still an open listing" read, never listing contents beyond what
      * `trimAuction` already allows out of the page. */
     stillListed: z.boolean().optional(),
+    /** Only present for `action: 'diagnostics'`. */
+    diagnostics: adapterDiagnosticsSchema.optional(),
+    /** A second result for a `buy` whose first result was
+     * `error: 'timeout_unknown'`: EA's answer arrived after the adapter
+     * stopped waiting, and `ok` says whether it bought. */
+    late: z.boolean().optional(),
   }),
+  mac: adapterMessageMacSchema.optional(),
 });
 
 /** ISOLATED world (content/engine) -> MAIN world (adapter): drive the act
@@ -122,23 +265,68 @@ export const adapterActRequestMessageSchema = z.object({
       action: z.literal('buy'),
       requestId: z.string().min(1),
       tradeId: z.string().min(1),
-      price: z.number().int().min(0),
+      /** The buy-now price content expects to pay. The adapter refuses
+       * (`price_mismatch` / `listing_unknown`) unless it equals the price
+       * it last saw listed for `tradeId`; a listing with no buy-now price
+       * (0) never matches. `main/adapter.ts`'s zod-free `asActRequest`
+       * re-checks this shape by hand — keep the two in sync. */
+      price: z.number().int().positive(),
+      /** The card content means to buy. When present the adapter also
+       * refuses (`resource_mismatch`) unless the listing it saw for
+       * `tradeId` is this card — the `auctions` messages content matched
+       * the filter against are unsigned, so they could claim any tradeId
+       * is the target card. */
+      resourceId: z.number().int().positive().optional(),
+      /** Likewise the card's base player id (a filter can target a player
+       * by it): when present it must match the listing's too. */
+      assetId: z.number().int().positive().optional(),
     }),
     z.object({
       action: z.literal('readResult'),
       requestId: z.string().min(1),
       tradeId: z.string().min(1),
     }),
+    /** Read-only: the adapter's diagnostics report (options page, "Copy
+     * diagnostics"). Authenticated like every other act request, so no page
+     * script can make the adapter describe the page to it on demand. */
+    z.object({
+      action: z.literal('diagnostics'),
+      requestId: z.string().min(1),
+    }),
+    /** Automation builds: (re-)send the Sniping Bot's catalog if the
+     * adapter has one (it may have been built before the content script was
+     * listening). Authenticated like every other act request; the adapter
+     * answers with a signed `catalog` message, not an `action_result`. */
+    z.object({
+      action: z.literal('catalog'),
+      requestId: z.string().min(1),
+    }),
   ]),
+  mac: adapterMessageMacSchema.optional(),
 });
 export type AdapterActRequestMessage = z.infer<typeof adapterActRequestMessageSchema>;
+
+/** Automation builds: the Sniping Bot's catalog, adapter -> content, in
+ * reply to a `catalog` act request or when the adapter has built a newer
+ * one. Signed like `action_result` (the MAC covers `kind` and `data`), and
+ * the MAC is required: content drops a catalog without a valid one, so no
+ * page script can choose what the bot's target form offers. */
+export const adapterCatalogMessageSchema = z.object({
+  channel: z.literal(ADAPTER_CHANNEL),
+  kind: z.literal('catalog'),
+  data: z.object({ catalog: adapterCatalogSchema }).strict(),
+  mac: adapterMessageMacSchema,
+});
+export type AdapterCatalogMessage = z.infer<typeof adapterCatalogMessageSchema>;
 
 export const adapterMessageSchema = z.discriminatedUnion('kind', [
   adapterReadyMessageSchema,
   adapterProbeMessageSchema,
   adapterShapeMessageSchema,
   adapterAuctionsMessageSchema,
+  adapterListingsBuyableMessageSchema,
   adapterActionResultMessageSchema,
+  adapterCatalogMessageSchema,
 ]);
 export type AdapterMessage = z.infer<typeof adapterMessageSchema>;
 
@@ -211,22 +399,46 @@ export const backgroundMessageTypeSchema = z.enum([
    * logs" button — local only, no network call. */
   'logs.export',
 ]);
-export type BackgroundMessageType = z.infer<typeof backgroundMessageTypeSchema>;
+/** Every message type background handles in every build: the core types
+ * above plus the automation builds' own (`AUTOMATION_BACKGROUND_MESSAGE_TYPES`,
+ * kept in their own module so the listable build never carries them). */
+export type BackgroundMessageType =
+  z.infer<typeof backgroundMessageTypeSchema> | AutomationBackgroundMessageType;
 
 /** Generic envelope every `chrome.runtime.sendMessage` call uses; `payload`
  * is typed per `BackgroundMessageType` by the sender/handler, not by this
  * shared shape, since the content/background split (unlike the adapter
  * channel) is internal to the extension and does not need a discriminated
- * union validated at the boundary. */
+ * union validated at the boundary. This one accepts the core types only;
+ * background builds its own from its handler table
+ * (`backgroundMessageEnvelopeSchemaFor`), so the automation types are
+ * accepted exactly where their handlers are registered. */
 export const backgroundMessageEnvelopeSchema = z.object({
   type: backgroundMessageTypeSchema,
   payload: z.unknown().optional(),
 });
 export type BackgroundMessageEnvelope = z.infer<typeof backgroundMessageEnvelopeSchema>;
 
+/** The envelope for exactly `types`: apps/extension `background/index.ts`
+ * passes its handler table's keys, so the envelope can never drift from
+ * what is registered (and a `__proto__`-style key is never a type). */
+export function backgroundMessageEnvelopeSchemaFor(types: readonly string[]) {
+  const allowed = new Set(types);
+  return z.object({
+    type: z
+      .string()
+      .min(1)
+      .max(64)
+      .refine((t) => allowed.has(t), { message: 'unknown message type' }),
+    payload: z.unknown().optional(),
+  });
+}
+
 export const backgroundResponseSchema = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(true), data: z.unknown() }),
-  z.object({ ok: z.literal(false), error: z.string() }),
+  /** `code` is the API's error code when the failure came from `apps/api`
+   * (`AUTH_INVALID_CREDENTIALS`, `RATE_LIMITED`...), so a UI can explain it. */
+  z.object({ ok: z.literal(false), error: z.string(), code: z.string().optional() }),
 ]);
 export type BackgroundResponse = z.infer<typeof backgroundResponseSchema>;
 
@@ -319,6 +531,20 @@ export const extBackgroundLicenseHeartbeatPayloadSchema = z
 
 /** `filters.save` — the *locally-persisted* `SavedFilter[]` (id, filterHash,
  * etc. already computed), not a creation request. */
+export const extBackgroundBotSettingsSetPayloadSchema = botSettingsSchema;
+export const extBackgroundBotUsageSetPayloadSchema = botDailyUsageSchema;
+
+/** `catalog.save`: the Snipe Targets form's choices, as the EA web app's own
+ * search panel lists them (apps/extension `model/catalog.ts`). The same
+ * shape the adapter sends content in a signed `catalog` message. */
+export const extBackgroundCatalogSavePayloadSchema = adapterCatalogSchema;
+
+export const extBackgroundCardNamesPayloadSchema = z
+  .object({
+    resourceIds: z.array(z.number().int().positive()).max(50),
+  })
+  .strict();
+
 export const extBackgroundFiltersSavePayloadSchema = z
   .object({
     filters: z.array(savedFilterSchema).max(200),
@@ -354,7 +580,7 @@ const extTelemetryPlainEventSchema = z
 export const extBackgroundTelemetryEnqueuePayloadSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('activity'), items: z.array(activityEventSchema).max(500) }).strict(),
   z.object({ kind: z.literal('sniping'), items: z.array(snipingAttemptSchema).max(500) }).strict(),
-  z.object({ kind: z.literal('trades'), items: z.array(tradeSchema).max(500) }).strict(),
+  z.object({ kind: z.literal('trades'), items: z.array(tradeIngestSchema).max(500) }).strict(),
   z.object({ kind: z.literal('filterStats'), items: z.array(filterStatsSchema).max(200) }).strict(),
   z
     .object({ kind: z.literal('riskEvents'), items: z.array(riskBudgetEventSchema).max(200) })
@@ -422,6 +648,18 @@ export const extContentKillSwitchMessageSchema = z
   .strict();
 export type ExtContentKillSwitchMessage = z.infer<typeof extContentKillSwitchMessageSchema>;
 
+/** Options page -> an EA tab's content script: collect the adapter's
+ * diagnostics report (`content/diagnostics.ts`). Answered with
+ * `extContentDiagnosticsResponseSchema`. */
+export const extContentDiagnosticsRequestSchema = z
+  .object({ type: z.literal('diagnostics.collect') })
+  .strict();
+export const extContentDiagnosticsResponseSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), diagnostics: adapterDiagnosticsSchema }),
+  z.object({ ok: z.literal(false), error: z.string().max(2000) }),
+]);
+export type ExtContentDiagnosticsResponse = z.infer<typeof extContentDiagnosticsResponseSchema>;
+
 export const extBackgroundEngineStateSetPayloadSchema = z
   .object({
     sessionStartedAt: z.number().min(0),
@@ -438,3 +676,17 @@ export const extBackgroundEngineStateSetPayloadSchema = z
   })
   .strict();
 export type ExtEngineStateSetPayload = z.infer<typeof extBackgroundEngineStateSetPayloadSchema>;
+
+/** `bot.budgetSet` (automation builds): the Sniping Bot's hourly budgets —
+ * its own governor's state (`Governor.serialize()`) and its sliding
+ * one-hour search and buy windows (apps/extension `engine/sniper.ts`).
+ * Kept in `storage.local` and hydrated on every start, so Stop/Start and a
+ * page reload never refill them. Bounded by `BOT_LIMITS`' hourly maxima. */
+export const extBackgroundBotBudgetSetPayloadSchema = z
+  .object({
+    governor: extBackgroundEngineStateSetPayloadSchema,
+    searchTimes: z.array(z.number().min(0)).max(10_000),
+    buyTimes: z.array(z.number().min(0)).max(10_000),
+  })
+  .strict();
+export type BotBudgetState = z.infer<typeof extBackgroundBotBudgetSetPayloadSchema>;

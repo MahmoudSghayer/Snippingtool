@@ -1,44 +1,55 @@
-// QA suite (owned by the Testing & QA agent — see docs/12-testing.md).
-// Unit coverage for lib/license.ts's offline-grace cache
-// (checkOfflineGrace/verifyEntitlementBlob/bootstrap/heartbeat caching),
-// previously untested.
+// lib/license.ts: the signed entitlement cache and the 24h offline grace.
 //
-// Testability note: this test file's `import.meta.env.VITE_LICENSE_PUBLIC_KEY`
-// is `''` (apps/extension/vitest.config.ts's `define` block — not owned by
-// this suite, and a Vite `define` is a compile-time literal substitution,
-// not something a test can override per-file via `vi.stubEnv`). With no key
-// configured, `verifyEntitlementBlob()` always returns `false` by its own
-// documented contract ("no VITE_LICENSE_PUBLIC_KEY configured — ... cannot
-// be verified", a loud warning rather than silently trusting an
-// unverifiable blob) — so `checkOfflineGrace()`'s 24h-expiry branch
-// (`verified === true` and the cache is/isn't older than 24h) cannot be
-// exercised end-to-end from this package's test config as it stands. What
-// *is* fully covered here: the "no cache" and "cache present but
-// unverifiable" paths (both real, reachable outcomes — the latter being
-// literally what a dev build without a configured signing key does today),
-// `verifyEntitlementBlob`'s own contract in isolation (malformed blob, no
-// key configured — both proven never to throw), and that `bootstrap()`/
-// `heartbeat()` correctly stamp the cache's `cachedAt` (the clock the grace
-// window is measured from) each time they're called. Exercising the actual
-// expiry boundary end-to-end needs a real Ed25519 keypair wired through
-// that `define` block — filed as a suggestion, not a defect, in
-// docs/12-testing.md "Defects found" (production presumably configures a
-// real key; only this test build's fixed empty default blocks it here).
+// Defect C11 (P0): the cache in `storage.local` was trusted on read without
+// any verification, and the blob parser split jose's three-part compact JWS
+// as `payload.signature`, so even a genuine blob never verified. Anyone could
+// edit the cache to add `automation.autobuyer`, clear `killSwitchActive`,
+// push `cachedAt` into the future and block the API. These tests pin the
+// fix: the blob is verified on every cache read, and features, the kill
+// switch and expiry come only from its signed claims.
+//
+// The build's public key here is a test key (vitest.config.ts), and the
+// fixtures in ./license-test-keys.ts were signed by the API's own signer.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { bootstrap, checkOfflineGrace, heartbeat, verifyEntitlementBlob } from '../../src/lib/license.js';
+import {
+  bootstrap,
+  checkOfflineGrace,
+  getCachedEntitlement,
+  heartbeat,
+  readUnverifiedCache,
+  verifyEntitlementBlob,
+  verifyEntitlementClaims,
+} from '../../src/lib/license.js';
+import { removeLocal, setLocal } from '../../src/lib/storage.js';
 
 import { useRealChromeStorage } from './chrome-storage-stub.js';
+import {
+  API_SIGNED_BLOB,
+  API_SIGNED_EXP,
+  API_SIGNED_IAT,
+  API_SIGNED_LEGACY_BLOB,
+  b64urlJson,
+  claimsFor,
+  FIXTURE_DEVICE_ID,
+  FIXTURE_USER_ID,
+  signBlob,
+} from './license-test-keys.js';
 
 import type { BootstrapResponse } from '@sl/shared';
 
+const CACHE_KEY = 'sl.license.cache.v1';
+const HOUR = 60 * 60 * 1000;
+const IAT_MS = API_SIGNED_IAT * 1000;
+
 function fakeBootstrapResponse(overrides: Partial<BootstrapResponse> = {}): BootstrapResponse {
   return {
-    userId: 'user-1',
-    subscription: { plan: 'pro', status: 'active', deviceLimit: 2, trialEndsAt: null, currentPeriodEnd: null },
-    license: { key: null, maxDevices: 2, expiresAt: null },
-    features: {},
+    userId: FIXTURE_USER_ID,
+    deviceId: FIXTURE_DEVICE_ID,
+    subscription: null,
+    license: null,
+    features: ['assist.ranker'],
     settings: {
       version: 1,
       targets: { minProfitPerSnipe: 500, dailyProfitGoal: null },
@@ -48,14 +59,142 @@ function fakeBootstrapResponse(overrides: Partial<BootstrapResponse> = {}): Boot
       notifications: { email: true, push: false, killSwitch: true, subscriptionChanges: true, weeklyDigest: false },
     },
     killSwitchActive: false,
-    entitlementBlob: 'not-a-real-signed-blob.deadbeef',
-    deviceId: 'device-1',
+    entitlementBlob: API_SIGNED_BLOB,
+    serverTime: new Date(IAT_MS).toISOString(),
     ...overrides,
   } as BootstrapResponse;
 }
 
-describe('lib/license.ts: offline-grace cache', () => {
+async function writeCache(bootstrapResponse: BootstrapResponse, cachedAt: number): Promise<void> {
+  await setLocal(CACHE_KEY, { bootstrap: bootstrapResponse, cachedAt });
+}
+
+function jsonResponse(body: unknown): Response {
+  return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+}
+
+describe('lib/license.ts: verifying the entitlement blob', () => {
+  it('verifies a blob signed by the API (jose compact JWS, three parts) and returns its claims', async () => {
+    const claims = await verifyEntitlementClaims(API_SIGNED_BLOB, IAT_MS + HOUR);
+    expect(claims).not.toBeNull();
+    expect(claims!.sub).toBe(FIXTURE_USER_ID);
+    expect(claims!.deviceId).toBe(FIXTURE_DEVICE_ID);
+    expect(claims!.killSwitchActive).toBe(false);
+    expect(claims!.snapshot.features).toEqual(['assist.ranker']);
+    await expect(verifyEntitlementBlob(API_SIGNED_BLOB, IAT_MS + HOUR)).resolves.toBe(true);
+  });
+
+  it('verifies a legacy API blob with no kill-switch claim, leaving the claim undefined', async () => {
+    const claims = await verifyEntitlementClaims(API_SIGNED_LEGACY_BLOB, IAT_MS + HOUR);
+    expect(claims).not.toBeNull();
+    expect(claims!.killSwitchActive).toBeUndefined();
+  });
+
+  it('rejects the blob once its signed expiry has passed', async () => {
+    await expect(verifyEntitlementClaims(API_SIGNED_BLOB, API_SIGNED_EXP * 1000 + 1)).resolves.toBeNull();
+  });
+
+  it('rejects a blob issued more than 5 minutes after now (clock rolled back), and allows ordinary skew', async () => {
+    await expect(verifyEntitlementClaims(API_SIGNED_BLOB, IAT_MS - 6 * 60 * 1000)).resolves.toBeNull();
+    await expect(verifyEntitlementClaims(API_SIGNED_BLOB, IAT_MS - 4 * 60 * 1000)).resolves.not.toBeNull();
+  });
+
+  it('rejects claims edited after signing (features added, signature kept)', async () => {
+    const [header, , sig] = API_SIGNED_BLOB.split('.');
+    const forged = claimsFor({ features: ['assist.ranker', 'automation.autobuyer'], killSwitchActive: false, iat: API_SIGNED_IAT, exp: API_SIGNED_EXP });
+    await expect(verifyEntitlementClaims(`${header}.${b64urlJson(forged)}.${sig}`, IAT_MS + HOUR)).resolves.toBeNull();
+  });
+
+  it('rejects a blob signed by any key other than the one built in', async () => {
+    const forger = (await crypto.subtle.generateKey({ name: 'Ed25519' }, false, ['sign', 'verify'])) as CryptoKeyPair;
+    const blob = await signBlob(claimsFor({ features: ['automation.autobuyer'], killSwitchActive: false, iat: API_SIGNED_IAT }), forger.privateKey);
+    await expect(verifyEntitlementClaims(blob, IAT_MS + HOUR)).resolves.toBeNull();
+  });
+
+  it('rejects malformed blobs without throwing, including the old two-part guess and the unsigned dev blob', async () => {
+    const [, payload, sig] = API_SIGNED_BLOB.split('.');
+    for (const blob of ['not-a-valid-blob', `${payload}.${sig}`, b64urlJson({ unsigned: true }), '..', `${b64urlJson({ alg: 'none' })}.${payload}.`]) {
+      await expect(verifyEntitlementClaims(blob, IAT_MS + HOUR)).resolves.toBeNull();
+    }
+  });
+});
+
+describe('lib/license.ts: reading the cache', () => {
   useRealChromeStorage();
+  beforeEach(() => removeLocal(CACHE_KEY)); // the stub's storage lives for the whole describe
+
+  it('takes features and the kill switch from the signed claims, not the editable cached fields', async () => {
+    const blob = await signBlob(claimsFor({ features: ['assist.ranker'], killSwitchActive: true, iat: API_SIGNED_IAT }));
+    await writeCache(fakeBootstrapResponse({ entitlementBlob: blob, features: ['assist.ranker', 'automation.autobuyer'], killSwitchActive: false }), IAT_MS);
+
+    const cached = await getCachedEntitlement(IAT_MS + HOUR);
+    expect(cached).not.toBeNull();
+    expect(cached!.bootstrap.features).toEqual(['assist.ranker']);
+    expect(cached!.bootstrap.killSwitchActive).toBe(true);
+    expect(cached!.killSwitchSigned).toBe(true);
+  });
+
+  it('drops a feature key the build does not know instead of passing it through', async () => {
+    const blob = await signBlob(claimsFor({ features: ['assist.ranker', 'future.thing'], killSwitchActive: false, iat: API_SIGNED_IAT }));
+    await writeCache(fakeBootstrapResponse({ entitlementBlob: blob }), IAT_MS);
+    expect((await getCachedEntitlement(IAT_MS + HOUR))!.bootstrap.features).toEqual(['assist.ranker']);
+  });
+
+  it('rejects a cache whose blob was tampered with', async () => {
+    const [header, , sig] = API_SIGNED_BLOB.split('.');
+    const forged = claimsFor({ features: ['automation.autobuyer'], killSwitchActive: false, iat: API_SIGNED_IAT, exp: API_SIGNED_EXP });
+    await writeCache(fakeBootstrapResponse({ entitlementBlob: `${header}.${b64urlJson(forged)}.${sig}` }), IAT_MS);
+
+    expect(await getCachedEntitlement(IAT_MS + HOUR)).toBeNull();
+    expect((await checkOfflineGrace(IAT_MS + HOUR)).withinGrace).toBe(false);
+  });
+
+  it('rejects a cache stamped more than 5 minutes in the future, and allows ordinary clock skew', async () => {
+    await writeCache(fakeBootstrapResponse(), IAT_MS + 6 * 60 * 1000);
+    expect(await getCachedEntitlement(IAT_MS)).toBeNull();
+    expect((await checkOfflineGrace(IAT_MS)).withinGrace).toBe(false);
+
+    await writeCache(fakeBootstrapResponse(), IAT_MS + 4 * 60 * 1000);
+    expect(await getCachedEntitlement(IAT_MS)).not.toBeNull();
+  });
+
+  it('reports a legacy blob’s kill switch as unsigned rather than trusting the cached "false"', async () => {
+    await writeCache(fakeBootstrapResponse({ entitlementBlob: API_SIGNED_LEGACY_BLOB, killSwitchActive: false }), IAT_MS);
+    const cached = await getCachedEntitlement(IAT_MS + HOUR);
+    expect(cached).not.toBeNull();
+    expect(cached!.killSwitchSigned).toBe(false);
+    expect(cached!.bootstrap.killSwitchActive).toBe(true); // fail closed until someone asks the API
+  });
+});
+
+describe('lib/license.ts: offline grace', () => {
+  useRealChromeStorage();
+  beforeEach(() => removeLocal(CACHE_KEY)); // the stub's storage lives for the whole describe
+
+  it('accepts a valid blob offline within the 24h grace', async () => {
+    await writeCache(fakeBootstrapResponse(), IAT_MS);
+    const result = await checkOfflineGrace(IAT_MS + 23 * HOUR);
+    expect(result.withinGrace).toBe(true);
+    expect(result.cached!.bootstrap.features).toEqual(['assist.ranker']);
+  });
+
+  it('ends the grace 24h after the blob was signed, even if cachedAt is pushed forward', async () => {
+    // The blob itself is still inside its 26h signed expiry, so it verifies
+    // (and its kill switch still counts); only the grace is over.
+    await writeCache(fakeBootstrapResponse(), IAT_MS + 24.5 * HOUR);
+    const result = await checkOfflineGrace(IAT_MS + 25 * HOUR);
+    expect(result.cached).not.toBeNull();
+    expect(result.withinGrace).toBe(false);
+  });
+
+  it('reports no grace with no cache at all', async () => {
+    expect(await checkOfflineGrace()).toEqual({ withinGrace: false, cached: null });
+  });
+});
+
+describe('lib/license.ts: bootstrap/heartbeat caching', () => {
+  useRealChromeStorage();
+  beforeEach(() => removeLocal(CACHE_KEY)); // the stub's storage lives for the whole describe
 
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn());
@@ -65,78 +204,44 @@ describe('lib/license.ts: offline-grace cache', () => {
     vi.unstubAllGlobals();
   });
 
-  it('verifyEntitlementBlob rejects a malformed blob (missing the payload.signature separator) without throwing', async () => {
-    await expect(verifyEntitlementBlob('not-a-valid-blob')).resolves.toBe(false);
-  });
-
-  it('verifyEntitlementBlob returns false (never throws) when no public key is configured — the documented "cannot be verified, never silently trusted" contract', async () => {
-    await expect(verifyEntitlementBlob('cGF5bG9hZA.c2ln')).resolves.toBe(false);
-  });
-
-  it('checkOfflineGrace with no cached entitlement at all reports no grace', async () => {
-    const result = await checkOfflineGrace();
-    expect(result).toEqual({ withinGrace: false, cached: null });
-  });
-
-  it('checkOfflineGrace with a cached-but-unverifiable entitlement (this build’s real current state) reports no grace, even seconds after caching', async () => {
-    const fetchMock = vi.mocked(globalThis.fetch);
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(fakeBootstrapResponse()), { status: 200, headers: { 'content-type': 'application/json' } }));
-
-    await bootstrap();
-    const result = await checkOfflineGrace(Date.now() + 1_000); // one second later — well within any real grace window
-    expect(result.withinGrace).toBe(false); // blob doesn't verify -> never within grace, regardless of freshness
-    expect(result.cached?.bootstrap.userId).toBe('user-1');
-  });
-
   it('bootstrap() stamps the cache with the current time as cachedAt', async () => {
-    const fetchMock = vi.mocked(globalThis.fetch);
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(fakeBootstrapResponse()), { status: 200, headers: { 'content-type': 'application/json' } }));
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(jsonResponse(fakeBootstrapResponse()));
 
     const before = Date.now();
     await bootstrap();
     const after = Date.now();
 
-    const result = await checkOfflineGrace();
-    expect(result.cached).not.toBeNull();
-    expect(result.cached!.cachedAt).toBeGreaterThanOrEqual(before);
-    expect(result.cached!.cachedAt).toBeLessThanOrEqual(after);
+    const raw = await readUnverifiedCache();
+    expect(raw!.cachedAt).toBeGreaterThanOrEqual(before);
+    expect(raw!.cachedAt).toBeLessThanOrEqual(after);
   });
 
   it('heartbeat() refreshes cachedAt to now and preserves the prior bootstrap’s userId', async () => {
     const fetchMock = vi.mocked(globalThis.fetch);
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(fakeBootstrapResponse({ userId: 'user-42' })), { status: 200, headers: { 'content-type': 'application/json' } }));
+    fetchMock.mockResolvedValueOnce(jsonResponse(fakeBootstrapResponse({ userId: 'user-42' })));
     await bootstrap();
-
-    const firstCache = (await checkOfflineGrace()).cached!;
+    const first = (await readUnverifiedCache())!;
     await new Promise((resolve) => setTimeout(resolve, 5));
 
-    fetchMock.mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({ subscription: fakeBootstrapResponse().subscription, license: fakeBootstrapResponse().license, features: {}, settings: fakeBootstrapResponse().settings, killSwitchActive: false, entitlementBlob: 'still-not-real.blob' }),
-        { status: 200, headers: { 'content-type': 'application/json' } },
-      ),
-    );
+    const { userId: _drop, ...hb } = fakeBootstrapResponse();
+    fetchMock.mockResolvedValueOnce(jsonResponse(hb));
     await heartbeat('device-1', 'idle');
 
-    const secondCache = (await checkOfflineGrace()).cached!;
-    expect(secondCache.cachedAt).toBeGreaterThan(firstCache.cachedAt);
-    expect(secondCache.bootstrap.userId).toBe('user-42'); // preserved from the prior bootstrap, per heartbeat()'s own contract
+    const second = (await readUnverifiedCache())!;
+    expect(second.cachedAt).toBeGreaterThan(first.cachedAt);
+    expect(second.bootstrap.userId).toBe('user-42');
   });
 
   it('heartbeat() returns null (never throws) on a network failure and leaves the prior cache untouched', async () => {
     const fetchMock = vi.mocked(globalThis.fetch);
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(fakeBootstrapResponse()), { status: 200, headers: { 'content-type': 'application/json' } }));
+    fetchMock.mockResolvedValueOnce(jsonResponse(fakeBootstrapResponse()));
     await bootstrap();
-    const before = (await checkOfflineGrace()).cached!;
+    const before = (await readUnverifiedCache())!;
 
     // retryFetch retries a network failure up to 3 more times before giving
-    // up — mockRejectedValue (not -Once) so every attempt sees the same
-    // failure, matching a real sustained outage.
+    // up, so every attempt sees the same failure, like a real outage.
     fetchMock.mockRejectedValue(new Error('network down'));
-    const result = await heartbeat('device-1', 'idle');
-    expect(result).toBeNull();
-
-    const after = (await checkOfflineGrace()).cached!;
-    expect(after.cachedAt).toBe(before.cachedAt); // untouched — heartbeat() only caches on success
+    expect(await heartbeat('device-1', 'idle')).toBeNull();
+    expect((await readUnverifiedCache())!.cachedAt).toBe(before.cachedAt);
   }, 15_000);
 });

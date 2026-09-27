@@ -545,10 +545,13 @@ One row per snipe attempt outcome, computed by the extension.
 | `target_price`, `listed_price` | integer, ≥ 0      |                                                                                  |
 | `outcome`                      | `sniping_outcome` | attempted/success/failed/too_slow/blocked/error — `blocked` = governor denied it |
 | `latency_ms`, `error_code`     | —                 |                                                                                  |
+| `attempt_id`                   | uuid, nullable    | client-generated per attempt (0032); NULL from extensions that predate it        |
 
 **Indexes:** `(user_id, occurred_at desc)`, `(device_id, occurred_at desc)`,
 `(resource_id, occurred_at desc)`, partial `trade_id`, `(outcome,
-occurred_at desc)`, BRIN.
+occurred_at desc)`, BRIN; unique `(user_id, attempt_id, occurred_at)` — the
+ingest route inserts `ON CONFLICT DO NOTHING`, so a retried attempt is
+stored once (the partition key has to be part of any unique index here).
 
 #### `risk_budget_events`
 
@@ -592,7 +595,10 @@ extension. Financial record: `user_id` **RESTRICT**.
 
 **Indexes:** partial unique `(user_id, trade_id)`; partial btree `user_id`,
 `resource_id`, `status`; partial `(user_id, sold_at) WHERE sold_at IS NOT
-NULL`.
+NULL`; partial `(user_id, bought_at desc, id)` (0033) for the trade list's
+`(bought_at, id)` keyset cursor. `POST /trades/batch` is one `INSERT … ON
+CONFLICT (user_id, trade_id) WHERE deleted_at IS NULL DO UPDATE`, in one
+transaction with its profit rollup.
 
 #### `profits`
 
@@ -780,6 +786,21 @@ SELECT create_month_partitions('audit_logs', date_trunc('month', now())::date, 1
 This is safe to run at any cadence — existing partitions are left alone,
 only missing months in the requested range are created — so "run it monthly
 and always keep ~12 months of headroom" is a reasonable default.
+
+**Rows in `_default`** block creating the partition that would cover them
+(Postgres refuses while the default holds rows for the new range). Ingest
+now rejects timestamps for the partitioned activity tables more than 5
+minutes ahead or 7 days back, which is what used to put them there, with a
+`TIMESTAMP_OUT_OF_WINDOW` 400 whose `details.indices` names the offending
+items. The unpartitioned `trades` table allows 400 days back (a card can
+be held for weeks), and the same 5 minutes ahead. `partitions.maintain` tries each table on its
+own, logs `partitions.maintain: could not create partitions for table` for
+one that fails, then fails the job naming it; it also logs
+`partitions.maintain: rows in DEFAULT partition` with `{table,
+defaultRows}` (from `default_partition_row_count()`, migration 0032)
+whenever a default partition is not empty. To clear it, move those rows
+out (`DELETE … RETURNING` from `<table>_default` into a holding table),
+rerun the job, then reinsert them through the parent.
 
 **Dropping old partitions** (once a retention policy is decided — not
 implemented yet): `DROP TABLE <table>_yYYYY_mMM;` on a partition detaches

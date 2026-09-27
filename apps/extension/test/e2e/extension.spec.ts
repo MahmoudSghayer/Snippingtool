@@ -22,7 +22,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { chromium, expect, test } from '@playwright/test';
+import { chromium, expect, test, type Page } from '@playwright/test';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const extensionDir = path.resolve(dirname, '..', '..');
@@ -31,6 +31,46 @@ const fixtureDir = path.join(dirname, '..', 'fixtures', 'mock-ea-app');
 const chromiumPath = process.env.PLAYWRIGHT_CHROMIUM_PATH || '/opt/pw-browsers/chromium';
 
 const PAGE_URL = 'https://www.ea.com/en/ultimate-team/web-app/index.html';
+
+interface CdpNode {
+  nodeId: number;
+  backendNodeId: number;
+  attributes?: string[];
+  children?: CdpNode[];
+  shadowRoots?: CdpNode[];
+}
+
+function findNode(node: CdpNode, id: string): CdpNode | null {
+  const attrs = node.attributes ?? [];
+  for (let i = 0; i < attrs.length; i += 2) if (attrs[i] === 'id' && attrs[i + 1] === id) return node;
+  for (const child of [...(node.shadowRoots ?? []), ...(node.children ?? [])]) {
+    const hit = findNode(child, id);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/** `#id` inside the panel's shadow root: its text and class. The panel's
+ * root is closed (ui/panel.ts), so no script on the page — and so no
+ * `page.evaluate` — can reach it; DevTools can, so this reads it over CDP. */
+async function panelElement(page: Page, id: string): Promise<{ text: string; className: string } | null> {
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    const { root } = (await cdp.send('DOM.getDocument', { depth: -1, pierce: true })) as { root: CdpNode };
+    const host = findNode(root, 'ledger-root');
+    const el = host?.shadowRoots?.[0] ? findNode(host.shadowRoots[0], id) : null;
+    if (!el) return null;
+    const { object } = (await cdp.send('DOM.resolveNode', { backendNodeId: el.backendNodeId })) as { object: { objectId: string } };
+    const { result } = (await cdp.send('Runtime.callFunctionOn', {
+      objectId: object.objectId,
+      functionDeclaration: 'function () { return { text: this.textContent || "", className: String(this.className) }; }',
+      returnByValue: true,
+    })) as { result: { value: { text: string; className: string } } };
+    return result.value;
+  } finally {
+    await cdp.detach();
+  }
+}
 
 function walk(dir: string): string[] {
   const out: string[] = [];
@@ -106,21 +146,19 @@ test.describe('extension against the mock EA web app', () => {
       // own hook and assert on the counters that only move once an
       // observation has crossed from the MAIN world into content.js.
       await page.evaluate(() => (window as unknown as { __mock: { triggerPassiveSearch(): Promise<void> } }).__mock.triggerPassiveSearch());
-      const panelNumber = (id: string) =>
-        host.evaluate(
-          (el, elementId) => Number(((el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.getElementById(elementId)?.textContent ?? '').replace(/[^\d]/g, '')),
-          id,
-        );
+      // The panel's shadow root is closed to page scripts.
+      expect(await host.evaluate((el) => el.shadowRoot)).toBeNull();
+      const panelNumber = async (id: string) => Number(((await panelElement(page, id))?.text ?? '').replace(/[^\d]/g, ''));
       await expect.poll(() => panelNumber('searches'), { timeout: 15_000 }).toBeGreaterThanOrEqual(1);
       await expect.poll(() => panelNumber('total'), { timeout: 15_000 }).toBeGreaterThan(0);
 
       // The bundle probe should report ok — the fixture's `window.services`
       // matches adapter.ts's ASSUMED SHAPE exactly, so the status dot must
       // not be in its warn state.
-      const dotClass = await host.evaluate((el) => (el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.getElementById('dot')?.className);
+      const dotClass = (await panelElement(page, 'dot'))?.className;
       expect(dotClass).not.toContain('warn');
 
-      const statusText = await host.evaluate((el) => (el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.getElementById('status')?.textContent);
+      const statusText = (await panelElement(page, 'status'))?.text;
       expect(statusText?.toLowerCase()).not.toContain('probe failed');
       expect(statusText?.toLowerCase()).not.toContain('shape');
     } finally {

@@ -61,7 +61,7 @@ src/
   ui/panel.ts          Shadow-DOM readout: card, sparkline, session P&L, risk meter, ranker.
   popup/               Status, login/2FA, current card, risk meter, quick toggles.
   options/              Filters editor, budgets/governor bounds, devices, telemetry opt-out,
-                          "What it sends", logs export, account/license info.
+                          "What it sends", logs export, "Copy diagnostics" (§4), account/license info.
 scripts/
   build.mjs               Programmatic Vite build, both targets — see §3.
   generate-manifest.mjs      Pure manifest-object builder, used by build.mjs.
@@ -99,7 +99,14 @@ Three channels, none of which overlap in purpose:
    `readResult`, each carrying a `requestId` the matching `action_result`
    echoes back — see `content/adapter-client.ts`). This is the only
    direction data about EA's internals ever flows, and only the fields
-   `trimAuction` copies ever cross it (§11).
+   `trimAuction` copies ever cross it (§11). Any page script can post on
+   this channel too, so `act_request` and `action_result` each carry an
+   HMAC under a per-page-load nonce that `content/handoff.ts` hands the
+   adapter at `document_start` (`lib/act-auth.ts`); unsigned or replayed
+   requests are ignored, and content schema-validates every inbound
+   message and drops unsigned or unmatched results. A `buy` is refused
+   (`price_mismatch` / `listing_unknown`) unless its price equals the
+   buy-now price the adapter itself last saw for that `tradeId`.
 2. **`content/index.ts` ↔ `background/index.ts`**, `browser.runtime.sendMessage`,
    typed by `backgroundMessageTypeSchema`
    (`packages/shared/src/ext-messages.ts`). Content sends `record` (raw
@@ -128,11 +135,32 @@ modules that benefit from shared chunks:
 | Call | Entry                                                                         | Format                     | Output                                                            |
 | ---- | ----------------------------------------------------------------------------- | -------------------------- | ----------------------------------------------------------------- |
 | 1    | `src/main/adapter.ts`                                                         | `lib` (IIFE, single entry) | `adapter.js`                                                      |
+| 1b   | `src/content/handoff.ts` (ISOLATED, `document_start`, before `adapter.js`)    | `lib` (IIFE, single entry) | `handoff.js`                                                      |
 | 2    | `src/content/index.ts`                                                        | `lib` (IIFE, single entry) | `content.js`                                                      |
 | 3    | `src/background/index.ts` + `src/popup/index.html` + `src/options/index.html` | ES, multi-entry            | `background.js`, `src/popup/index.html`, `src/options/index.html` |
 
 `scripts/generate-manifest.mjs` then writes `manifest.json` from the two
 targets' env (`VITE_API_ORIGIN`, `VITE_UPDATE_URL`, the package version).
+
+**Licence key (required for a release build).** `VITE_LICENSE_PUBLIC_KEY`
+must be the API's `ENTITLEMENT_PUBLIC_KEY`, pasted as-is (SPKI PEM; the
+`\n`-escaped one-line form from `.env` works). `lib/license.ts` verifies
+the cached entitlement blob with it. A build without it can verify nothing:
+no offline grace, and every open EA tab polls `GET /extension/kill-switch`
+every 8 s, where a rate-limit 429 reads as "kill switch active". So
+`scripts/build.mjs` fails when the key is missing or is not an Ed25519
+public key. Exceptions: `pnpm dev` (`--watch`) only warns, and
+`SL_ALLOW_NO_LICENSE_KEY=1` allows a keyless build that will not ship (CI
+checks and tests use it). The release workflow reads the key from the
+repository variable `ENTITLEMENT_PUBLIC_KEY`.
+
+The dashboard-download template (`pnpm --filter @sl/extension
+build:template`, i.e. `ledger-auto --template`, built by the API image) is
+exempt: it bakes in a placeholder that `apps/api/src/lib/extension-download.ts`
+replaces, when it serves the zip, with the raw Ed25519 key from the API's own
+`ENTITLEMENT_PUBLIC_KEY` (the JWK `x`, base64url). `lib/license.ts` imports
+that form as well as PEM. A template whose placeholder was never filled in
+verifies nothing and logs an error saying so, rather than throwing.
 
 ```
 pnpm --filter @sl/extension build:ledger    # dist/ledger      — listable
@@ -169,49 +197,283 @@ Verify: `grep -r autobuyer apps/extension/dist/ledger` returns nothing —
 covered by `test/e2e/extension.spec.ts`'s `ledger build contents` suite,
 which runs even without a browser (a plain filesystem scan).
 
+### The `userscript` target
+
+`pnpm --filter @sl/extension build:userscript` builds the M1–M3 code (same
+feature set as `ledger-auto`, `VITE_BUILD_TARGET=userscript`) into one
+Tampermonkey file, `dist/userscript/nova-trade.user.js`, plus the
+header-only `nova-trade.meta.js` Tampermonkey polls for updates.
+
+Customers install it from the API, not from a static host: the chrome zip
+stays the main install, and "My account" offers Tampermonkey as the
+optional one-click alternative. `build:userscript-template` builds it once
+with the zip's placeholder origins (`scripts/template-placeholders.mjs`)
+plus a placeholder download token; the API image ships that file, and
+`GET /api/v1/downloads/userscript/:token/nova-trade.user.js` (and
+`.../nova-trade.meta.js`) fills in APP_ORIGIN, DASHBOARD_ORIGIN, the
+license key and the token. The token is an HMAC of the user id (key derived
+from COOKIE_SECRET, purpose `userscript-download:v1`), never stored;
+Tampermonkey fetches without cookies, so the signed URL is what identifies
+the user, and each request checks their pass (403 once it no longer
+includes the autobuyer). `@version` is the extension version, and
+`@downloadURL`/`@updateURL` are the same signed URLs, so updates follow
+extension releases. `GET /api/v1/downloads/userscript/link` gives the
+signed-in user their `installUrl`. No
+extension code forks for it; `src/userscript/` supplies what the manifest
+and the browser would otherwise provide:
+
+| Extension                         | Userscript                                                                                                                                                                              |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `adapter.js` in the MAIN world    | The same adapter IIFE, built first and embedded as a string (`virtual:adapter-source`), injected with `GM_addElement` at `document-start` (`setup.ts`)                                  |
+| Service worker + ISOLATED content | `background/index.ts` and `content/index.ts`, imported in that order by `main.ts` and run in Tampermonkey's isolated context                                                            |
+| `webextension-polyfill`           | `browser-shim.ts` (build alias): one in-page message bus with Chrome's first-answer-wins rule and structured cloning; `storage.*` on `GM_*Value`; `alarms` on timers; `tabs` = this tab |
+| `host_permissions` for the API    | `lib/http.ts`'s transport swapped for `gm-fetch.ts` (`GM_xmlhttpRequest`, `anonymous: true` so EA's cookies never go along); the API host is the header's only `@connect`               |
+| Toolbar popup, options page       | `launcher.ts`: a button on the EA page opening a drawer that mounts `popup/app.ts` and `options/app.ts` in their own shadow roots; also in Tampermonkey's menu                          |
+
+Differences that follow from there being no extension process:
+
+- **`storage.session` persists.** It is GM storage under a `session:` prefix,
+  so the access token and saved governor state survive a browser restart. A
+  stale token is refreshed on its first 401, and resuming governor counters
+  is the conservative direction.
+- **Everything runs per tab.** Each EA tab has its own "background": its own
+  alarms, heartbeat and kill-switch listener. Alarms only tick while an EA
+  tab is open.
+- **IndexedDB is ea.com's.** The observation database lives in the EA
+  origin, so clearing ea.com's site data clears it, and EA's page code could
+  read it. It only ever holds trimmed market listings; tokens and settings
+  are in GM storage, which the page cannot reach.
+- **No minification.** People install userscripts by hand and should be able
+  to read what they are installing.
+- **The page channel is authenticated the same way.** `setup.ts` mints the
+  act-channel nonce and puts it on `<html>` before injecting the adapter,
+  which takes it synchronously, as `handoff.js` does in the extension
+  (`lib/act-auth.ts`'s `handOffNonceWithinBundle`; content's copy stays in
+  the bundle, not on Tampermonkey's global). Content talks to the page
+  through `unsafeWindow`, so the userscript's adapter (only) accepts act
+  requests by origin rather than by `event.source`; every request, result
+  and catalog is still MAC-checked.
+
+### The Sniping Bot page (automation builds)
+
+`ledger-auto` and `userscript` add a **Sniping Bot** page: an item under
+Transfers in EA's left navigation (`ui/ea-nav.ts`) opens a full page
+(`ui/bot-page.ts`) with the bot's settings on the left and the live session on
+the right. The in-page panel and the userscript's SL menu open it too.
+
+The bot (`engine/sniper.ts`) searches the user's saved filters in turn, buys
+every listing at or under the price cap (cheapest first), then waits a random
+delay from the user's range, with breaks every N searches and rests every N
+minutes. It ships through the same `virtual:autobuyer-loader` alias as the
+autobuyer (`loadSniper()`), so the `ledger` build never contains it, and the
+autobuyer does not buy while the bot runs.
+
+**Recommended limits, editable, with a live risk level.** The settings
+(`BotSettings` in `@sl/shared`) live in `storage.local`, never on the
+server. They start on the recommended limits (`RECOMMENDED_BOT_SETTINGS`):
+a random 8–12 s search delay, at most 250 searches and 15 buys an hour, a
+60-minute session then a 20-minute rest, at most 6 active hours a day, at
+most 500,000 coins spent an hour, and a 10 s cooldown after every buy. The
+user can change any of them within `BOT_LIMITS` (the hard technical
+bounds); "Reset to recommended" restores them. Settings saved by older
+builds still parse: missing fields take the recommended values, and the
+retired `safetyMode`, `customRiskAcknowledgedAt`, `safety.actionsPerHour`
+and `safety.sessionLengthMinutes` are accepted and ignored.
+
+`botRiskLevel(settings)` rates them live: searches a day
+(min(max searches an hour, 3600 / shortest delay) × active hours a day,
+where active hours are the session/rest duty cycle over 24 h, capped by max
+active hours a day), buys a day (max buys an hour × the same hours), and the
+shortest delay. Tiers, the worst factor winning: low up to 2,000 searches /
+100 buys a day with at least 6 s between searches; moderate up to 3,500 /
+150 / 4 s; high up to 5,000 / 250 / 2 s; very high beyond. The recommended
+defaults rate low (1,500 searches, 90 buys a day). The page shows the level,
+the projections and the reasons, and says the thresholds come from limits
+traders have reported, not from EA. The first time the user saves settings
+above low, the page holds them back until they tick "I understand these
+settings raise the risk of an EA ban, and that a ban is never refundable";
+`riskAcknowledgedAt` records when, and the engine will not start settings
+above low without it. Each save that changes the level is reported as a
+`settings_change` activity event with the field `bot.riskLevel=<level>`
+(`lib/bot-safety.ts`), subject to the usual telemetry opt-out.
+
+The engine (`engine/sniper.ts`) enforces the user's own numbers, clamped
+into `BOT_LIMITS` first (`clampBotSettings`): searches and buys an hour on
+sliding windows, the session/rest cycle, active hours a day (per local day,
+saved through `bot.usageGet` / `bot.usageSet` so a reload doesn't reset
+it), the cooldown after each buy, and coins an hour and the buy:search
+ratio through its own governor (`botGovernorSettings`, bounded by
+`BOT_GOVERNOR_BOUNDS`). The server kill switch and adapter probe failures
+stop it whatever the settings say.
+
+**Snipe targets are built like EA's own search panel**: OVR range slider
+with Min/Max OVR, "Type Player Name" (with EA portraits), and Quality,
+Rarity, Position, Chemistry Style, Country/Region, League and Club rows.
+The lists are the web app's own: `main/adapter.ts` calls its
+`UTDataProviderFactory` (`getRareItemLevelDP`, `getItemRarityDP`,
+`getPlayerPositionDP`, `getPlayStyleDP`, `getNationDP`, `getLeagueDP`,
+`getTeamDP` per league) and takes every picture from its
+`AssetLocationUtils.getFilterImage`, so entries, order, labels and images
+match EA's panel, in the user's web-app language. Like EA's panel, Club is
+disabled until a league is chosen, and choosing a quality clears the rarity
+and narrows the rarity list. Players come from the web app's `players.json`
+(`AssetLocationUtils.getPlayerSearchFileUri()`). Stored in `storage.local`
+(`catalog.get` / `catalog.save`, `model/catalog.ts`).
+
+### Web app shape (verified 2026-09-23)
+
+`main/adapter.ts` was checked against the FC 27 web app's own code
+(`js/compiled_1-4.js`, `ocompiled.js`) and public data files:
+
+| What       | The web app's own                                                                                                                                                                                    |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Search     | `services.Item.clearTransferMarketCache()` then `services.Item.searchTransferMarket(new UTSearchCriteriaDTO(), page)` -> observable; `res.data.items`                                                |
+| Buy now    | `services.Item.bid(item, auction.buyNowPrice)`                                                                                                                                                       |
+| Criteria   | `type` (set first), `maskedDefId`, `level` (`bronze`/`silver`/`gold`/`SP`), `rarities`, `position` / `zone` (130-132), `playStyle`, `nation`, `league`, `club`, `minBuy`/`maxBuy`, `ovrMin`/`ovrMax` |
+| Items      | `definitionId`, `databaseId` (base player id), `rating`, `getAuctionData()` -> `tradeId`, `buyNowPrice`, `expires`                                                                                   |
+| Navigation | `.ut-tab-bar-item` buttons, Transfers has `icon-transfer`; top bar `.ut-navigation-bar-view`                                                                                                         |
+
+The adapter waits for the web app to start (and log in) before its first
+probe, and builds the catalog then.
+
+Not yet available: transfer list, sold and unsold counts (the adapter has no
+transfer list access yet).
+
 ## 4. The ASSUMED SHAPE and the day-one verification checklist
 
 The live EA FC web app is unreachable while the market is locked, so
 `main/adapter.ts`'s act surface (`search`/`buy`/`readResult`, M2/M3 only —
 passive observation is unaffected and unchanged from milestone 1) is written
-against a **documented assumption**, not observed fact. The full assumption
-lives in a comment titled `ASSUMED SHAPE — verify on day one` at the top of
-`adapter.ts`; the short version:
+against **documented assumptions**, not observed fact. Rather than one guess,
+the adapter carries two candidate shapes, each in its own module under
+`src/main/` (`main/shapes.ts` lists them), and the probe selects whichever
+the page has:
 
-- `window.services.Item.repository.search(criteria) -> Promise<{ auctionInfo: [...] }>`
-- `window.services.Transfer.repository.buyNow(tradeId) -> Promise<unknown>`
-- `window.services.Transfer.repository.bid(tradeId, amount) -> Promise<unknown>`
+- **observable** (`main/shape-observable.ts`, tried first — what community
+  autobuyers describe):
+  `services.Item.searchTransferMarket(criteria, 1)` and
+  `services.Item.bid(item, price)`, each answering once through
+  `.observe(scope, (sender, response) => …)` with
+  `{ success, data: { items } }`; items are entities with
+  `getAuctionData()` or `_auction`, card id under `definitionId`,
+  `resourceId` or `maskedDefId`.
+- **promise** (`main/shape-promise.ts`, the original assumption):
+  `services.Item.repository.search(criteria) -> Promise<{ auctionInfo }>`,
+  `services.Transfer.repository.buyNow(tradeId)`, and
+  `services.Transfer.repository.bid` probed for presence only.
 
-Every single lookup is guarded (`typeof x === 'function'` before ever
-calling it) — a missing or renamed property is a clean `probe()` failure
-(`{ ok: false, reason }`), never a thrown exception. `probe()` runs once at
-load and again before every act call, so a bundle update mid-session is
-caught immediately, not just on the next page load (docs/01-architecture.md
-§3.5).
+Neither present: `probe()` fails closed with a `reason` naming what each
+candidate was missing, and act is disabled. Every lookup is guarded, so a
+renamed property is a clean probe failure, never a thrown exception.
+`probe()` runs once at load and again before every act call, so a bundle
+update mid-session is caught immediately (docs/01-architecture.md §3.5).
+
+**No silent success.** Whatever a service call returns goes through
+`main/ea-response.ts` (an observable is observed, a promise awaited, both
+with a 12 s limit) and `main/ea-listing.ts` (entities and UTAS JSON
+normalised field by field). A search whose response has no list, reports
+`success` other than `true`, or holds only unreadable entries is an error —
+never `ok` with no listings. An empty list is still a real "no results".
+
+Shape-specific limits, all to confirm on day one:
+
+- The observable shape's search criteria use the community-known
+  `UTSearchCriteriaDTO` field names, none verified: `type: 'player'`,
+  `resourceId` → `maskedDefId`, `minPrice`/`maxPrice` → `minBuy`/`maxBuy`,
+  `position` → `position`, `nationality` → `nation`, `league` → `league`,
+  `club` → `club`, `quality` → `level` (`bronze`/`silver`/`gold`, and
+  `special` → `SP`). Rating has no known DTO field: `minRating`/`maxRating`
+  are a pure guess. Any other field is refused (`cannot search by …`)
+  rather than searched wider. It builds the page's own
+  `UTSearchCriteriaDTO` when one exists.
+- The observable shape buys on the item entity. It gets entities from its
+  own searches and, through a hook on `services.Item.searchTransferMarket`
+  (`main/search-hook.ts`), from searches the human runs in EA's UI: the
+  hook calls the original, adds one observer of its own, and hands the
+  page the original observable untouched. The hook reports no search of
+  its own (passive observation reports it, once, from the network): it
+  only keeps the entities and, if passive already reported those listings,
+  sends a `listings_buyable` upgrade that content applies without counting
+  anything. Likewise an act search and its own network response are one
+  search: a market request sent while an act search is in flight is tagged
+  as that search's, and the act result and that tagged response (same
+  tradeIds, in either order) are posted once. Nothing else is ever merged:
+  two human searches with the same, often empty, results are two searches,
+  and each counts toward `actionsPerHour`. A listing seen only passively
+  (no entity) is sent to content with `buyable: false`, the ranker drops
+  it, and it is never attempted; asked anyway, the adapter refuses with
+  `listing_entity_unknown`. The entity's price is re-checked too, on top of
+  the Task 2 price check. A search response must carry `success: true`.
+- A buy EA has not answered within 12 s is reported as `timeout_unknown`,
+  not as a failure: it may have gone through. It is recorded as
+  `attempted`, stays charged to the governor, is never retried, and if
+  EA's answer arrives later the adapter sends a second, signed `late`
+  result that records the trade. An adapter *refusal* (price mismatch,
+  unknown listing, no entity, no act key) never reached EA, so the
+  governor refunds what it charged for it.
+- The card id is `resourceId`, `definitionId` or `maskedDefId`, never
+  `assetId` (the base player, shared by every version of a card).
+- The observable shape has no verified trade-status call, so `readResult`
+  fails loud. (Nothing calls `readResult` today.)
+- The promise shape treats a resolved `buyNow` as success unless it says
+  `success: false`; the observable shape needs an explicit `success: true`.
 
 **Day-one checklist**, once the market unlocks and the real web app is
 reachable:
 
-1. Open the real FC web app with DevTools open, run `window.services` in the
-   console. If it exists with `Item`/`Transfer` sub-objects, check their
-   `repository` methods' names against the list above.
-2. If the names differ (near-certain — this is a documented guess), update
-   the three guarded lookups in `probe()` and the corresponding calls in
-   `actSearch`/`actBuy`/`actReadResult`. Nothing else in the codebase needs
-   to change — that is the whole point of the never-forge-a-request seam.
-3. Run a real search through the app's own UI with DevTools' Network tab
-   open, capture one `transfermarket` response, and diff it against
-   `test/fixtures/mock-ea-app/payloads.js`'s shape (`itemData.resourceId`,
-   `buyNowPrice`, `expires` as seconds-remaining, etc.) — passive
-   observation has been correct since milestone 1 and almost certainly still
-   is, but this is the cheap way to be sure before trusting `act.search`'s
-   result-shape guess (`extractAuctionInfo`'s `auctionInfo`/`items` fallback)
-   too.
-4. Call `services.Item.repository.search({})` directly in the console and
-   compare its resolved shape against what `extractAuctionInfo` expects.
-5. Only once 1–4 pass: flip a test account to a `ledger-auto`-entitled plan
+1. Load the extension, sign in, and open the real FC web app. Go to the
+   transfer market and run one search by hand in EA's own UI.
+2. Open the extension's options page (right-click the toolbar icon →
+   Options) and click **Copy diagnostics** under *Diagnostics*. It asks the
+   open EA tab's adapter for its report over the authenticated act channel
+   and copies a JSON report (also shown below the button). Paste it into
+   the team channel. It carries key names and types, never values: no
+   tokens, emails or coin balances.
+3. Read `adapter.probe` and `adapter.candidates`:
+   - **Good, observable shape:** `probe.ok: true`, `probe.shape:
+     "observable"`; `servicesKeys.Item` lists `searchTransferMarket` and
+     `bid` as `"function"`; `globals.UTSearchCriteriaDTO` is `"function"`;
+     `globals.searchHook` is `"installed"`, and the log has `search hook
+     installed`; after the human's own search the log shows no `hook:`
+     errors and `lastMarketResponse.source` is `"hook:search"`;
+     `lastMarketResponse.shape` (after an act search) has `success:
+     "boolean"` and `data.items["[0]"]` with `getAuctionData: "function"`
+     or an `_auction` object, plus one of
+     `definitionId`/`resourceId`/`maskedDefId`.
+   - **Good, promise shape:** `probe.ok: true`, `probe.shape: "promise"`;
+     `servicesKeys.Item.repository.search` and
+     `servicesKeys.Transfer.repository.buyNow` are `"function"`.
+   - **Neither:** `probe.ok: false`, and `candidates` says what each shape
+     was missing. `servicesKeys` shows what `window.services` really has,
+     three levels deep — write (or fix) a shape module from it. Nothing
+     outside `src/main/` needs to change: that is the never-forge-a-request
+     seam.
+4. Check the passive side in the same report: `lastMarketResponse.source:
+   "passive"` with `shape.auctionInfo["[0]"]` holding `tradeId`,
+   `buyNowPrice`, `expires` and `itemData.resourceId` as numbers, and
+   `stats.failed` at 0. Diff it against
+   `test/fixtures/mock-ea-app/payloads.js` if anything differs.
+5. With a saved filter that sets only a max price, let assist run one
+   search, then **Copy diagnostics** again: the last `log` lines should read
+   `search ok (<shape>): N listings`, and `lastMarketResponse.source` should
+   be `"act:search"`. `search failed: …` there, or `N` at 0 when EA's own UI
+   shows results for the same filter, means the criteria field names are
+   wrong: fix the shape's criteria builder. Repeat with a filter for each
+   of position, nation, league, club and quality, and compare against the
+   same search in EA's UI (the `level`/`SP` and rating names are the
+   likeliest to be wrong). `skipped N unreadable entries` in the log means
+   part of the item shape changed.
+6. Check that the card id lines up: the `resourceId` the panel shows for a
+   listing must be the same number EA's UI uses for that exact card
+   version (not the base player's `assetId`).
+7. Only once 1–6 pass: flip a test account to a `ledger-auto`-entitled plan
    and watch one real, human-confirmed `assist.confirmBuy()` (M2, not M3) go
-   through before trusting the automated loop at all.
+   through (`buy ok (<shape>)` in the log) before trusting the automated
+   loop at all. Confirm what a *failed* buy looks like too (outbid or
+   expired listing): it must show as `buy failed`, never `buy ok`. Note
+   how long a real `bid` takes to answer: a `timeout_unknown` in the log
+   means EA took over 12 s, and a following `late buy answer` line says
+   how it went. Several of those mean the limit is too short.
 
 ## 5. Safety governor: thresholds and math
 
@@ -261,6 +523,14 @@ falls back to the shipped default:
   see `packages/shared/src/schemas/settings.ts`, additive/backward-
   compatible).
 
+An allowed buy the adapter then *refuses* before calling EA (price
+mismatch, unknown listing, no entity, no act key), in a result whose MAC
+verified, is refunded with `Governor.refund(decision)`. An unsigned outcome
+is never refunded, even one reading `adapter_unauthenticated` (content's own
+timeout after an unsigned probe hint, which a page script can forge): it never reached EA, so it must not use up the
+action, buy or coin budget. A buy EA saw, or may have seen
+(`timeout_unknown`), stays charged.
+
 `actionsPerHour` and `sessionLengthMinutes` are **hard stops**: exceeding
 either puts the governor into a cooldown (`cooldownSeconds`, default 20,
 bounds 0–3600) during which _every_ action — search or buy — is denied,
@@ -293,9 +563,13 @@ overview only):
   pushed value lives in `storage.session` so a restarted service worker
   does not re-announce a deactivation.
 - **Pull** — `content/index.ts`'s engine tick (every 8 s) asks background
-  for `license.killSwitchGet`, the cached entitlement's flag from
-  `storage.local` (no network), and applies any difference. A missed push
-  is therefore corrected within one tick.
+  for `license.killSwitchGet`, the flag signed into the cached entitlement
+  blob (no network), and applies any difference. A missed push is therefore
+  corrected within one tick. The cached `killSwitchActive` field is never
+  read (anyone can edit `storage.local`); with no signed flag (cache
+  missing, tampered or expired, or a blob signed before the flag was a
+  claim) background asks `GET /extension/kill-switch`, and reports the
+  switch active if that fails too.
 
 Either path calls the content script's `applyKillSwitch()`, which sets the
 governor's switch, updates the in-page panel's status line ("Kill switch
@@ -307,6 +581,13 @@ not lost. Worst-case latency from an admin flipping the toggle to an open
 tab halting is therefore one heartbeat period (10 min) plus one engine
 tick; the cross-app e2e journey (b) asserts the open EA tab reports the
 switch after the heartbeat with no reload.
+
+**Known limit — features in an open tab.** Features (`assist.ranker`,
+`automation.autobuyer`) are read once, from `license.bootstrap` at page
+load; there is no features push. So when the 24h offline grace runs out, an
+EA tab that is already open keeps its features until it reloads (every new
+`license.bootstrap` answer has them off). The kill switch is not affected:
+it still reaches that tab by push and pull as above.
 
 `Governor.snapshot()` is the always-on "current utilization" read the risk
 meter (`ui/panel.ts`'s "Risk budget" section, and the popup) displays; it
@@ -333,7 +614,8 @@ word for word (`options/main.ts`'s `WHAT_IT_SENDS`), and the same list
   listing).
 
 **`telemetryOptOut`** (`lib/telemetry.ts`) is checked client-side, before
-anything is even queued for send — an opted-out user's data never leaves
+anything is even queued (`enqueue()` queues nothing while opted out or
+signed out) and again at flush — an opted-out user's data never leaves
 the machine in the first place, it is not a server-side filter on data that
 already arrived. It does **not** affect the license heartbeat
 (`lib/license.ts`), which sends only an install id, the extension version,
@@ -357,6 +639,28 @@ flush also fires on `chrome.runtime.onSuspend` (background/telemetry.ts) —
 not the safety net (the persistence above is), just an earlier send
 attempt when the browser signals it's about to unload the extension's
 background context.
+
+**Retries** (P0 task 11): each batch type flushes independently, and only
+the chunks that failed are re-queued. Every sniping attempt carries a
+client `attemptId` (kept with its original `occurredAt` in the queue), so a
+re-sent attempt is stored once by the API. A batch rejected with a 4xx
+other than 401/403/408/429 is logged and dropped, not retried forever,
+except a `TIMESTAMP_OUT_OF_WINDOW` 400: it names the offending items
+(`details.indices`), only those are dropped, and the rest of the chunk is
+sent again at once. Items outside the API's timestamp window (5 minutes
+ahead; 7 days back for activity and sniping, 400 days back for trades) are
+dropped before sending; each batch type holds at most 1,000 items, oldest
+dropped first.
+
+**Clock skew.** The API keeps that window strict and never clamps (a
+clamped `occurredAt` would stop matching a retried attempt's idempotency
+key). Instead `lib/clock.ts` keeps the offset between this machine and the
+server, measured from the `serverTime` in every bootstrap and heartbeat
+response and persisted in `storage.local`. `lib/telemetry.ts` moves an
+item's `occurredAt`/`boughtAt`/`soldAt` onto the server's clock once, when
+the item is queued, so the persisted item — and every retry of it — carries
+the corrected timestamp, and a machine whose clock runs fast loses
+nothing. The before-sending filter uses the corrected clock too.
 
 ## 7. Crash recovery
 

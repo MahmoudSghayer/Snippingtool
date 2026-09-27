@@ -10,7 +10,7 @@ import { ACCEPT_TERMS_ERROR, RegisterForm } from '@/pages/auth/RegisterPage.js';
 function setup() {
   const user = userEvent.setup();
   const onSubmit = vi.fn();
-  render(<RegisterForm onSubmit={onSubmit} defaultDeviceName="Test device" />);
+  render(<RegisterForm onSubmit={onSubmit} />);
   return { user, onSubmit };
 }
 
@@ -84,6 +84,12 @@ describe('RegisterForm', () => {
     ).toBeInTheDocument();
   });
 
+  it('has no device field', () => {
+    setup();
+    expect(screen.queryByLabelText('This device')).toBeNull();
+    expect(document.getElementById('deviceName')).toBeNull();
+  });
+
   it('accepts valid, matching passwords with the terms accepted and submits', async () => {
     const { user, onSubmit } = setup();
 
@@ -94,7 +100,6 @@ describe('RegisterForm', () => {
     await waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
     expect(onSubmit.mock.calls[0]![0]).toMatchObject({
       email: 'person@example.com',
-      deviceName: 'Test device',
       acceptTerms: true,
     });
   });

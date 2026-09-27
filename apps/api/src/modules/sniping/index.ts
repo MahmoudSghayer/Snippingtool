@@ -58,6 +58,7 @@ export default fp(
           userId,
           deviceId: known.has(a.deviceId) ? a.deviceId : null,
           resourceId: String(a.resourceId),
+          attemptId: a.attemptId ?? null,
           tradeId: a.tradeId ?? null,
           targetPrice: a.targetPrice,
           listedPrice: a.listedPrice,
@@ -67,15 +68,27 @@ export default fp(
           occurredAt: new Date(a.occurredAt),
         }));
         if (rows.length > 0) {
-          await fastify.db.insert(snipingActivity).values(rows);
-          // Snipe counts and success rate live in the `profits` rollup too;
-          // recompute the days this batch touched so the dashboard's
-          // success rate is current on its next request.
-          await rollupProfitsForUserDays(
-            fastify.db,
-            rows.map((r) => ({ userId, day: utcDay(r.occurredAt) })),
-          );
+          await fastify.db.transaction(async (tx) => {
+            // The extension re-sends a batch whose flush failed, with the
+            // same `attemptId` and `occurredAt` per attempt; the unique
+            // index on (user_id, attempt_id, occurred_at) (migration 0032)
+            // turns the repeat into a no-op instead of a second snipe.
+            // Attempts from older extensions carry no id and are inserted
+            // as before.
+            await tx.insert(snipingActivity).values(rows).onConflictDoNothing();
+            // Snipe counts and success rate live in the `profits` rollup
+            // too; recompute the days this batch touched, in the same
+            // transaction, so the dashboard's success rate is current on
+            // its next request and a failed rollup never leaves the
+            // attempts written without it.
+            await rollupProfitsForUserDays(
+              tx,
+              rows.map((r) => ({ userId, day: utcDay(r.occurredAt) })),
+            );
+          });
         }
+        // Counts what the client sent, duplicates included: a retried
+        // attempt is accepted, just not stored twice.
         return { accepted: rows.length };
       },
     );

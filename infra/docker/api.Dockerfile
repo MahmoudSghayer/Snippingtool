@@ -51,10 +51,14 @@ RUN pnpm --filter=@sl/api deploy --prod /prod/api
 # a template with placeholder origins; the API fills in its own APP_ORIGIN,
 # DASHBOARD_ORIGIN and entitlement key when it serves the zip
 # (apps/api/src/lib/extension-download.ts), so this image needs no
-# per-deployment build args for it.
+# per-deployment build args for it. The Tampermonkey userscript
+# (GET /api/v1/downloads/userscript/:token/nova-trade.user.js) is built the
+# same way, and also gets each user's signed download token filled in.
 RUN pnpm --filter=@sl/extension build:template \
+ && pnpm --filter=@sl/extension build:userscript-template \
  && mkdir -p /prod/api/downloads \
- && cp -r apps/extension/dist/ledger-auto-template /prod/api/downloads/extension-template
+ && cp -r apps/extension/dist/ledger-auto-template /prod/api/downloads/extension-template \
+ && cp -r apps/extension/dist/userscript-template /prod/api/downloads/userscript-template
 
 # ---------------------------------------------------------------------------
 # runtime — shared base for server + worker: non-root user, tini as PID 1,

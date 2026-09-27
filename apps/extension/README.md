@@ -26,11 +26,40 @@ pnpm --filter @sl/extension lint
 pnpm --filter @sl/extension test          # vitest, jsdom + fake-indexeddb
 pnpm --filter @sl/extension build:ledger  # -> dist/ledger
 pnpm --filter @sl/extension build:auto    # -> dist/ledger-auto
+pnpm --filter @sl/extension build:userscript  # -> dist/userscript/nova-trade.user.js
+pnpm --filter @sl/extension build:template             # -> dist/ledger-auto-template (API download)
+pnpm --filter @sl/extension build:userscript-template  # -> dist/userscript-template (API download)
 ```
 
 `dist/ledger` and `dist/ledger-auto` are both fully self-contained,
 loadable-unpacked extensions (`chrome://extensions` → Developer mode → Load
 unpacked → pick the `dist/<target>` folder).
+
+## Userscript (Tampermonkey)
+
+The same M1–M3 code as one Tampermonkey script, the optional one-click
+install next to the zip. Customers get it from the API: "My account" shows
+an "Install Nova Trade script" link (`GET /api/v1/downloads/userscript/link`)
+to `/api/v1/downloads/userscript/<signed token>/nova-trade.user.js`, which
+serves the `userscript --template` build with this deployment's origins and
+the user's token filled in, and only while their pass includes the
+autobuyer. The script's `@downloadURL`/`@updateURL` point at the same signed
+URLs, so Tampermonkey updates it when the extension version goes up, and
+stops getting updates (403) when the pass lapses. See
+`apps/api/src/lib/extension-download.ts` and `lib/userscript-token.ts`.
+
+For local testing, a standalone build against a given API:
+
+```
+VITE_API_ORIGIN=https://api.example.com \
+VITE_DASHBOARD_ORIGIN=https://example.com \
+pnpm --filter @sl/extension build:userscript
+```
+
+Without `USERSCRIPT_DOWNLOAD_URL` that script works but never
+auto-updates. In Chrome, Tampermonkey needs "Allow User Scripts" turned on
+for it (`chrome://extensions` → Tampermonkey → Details). How it maps onto the
+extension's worlds and APIs: [`docs/06-extension.md`](../../docs/06-extension.md) §3.
 
 ## End-to-end test
 

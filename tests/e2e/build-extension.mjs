@@ -18,11 +18,12 @@
 // extension's own e2e job" runs second in the same checkout.
 //
 // Otherwise mirrors apps/extension/scripts/build.mjs step-for-step — see
-// that file for the full rationale (library-mode IIFE builds for the two
+// that file for the full rationale (library-mode IIFE builds for the
 // content-script entries, an ES-module group for background/popup/options,
-// a hand-written manifest). Imports that file's sibling
-// generate-manifest.mjs directly (read-only — this suite never edits
-// apps/extension's own files) rather than duplicating the manifest shape.
+// a hand-written manifest). Imports that file's siblings entries.mjs (the
+// entry list, so this build emits every file the manifest names, handoff.js
+// included) and generate-manifest.mjs directly (read-only — this suite never
+// edits apps/extension's own files) rather than duplicating either.
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -39,6 +40,9 @@ export async function buildExtension(
 ) {
   const { buildManifest } = await import(
     path.join(extensionRoot, 'scripts', 'generate-manifest.mjs')
+  );
+  const { LIB_ENTRIES, ES_GROUP_INPUTS } = await import(
+    path.join(extensionRoot, 'scripts', 'entries.mjs')
   );
   const pkg = JSON.parse(readFileSync(path.join(extensionRoot, 'package.json'), 'utf8'));
 
@@ -86,33 +90,21 @@ export async function buildExtension(
 
   rmSync(outDir, { recursive: true, force: true });
 
-  await build({
-    ...baseConfig(true),
-    build: {
-      ...baseConfig(true).build,
-      lib: {
-        entry: path.join(extensionRoot, 'src/main/adapter.ts'),
-        formats: ['iife'],
-        name: 'SLAdapter',
-        fileName: () => 'adapter.js',
+  for (const [i, { entry, fileName, globalName }] of LIB_ENTRIES.entries()) {
+    await build({
+      ...baseConfig(i === 0),
+      build: {
+        ...baseConfig(i === 0).build,
+        lib: {
+          entry: path.join(extensionRoot, entry),
+          formats: ['iife'],
+          name: globalName,
+          fileName: () => fileName,
+        },
+        rollupOptions: { treeshake: { moduleSideEffects: false }, output: { extend: true } },
       },
-      rollupOptions: { treeshake: { moduleSideEffects: false }, output: { extend: true } },
-    },
-  });
-
-  await build({
-    ...baseConfig(false),
-    build: {
-      ...baseConfig(false).build,
-      lib: {
-        entry: path.join(extensionRoot, 'src/content/index.ts'),
-        formats: ['iife'],
-        name: 'SLContent',
-        fileName: () => 'content.js',
-      },
-      rollupOptions: { treeshake: { moduleSideEffects: false }, output: { extend: true } },
-    },
-  });
+    });
+  }
 
   await build({
     ...baseConfig(false),
@@ -120,11 +112,12 @@ export async function buildExtension(
       ...baseConfig(false).build,
       rollupOptions: {
         treeshake: { moduleSideEffects: false },
-        input: {
-          background: path.join(extensionRoot, 'src/background/index.ts'),
-          popup: path.join(extensionRoot, 'src/popup/index.html'),
-          options: path.join(extensionRoot, 'src/options/index.html'),
-        },
+        input: Object.fromEntries(
+          Object.entries(ES_GROUP_INPUTS).map(([name, entry]) => [
+            name,
+            path.join(extensionRoot, entry),
+          ]),
+        ),
         output: {
           entryFileNames: '[name].js',
           chunkFileNames: 'assets/[name]-[hash].js',

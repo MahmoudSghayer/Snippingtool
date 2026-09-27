@@ -9,7 +9,14 @@
  * behind `import.meta.env.VITE_AUTOMATION === '1'` as defence in depth.
  */
 import * as autobuyer from './autobuyer.js';
+import * as sniper from './sniper.js';
 
 export async function loadAutobuyer(): Promise<typeof autobuyer> {
   return autobuyer;
+}
+
+/** The Sniping Bot loop (`./sniper.ts`) is automation too, so it ships only
+ * where the autobuyer does, through the same alias. */
+export async function loadSniper(): Promise<typeof sniper> {
+  return sniper;
 }

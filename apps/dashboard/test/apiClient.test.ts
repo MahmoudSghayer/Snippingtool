@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { api, setUnauthorizedHandler } from '@/api/client.js';
+import { api, forgetCsrfToken, setUnauthorizedHandler } from '@/api/client.js';
 
 /** Covers docs/04-auth.md §10's CSRF model as implemented by
  * src/api/client.ts: the `x-csrf-token` header is attached to mutating
@@ -23,6 +23,7 @@ describe('api client CSRF + 401 handling', () => {
 
   afterEach(() => {
     document.cookie = 'sl_csrf=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+    forgetCsrfToken();
     setUnauthorizedHandler(() => {});
   });
 
@@ -40,15 +41,37 @@ describe('api client CSRF + 401 handling', () => {
     expect(request.headers.get('x-csrf-token')).toBe('test-csrf-token');
   });
 
+  it('uses the token from the x-csrf-token response header when the cookie is not readable (cross-site API)', async () => {
+    // Dashboard and API on different sites: `document.cookie` never holds
+    // the API host's `sl_csrf`, so the client takes it from a response.
+    document.cookie = 'sl_csrf=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+    const withHeader = vi.fn(
+      async () =>
+        new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', 'x-csrf-token': 'header-token.sig' },
+        }),
+    );
+    await api.GET('/api/v1/users/me', { fetch: withHeader });
+    await api.POST('/api/v1/auth/logout', { body: {}, fetch: fetchMock });
+    const request = fetchMock.mock.calls[0]![0] as Request;
+    expect(request.headers.get('x-csrf-token')).toBe('header-token.sig');
+  });
+
   it('does not attach x-csrf-token on a GET request', async () => {
     await api.GET('/api/v1/users/me', { fetch: fetchMock });
     const request = fetchMock.mock.calls[0]![0] as Request;
     expect(request.headers.get('x-csrf-token')).toBeNull();
   });
 
-  it('calls the unauthorized handler on a 401 for a non-exempt path', async () => {
+  it('calls the unauthorized handler on a 401 whose code is not refreshable', async () => {
+    // AUTH_SESSION_REVOKED (a force-logout / password-change row_version
+    // bump) is a 401 the silent-refresh middleware deliberately does not
+    // try to fix (see client.ts's `REFRESHABLE_AUTH_CODES` comment) — it
+    // should fall straight through to the unauthorized handler, same as
+    // before this middleware existed.
     fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ code: 'AUTH_TOKEN_EXPIRED', message: 'expired' }), {
+      new Response(JSON.stringify({ code: 'AUTH_SESSION_REVOKED', message: 'revoked' }), {
         status: 401,
       }),
     );
@@ -70,6 +93,222 @@ describe('api client CSRF + 401 handling', () => {
       body: { email: 'a@example.com', password: 'x', device: { fingerprint: 'a'.repeat(20) } },
       fetch: fetchMock,
     });
+    expect(handler).not.toHaveBeenCalled();
+  });
+});
+
+/** Defect C8 (this branch's P0 fix list): `sl_at` expires after 15
+ * minutes and nothing ever called `POST /auth/refresh`, so every dashboard
+ * session died at 15 minutes regardless of the 30-day `sl_rt` cookie. These
+ * cover client.ts's fix: a 401 whose code means the access token is expired
+ * or missing triggers one single-flighted refresh, then a single retry of
+ * the original request. */
+describe('api client silent token refresh', () => {
+  beforeEach(() => forgetCsrfToken());
+  afterEach(() => {
+    setUnauthorizedHandler(() => {});
+    document.cookie = 'sl_csrf=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+  });
+
+  function jsonResponse(body: unknown, status: number): Response {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  it('refreshes once and retries the original request on AUTH_TOKEN_EXPIRED', async () => {
+    let meCalls = 0;
+    const fetchMock = vi.fn(async (input: Request) => {
+      if (input.url.includes('/auth/refresh')) {
+        return jsonResponse({ accessToken: 'a', refreshToken: 'b', expiresIn: 900 }, 200);
+      }
+      meCalls += 1;
+      if (meCalls === 1) return jsonResponse({ code: 'AUTH_TOKEN_EXPIRED', message: 'expired' }, 401);
+      return jsonResponse({ id: 'user-1' }, 200);
+    });
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+
+    const { data, error } = await api.GET('/api/v1/users/me', { fetch: fetchMock });
+
+    expect(error).toBeUndefined();
+    expect(data).toEqual({ id: 'user-1' });
+    expect(meCalls).toBe(2);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('calls the unauthorized handler if the retry after a successful refresh still 401s', async () => {
+    // Fix round 1: a retry that still 401s (e.g. the session was revoked in
+    // the gap between the refresh and the retry) must not be handed back to
+    // the caller as a bare, unactioned 401 — it should redirect to login
+    // like any other unrecoverable 401.
+    let meCalls = 0;
+    const fetchMock = vi.fn(async (input: Request) => {
+      if (input.url.includes('/auth/refresh')) {
+        return jsonResponse({ accessToken: 'a', refreshToken: 'b', expiresIn: 900 }, 200);
+      }
+      meCalls += 1;
+      if (meCalls === 1) return jsonResponse({ code: 'AUTH_TOKEN_EXPIRED', message: 'expired' }, 401);
+      return jsonResponse({ code: 'AUTH_SESSION_REVOKED', message: 'revoked' }, 401);
+    });
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+
+    const { error } = await api.GET('/api/v1/users/me', { fetch: fetchMock });
+
+    expect(meCalls).toBe(2);
+    expect(handler).toHaveBeenCalledOnce();
+    // The *retried* response's error, not the original request's — proves
+    // the handler/return value both reflect the retry, not stale state.
+    expect(error).toEqual({ code: 'AUTH_SESSION_REVOKED', message: 'revoked' });
+  });
+
+  it('re-attaches the CSRF header on the retried request from the current cookie', async () => {
+    // Fix round 1: on a fresh browser session there's no `sl_csrf` cookie
+    // yet, so the original (mutating) request carries no CSRF header. The
+    // CSRF plugin mints the cookie server-side while handling that very
+    // request, and its `Set-Cookie` lands on the 401 response — a real
+    // browser applies it to `document.cookie` before this code runs. The
+    // retried request must pick up that newly-minted cookie, not replay the
+    // original (headerless) clone verbatim.
+    document.cookie = 'sl_csrf=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+    let enrollCalls = 0;
+    const fetchMock = vi.fn(async (input: Request) => {
+      if (input.url.includes('/auth/refresh')) {
+        return jsonResponse({ accessToken: 'a', refreshToken: 'b', expiresIn: 900 }, 200);
+      }
+      enrollCalls += 1;
+      if (enrollCalls === 1) {
+        document.cookie = 'sl_csrf=fresh-token; path=/';
+        return jsonResponse({ code: 'AUTH_TOKEN_EXPIRED', message: 'expired' }, 401);
+      }
+      return jsonResponse({ secret: 's', otpauthUrl: 'o', recoveryCodes: [] }, 200);
+    });
+    setUnauthorizedHandler(vi.fn());
+
+    await api.POST('/api/v1/auth/totp/enroll', { body: {}, fetch: fetchMock });
+
+    const originalRequest = fetchMock.mock.calls[0]![0] as Request;
+    const retryRequest = fetchMock.mock.calls[2]![0] as Request;
+    expect(originalRequest.headers.get('x-csrf-token')).toBeNull();
+    expect(retryRequest.headers.get('x-csrf-token')).toBe('fresh-token');
+  });
+
+  it('replays with the token the refresh response carried (cross-site API, no readable cookie)', async () => {
+    document.cookie = 'sl_csrf=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+    let enrollCalls = 0;
+    const fetchMock = vi.fn(async (input: Request) => {
+      if (input.url.includes('/auth/refresh')) {
+        const res = jsonResponse({ accessToken: 'a', refreshToken: 'b', expiresIn: 900 }, 200);
+        res.headers.set('x-csrf-token', 'after-refresh.sig');
+        return res;
+      }
+      enrollCalls += 1;
+      if (enrollCalls === 1) {
+        const res = jsonResponse({ code: 'AUTH_TOKEN_EXPIRED', message: 'expired' }, 401);
+        res.headers.set('x-csrf-token', 'before-refresh.sig');
+        return res;
+      }
+      return jsonResponse({ secret: 's', otpauthUrl: 'o', recoveryCodes: [] }, 200);
+    });
+    setUnauthorizedHandler(vi.fn());
+
+    await api.POST('/api/v1/auth/totp/enroll', { body: {}, fetch: fetchMock });
+
+    const retryRequest = fetchMock.mock.calls[2]![0] as Request;
+    expect(retryRequest.headers.get('x-csrf-token')).toBe('after-refresh.sig');
+  });
+
+  it('clearLocalSession forgets the remembered token', async () => {
+    document.cookie = 'sl_csrf=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+    const withHeader = vi.fn(async () => {
+      const res = jsonResponse({}, 200);
+      res.headers.set('x-csrf-token', 'old-user.sig');
+      return res;
+    });
+    await api.GET('/api/v1/users/me', { fetch: withHeader });
+    const { clearLocalSession } = await import('@/lib/session.js');
+    clearLocalSession();
+    const plain = vi.fn(async () => jsonResponse({}, 200));
+    await api.POST('/api/v1/auth/logout', { body: {}, fetch: plain });
+    expect((plain.mock.calls[0]![0] as Request).headers.get('x-csrf-token')).toBeNull();
+  });
+
+  it('single-flights the refresh across two concurrent 401s and retries both', async () => {
+    let refreshCalls = 0;
+    const seenOnce = new Set<string>();
+    const fetchMock = vi.fn(async (input: Request) => {
+      if (input.url.includes('/auth/refresh')) {
+        refreshCalls += 1;
+        // Yield a tick so both callers' 401s are already awaiting this same
+        // refresh before it resolves — proving they share one promise
+        // rather than each independently calling in and racing.
+        await Promise.resolve();
+        return jsonResponse({ accessToken: 'a', refreshToken: 'b', expiresIn: 900 }, 200);
+      }
+      if (!seenOnce.has(input.url)) {
+        seenOnce.add(input.url);
+        return jsonResponse({ code: 'AUTH_TOKEN_EXPIRED', message: 'expired' }, 401);
+      }
+      return jsonResponse({ ok: true }, 200);
+    });
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+
+    const [a, b] = await Promise.all([
+      api.GET('/api/v1/users/me', { fetch: fetchMock }),
+      api.GET('/api/v1/analytics/me/overview', { fetch: fetchMock }),
+    ]);
+
+    expect(refreshCalls).toBe(1);
+    expect(a.error).toBeUndefined();
+    expect(b.error).toBeUndefined();
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('calls the unauthorized handler with the original 401 when the refresh itself fails', async () => {
+    const fetchMock = vi.fn(async (input: Request) => {
+      if (input.url.includes('/auth/refresh')) {
+        return jsonResponse({ code: 'AUTH_TOKEN_INVALID', message: 'no refresh token' }, 401);
+      }
+      return jsonResponse({ code: 'AUTH_TOKEN_EXPIRED', message: 'expired' }, 401);
+    });
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+
+    const { error } = await api.GET('/api/v1/users/me', { fetch: fetchMock });
+
+    expect(handler).toHaveBeenCalledOnce();
+    expect(error).toEqual({ code: 'AUTH_TOKEN_EXPIRED', message: 'expired' });
+  });
+
+  it('never attempts a refresh for a 401 on /auth/refresh itself (no refresh loop)', async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse({ code: 'AUTH_TOKEN_EXPIRED', message: 'expired' }, 401),
+    );
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+
+    await api.POST('/api/v1/auth/refresh', { body: {}, fetch: fetchMock });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('never attempts a refresh for a 401 on /auth/login', async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse({ code: 'AUTH_TOKEN_EXPIRED', message: 'expired' }, 401),
+    );
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+
+    await api.POST('/api/v1/auth/login', {
+      body: { email: 'a@example.com', password: 'x', device: { fingerprint: 'a'.repeat(20) } },
+      fetch: fetchMock,
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
     expect(handler).not.toHaveBeenCalled();
   });
 });

@@ -9,7 +9,7 @@
 // (lib/analytics/rollup.ts) so the dashboard reflects it on its next
 // request rather than after the hourly job.
 
-import { trades } from '@sl/db';
+import { trades, type Database } from '@sl/db';
 import {
   closeTradeRequestSchema,
   computeTradeProfit,
@@ -20,7 +20,7 @@ import {
   tradeSchema,
   type Trade,
 } from '@sl/shared';
-import { and, desc, eq, inArray, isNull, lt } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import fp from 'fastify-plugin';
 import { z } from 'zod';
 
@@ -34,6 +34,24 @@ import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 
 type TradeRow = typeof trades.$inferSelect;
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Serialises one user's trade writes (batch and close) for the rest of
+ * the transaction. Each write reads a trade's previous days before moving
+ * it, so its old day can be re-rolled; without this, two writes to the
+ * same trade could each read the old days and one move would leave a
+ * stale day behind. Taken before any rollup lock, always, so the two
+ * kinds of lock are acquired in one order. */
+async function lockUserTrades(tx: Database, userId: string): Promise<void> {
+  await tx.execute(
+    sql.join([
+      sql`SELECT pg_advisory_xact_lock(hashtextextended(`,
+      sql.param(`trades:${userId}`),
+      sql`, 0))`,
+    ]),
+  );
+}
 
 /** Tax and net for a stored row: derived from prices whenever a sale price
  * is known, `null` while the card is still in flight. */
@@ -73,8 +91,19 @@ function batchValues(t: ReportTradesRequest['trades'][number], existing: TradeRo
   };
 
   if (existing && TERMINAL_STATUSES.has(existing.status) && !TERMINAL_STATUSES.has(t.status)) {
+    // The stored sale stands, so the purchase must still precede it: a
+    // stale report whose purchase time is after the recorded sale keeps the
+    // stored purchase time (trades_sold_after_bought would otherwise 500
+    // the whole batch). Not a 400: the extension cannot fix a report the
+    // dashboard's /close made stale, and rejecting it would fail every other
+    // trade in the batch with it.
+    // A stored purchase time of null stays null: trades_sold_after_bought
+    // accepts a NULL bought_at, and the reported one is after the sale.
+    const boughtAt: Date | null =
+      existing.soldAt && buySide.boughtAt > existing.soldAt ? existing.boughtAt : buySide.boughtAt;
     return {
       ...buySide,
+      boughtAt,
       status: existing.status,
       sellPrice: existing.sellPrice,
       soldAt: existing.soldAt,
@@ -128,13 +157,27 @@ export default fp(
       },
       async (request) => {
         const userId = request.authUser!.id;
-        const affected: { userId: string; day: string }[] = [];
+        // `trades_sold_after_bought` would otherwise fail the whole batch
+        // with a 500; say which trade is wrong instead.
+        const inverted = request.body.trades.find(
+          (t) => t.soldAt != null && Date.parse(t.soldAt) < Date.parse(t.boughtAt),
+        );
+        if (inverted)
+          throw AppErrors.validation('A trade cannot be sold before it was bought.', {
+            tradeId: inverted.tradeId,
+          });
 
         // A batch may report the same trade more than once (the extension
         // re-queues on a failed flush); the last report wins.
         const latest = new Map(request.body.trades.map((t) => [t.tradeId, t]));
 
         await fastify.db.transaction(async (tx) => {
+          // Serialise this user's trade writes: two overlapping batches that
+          // both see a new tradeId as absent would otherwise both insert it
+          // and one would 500 on the live unique index.
+          await lockUserTrades(tx, userId);
+
+          const affected: { userId: string; day: string }[] = [];
           const existingRows = await tx.query.trades.findMany({
             where: and(
               eq(trades.userId, userId),
@@ -160,9 +203,12 @@ export default fp(
             for (const day of touchedDays(values)) affected.push({ userId, day });
           }
           if (inserts.length > 0) await tx.insert(trades).values(inserts);
+
+          // In the same transaction, so the rollup sees exactly what this
+          // batch wrote and a failure leaves neither half behind.
+          await rollupProfitsForUserDays(tx, affected);
         });
 
-        await rollupProfitsForUserDays(fastify.db, affected);
         return { upserted: latest.size };
       },
     );
@@ -181,41 +227,44 @@ export default fp(
       },
       async (request) => {
         const userId = request.authUser!.id;
-        const existing = await fastify.db.query.trades.findFirst({
-          where: and(
-            eq(trades.id, request.params.id),
-            eq(trades.userId, userId),
-            isNull(trades.deletedAt),
-          ),
+        return fastify.db.transaction(async (tx) => {
+          await lockUserTrades(tx, userId);
+          const existing = await tx.query.trades.findFirst({
+            where: and(
+              eq(trades.id, request.params.id),
+              eq(trades.userId, userId),
+              isNull(trades.deletedAt),
+            ),
+          });
+          if (!existing) throw AppErrors.notFound('trade');
+          if (existing.status === 'sold')
+            throw AppErrors.conflict('This trade is already recorded as sold.', {
+              soldAt: existing.soldAt?.toISOString() ?? null,
+            });
+
+          const soldAt = request.body.soldAt ? new Date(request.body.soldAt) : new Date();
+          if (existing.boughtAt && soldAt < existing.boughtAt)
+            throw AppErrors.validation('A trade cannot be sold before it was bought.', {
+              boughtAt: existing.boughtAt.toISOString(),
+            });
+
+          const [updated] = await tx
+            .update(trades)
+            .set({
+              status: 'sold',
+              sellPrice: request.body.sellPrice,
+              soldAt,
+              ...profitColumns(existing.buyPrice ?? 0, request.body.sellPrice),
+            })
+            .where(eq(trades.id, existing.id))
+            .returning();
+
+          await rollupProfitsForUserDays(
+            tx,
+            touchedDays(updated!).map((day) => ({ userId, day })),
+          );
+          return toTradeDto(updated!);
         });
-        if (!existing) throw AppErrors.notFound('trade');
-        if (existing.status === 'sold')
-          throw AppErrors.conflict('This trade is already recorded as sold.', {
-            soldAt: existing.soldAt?.toISOString() ?? null,
-          });
-
-        const soldAt = request.body.soldAt ? new Date(request.body.soldAt) : new Date();
-        if (existing.boughtAt && soldAt < existing.boughtAt)
-          throw AppErrors.validation('A trade cannot be sold before it was bought.', {
-            boughtAt: existing.boughtAt.toISOString(),
-          });
-
-        const [updated] = await fastify.db
-          .update(trades)
-          .set({
-            status: 'sold',
-            sellPrice: request.body.sellPrice,
-            soldAt,
-            ...profitColumns(existing.buyPrice ?? 0, request.body.sellPrice),
-          })
-          .where(eq(trades.id, existing.id))
-          .returning();
-
-        await rollupProfitsForUserDays(
-          fastify.db,
-          touchedDays(updated!).map((day) => ({ userId, day })),
-        );
-        return toTradeDto(updated!);
       },
     );
 
@@ -234,15 +283,22 @@ export default fp(
         const limit = request.query.limit;
         const userId = request.authUser!.id;
 
+        // Keyset on (bought_at, id), newest first. Comparing bought_at alone
+        // skipped every row that shared the last row's timestamp — the
+        // extension can report several buys in the same millisecond.
+        const conditions = [eq(trades.userId, userId), isNull(trades.deletedAt)];
+        if (cursor) {
+          const at = new Date(cursor.v);
+          if (Number.isNaN(at.getTime()) || !UUID_RE.test(cursor.id))
+            throw AppErrors.validation('Invalid cursor.');
+          conditions.push(
+            or(lt(trades.boughtAt, at), and(eq(trades.boughtAt, at), lt(trades.id, cursor.id)))!,
+          );
+        }
+
         const rows = await fastify.db.query.trades.findMany({
-          where: cursor
-            ? and(
-                eq(trades.userId, userId),
-                isNull(trades.deletedAt),
-                lt(trades.boughtAt, new Date(cursor.v)),
-              )
-            : and(eq(trades.userId, userId), isNull(trades.deletedAt)),
-          orderBy: [desc(trades.boughtAt)],
+          where: and(...conditions),
+          orderBy: [desc(trades.boughtAt), desc(trades.id)],
           limit: limit + 1,
         });
 

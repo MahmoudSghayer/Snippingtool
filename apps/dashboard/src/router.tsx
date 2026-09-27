@@ -14,6 +14,7 @@ import { z } from 'zod';
 
 import { setUnauthorizedHandler } from '@/api/client.js';
 import { permissionsFor, type AdminNavKey } from '@/lib/adminNav.js';
+import { handleUnauthorized } from '@/lib/unauthorized.js';
 import { AppContentErrorCard, ErrorPage } from '@/pages/ErrorPage.js';
 import { NotFoundPage } from '@/pages/NotFoundPage.js';
 import {
@@ -342,13 +343,15 @@ declare module '@tanstack/react-router' {
   }
 }
 
-// 401 anywhere -> send the browser to /login, preserving the path it was on
-// so a successful login can return there (docs/07-dashboard.md "401 ->
-// redirect to login preserving return path").
-setUnauthorizedHandler((path) => {
-  if (window.location.pathname === '/login') return;
-  void router.navigate({ to: '/login', search: { returnTo: path } });
-});
+// 401 anywhere -> clear the local session (query cache included) and send
+// the browser to /login, preserving the path it was on so a successful
+// login can return there (docs/07-dashboard.md "401 -> redirect to login
+// preserving return path"; lib/unauthorized.ts).
+setUnauthorizedHandler((path) =>
+  handleUnauthorized(path, (returnTo) => {
+    void router.navigate({ to: '/login', search: { returnTo } });
+  }),
+);
 
 // --- Per-route <title> --------------------------------------------------
 // One static map + one subscription, rather than a `useEffect` in every

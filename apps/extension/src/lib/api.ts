@@ -12,7 +12,7 @@
 import { getValidAccessToken, handleUnauthorized } from './auth.js';
 import { retryFetch, toApiError, type RetryFetchOptions } from './http.js';
 
-export { ApiError, API_ORIGIN } from './http.js';
+export { ApiError, API_ORIGIN, NetworkError } from './http.js';
 
 export async function apiFetch(path: string, init: RequestInit = {}, opts: RetryFetchOptions = {}): Promise<Response> {
   let refreshedOnce = false;

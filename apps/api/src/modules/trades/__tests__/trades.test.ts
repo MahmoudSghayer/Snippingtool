@@ -32,11 +32,18 @@ async function createUser(
   return { userId, token };
 }
 
-function utcNoon(daysAgo: number): Date {
-  const now = new Date();
-  return new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - daysAgo, 12),
-  );
+/** An instant on the UTC day `daysAgo` days back: noon for past days, and
+ * for today the midpoint between midnight and now — the API rejects
+ * timestamps more than 5 minutes in the future, so "today at noon" only
+ * works in the afternoon. */
+// Fixed once, so two calls for the same day return the same instant (a
+// sale stamped a millisecond before its purchase is a 400).
+const NOW = new Date();
+function onUtcDay(daysAgo: number): Date {
+  const now = NOW;
+  const midnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - daysAgo);
+  if (daysAgo > 0) return new Date(midnight + 12 * 60 * 60 * 1000);
+  return new Date(midnight + Math.floor((now.getTime() - midnight) / 2));
 }
 
 function day(d: Date): string {
@@ -55,7 +62,7 @@ function tradePayload(overrides: Record<string, unknown> = {}) {
     eaTax: 0.05,
     netProfit: null,
     status: 'bought',
-    boughtAt: utcNoon(0).toISOString(),
+    boughtAt: onUtcDay(0).toISOString(),
     soldAt: null,
     ...overrides,
   };
@@ -94,7 +101,7 @@ describe('trades module (/api/v1/trades)', () => {
             eaTax: 0, // client claims no tax…
             netProfit: 999999, // …and a wildly inflated profit
             status: 'sold',
-            soldAt: utcNoon(0).toISOString(),
+            soldAt: onUtcDay(0).toISOString(),
           }),
         ],
       },
@@ -138,8 +145,8 @@ describe('trades module (/api/v1/trades)', () => {
 
   it('batch: rolls profits up immediately, on the day each event happened — including past days', async () => {
     const { userId, token } = await createUser(app, 'trades-rollup@example.com');
-    const yesterday = utcNoon(1);
-    const today = utcNoon(0);
+    const yesterday = onUtcDay(1);
+    const today = onUtcDay(0);
 
     const res = await app.inject({
       method: 'POST',
@@ -200,8 +207,8 @@ describe('trades module (/api/v1/trades)', () => {
 
   it('batch: re-reporting a trade re-rolls the day it moved away from', async () => {
     const { userId, token } = await createUser(app, 'trades-move@example.com');
-    const yesterday = utcNoon(1);
-    const today = utcNoon(0);
+    const yesterday = onUtcDay(1);
+    const today = onUtcDay(0);
 
     const first = tradePayload({
       tradeId: 'moved',
@@ -334,7 +341,9 @@ describe('trades module (/api/v1/trades)', () => {
       method: 'POST',
       url: '/api/v1/trades/batch',
       headers: { authorization: `Bearer ${token}` },
-      payload: { trades: [tradePayload({ tradeId: 'early', boughtAt: utcNoon(0).toISOString() })] },
+      payload: {
+        trades: [tradePayload({ tradeId: 'early', boughtAt: onUtcDay(0).toISOString() })],
+      },
     });
     const row = await app.db.query.trades.findFirst({
       where: and(eq(trades.userId, userId), eq(trades.tradeId, 'early')),
@@ -343,7 +352,7 @@ describe('trades module (/api/v1/trades)', () => {
       method: 'POST',
       url: `/api/v1/trades/${row!.id}/close`,
       headers: { authorization: `Bearer ${token}` },
-      payload: { sellPrice: 1, soldAt: utcNoon(3).toISOString() },
+      payload: { sellPrice: 1, soldAt: onUtcDay(3).toISOString() },
     });
     expect(res.statusCode).toBe(400);
   });
@@ -386,7 +395,7 @@ describe('trades module (/api/v1/trades)', () => {
             outcome: 'success',
             latencyMs: 10,
             errorCode: null,
-            occurredAt: utcNoon(0).toISOString(),
+            occurredAt: onUtcDay(0).toISOString(),
             deviceId: newId(),
           },
           {
@@ -396,7 +405,7 @@ describe('trades module (/api/v1/trades)', () => {
             outcome: 'too_slow',
             latencyMs: 10,
             errorCode: null,
-            occurredAt: utcNoon(0).toISOString(),
+            occurredAt: onUtcDay(0).toISOString(),
             deviceId: newId(),
           },
         ],

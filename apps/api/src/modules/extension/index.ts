@@ -127,6 +127,7 @@ export default fp(
           entitlementSnapshot,
           userId,
           deviceId,
+          killSwitchActive,
         );
 
         return {
@@ -192,6 +193,7 @@ export default fp(
           entitlementSnapshot,
           userId,
           deviceId,
+          killSwitchActive,
         );
 
         return {

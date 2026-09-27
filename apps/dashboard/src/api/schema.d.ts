@@ -4356,6 +4356,117 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/downloads/userscript/link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The signed-in user's Tampermonkey install link. The script behind it is served only while their pass is active. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uri */
+                            installUrl: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/downloads/userscript/{token}/nova-trade.user.js": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The Nova Trade userscript for Tampermonkey (signed per-user link). Requires an active pass. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    token: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/downloads/userscript/{token}/nova-trade.meta.js": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The userscript's header, which Tampermonkey polls for updates (signed per-user link). Requires an active pass. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    token: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/extension/bootstrap": {
         parameters: {
             query?: never;
@@ -4384,7 +4495,7 @@ export interface paths {
                         };
                         extensionVersion: string;
                         /** @enum {string} */
-                        buildTarget: "ledger" | "ledger-auto";
+                        buildTarget: "ledger" | "ledger-auto" | "userscript";
                     };
                 };
             };
@@ -4803,11 +4914,14 @@ export interface paths {
                                 minRating?: number;
                                 maxRating?: number;
                                 position?: string;
+                                zone?: number;
                                 nationality?: number;
                                 league?: number;
                                 club?: number;
                                 /** @enum {string} */
                                 quality?: "bronze" | "silver" | "gold" | "special";
+                                rarity?: number;
+                                chemistryStyle?: number;
                             };
                             filterHash: string;
                             isActive: boolean;
@@ -4838,11 +4952,14 @@ export interface paths {
                             minRating?: number;
                             maxRating?: number;
                             position?: string;
+                            zone?: number;
                             nationality?: number;
                             league?: number;
                             club?: number;
                             /** @enum {string} */
                             quality?: "bronze" | "silver" | "gold" | "special";
+                            rarity?: number;
+                            chemistryStyle?: number;
                         };
                     };
                 };
@@ -4865,11 +4982,14 @@ export interface paths {
                                 minRating?: number;
                                 maxRating?: number;
                                 position?: string;
+                                zone?: number;
                                 nationality?: number;
                                 league?: number;
                                 club?: number;
                                 /** @enum {string} */
                                 quality?: "bronze" | "silver" | "gold" | "special";
+                                rarity?: number;
+                                chemistryStyle?: number;
                             };
                             filterHash: string;
                             isActive: boolean;
@@ -4944,11 +5064,14 @@ export interface paths {
                             minRating?: number;
                             maxRating?: number;
                             position?: string;
+                            zone?: number;
                             nationality?: number;
                             league?: number;
                             club?: number;
                             /** @enum {string} */
                             quality?: "bronze" | "silver" | "gold" | "special";
+                            rarity?: number;
+                            chemistryStyle?: number;
                         };
                         isActive?: boolean;
                         sortOrder?: number;
@@ -4973,11 +5096,14 @@ export interface paths {
                                 minRating?: number;
                                 maxRating?: number;
                                 position?: string;
+                                zone?: number;
                                 nationality?: number;
                                 league?: number;
                                 club?: number;
                                 /** @enum {string} */
                                 quality?: "bronze" | "silver" | "gold" | "special";
+                                rarity?: number;
+                                chemistryStyle?: number;
                             };
                             filterHash: string;
                             isActive: boolean;
@@ -6761,6 +6887,8 @@ export interface paths {
                 content: {
                     "application/json": {
                         attempts: {
+                            /** Format: uuid */
+                            attemptId?: string;
                             resourceId: number;
                             tradeId?: string;
                             targetPrice: number;

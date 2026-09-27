@@ -17,24 +17,37 @@
  * boot here used to take M1 recording down with it (docs/12-testing.md
  * "Defects found" row #10). Nothing in this file touches `lib/storage.ts`.
  */
-import { extContentKillSwitchMessageSchema } from '@sl/shared';
+import { DEFAULT_BOT_SETTINGS, extContentKillSwitchMessageSchema } from '@sl/shared';
 import browser from 'webextension-polyfill';
 
 import { AssistEngine } from '../engine/assist.js';
 import { Governor, type GovernorState } from '../engine/governor.js';
 import { rankCandidates, type OpportunityCandidate, type ScoredOpportunity } from '../engine/ranker.js';
 import { countObservedSearches, governedSearch } from '../engine/search.js';
+import { readHandedOffNonce } from '../lib/act-auth.js';
+import { riskLevelChangeEvent } from '../lib/bot-safety.js';
 import { logger } from '../lib/logger.js';
 import { singleFlight } from '../lib/single-flight.js';
+import { setBotPageOpener } from '../ui/bot-opener.js';
+import { createBotPage } from '../ui/bot-page.js';
+import { installNavItem } from '../ui/ea-nav.js';
 import { createPanel, type Panel } from '../ui/panel.js';
+import { onTrusted } from '../ui/trusted-events.js';
 
-import { createAdapterClient } from './adapter-client.js';
+import { createAdapterClient, pageWindow } from './adapter-client.js';
+import { createDiagnosticsResponder } from './diagnostics.js';
+import { createSearchObserver } from './search-observer.js';
 
 import type { Autobuyer, StopReason } from '../engine/autobuyer.js';
+import type { Sniper } from '../engine/sniper.js';
 import type { AttemptInput, TradeInput } from '../engine/types.js';
+import type { Catalog } from '../model/catalog.js';
 import type { PriceSummary } from '../model/prices.js';
 import type {
   ActivityEvent,
+  BotBudgetState,
+  BotDailyUsage,
+  BotSettings,
   BackgroundResponse,
   BootstrapResponse,
   FeatureKey,
@@ -55,6 +68,10 @@ const RISK_UI_TICK_MS = 3000;
 const AUTOBUYER_TICK_MS = 8000;
 const WATCHDOG_MS = 15000;
 const WATCHDOG_STALE_MS = 60000;
+/** How often a running Sniping Bot re-reads the entitlement (background's
+ * cached `license.bootstrap`, refreshed by its heartbeat), so a plan that
+ * loses the bot stops it mid-session. */
+const ENTITLEMENT_CHECK_MS = 30000;
 
 // ---- background messaging ---------------------------------------------------
 
@@ -81,7 +98,31 @@ function nowIso(): string {
 
 async function main(): Promise<void> {
   const panel: Panel = createPanel();
-  const adapter = createAdapterClient(window);
+  // The act-channel nonce content/handoff.ts minted at document_start (the
+  // userscript's setup.ts, in that build). Without it every act call fails
+  // closed (assist/automation cannot buy); M1 recording does not need it.
+  const actNonce = readHandedOffNonce();
+  if (!actNonce) logger.warn('no act-channel nonce was handed off — assist/automation buys are disabled on this page', 'adapter');
+  const adapter = createAdapterClient(pageWindow(), actNonce);
+  // The options page's "Copy diagnostics" (content/diagnostics.ts). Wired
+  // here, before any bootstrap, so it answers even when M2/M3 never boots —
+  // which is exactly when it is needed.
+  const respondToDiagnostics = createDiagnosticsResponder(adapter, browser.runtime.id);
+  browser.runtime.onMessage.addListener((message: unknown, sender: { id?: string }) => respondToDiagnostics(message, sender));
+
+  // The Snipe Targets form's choices, built by the adapter with the web
+  // app's own lists once it has started (model/catalog.ts), and sent over
+  // the same authenticated channel as act results: only a catalog whose MAC
+  // verifies reaches this callback. Asked for now too, in case it was ready
+  // before this script was listening.
+  // Automation builds only: the listable build has no Sniping Bot page, and
+  // its adapter builds no catalog.
+  if (AUTOMATION_ENABLED) {
+    adapter.onCatalog((catalog) => {
+      void send('catalog.save', catalog);
+    });
+    adapter.requestCatalog();
+  }
 
   panel.setHealth('live', 'Recording. Nothing beyond product telemetry (docs/06-extension.md) is sent.');
   send('counts').then((data) => data && panel.setTotals(data as { auctions: number; playersLast24h: number }));
@@ -90,7 +131,6 @@ async function main(): Promise<void> {
 
   let recordQueue: TrimmedAuction[] = [];
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
-  let searches = 0;
   let lastResourceId: number | null = null;
   let lastRating: number | null = null;
   const tracked = new Map<string, TrimmedAuction>();
@@ -112,15 +152,9 @@ async function main(): Promise<void> {
   // an `engine.killSwitch` push arriving before the M2 bootstrap finishes
   // is not lost (it is re-applied to the governor once one exists).
   let killSwitchActive = false;
-
-  function dominantResource(auctions: TrimmedAuction[]): number | null {
-    const tally = new Map<number, number>();
-    for (const a of auctions) tally.set(a.resourceId, (tally.get(a.resourceId) ?? 0) + 1);
-    let best: number | null = null;
-    let bestN = 0;
-    for (const [id, n] of tally) if (n > bestN) { best = id; bestN = n; }
-    return best != null && bestN / auctions.length >= 0.5 ? best : null;
-  }
+  // The Sniping Bot (automation builds; see "M3: the Sniping Bot page"
+  // below). Declared here so the kill switch above can stop it.
+  let sniper: Sniper | null = null;
 
   async function flushRecordQueue(): Promise<void> {
     flushTimer = null;
@@ -170,33 +204,36 @@ async function main(): Promise<void> {
     void send('telemetry.enqueue', { kind: 'activity', items: [event] });
   }
 
-  adapter.onAuctions((raw) => {
-    const auctions = raw as TrimmedAuction[];
-    searches++;
-    panel.setSearches(searches);
-    panel.setHealth(engineHealthState(), engineHealthMessage());
-
-    for (const a of auctions) {
-      tracked.set(a.tradeId, a);
-    }
-    // Prune anything long expired so `tracked` doesn't grow without bound.
-    const cutoff = Date.now() - 10 * 60 * 1000;
-    for (const [id, a] of tracked) if (a.expiresAt != null && a.expiresAt < cutoff) tracked.delete(id);
-
-    if (auctions.length > 0) {
-      const dominant = dominantResource(auctions);
-      if (dominant != null) {
-        lastResourceId = dominant;
-        lastRating = auctions.find((a) => a.resourceId === dominant)?.rating ?? null;
-      }
-      // No real filter is known for a manually-run EA search (the adapter
-      // only sees the response, not the request) — `resource:<id>` is a
-      // coarse, documented stand-in filter hash (docs/06-extension.md).
-      reportSearchActivity(dominant != null ? `resource:${dominant}` : 'mixed', auctions);
-      recordQueue = recordQueue.concat(auctions);
-      scheduleFlush();
+  // Listings the adapter can now buy (it has seen their item entities).
+  // Not a search: nothing is counted, recorded or reported.
+  adapter.onBuyable((tradeIds) => {
+    for (const tradeId of tradeIds) {
+      const a = tracked.get(tradeId);
+      if (a) tracked.set(tradeId, { ...a, buyable: true });
     }
   });
+
+  // One `auctions` message is one search (the adapter posts each search
+  // once, main/adapter.ts): content/search-observer.ts does the counting,
+  // tracking, telemetry and ledger recording for it.
+  adapter.onAuctions(
+    createSearchObserver({
+      tracked,
+      onSearch: (count) => {
+        panel.setSearches(count);
+        panel.setHealth(engineHealthState(), engineHealthMessage());
+      },
+      onDominant: (resourceId, rating) => {
+        lastResourceId = resourceId;
+        lastRating = rating;
+      },
+      reportSearch: reportSearchActivity,
+      record: (auctions) => {
+        recordQueue = recordQueue.concat(auctions);
+        scheduleFlush();
+      },
+    }),
+  );
 
   // Every observed search response counts toward the governor's
   // buy/search ratio and actionsPerHour — the human searching in EA's own UI
@@ -245,6 +282,9 @@ async function main(): Promise<void> {
     const changed = active !== killSwitchActive;
     killSwitchActive = active;
     governor?.setKillSwitch(active, active ? (reason ?? 'server kill switch active') : undefined);
+    // The Sniping Bot runs its own governor: stop it now rather than at its
+    // next action (it re-reads the switch before every one anyway).
+    if (active && sniper?.isRunning()) sniper.stop('kill_switch', reason ?? 'server kill switch active');
     if (changed) {
       if (active) logger.warn(`kill switch active — ${reason ?? 'server kill switch active'}`, 'kill-switch');
       else logger.info('kill switch cleared by the server', 'kill-switch');
@@ -301,6 +341,9 @@ async function main(): Promise<void> {
 
   function recordAttempt(input: AttemptInput): void {
     const attempt: SnipingAttempt = {
+      // Identifies this attempt through every retry of its flush, so the
+      // API stores it once (lib/telemetry.ts).
+      attemptId: crypto.randomUUID(),
       resourceId: input.resourceId,
       tradeId: input.tradeId,
       targetPrice: input.targetPrice,
@@ -348,8 +391,11 @@ async function main(): Promise<void> {
   let deviceIdCache: string | null = null;
   const sessionId = crypto.randomUUID();
 
+  // Saved filters: rotated by assist, searched by the Sniping Bot, edited
+  // on the Sniping Bot page. One array so all three see the same list.
+  let filters = (await send<SavedFilter[]>('filters.list')) ?? [];
+
   if (governor && features.includes('assist.ranker')) {
-    const filters = (await send<SavedFilter[]>('filters.list')) ?? [];
     assist = new AssistEngine({
       governor,
       adapter,
@@ -376,7 +422,9 @@ async function main(): Promise<void> {
       onTrade: recordTrade,
     });
 
-    document.addEventListener('keydown', (e) => {
+    // Trusted key presses only: the confirm key buys, and a page script can
+    // dispatch a synthetic keydown on `document` (ui/trusted-events.ts).
+    onTrusted(document, 'keydown', (e) => {
       const target = e.target as HTMLElement | null;
       const typing = target && /^(input|textarea|select)$/i.test(target.tagName);
       if (typing || !assist) return;
@@ -399,6 +447,142 @@ async function main(): Promise<void> {
     }
   }
 
+  // ---- M3: the Sniping Bot page -------------------------------------------
+  //
+  // Automation builds only (the listable build never loads `engine/sniper.ts`
+  // — see `engine/autobuyer-loader.*.ts`). The bot runs its own governor from
+  // the page's Safety limits; the server kill switch still stops it.
+  if (AUTOMATION_ENABLED) {
+    let botSettings: BotSettings | null = await send<BotSettings>('bot.settingsGet');
+    let unavailableReason: string | null = null;
+
+    // Called at load and whenever the page opens: a user who signs in from
+    // the SL drawer after the page loaded gets the bot without a reload.
+    const prepareSniper = async (fresh: boolean): Promise<void> => {
+      if (sniper) {
+        // A plan lost mid-session (the check below) empties `features`, and
+        // the bot then refuses to start. Opening the page re-checks, so a
+        // user who signs back in or renews gets the bot without a reload.
+        if (fresh && !features.includes('automation.autobuyer')) {
+          const boot = await send<BootstrapResponse>('license.bootstrap');
+          if (boot) {
+            features = boot.features;
+            killSwitchActive = killSwitchActive || boot.killSwitchActive;
+          }
+        }
+        return;
+      }
+      let signedIn = !!authStatus?.authenticated;
+      let allowed = features.includes('automation.autobuyer');
+      if (fresh) {
+        signedIn = !!(await send<{ authenticated: boolean }>('auth.status'))?.authenticated;
+        const boot = signedIn ? await send<BootstrapResponse>('license.bootstrap') : null;
+        allowed = !!boot?.features.includes('automation.autobuyer');
+        if (boot) {
+          features = boot.features;
+          killSwitchActive = killSwitchActive || boot.killSwitchActive;
+          deviceIdCache = deviceIdCache ?? boot.deviceId;
+        }
+      }
+      botSettings = botSettings ?? (await send<BotSettings>('bot.settingsGet'));
+      // No act-channel nonce: the adapter cannot authenticate a single
+      // search or buy. In the userscript that means page scripts had already
+      // run when it installed (userscript/setup.ts refuses the handoff then).
+      if (!actNonce) unavailableReason = NO_ACT_CHANNEL_REASON;
+      else if (!signedIn) unavailableReason = 'Sign in (NT button) to use the Sniping Bot.';
+      else if (!allowed) unavailableReason = 'Your plan does not include the Sniping Bot.';
+      else if (!botSettings) unavailableReason = 'The extension could not load the bot settings. Reload the page.';
+      else unavailableReason = null;
+      if (unavailableReason || !botSettings) return;
+
+      const { loadSniper } = await import('virtual:autobuyer-loader');
+      const mod = await loadSniper();
+      if (!mod) {
+        unavailableReason = 'The Sniping Bot is not available in this build.';
+        return;
+      }
+      sniper = new mod.Sniper(
+        {
+          adapter,
+          getFilters: () => filters.filter((f) => f.isActive).map((f) => ({ id: f.id, name: f.name, filter: f.filter })),
+          estimateSellPrice: async (resourceId) => {
+            const r = await send<{ summary: PriceSummary }>('summary', { resourceId, minProfit: settingsCache.targets.minProfitPerSnipe });
+            return r?.summary.median ?? null;
+          },
+          // The hours-per-day limit survives a page reload.
+          loadUsage: () => send<BotDailyUsage | null>('bot.usageGet'),
+          saveUsage: (usage) => void send('bot.usageSet', usage),
+          // The hourly budgets survive Stop/Start and a page reload too.
+          loadBudget: () => send<BotBudgetState | null>('bot.budgetGet'),
+          saveBudget: (budget) => void send('bot.budgetSet', budget),
+          entitled: () => features.includes('automation.autobuyer'),
+          killSwitch: () => ({ active: killSwitchActive || !!governor?.isKillSwitchActive() }),
+          onChange: () => botPage.refresh(),
+          onAttempt: recordAttempt,
+          onTrade: recordTrade,
+        },
+        botSettings,
+      );
+    };
+    await prepareSniper(false);
+
+    // A plan that loses the bot mid-session (the heartbeat refreshes
+    // background's cached entitlement) stops it with a reason, not at the
+    // next page load. The kill switch has its own push and pull above.
+    let entitlementMisses = 0;
+    setInterval(() => {
+      const autobuyerRunning = !!autobuyer && !autobuyer.isStopped();
+      if (!sniper?.isRunning() && !autobuyerRunning) return;
+      void send<BootstrapResponse>('license.bootstrap').then((boot) => {
+        if (boot) {
+          entitlementMisses = 0;
+          features = boot.features;
+          if (boot.killSwitchActive) applyKillSwitch(true, 'server kill switch active');
+        } else if (++entitlementMisses >= 2) {
+          // No entitlement at all (signed out, or background has none to
+          // give): fail closed.
+          features = [];
+        }
+        if (features.includes('automation.autobuyer')) return;
+        sniper?.stop('not_entitled');
+        if (autobuyer && !autobuyer.isStopped()) {
+          autobuyer.stop('not_entitled', 'your plan no longer includes automation');
+          reportAutobuyerStop('not_entitled', 'your plan no longer includes automation');
+        }
+      });
+    }, ENTITLEMENT_CHECK_MS);
+
+    const botPage = createBotPage({
+      getSniper: () => sniper,
+      getUnavailableReason: () => (sniper ? null : unavailableReason),
+      prepare: () => prepareSniper(true),
+      getSettings: () => botSettings ?? DEFAULT_BOT_SETTINGS,
+      saveSettings: async (next) => {
+        // A change of risk level is reported, so admins can see who runs
+        // the bot on risky settings.
+        const modeEvent = riskLevelChangeEvent(botSettings, next, nowIso(), deviceIdCache);
+        botSettings = next;
+        await send('bot.settingsSet', next);
+        if (modeEvent) void send('telemetry.enqueue', { kind: 'activity', items: [modeEvent] });
+      },
+      getFilters: () => filters,
+      saveFilters: async (next) => {
+        filters = next;
+        await send('filters.save', { filters: next });
+      },
+      resolveNames: async (resourceIds) => (await send<Record<string, string | null>>('cards.names', { resourceIds })) ?? {},
+      getCatalog: () => send<Catalog | null>('catalog.get'),
+    });
+    const nav = installNavItem({
+      onToggle: () => botPage.toggle(),
+      onEaNavigate: () => botPage.close(),
+      onOffset: (left, top) => botPage.setOffsets(left, top),
+    });
+    botPage.onOpenChange((open) => nav.setActive(open));
+    setBotPageOpener(() => botPage.open());
+    panel.setBotLauncher(() => botPage.open());
+  }
+
   function buildCandidatesFromTracked(): OpportunityCandidate[] {
     // Cap the number of distinct cards summarised per tick — this is a
     // content-script loop (rule 5 allows it here), but it should still be a
@@ -412,7 +596,13 @@ async function main(): Promise<void> {
     }
     return Array.from(byResource.entries())
       .slice(0, 20)
-      .flatMap(([, auctions]) => auctions.map((a) => ({ resourceId: a.resourceId, tradeId: a.tradeId, price: a.buyNow, summary: lastSummaryByResource.get(a.resourceId) })))
+      .flatMap(([, auctions]) =>
+        // A listing the adapter said it cannot buy never becomes a candidate
+        // (engine/ranker.ts drops `buyable: false` too, belt and braces).
+        auctions
+          .filter((a) => a.buyable !== false)
+          .map((a) => ({ resourceId: a.resourceId, tradeId: a.tradeId, price: a.buyNow, summary: lastSummaryByResource.get(a.resourceId) })),
+      )
       .filter((c): c is OpportunityCandidate => c.summary != null);
   }
 
@@ -446,7 +636,8 @@ async function main(): Promise<void> {
     rankedCandidates = rankCandidates(candidates, { minEv: settingsCache.targets.minProfitPerSnipe });
     panel.setRanked(rankedCandidates);
 
-    if (autobuyer && !autobuyer.isStopped()) {
+    // The Sniping Bot buys on its own; never let two engines buy at once.
+    if (autobuyer && !autobuyer.isStopped() && !sniper?.isRunning()) {
       await autobuyer.runCycle(rankedCandidates.slice(0, 5));
       const stop = autobuyer.getStopReason();
       if (stop) reportAutobuyerStop(stop.reason, stop.detail);
@@ -529,9 +720,22 @@ async function main(): Promise<void> {
   }
 }
 
-void main().catch((err) => {
-  // M1 recording is wired up synchronously at the top of main() and keeps
-  // working whatever happens below it; a failed M2/M3 bootstrap is reported,
-  // never allowed to become a silent unhandled rejection.
-  logger.error(`content bootstrap failed (recording continues): ${String(err)}`, 'content');
-});
+/** Shown on the Sniping Bot page when no act-channel nonce was handed off. */
+const NO_ACT_CHANNEL_REASON =
+  "Nova Trade could not open a secure connection to EA's web app on this page load, so the Sniping Bot is locked. Reload the page to use it.";
+
+function start(): void {
+  void main().catch((err) => {
+    // M1 recording is wired up synchronously at the top of main() and keeps
+    // working whatever happens below it; a failed M2/M3 bootstrap is reported,
+    // never allowed to become a silent unhandled rejection.
+    logger.error(`content bootstrap failed (recording continues): ${String(err)}`, 'content');
+  });
+}
+
+// The extension injects this file at document_idle, so the first branch is
+// never taken there. The userscript build evaluates it at document-start (so
+// the MAIN-world adapter is in place before EA's first market call) and the
+// panel needs a <body> to attach to.
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
+else start();

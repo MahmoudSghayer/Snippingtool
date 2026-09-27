@@ -46,7 +46,9 @@ function detectBrowser(): string {
   return 'Unknown';
 }
 
-export function buildDevicePayload(name: string): {
+/** The device this browser signs in as. Named automatically ("Chrome on
+ * Windows"): it shows under Devices in My account. */
+export function buildDevicePayload(): {
   fingerprint: string;
   name: string;
   browser: string;
@@ -54,7 +56,7 @@ export function buildDevicePayload(name: string): {
 } {
   return {
     fingerprint: getDeviceFingerprint(),
-    name,
+    name: defaultDeviceName(),
     browser: detectBrowser(),
     os: detectOs(),
   };

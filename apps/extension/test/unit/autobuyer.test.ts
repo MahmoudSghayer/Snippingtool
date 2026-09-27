@@ -49,6 +49,7 @@ function fakeAdapter(buyImpl: AdapterClient['buy'] = async () => ({ ok: true, la
     search: vi.fn(async () => ({ ok: true, latencyMs: 5 })),
     buy: buyImpl,
     readResult: vi.fn(async () => ({ ok: true, latencyMs: 5 })),
+    diagnostics: vi.fn(async () => ({ ok: false, latencyMs: 0 })),
     onProbe: (cb) => {
       probeCb = cb;
       return () => {
@@ -61,7 +62,10 @@ function fakeAdapter(buyImpl: AdapterClient['buy'] = async () => ({ ok: true, la
         shapeCb = undefined;
       };
     },
+    onBuyable: () => () => undefined,
     onAuctions: () => () => undefined,
+    onCatalog: () => () => undefined,
+    requestCatalog: () => undefined,
     dispose: () => undefined,
   };
 
@@ -181,5 +185,80 @@ describe('Autobuyer: respects governor denial', () => {
     // First buy (800) fits under the 1000 budget; the second (would bring total to 1600) is skipped.
     expect(successes).toBe(1);
     expect(buy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Autobuyer: adapter refusals are failed attempts, not retries (defect C12)', () => {
+  it.each(['price_mismatch', 'listing_unknown', 'listing_entity_unknown', 'adapter_unauthenticated'])(
+    'a %s refusal is recorded once as failed, with no trade and no retry',
+    async (error) => {
+      const onAttempt = vi.fn();
+      const onTrade = vi.fn();
+      const governor = new Governor(SETTINGS, { now: () => 0 });
+      const buy = vi.fn(async () => ({ ok: false, error, latencyMs: 1 }));
+      const { adapter } = fakeAdapter(buy);
+
+      const autobuyer = new Autobuyer({ governor, adapter, onAttempt, onTrade, maxRetriesPerCandidate: 2 });
+      const successes = await autobuyer.runCycle([opportunity({ tradeId: 't-1' })]);
+
+      expect(successes).toBe(0);
+      expect(buy).toHaveBeenCalledTimes(1);
+      expect(onTrade).not.toHaveBeenCalled();
+      expect(onAttempt).toHaveBeenCalledTimes(1);
+      expect(onAttempt).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'failed', errorCode: error }));
+    },
+  );
+});
+
+describe('Autobuyer: what reaches EA, and what the governor charges', () => {
+  it('refunds the governor for an adapter refusal', async () => {
+    const governor = new Governor(SETTINGS, { now: () => 0 });
+    governor.allow({ kind: 'search' });
+    const before = governor.snapshot();
+    const { adapter } = fakeAdapter(vi.fn(async () => ({ ok: false, error: 'price_mismatch', latencyMs: 1, signed: true as const })));
+    await new Autobuyer({ governor, adapter, onAttempt: vi.fn(), onTrade: vi.fn() }).runCycle([opportunity()]);
+    expect(governor.snapshot()).toEqual(before);
+  });
+
+  it('never refunds an unsigned adapter_unauthenticated (a forged probe plus a timeout)', async () => {
+    const governor = new Governor(SETTINGS, { now: () => 0 });
+    governor.allow({ kind: 'search' });
+    const { adapter } = fakeAdapter(vi.fn(async () => ({ ok: false, error: 'adapter_unauthenticated', latencyMs: 15_000 })));
+    await new Autobuyer({ governor, adapter, onAttempt: vi.fn(), onTrade: vi.fn() }).runCycle([opportunity()]);
+    expect(governor.serialize().buyCount).toBe(1);
+    expect(governor.snapshot().coinFlowLastHour).toBe(1000);
+  });
+
+  it('never attempts a listing the adapter cannot buy', async () => {
+    const buy = vi.fn(async () => ({ ok: true, latencyMs: 1 }));
+    const { adapter } = fakeAdapter(buy);
+    const onAttempt = vi.fn();
+    const governor = new Governor(SETTINGS, { now: () => 0 });
+    await new Autobuyer({ governor, adapter, onAttempt, onTrade: vi.fn() }).runCycle([opportunity({ tradeId: 'x', buyable: false })]);
+    expect(buy).not.toHaveBeenCalled();
+    expect(onAttempt).not.toHaveBeenCalled();
+    expect(governor.serialize().buyCount).toBe(0);
+  });
+
+  it('never retries a timeout_unknown buy (it may have gone through), and counts a late success', async () => {
+    let resolveLate: (o: { ok: boolean; latencyMs: number }) => void = () => undefined;
+    const late = new Promise<{ ok: boolean; latencyMs: number }>((r) => (resolveLate = r));
+    const buy = vi.fn(async () => ({ ok: false, error: 'timeout_unknown', latencyMs: 12_000, late }));
+    const { adapter } = fakeAdapter(buy);
+    const onAttempt = vi.fn();
+    const onTrade = vi.fn();
+    const governor = new Governor(SETTINGS, { now: () => 0 });
+    const autobuyer = new Autobuyer({ governor, adapter, onAttempt, onTrade, maxRetriesPerCandidate: 2, sessionCoinBudget: 1500 });
+    expect(await autobuyer.runCycle([opportunity({ price: 1000 })])).toBe(0);
+    expect(buy).toHaveBeenCalledTimes(1);
+    expect(onAttempt).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'attempted', errorCode: 'timeout_unknown' }));
+
+    resolveLate({ ok: true, latencyMs: 13_000 });
+    await vi.waitFor(() => expect(onTrade).toHaveBeenCalledTimes(1));
+    // The late buy counts against the session budget: a second 1000 no longer fits.
+    const buy2 = vi.fn(async () => ({ ok: true, latencyMs: 1 }));
+    (adapter as { buy: unknown }).buy = buy2;
+    await autobuyer.runCycle([opportunity({ tradeId: 't-2', price: 1000 })]);
+    expect(buy2).not.toHaveBeenCalled();
   });
 });

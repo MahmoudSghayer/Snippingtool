@@ -47,7 +47,7 @@ export default fp(
       credentials: true,
       methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'Authorization', 'x-csrf-token', 'x-request-id'],
-      exposedHeaders: ['x-request-id'],
+      exposedHeaders: ['x-request-id', 'x-csrf-token'],
     });
   },
   { name: 'cors', dependencies: ['config'] },

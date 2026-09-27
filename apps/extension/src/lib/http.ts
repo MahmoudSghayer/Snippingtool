@@ -7,6 +7,20 @@
  */
 export const API_ORIGIN = import.meta.env.VITE_API_ORIGIN;
 
+type FetchImpl = (input: string, init: RequestInit) => Promise<Response>;
+
+let fetchImpl: FetchImpl = (input, init) => fetch(input, init);
+
+/** Swaps the transport every API call goes through. The extension builds
+ * never call this — their pages reach the API with the manifest's
+ * host_permissions. The userscript build runs on ea.com's origin, where a
+ * plain `fetch` to the API is a cross-origin request, so it installs a
+ * `GM_xmlhttpRequest`-backed implementation instead
+ * (`src/userscript/gm-fetch.ts`). */
+export function setFetchImpl(impl: FetchImpl): void {
+  fetchImpl = impl;
+}
+
 export function backoffMs(attempt: number): number {
   return Math.min(30_000, 500 * 2 ** attempt) + Math.random() * 250;
 }
@@ -37,7 +51,7 @@ export async function retryFetch(path: string, init: RequestInit = {}, opts: Ret
     if (opts.authorize) await opts.authorize(headers);
 
     try {
-      const res = await fetch(`${API_ORIGIN}${path}`, { ...init, headers });
+      const res = await fetchImpl(`${API_ORIGIN}${path}`, { ...init, headers });
       if ((res.status === 429 || res.status >= 500) && attempt < maxRetries) {
         await sleep(backoffMs(attempt));
         attempt++;
@@ -45,15 +59,35 @@ export async function retryFetch(path: string, init: RequestInit = {}, opts: Ret
       }
       return res;
     } catch (err) {
-      if (attempt >= maxRetries) throw err;
+      if (attempt >= maxRetries) throw new NetworkError(err);
       await sleep(backoffMs(attempt));
       attempt++;
     }
   }
 }
 
-export interface ApiErrorBody {
-  error?: { code?: string; message?: string };
+/** The request never got a response: `fetch` itself rejected (offline, DNS,
+ * connection refused, CORS/TLS failure, abort) on every attempt. Distinct
+ * from `ApiError` (the API answered) and from anything thrown locally after
+ * a response arrived, so callers can tell "unreachable" apart. Keeps the
+ * original message, which is what the popup shows. */
+export class NetworkError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+    this.name = 'NetworkError';
+  }
+}
+
+/** The API's error envelope is `{ code, message, details?, requestId }`
+ * (@sl/shared apiErrorSchema). The `{ error: { ... } }` wrapping is accepted
+ * too (apiErrorEnvelope). */
+interface ApiErrorFields {
+  code?: string;
+  message?: string;
+  details?: Record<string, unknown>;
+}
+export interface ApiErrorBody extends ApiErrorFields {
+  error?: ApiErrorFields;
 }
 
 export class ApiError extends Error {
@@ -62,6 +96,7 @@ export class ApiError extends Error {
     public readonly code: string,
     message: string,
     public readonly requestId?: string,
+    public readonly details?: Record<string, unknown>,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -72,8 +107,18 @@ export async function toApiError(res: Response): Promise<ApiError> {
   const requestId = res.headers.get('x-request-id') ?? undefined;
   try {
     const body = (await res.json()) as ApiErrorBody;
-    return new ApiError(res.status, body.error?.code ?? 'INTERNAL', body.error?.message ?? res.statusText, requestId);
+    // Top-level first: that is what the API sends. Reading only `error.*`
+    // made every code 'INTERNAL'. The message is never empty: over HTTP/2
+    // the status text is, and a failed sign-in then showed nothing.
+    const fields = body.error ?? body;
+    return new ApiError(
+      res.status,
+      fields.code ?? 'INTERNAL',
+      fields.message ?? (res.statusText || `Request failed (HTTP ${res.status})`),
+      requestId,
+      fields.details,
+    );
   } catch {
-    return new ApiError(res.status, 'INTERNAL', res.statusText, requestId);
+    return new ApiError(res.status, 'INTERNAL', res.statusText || `Request failed (HTTP ${res.status})`, requestId);
   }
 }

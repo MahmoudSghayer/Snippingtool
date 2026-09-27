@@ -1,0 +1,289 @@
+/*
+ * act-auth.ts — authenticates the act channel between content (ISOLATED
+ * world) and main/adapter.ts (MAIN world), docs/09-security.md §13.
+ *
+ * The problem (defect C10): the channel is `window.postMessage`, which every
+ * script on EA's page can both send on and listen to. Without this, any page
+ * script could post an `act_request` and have the adapter call EA's buyNow
+ * without ever passing through the governor, or post a fake `action_result`
+ * and have content record a buy that never happened.
+ *
+ * The scheme:
+ *   1. A tiny ISOLATED-world script (content/handoff.ts, `document_start`,
+ *      listed before adapter.js in the manifest) generates a random 256-bit
+ *      nonce per page load and puts it on <html> as an attribute. It keeps
+ *      a copy in the ISOLATED world's own globals for content.js.
+ *   2. adapter.ts (also `document_start`) reads the attribute, removes it,
+ *      and keeps the nonce only in a closure. Both scripts run before any
+ *      page script exists, so no page script can see the attribute.
+ *   3. The nonce is then used as an HMAC-SHA256 key and never sent anywhere.
+ *      Every `act_request` carries `mac = HMAC(nonce, canonical message)`,
+ *      and every `action_result` the adapter sends back carries one too. A
+ *      page script sees the MACs go past but cannot compute one for a
+ *      message of its own. (Putting the nonce itself in each request would
+ *      hand it to every page listener on the first buy.)
+ *
+ * What this is not: a security boundary. A MAIN-world script shares the
+ * adapter's realm, so one that runs before it (another extension's
+ * `document_start` MAIN-world script, say) could hook what it uses. The
+ * primitives below are captured at module load to raise that bar for page
+ * scripts that run later. See docs/threat-model.md §3.1 for the residual
+ * risk.
+ */
+
+/** The <html> attribute the nonce crosses the world boundary on. Present
+ * only between the two `document_start` scripts running. */
+export const HANDOFF_ATTRIBUTE = 'data-sl-handoff';
+
+/** Where content/handoff.ts leaves the nonce for content.js: a property on
+ * the ISOLATED world's global object, which page scripts cannot reach. */
+const HANDOFF_GLOBAL_KEY = '__slAdapterNonce';
+
+/** Error strings the adapter's `action_result` uses for refusals. Content
+ * records each as a failed attempt (engine/assist.ts, engine/autobuyer.ts). */
+export const ACT_ERROR = {
+  /** The listing's buy-now price is not the price content expected. */
+  priceMismatch: 'price_mismatch',
+  /** The adapter has not seen this tradeId listed (or it has expired). */
+  listingUnknown: 'listing_unknown',
+  /** The selected service-layer shape buys on the item entity a search
+   * returned (main/shape-observable.ts), and the adapter's own act search
+   * never returned this tradeId — it was only seen passively. */
+  listingEntityUnknown: 'listing_entity_unknown',
+  /** The listing the adapter saw for this tradeId is a different card from
+   * the one content asked to buy (its `resourceId`). */
+  resourceMismatch: 'resource_mismatch',
+  /** No nonce was handed off, so no act request can be authenticated. */
+  unauthenticated: 'adapter_unauthenticated',
+  /** Not a refusal: the buy reached EA, and EA had not answered when the
+   * adapter stopped waiting. It may have gone through; a late answer is
+   * reported as a second, `late: true` result. Never retried. */
+  timeoutUnknown: 'timeout_unknown',
+} as const;
+
+/** The refusals: the adapter said no before anything reached EA. Such a
+ * buy used none of the governor's budget, and asking again cannot change
+ * the answer (engine/assist.ts and engine/autobuyer.ts refund and do not
+ * retry). `timeout_unknown` is deliberately not one of them. */
+const REFUSALS: ReadonlySet<string> = new Set([
+  ACT_ERROR.priceMismatch,
+  ACT_ERROR.resourceMismatch,
+  ACT_ERROR.listingUnknown,
+  ACT_ERROR.listingEntityUnknown,
+  ACT_ERROR.unauthenticated,
+]);
+
+export function isAdapterRefusal(error: string | undefined): boolean {
+  return error !== undefined && REFUSALS.has(error);
+}
+
+const NONCE_PATTERN = /^[0-9a-f]{64}$/;
+
+// ---- primitives captured at load --------------------------------------------
+// In the MAIN world, this module runs at `document_start`, before any page
+// script. Holding our own references means a page script that later
+// replaces `JSON.stringify` or `SubtleCrypto.prototype.sign` does not change
+// what the adapter computes.
+const stringify = JSON.stringify;
+const objectKeys = Object.keys;
+const isArray = Array.isArray;
+const arraySort = Array.prototype.sort;
+const arrayMap = Array.prototype.map;
+const arrayJoin = Array.prototype.join;
+const regexpTest = RegExp.prototype.test;
+const apply = Reflect.apply;
+const TextEncoderCtor = globalThis.TextEncoder;
+const subtle: SubtleCrypto | undefined = globalThis.crypto?.subtle;
+const importKey = subtle?.importKey;
+const hmacSign = subtle?.sign;
+const hmacVerify = subtle?.verify;
+const getRandomValues = globalThis.crypto?.getRandomValues;
+
+function hex(bytes: Uint8Array): string {
+  let out = '';
+  for (let i = 0; i < bytes.length; i++) out += (bytes[i]! < 16 ? '0' : '') + bytes[i]!.toString(16);
+  return out;
+}
+
+function unhex(value: string): Uint8Array {
+  const out = new Uint8Array(value.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(value.slice(i * 2, i * 2 + 2), 16);
+  return out;
+}
+
+function isHex64(value: unknown): value is string {
+  return typeof value === 'string' && apply(regexpTest, NONCE_PATTERN, [value]) === true;
+}
+
+/** 32 random bytes, hex encoded. */
+export function generateNonce(): string {
+  const bytes = new Uint8Array(32);
+  apply(getRandomValues!, globalThis.crypto, [bytes]);
+  return hex(bytes);
+}
+
+/** A key-order-independent JSON encoding, so both ends MAC the same bytes
+ * whatever order an object's keys arrive in. Undefined values are dropped,
+ * as JSON drops them. */
+export function canonicalize(value: unknown): string {
+  if (value === null || typeof value !== 'object') return stringify(value) ?? 'null';
+  if (isArray(value)) return '[' + apply(arrayJoin, apply(arrayMap, value, [(v: unknown) => canonicalize(v)]), [',']) + ']';
+  const record = value as Record<string, unknown>;
+  const keys = apply(arraySort, objectKeys(record), []) as string[];
+  let out = '';
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i]!;
+    if (record[key] === undefined) continue;
+    out += (out ? ',' : '') + stringify(key) + ':' + canonicalize(record[key]);
+  }
+  return '{' + out + '}';
+}
+
+/** The message kinds that carry a MAC: content's requests, and the
+ * adapter's results and catalog (the Sniping Bot's target choices). */
+export type SignedMessageKind = 'act_request' | 'action_result' | 'catalog';
+
+/** What a MAC covers: the message kind (so a request's MAC can never pass as
+ * a result's or a catalog's, or vice versa) plus the whole `data` payload. */
+export function canonicalActMessage(kind: SignedMessageKind, data: unknown): string {
+  return canonicalize({ kind, data });
+}
+
+export interface ActSigner {
+  /** Hex HMAC-SHA256 of `message` under the nonce. */
+  sign(message: string): Promise<string>;
+  /** Constant-time check of a hex MAC; false for anything malformed. */
+  verify(message: string, mac: unknown): Promise<boolean>;
+}
+
+/** `null` when the nonce is malformed or WebCrypto is unavailable — callers
+ * then treat the act channel as closed (fail closed, never open). */
+export function createActSigner(nonce: string | null): ActSigner | null {
+  if (!isHex64(nonce) || !subtle || !importKey || !hmacSign || !hmacVerify || !TextEncoderCtor) return null;
+  const encoder = new TextEncoderCtor();
+  const key: Promise<CryptoKey> = apply(importKey, subtle, [
+    'raw',
+    unhex(nonce),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign', 'verify'],
+  ]) as Promise<CryptoKey>;
+  return {
+    async sign(message) {
+      const mac = (await apply(hmacSign, subtle, ['HMAC', await key, encoder.encode(message)])) as ArrayBuffer;
+      return hex(new Uint8Array(mac));
+    },
+    async verify(message, mac) {
+      if (!isHex64(mac)) return false;
+      try {
+        return (await apply(hmacVerify, subtle, ['HMAC', await key, unhex(mac), encoder.encode(message)])) === true;
+      } catch {
+        return false;
+      }
+    },
+  };
+}
+
+// ---- the handoff ------------------------------------------------------------
+
+/** ISOLATED world, `document_start` (content/handoff.ts): mint this page
+ * load's nonce, leave it on <html> for the adapter, and keep a private copy
+ * for content.js. Returns the nonce. */
+export function handOffNonce(doc: Document = document, isolatedGlobal: object = globalThis): string {
+  const nonce = generateNonce();
+  Object.defineProperty(isolatedGlobal, HANDOFF_GLOBAL_KEY, { value: nonce, configurable: true, enumerable: false, writable: false });
+  doc.documentElement?.setAttribute(HANDOFF_ATTRIBUTE, nonce);
+  return nonce;
+}
+
+/*
+ * The userscript build (src/userscript/setup.ts) does the same handoff, with
+ * one difference: content's copy of the nonce. Its "ISOLATED world" is
+ * Tampermonkey's sandbox, whose global object may be the page's own window
+ * (depending on Tampermonkey's sandbox mode), so a property on it is not
+ * private. But the userscript is one bundle — setup and content share this
+ * module — so the copy is kept in this module's closure instead. The <html>
+ * attribute half is unchanged: setup.ts sets it and injects adapter.js
+ * synchronously, which takes and removes it before any page script runs.
+ */
+let bundleNonceHolder: object | null = null;
+
+/**
+ * Whether it is still safe to put the nonce on <html>: the document is
+ * still being parsed and holds no <script> element yet, so no page script
+ * can have run. The extension's handoff.js is guaranteed that by running at
+ * `document_start`; a userscript is not (Tampermonkey can inject late — a
+ * slow browser start, a script enabled on an open tab, "instant" injection
+ * off). A page script that ran first could watch <html> with a
+ * MutationObserver (`attributeOldValue` shows the nonce as it is removed)
+ * or hook `crypto.subtle.importKey`, and with the nonce forge results and
+ * catalogs.
+ */
+export function isSafeToHandOff(doc: Document = document): boolean {
+  if (doc.readyState !== 'loading') return false;
+  // Some script managers (Tampermonkey MV2 and on Firefox, Violentmonkey's
+  // page mode) run the userscript from an inline <script> they add, which is
+  // still in the DOM while it runs: that one is ours, not a page script.
+  const own = doc.currentScript;
+  for (const script of Array.from(doc.getElementsByTagName('script'))) if (script !== own) return false;
+  return true;
+}
+
+/** Userscript only: `handOffNonce` with content's copy kept in this
+ * module's closure (see above). Call before injecting the adapter. Fails
+ * closed: when `isSafeToHandOff` says a page script may already have run,
+ * nothing is handed off and it returns null, so the act channel stays
+ * locked for this page load (content tells the user to reload). */
+export function handOffNonceWithinBundle(doc: Document = document): string | null {
+  bundleNonceHolder = {};
+  if (!isSafeToHandOff(doc)) return null;
+  return handOffNonce(doc, bundleNonceHolder);
+}
+
+/** ISOLATED world, content.js: the nonce handoff.ts minted for this page
+ * load, or `null` if it never ran. Read once — the copy is deleted so
+ * nothing loaded later picks it up. In the userscript, the copy
+ * `handOffNonceWithinBundle` kept. */
+export function readHandedOffNonce(isolatedGlobal: object = bundleNonceHolder ?? globalThis): string | null {
+  const holder = isolatedGlobal as Record<string, unknown>;
+  const nonce = holder[HANDOFF_GLOBAL_KEY];
+  delete holder[HANDOFF_GLOBAL_KEY];
+  return isHex64(nonce) ? nonce : null;
+}
+
+/** MAIN world, adapter.ts at `document_start`: take the nonce off <html>
+ * and remove the attribute. The manifest lists handoff.js first, so the
+ * attribute is normally already there. If the adapter ran first anyway, a
+ * one-shot MutationObserver picks it up the moment handoff.js sets it —
+ * but only until the parser starts adding the page's own nodes: no page
+ * script can run before that happens (the parser runs a microtask
+ * checkpoint before executing each script), so a value that shows up after
+ * it could have come from a page script and is never taken. */
+export function takeHandedOffNonce(
+  doc: Document,
+  onNonce: (nonce: string) => void,
+  opts: { lateFallback?: boolean } = {},
+): void {
+  const root = doc.documentElement;
+  if (!root) return;
+
+  const take = (): boolean => {
+    const value = root.getAttribute(HANDOFF_ATTRIBUTE);
+    if (value == null) return false;
+    root.removeAttribute(HANDOFF_ATTRIBUTE);
+    if (isHex64(value)) onNonce(value);
+    return true;
+  };
+
+  if (take()) return;
+  // The userscript sets the attribute and injects the adapter synchronously,
+  // so the attribute is either there now or never: it passes
+  // `lateFallback: false`, and a value that appears later (which could only
+  // be a page script's) is never taken.
+  if (opts.lateFallback === false) return;
+  if (typeof MutationObserver !== 'function') return;
+  const observer = new MutationObserver((records) => {
+    if (take() || records.some((r) => r.type === 'childList')) observer.disconnect();
+  });
+  observer.observe(root, { attributes: true, attributeFilter: [HANDOFF_ATTRIBUTE], childList: true });
+}

@@ -65,7 +65,8 @@ label .bounds {
   font-variant-numeric: tabular-nums;
 }
 input,
-select {
+select,
+textarea {
   width: 100%;
   padding: 7px 9px;
   border-radius: var(--sl-radius-sm);
@@ -83,7 +84,8 @@ input[type='checkbox'] {
   width: auto;
 }
 input:focus-visible,
-select:focus-visible {
+select:focus-visible,
+textarea:focus-visible {
   outline: 2px solid var(--sl-accent);
   outline-offset: 1px;
 }
@@ -200,4 +202,12 @@ ul.sends-list {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+/* "Copy diagnostics" output: the JSON report, selectable by hand. */
+#diagnostics-output {
+  margin-top: 10px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12px;
+  resize: vertical;
 }

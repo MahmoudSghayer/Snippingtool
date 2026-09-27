@@ -6,3 +6,4 @@ export * from './permissions.js';
 export * from './schemas/index.js';
 export * from './ws-events.js';
 export * from './ext-messages.js';
+export * from './automation-messages.js';

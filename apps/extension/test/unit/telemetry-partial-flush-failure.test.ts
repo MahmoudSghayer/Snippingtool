@@ -54,12 +54,14 @@ describe('lib/telemetry.ts: flush() re-queues only the batch that actually faile
   });
 
   it('when only the sniping batch POST fails, the other five are reported sent and are not re-queued', async () => {
-    // A 400 (not 429/5xx) fails on the first attempt with no retry/backoff
+    // A 408 (not 429/5xx) fails on the first attempt with no retry/backoff
     // delay — see lib/http.ts's `retryFetch` — so this stays fast while
-    // still exercising a real per-batch rejection.
+    // still exercising a real per-batch rejection. (Not a 400: flush() drops
+    // a batch the API rejects permanently instead of re-queueing it — see
+    // telemetry-flush.test.ts.)
     fetchMock.mockImplementation(async (url: unknown) => {
       if (String(url).includes('/sniping/attempts')) {
-        return jsonResponse(400, { error: { code: 'BAD_REQUEST', message: 'nope' } });
+        return jsonResponse(408, { error: { code: 'REQUEST_TIMEOUT', message: 'nope' } });
       }
       return jsonResponse(200, { accepted: 1 });
     });
@@ -85,7 +87,7 @@ describe('lib/telemetry.ts: flush() re-queues only the batch that actually faile
   });
 
   it('when every batch POST fails, all six are re-queued and none are reported sent', async () => {
-    fetchMock.mockImplementation(async () => jsonResponse(400, { error: { code: 'BAD_REQUEST', message: 'nope' } }));
+    fetchMock.mockImplementation(async () => jsonResponse(408, { error: { code: 'REQUEST_TIMEOUT', message: 'nope' } }));
 
     const result = await flush();
 

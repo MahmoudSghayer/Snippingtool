@@ -25,6 +25,7 @@ import { z } from 'zod';
 
 import { api, apiErrorMessage } from '@/api/client.js';
 import { ensureBootstrapped, resetBootstrap } from '@/lib/authBootstrap.js';
+import { clearLocalSession } from '@/lib/session.js';
 import { useAuthStore } from '@/stores/auth.js';
 
 type PasswordForm = z.infer<typeof changePasswordRequestSchema>;
@@ -326,8 +327,10 @@ export function DeleteAccountCard() {
       if (error) throw error;
     },
     onSuccess: () => {
-      useAuthStore.getState().clearSession();
-      resetBootstrap();
+      // Defect C9: the query cache too, not just the auth store — the
+      // account no longer exists, so nothing it cached should survive for
+      // whoever uses this browser tab next.
+      clearLocalSession();
       void navigate({ to: '/login' });
     },
     onError: (error) =>

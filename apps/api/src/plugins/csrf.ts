@@ -52,6 +52,13 @@ declare module 'fastify' {
 }
 
 const CSRF_COOKIE = 'sl_csrf';
+/** The same token, echoed on every cookie-session response. When the
+ * dashboard and the API are on different sites (Vercel + the VM), the
+ * dashboard's JS cannot read this API host's cookie from `document.cookie`,
+ * so it takes the token from this header instead. Only the CORS allowlist
+ * can read it (plugins/cors.ts exposes it); a cross-site attacker page gets
+ * neither the header nor the cookie value, so double-submit still holds. */
+const CSRF_HEADER = 'x-csrf-token';
 
 /** Reads a cookie's raw (still percent-encoded, still `value.signature`)
  * value straight out of the `Cookie` request header, bypassing
@@ -95,8 +102,17 @@ export default fp(
     // client, since the existing cookie is still validly signed.
     fastify.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply) => {
       if (request.headers.authorization) return; // bearer clients never need this cookie
+      // Every cookie-session response carries session/CSRF material (the
+      // x-csrf-token header below, and sl_at/sl_csrf via Set-Cookie) that
+      // must never sit in a shared cache — Vercel's edge proxies these
+      // responses (vercel.json's /api rewrite), and a cached response would
+      // hand one user's token to whoever else it's served to.
+      reply.header('cache-control', 'private, no-store');
       const raw = readRawCookie(request.headers.cookie, CSRF_COOKIE);
-      if (raw && fastify.unsignCookie(decodeURIComponent(raw)).valid) return;
+      if (raw && fastify.unsignCookie(decodeURIComponent(raw)).valid) {
+        reply.header(CSRF_HEADER, decodeURIComponent(raw));
+        return;
+      }
       const token = randomBytes(32).toString('base64url');
       reply.setCookie(CSRF_COOKIE, token, {
         signed: true,
@@ -105,6 +121,7 @@ export default fp(
         secure: cookieAttrs.secure,
         path: '/',
       });
+      reply.header(CSRF_HEADER, fastify.signCookie(token));
     });
 
     // Kept as a (request, reply, done) callback (rather than async) purely

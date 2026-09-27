@@ -336,13 +336,13 @@ market is locked, per the project's own stated constraint
 market unlocks — summarised here since it's this doc's job to say how
 verification actually happens, not duplicated in full:
 
-1. Open the real web app, inspect `window.services.{Item,Transfer}.repository`
-   method names against `adapter.ts`'s `ASSUMED SHAPE` comment; update the
-   three guarded lookups if they differ (near-certain they will).
-2. Capture one real `transfermarket` network response, diff its shape
-   against `test/fixtures/mock-ea-app/payloads.js`.
-3. Call `services.Item.repository.search({})` directly in the console,
-   compare against what `extractAuctionInfo` expects.
+1. Open the real web app, run one search in EA's own UI, then click
+   **Copy diagnostics** on the options page and share the JSON report.
+2. Read which candidate shape the probe selected (`probe.shape`), or, if
+   neither, what `window.services` really has (`servicesKeys`); fix or add
+   a shape module under `src/main/` if needed.
+3. Check the passive and act-search response shapes in the same report
+   (`lastMarketResponse`), and one assist-driven search in its log.
 4. Only once 1–3 pass: one real, human-confirmed `assist.confirmBuy()` (M2)
    before trusting anything automated.
 

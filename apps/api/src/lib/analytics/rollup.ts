@@ -9,15 +9,28 @@
 //     `POST /sniping/attempts`) call it synchronously for every day their
 //     write touched, so the dashboard reflects a logged trade on the very
 //     next request instead of after the hourly job;
-//   - the `profits.rollup` job sweeps today for every active user as a
-//     self-healing backstop.
+//   - the `profits.rollup` job sweeps today and yesterday for every active
+//     user as a self-healing backstop.
+//
+// Race-freedom: the recompute is one `INSERT … SELECT sum()/count() … ON
+// CONFLICT (user_id, day) DO UPDATE` statement, so two ingests creating the
+// same new day can no longer both try to INSERT and 500 on
+// `profits_user_id_day_unique`. It must run inside the caller's
+// transaction, after the caller's own write: it first takes a
+// transaction-scoped advisory lock on `(user, day)`, so a concurrent trade
+// ingest and sniping ingest for the same day take turns, and the second
+// one's aggregate (a fresh READ COMMITTED snapshot, taken after the lock)
+// sees the first one's committed rows. Without the lock the second upsert
+// could overwrite the row with totals that miss the first ingest's rows.
+// Keys are locked in sorted order so two transactions touching the same
+// days can never deadlock on each other.
 //
 // Day attribution (also documented in docs/08-analytics.md): coins spent
 // and snipes count on the day the purchase/attempt happened; coins earned,
 // net profit and closed trades count on the day the sale happened.
 
-import { profits, snipingActivity, trades, type Database } from '@sl/db';
-import { and, eq, gte, isNull, lt } from 'drizzle-orm';
+import { snipingActivity, trades, type Database } from '@sl/db';
+import { and, gte, isNull, lt, or, sql } from 'drizzle-orm';
 
 import { newId } from '../ids.js';
 
@@ -43,110 +56,177 @@ export interface ProfitDayTotals {
   tradesClosed: number;
 }
 
-/** Recomputes and upserts the `profits` row for one user on one UTC day.
- * Returns the totals written. A day with no activity at all still gets a
- * zero row if one already existed (so a deleted/corrected trade zeroes it
- * out rather than leaving stale numbers behind). */
+const ZERO_TOTALS: ProfitDayTotals = {
+  coinsSpent: 0,
+  coinsEarned: 0,
+  netProfit: 0,
+  snipes: 0,
+  successes: 0,
+  tradesClosed: 0,
+};
+
+/** A Drizzle transaction handle (what `db.transaction(cb)` passes `cb`).
+ * The rollup takes this, not `Database`: its advisory lock is
+ * transaction-scoped, and outside a transaction it would be released the
+ * moment it was taken. */
+export type Transaction = Parameters<Parameters<Database['transaction']>[0]>[0];
+
+function assertTransaction(tx: Transaction): void {
+  // A plain `Database` has no rollback(); only a transaction handle does.
+  if (typeof (tx as { rollback?: unknown }).rollback !== 'function') {
+    throw new Error('rollupProfitsForUserDay must run inside a transaction');
+  }
+}
+
+/** Recomputes and upserts the `profits` row for one user on one UTC day,
+ * entirely in SQL. Returns the totals written (zeros when there was nothing
+ * to write). A day with no activity at all still gets a zero row if one
+ * already existed (so a deleted/corrected trade zeroes it out rather than
+ * leaving stale numbers behind), but a day that never had a row does not
+ * get an empty one. Call it inside a transaction: see this file's header. */
 export async function rollupProfitsForUserDay(
-  db: Database,
+  tx: Transaction,
   userId: string,
   day: string,
 ): Promise<ProfitDayTotals> {
+  assertTransaction(tx);
   const { start, end } = dayBounds(day);
+  // Built the way the repo requires (packages/config/eslint-preset.js):
+  // constant SQL chunks joined with separately bound params, never a value
+  // interpolated into a `sql` template.
+  const u = () => sql.param(userId);
+  const from = () => sql.param(start.toISOString());
+  const to = () => sql.param(end.toISOString());
+  const d = () => sql.param(day);
 
-  const [sold, bought, snipes] = await Promise.all([
-    db.query.trades.findMany({
-      where: and(
-        eq(trades.userId, userId),
-        isNull(trades.deletedAt),
-        gte(trades.soldAt, start),
-        lt(trades.soldAt, end),
-      ),
-    }),
-    db.query.trades.findMany({
-      where: and(
-        eq(trades.userId, userId),
-        isNull(trades.deletedAt),
-        gte(trades.boughtAt, start),
-        lt(trades.boughtAt, end),
-      ),
-    }),
-    db.query.snipingActivity.findMany({
-      where: and(
-        eq(snipingActivity.userId, userId),
-        gte(snipingActivity.occurredAt, start),
-        lt(snipingActivity.occurredAt, end),
-      ),
-    }),
-  ]);
+  await tx.execute(
+    sql.join([
+      sql`SELECT pg_advisory_xact_lock(hashtextextended(`,
+      sql.param(`profits:${userId}:${day}`),
+      sql`, 0))`,
+    ]),
+  );
 
-  const totals: ProfitDayTotals = {
-    coinsSpent: bought.reduce((sum, t) => sum + (t.buyPrice ?? 0), 0),
-    coinsEarned: sold.reduce((sum, t) => sum + (t.sellPrice ?? 0), 0),
-    netProfit: sold.reduce((sum, t) => sum + (t.netProfit ?? 0), 0),
-    snipes: snipes.length,
-    successes: snipes.filter((s) => s.outcome === 'success').length,
-    tradesClosed: sold.length,
+  const rows = (await tx.execute(
+    sql.join([
+      sql`WITH bought AS (
+         SELECT coalesce(sum(buy_price), 0)::bigint AS coins_spent, count(*)::int AS n
+           FROM trades
+          WHERE user_id = `,
+      u(),
+      sql`::uuid AND deleted_at IS NULL AND bought_at >= `,
+      from(),
+      sql`::timestamptz AND bought_at < `,
+      to(),
+      sql`::timestamptz
+       ), sold AS (
+         SELECT coalesce(sum(sell_price), 0)::bigint AS coins_earned,
+                coalesce(sum(net_profit), 0)::bigint AS net_profit,
+                count(*)::int AS n
+           FROM trades
+          WHERE user_id = `,
+      u(),
+      sql`::uuid AND deleted_at IS NULL AND sold_at >= `,
+      from(),
+      sql`::timestamptz AND sold_at < `,
+      to(),
+      sql`::timestamptz
+       ), snipes AS (
+         SELECT count(*)::int AS n,
+                (count(*) FILTER (WHERE outcome = 'success'))::int AS successes
+           FROM sniping_activity
+          WHERE user_id = `,
+      u(),
+      sql`::uuid AND occurred_at >= `,
+      from(),
+      sql`::timestamptz AND occurred_at < `,
+      to(),
+      sql`::timestamptz
+       )
+       INSERT INTO profits
+         (id, user_id, day, coins_spent, coins_earned, net_profit, snipes, successes, trades_closed)
+       SELECT `,
+      sql.param(newId()),
+      sql`::uuid, `,
+      u(),
+      sql`::uuid, `,
+      d(),
+      sql`::date, bought.coins_spent, sold.coins_earned, sold.net_profit,
+              snipes.n, snipes.successes, sold.n
+         FROM bought, sold, snipes
+        WHERE bought.n + sold.n + snipes.n > 0
+           OR EXISTS (SELECT 1 FROM profits p WHERE p.user_id = `,
+      u(),
+      sql`::uuid AND p.day = `,
+      d(),
+      sql`::date)
+       ON CONFLICT (user_id, day) DO UPDATE SET
+         coins_spent = EXCLUDED.coins_spent,
+         coins_earned = EXCLUDED.coins_earned,
+         net_profit = EXCLUDED.net_profit,
+         snipes = EXCLUDED.snipes,
+         successes = EXCLUDED.successes,
+         trades_closed = EXCLUDED.trades_closed
+       RETURNING coins_spent, coins_earned, net_profit, snipes, successes, trades_closed`,
+    ]),
+  )) as unknown as Array<Record<string, string | number>>;
+
+  const [row] = rows;
+  if (!row) return { ...ZERO_TOTALS };
+  // bigint columns come back as strings from postgres-js.
+  return {
+    coinsSpent: Number(row.coins_spent),
+    coinsEarned: Number(row.coins_earned),
+    netProfit: Number(row.net_profit),
+    snipes: Number(row.snipes),
+    successes: Number(row.successes),
+    tradesClosed: Number(row.trades_closed),
   };
-
-  const hasActivity = sold.length + bought.length + snipes.length > 0;
-
-  // Two writes for the same user can roll the same day up at once (a trades
-  // batch and a sniping ingest, or a request racing the hourly job), so the
-  // insert must not assume it is first. A day with no activity only ever
-  // updates an existing row (zeroing it) and never creates an empty one.
-  if (hasActivity) {
-    await db
-      .insert(profits)
-      .values({ id: newId(), userId, day, ...totals })
-      .onConflictDoUpdate({ target: [profits.userId, profits.day], set: totals });
-  } else {
-    await db
-      .update(profits)
-      .set(totals)
-      .where(and(eq(profits.userId, userId), eq(profits.day, day)));
-  }
-  return totals;
 }
 
-/** Recomputes the `profits` row for every `(user, day)` pair in `keys`.
- * Deduplicates, so a batch touching the same day many times rolls it up
- * once. */
+/** Recomputes the `profits` row for every `(user, day)` pair in `keys`,
+ * inside the caller's transaction. Deduplicates, so a batch touching the
+ * same day many times rolls it up once, and goes in sorted order so the
+ * advisory locks are always taken in the same order. */
 export async function rollupProfitsForUserDays(
-  db: Database,
+  tx: Transaction,
   keys: Iterable<{ userId: string; day: string }>,
 ): Promise<number> {
-  const seen = new Set<string>();
-  for (const { userId, day } of keys) {
-    const k = `${userId}|${day}`;
-    if (seen.has(k)) continue;
-    seen.add(k);
-    await rollupProfitsForUserDay(db, userId, day);
+  const unique = new Map<string, { userId: string; day: string }>();
+  for (const k of keys) unique.set(`${k.userId}|${k.day}`, k);
+  const sorted = [...unique.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  for (const [, { userId, day }] of sorted) {
+    await rollupProfitsForUserDay(tx, userId, day);
   }
-  return seen.size;
+  return sorted.length;
 }
 
-/** Every user with a purchase, sale or snipe attempt on `day`, rolled up.
- * Used by the hourly `profits.rollup` job for today. */
+/** Every user with a purchase, sale or snipe attempt on `day`, rolled up,
+ * each in its own short transaction. Used by the hourly `profits.rollup`
+ * job for today and yesterday. */
 export async function rollupProfitsForDay(db: Database, day: string): Promise<number> {
   const { start, end } = dayBounds(day);
-  const [sold, bought, snipes] = await Promise.all([
+  const [traders, snipers] = await Promise.all([
     db
-      .select({ userId: trades.userId })
+      .selectDistinct({ userId: trades.userId })
       .from(trades)
-      .where(and(isNull(trades.deletedAt), gte(trades.soldAt, start), lt(trades.soldAt, end))),
+      .where(
+        and(
+          isNull(trades.deletedAt),
+          or(
+            and(gte(trades.soldAt, start), lt(trades.soldAt, end)),
+            and(gte(trades.boughtAt, start), lt(trades.boughtAt, end)),
+          ),
+        ),
+      ),
     db
-      .select({ userId: trades.userId })
-      .from(trades)
-      .where(and(isNull(trades.deletedAt), gte(trades.boughtAt, start), lt(trades.boughtAt, end))),
-    db
-      .select({ userId: snipingActivity.userId })
+      .selectDistinct({ userId: snipingActivity.userId })
       .from(snipingActivity)
       .where(and(gte(snipingActivity.occurredAt, start), lt(snipingActivity.occurredAt, end))),
   ]);
-  const userIds = new Set([...sold, ...bought, ...snipes].map((r) => r.userId));
-  return rollupProfitsForUserDays(
-    db,
-    [...userIds].map((userId) => ({ userId, day })),
-  );
+  const userIds = [...new Set([...traders, ...snipers].map((r) => r.userId))].sort();
+  for (const userId of userIds) {
+    await db.transaction((tx) => rollupProfitsForUserDay(tx, userId, day));
+  }
+  return userIds.length;
 }
