@@ -6,12 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { trustTestEvents, untrustedEvents } from './ui-test-helpers.js';
 
 let optedOut = false;
+let bootstrapEmail: string | undefined;
 const send = vi.fn(async (type: string, payload?: unknown) => {
   switch (type) {
     case 'auth.status':
       return { authenticated: true };
     case 'license.bootstrap':
-      return { subscription: null, killSwitchActive: false };
+      return { subscription: null, killSwitchActive: false, email: bootstrapEmail };
     case 'settings.get':
       return { telemetryOptOut: optedOut };
     case 'settings.set':
@@ -33,12 +34,40 @@ const settle = async () => {
 
 beforeEach(() => {
   optedOut = false;
+  bootstrapEmail = undefined;
   send.mockClear();
   document.body.innerHTML = '<div id="app"></div>';
   (globalThis as Record<string, unknown>).CSS ??= { escape: (s: string) => s };
   trustTestEvents();
 });
 afterEach(() => untrustedEvents());
+
+describe('account view — Email', () => {
+  it('shows the signed-in email above Plan, escaped', async () => {
+    bootstrapEmail = 'trader+<b>@example.com';
+    const { mountPopup } = await import('../../src/popup/app.js');
+    const app = document.getElementById('app')!;
+    mountPopup(app);
+    await settle();
+
+    const rows = Array.from(app.querySelectorAll('.row .k')).map((k) => k.textContent);
+    expect(rows.indexOf('Email')).toBeGreaterThanOrEqual(0);
+    expect(rows.indexOf('Email')).toBeLessThan(rows.indexOf('Plan'));
+    const emailRow = Array.from(app.querySelectorAll('.row')).find((r) => r.querySelector('.k')?.textContent === 'Email')!;
+    expect(emailRow.querySelector('.v')!.innerHTML).not.toContain('<b>');
+    expect(emailRow.textContent).toContain('trader+<b>@example.com');
+  });
+
+  it('hides the row when bootstrap has no email', async () => {
+    bootstrapEmail = undefined;
+    const { mountPopup } = await import('../../src/popup/app.js');
+    const app = document.getElementById('app')!;
+    mountPopup(app);
+    await settle();
+
+    expect(Array.from(app.querySelectorAll('.row .k')).some((k) => k.textContent === 'Email')).toBe(false);
+  });
+});
 
 describe('account view — Share usage data', () => {
   it('shows the switch on, and turning it off opts out of telemetry (and back)', async () => {

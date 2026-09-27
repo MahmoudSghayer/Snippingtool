@@ -215,6 +215,7 @@ async function renderLoggedIn(): Promise<void> {
   h(`
     <h1><span class="dot ${killSwitch ? 'risk' : usable ? 'live' : 'warn'}"></span> Nova Trade</h1>
     <div class="card">
+      ${bootstrap?.email ? `<div class="row"><span class="k">Email</span><span class="v">${esc(bootstrap.email)}</span></div>` : ''}
       <div class="row"><span class="k">Plan</span><span class="v">${esc(sub?.plan.name ?? 'No plan')}</span></div>
       ${sub ? `<div class="row"><span class="k">Status</span><span class="v">${esc(STATUS_LABEL[sub.status])}</span></div>` : ''}
       ${
