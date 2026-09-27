@@ -3274,6 +3274,7 @@ export interface paths {
                     from: string;
                     to: string;
                     granularity?: "day" | "week" | "month" | "lifetime";
+                    tz?: string;
                 };
                 header?: never;
                 path?: never;
@@ -7361,6 +7362,11 @@ export interface paths {
                 query?: {
                     cursor?: string;
                     limit?: number;
+                    status?: "bought" | "listed" | "sold" | "expired" | "unsold";
+                    from?: string;
+                    to?: string;
+                    tz?: string;
+                    order?: "desc" | "asc";
                 };
                 header?: never;
                 path?: never;
@@ -7392,10 +7398,96 @@ export interface paths {
                                 boughtAt: string;
                                 /** Format: date-time */
                                 soldAt: string | null;
+                                cardName: string | null;
                             }[];
                             nextCursor: string | null;
                         };
                     };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/trades/totals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    status?: "bought" | "listed" | "sold" | "expired" | "unsold";
+                    from?: string;
+                    to?: string;
+                    tz?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            count: number;
+                            sold: number;
+                            spent: number;
+                            revenue: number;
+                            netProfit: number;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/trades/export.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Stream the caller's trades matching the given filters as CSV. */
+        get: {
+            parameters: {
+                query?: {
+                    status?: "bought" | "listed" | "sold" | "expired" | "unsold";
+                    from?: string;
+                    to?: string;
+                    tz?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
                 };
             };
         };
