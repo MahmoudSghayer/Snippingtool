@@ -1,4 +1,4 @@
-# Threat Model — The Sniper's Ledger
+# Threat Model — Nova Trade
 
 Companion to `docs/01-architecture.md` (component/deployment/sequence
 diagrams, trust-boundary table) and `docs/09-security.md` (controls

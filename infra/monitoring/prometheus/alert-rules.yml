@@ -1,4 +1,4 @@
-# Alert rules for The Sniper's Ledger. Every alert here is explained, with
+# Alert rules for Nova Trade. Every alert here is explained, with
 # the on-call response, in docs/11-devops.md's "Monitoring / alerting
 # runbook" — `summary`/`description` annotations link back to it by anchor.
 

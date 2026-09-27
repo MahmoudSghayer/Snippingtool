@@ -28,10 +28,8 @@ import { readHandedOffNonce } from '../lib/act-auth.js';
 import { riskLevelChangeEvent } from '../lib/bot-safety.js';
 import { logger } from '../lib/logger.js';
 import { singleFlight } from '../lib/single-flight.js';
-import { setBotPageOpener } from '../ui/bot-opener.js';
-import { createBotPage } from '../ui/bot-page.js';
+import { createBotPage, type LiveSearch } from '../ui/bot-page.js';
 import { installNavItem } from '../ui/ea-nav.js';
-import { createPanel, type Panel } from '../ui/panel.js';
 import { onTrusted } from '../ui/trusted-events.js';
 
 import { createAdapterClient, pageWindow } from './adapter-client.js';
@@ -64,7 +62,6 @@ const AUTOMATION_ENABLED = import.meta.env.VITE_AUTOMATION === '1';
 const RECORD_FLUSH_MS = 2000;
 const RECORD_FLUSH_AT = 300;
 const STATE_PERSIST_MS = 5000;
-const RISK_UI_TICK_MS = 3000;
 const AUTOBUYER_TICK_MS = 8000;
 const WATCHDOG_MS = 15000;
 const WATCHDOG_STALE_MS = 60000;
@@ -97,7 +94,6 @@ function nowIso(): string {
 // ---- boot --------------------------------------------------------------------
 
 async function main(): Promise<void> {
-  const panel: Panel = createPanel();
   // The act-channel nonce content/handoff.ts minted at document_start (the
   // userscript's setup.ts, in that build). Without it every act call fails
   // closed (assist/automation cannot buy); M1 recording does not need it.
@@ -124,9 +120,6 @@ async function main(): Promise<void> {
     adapter.requestCatalog();
   }
 
-  panel.setHealth('live', 'Recording. Nothing beyond product telemetry (docs/06-extension.md) is sent.');
-  send('counts').then((data) => data && panel.setTotals(data as { auctions: number; playersLast24h: number }));
-
   // ---- M1: passive observation (always on, no account required) -----------
 
   let recordQueue: TrimmedAuction[] = [];
@@ -147,8 +140,7 @@ async function main(): Promise<void> {
   // having booted.
   let governor: Governor | null = null;
   let assist: AssistEngine | null = null;
-  // Server kill switch, tracked here as well as inside the governor so the
-  // panel reports it even on an account with no engine (M1-only), and so
+  // Server kill switch, tracked here as well as inside the governor so
   // an `engine.killSwitch` push arriving before the M2 bootstrap finishes
   // is not lost (it is re-applied to the governor once one exists).
   let killSwitchActive = false;
@@ -163,26 +155,7 @@ async function main(): Promise<void> {
     recordQueue = [];
 
     const result = await send('record', { auctions: batch });
-    if (!result) {
-      panel.setHealth('warn', 'Recorded nothing — the extension background may have reloaded.');
-      return;
-    }
-
-    const totals = await send<{ auctions: number; playersLast24h: number }>('counts');
-    if (totals) panel.setTotals(totals);
-
-    if (lastResourceId != null) {
-      const summary = await send<{
-        resourceId: number;
-        summary: PriceSummary;
-        maxSnipe: number | null;
-        recentPrices?: number[];
-      }>('summary', { resourceId: lastResourceId, minProfit: settingsCache.targets.minProfitPerSnipe });
-      if (summary) {
-        panel.setCard({ resourceId: summary.resourceId, rating: lastRating, summary: summary.summary, maxSnipe: summary.maxSnipe });
-        panel.setSparkline(summary.recentPrices ?? []);
-      }
-    }
+    if (!result) logger.warn('recorded nothing — the extension background may have reloaded', 'record');
   }
 
   function scheduleFlush(): void {
@@ -219,10 +192,6 @@ async function main(): Promise<void> {
   adapter.onAuctions(
     createSearchObserver({
       tracked,
-      onSearch: (count) => {
-        panel.setSearches(count);
-        panel.setHealth(engineHealthState(), engineHealthMessage());
-      },
       onDominant: (resourceId, rating) => {
         lastResourceId = resourceId;
         lastRating = rating;
@@ -251,24 +220,11 @@ async function main(): Promise<void> {
         items: [{ type: 'error', occurredAt: nowIso(), metadata: { code: 'ADAPTER_PROBE_FAILED', message: status.reason ?? 'unknown', context: 'adapter.probe' } }] satisfies ActivityEvent[],
       });
     }
-    panel.setHealth(engineHealthState(), engineHealthMessage());
   });
 
   adapter.onShape((reason) => {
     logger.warn(`market payload shape changed: ${reason}`, 'adapter.shape');
-    panel.setHealth('warn', `Not recording — the market response changed shape (${reason}). adapter.ts needs updating.`);
   });
-
-  function engineHealthState(): 'live' | 'warn' | 'risk' {
-    if (!probeOk) return 'warn';
-    if (killSwitchActive || governor?.isKillSwitchActive()) return 'risk';
-    return 'live';
-  }
-  function engineHealthMessage(): string {
-    if (!probeOk) return `Bundle probe failed — assist/automation are hard-stopped until adapter.ts is updated.`;
-    if (killSwitchActive || governor?.isKillSwitchActive()) return 'Kill switch active — all actions blocked.';
-    return assist ? 'Assist engine active.' : 'Recording. Nothing beyond product telemetry is sent.';
-  }
 
   // ---- server kill switch: push (background -> this tab) + pull ------------
   //
@@ -289,7 +245,6 @@ async function main(): Promise<void> {
       if (active) logger.warn(`kill switch active — ${reason ?? 'server kill switch active'}`, 'kill-switch');
       else logger.info('kill switch cleared by the server', 'kill-switch');
     }
-    panel.setHealth(engineHealthState(), engineHealthMessage());
   }
 
   browser.runtime.onMessage.addListener((message: unknown): undefined => {
@@ -391,9 +346,8 @@ async function main(): Promise<void> {
   let deviceIdCache: string | null = null;
   const sessionId = crypto.randomUUID();
 
-  // Saved filters: rotated by assist, searched by the Sniping Bot, edited
-  // on the Sniping Bot page. One array so all three see the same list.
-  let filters = (await send<SavedFilter[]>('filters.list')) ?? [];
+  // Saved filters: rotated by assist.
+  const filters = (await send<SavedFilter[]>('filters.list')) ?? [];
 
   if (governor && features.includes('assist.ranker')) {
     assist = new AssistEngine({
@@ -455,9 +409,12 @@ async function main(): Promise<void> {
   if (AUTOMATION_ENABLED) {
     let botSettings: BotSettings | null = await send<BotSettings>('bot.settingsGet');
     let unavailableReason: string | null = null;
+    // The search filled in on the bot page: the only one the bot runs. Never
+    // written to the saved filters (assist and the dashboard use those).
+    let liveSearch: LiveSearch | null = null;
 
     // Called at load and whenever the page opens: a user who signs in from
-    // the SL drawer after the page loaded gets the bot without a reload.
+    // the account view after the page loaded gets the bot without a reload.
     const prepareSniper = async (fresh: boolean): Promise<void> => {
       if (sniper) {
         // A plan lost mid-session (the check below) empties `features`, and
@@ -489,8 +446,8 @@ async function main(): Promise<void> {
       // search or buy. In the userscript that means page scripts had already
       // run when it installed (userscript/setup.ts refuses the handoff then).
       if (!actNonce) unavailableReason = NO_ACT_CHANNEL_REASON;
-      else if (!signedIn) unavailableReason = 'Sign in (NT button) to use the Sniping Bot.';
-      else if (!allowed) unavailableReason = 'Your plan does not include the Sniping Bot.';
+      else if (!signedIn) unavailableReason = 'Sign in to Nova Trade to use Nova AI.';
+      else if (!allowed) unavailableReason = 'Your plan does not include Nova AI.';
       else if (!botSettings) unavailableReason = 'The extension could not load the bot settings. Reload the page.';
       else unavailableReason = null;
       if (unavailableReason || !botSettings) return;
@@ -498,13 +455,13 @@ async function main(): Promise<void> {
       const { loadSniper } = await import('virtual:autobuyer-loader');
       const mod = await loadSniper();
       if (!mod) {
-        unavailableReason = 'The Sniping Bot is not available in this build.';
+        unavailableReason = 'Nova AI is not available in this build.';
         return;
       }
       sniper = new mod.Sniper(
         {
           adapter,
-          getFilters: () => filters.filter((f) => f.isActive).map((f) => ({ id: f.id, name: f.name, filter: f.filter })),
+          getFilters: () => (liveSearch ? [liveSearch] : []),
           estimateSellPrice: async (resourceId) => {
             const r = await send<{ summary: PriceSummary }>('summary', { resourceId, minProfit: settingsCache.targets.minProfitPerSnipe });
             return r?.summary.median ?? null;
@@ -565,10 +522,8 @@ async function main(): Promise<void> {
         await send('bot.settingsSet', next);
         if (modeEvent) void send('telemetry.enqueue', { kind: 'activity', items: [modeEvent] });
       },
-      getFilters: () => filters,
-      saveFilters: async (next) => {
-        filters = next;
-        await send('filters.save', { filters: next });
+      setLiveSearch: (search) => {
+        liveSearch = search;
       },
       resolveNames: async (resourceIds) => (await send<Record<string, string | null>>('cards.names', { resourceIds })) ?? {},
       getCatalog: () => send<Catalog | null>('catalog.get'),
@@ -576,11 +531,9 @@ async function main(): Promise<void> {
     const nav = installNavItem({
       onToggle: () => botPage.toggle(),
       onEaNavigate: () => botPage.close(),
-      onOffset: (left, top) => botPage.setOffsets(left, top),
+      onBounds: (bounds) => botPage.setBounds(bounds),
     });
     botPage.onOpenChange((open) => nav.setActive(open));
-    setBotPageOpener(() => botPage.open());
-    panel.setBotLauncher(() => botPage.open());
   }
 
   function buildCandidatesFromTracked(): OpportunityCandidate[] {
@@ -634,7 +587,6 @@ async function main(): Promise<void> {
     await refreshSummaries();
     const candidates = buildCandidatesFromTracked();
     rankedCandidates = rankCandidates(candidates, { minEv: settingsCache.targets.minProfitPerSnipe });
-    panel.setRanked(rankedCandidates);
 
     // The Sniping Bot buys on its own; never let two engines buy at once.
     if (autobuyer && !autobuyer.isStopped() && !sniper?.isRunning()) {
@@ -657,28 +609,11 @@ async function main(): Promise<void> {
 
   function reportAutobuyerStop(reason: StopReason, detail: string): void {
     logger.error(`autobuyer stopped: ${reason} — ${detail}`, 'autobuyer');
-    panel.setHealth('warn', `Automation stopped (${reason}): ${detail}`);
   }
 
   if (governor) {
     setInterval(() => void engineTick(), AUTOBUYER_TICK_MS);
   }
-
-  // ---- risk meter / session P&L UI tick ------------------------------------
-
-  setInterval(() => {
-    if (!governor) return;
-    const snapshot = governor.snapshot();
-    panel.setRiskSnapshot(snapshot);
-    if (assist) panel.setSessionPnl(assist.sessionPnl);
-    // Defect (docs/10-design-system.md §15 "Known gap"): the popup showed
-    // no live risk gauge at all — only this in-page panel did. Pushing the
-    // same snapshot the panel just rendered to background (cached in
-    // `storage.session`, `background/governor.ts`) lets the popup show the
-    // real segmented gauge too, without ever reconstructing/recomputing a
-    // safety-critical number outside the governor's own math.
-    void send('governor.snapshotPush', snapshot);
-  }, RISK_UI_TICK_MS);
 
   // ---- crash recovery: persist governor state via background -------------
 
@@ -720,9 +655,9 @@ async function main(): Promise<void> {
   }
 }
 
-/** Shown on the Sniping Bot page when no act-channel nonce was handed off. */
+/** Shown on the Nova AI page when no act-channel nonce was handed off. */
 const NO_ACT_CHANNEL_REASON =
-  "Nova Trade could not open a secure connection to EA's web app on this page load, so the Sniping Bot is locked. Reload the page to use it.";
+  "Nova Trade could not open a secure connection to EA's web app on this page load, so Nova AI is locked. Reload the page to use it.";
 
 function start(): void {
   void main().catch((err) => {
@@ -736,6 +671,6 @@ function start(): void {
 // The extension injects this file at document_idle, so the first branch is
 // never taken there. The userscript build evaluates it at document-start (so
 // the MAIN-world adapter is in place before EA's first market call) and the
-// panel needs a <body> to attach to.
+// bot page needs a <body> to attach to.
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
 else start();

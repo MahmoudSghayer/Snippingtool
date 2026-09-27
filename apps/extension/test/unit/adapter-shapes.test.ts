@@ -461,9 +461,9 @@ describe('one search is one search, whichever paths saw it', () => {
     const batches: unknown[][] = [];
     client.onAuctions((a) => batches.push(a));
     countObservedSearches(client, () => governor as never);
-    // content/index.ts's own handler, as it wires it: the panel counter,
-    // the telemetry `search` event and the ledger rows.
-    const content = { onSearch: vi.fn(), reportSearch: vi.fn(), record: vi.fn() };
+    // content/index.ts's own handler, as it wires it: the telemetry
+    // `search` event and the ledger rows.
+    const content = { reportSearch: vi.fn(), record: vi.fn() };
     client.onAuctions(createSearchObserver({ tracked: new Map(), ...content }));
     return { client, governor, batches, content };
   }
@@ -493,7 +493,6 @@ describe('one search is one search, whichever paths saw it', () => {
     await settleAll();
     expect(posted.filter((m) => m.kind === 'auctions')).toHaveLength(2);
     expect(governor.recordObservedSearch).toHaveBeenCalledTimes(2);
-    expect(content.onSearch).toHaveBeenCalledTimes(2);
     if ((ids as number[]).length > 0) {
       expect(content.reportSearch).toHaveBeenCalledTimes(2);
       expect(content.record).toHaveBeenCalledTimes(2);

@@ -12,20 +12,20 @@
 // Three separate `vite.build()` calls per target, not one multi-entry build,
 // because content scripts must ship as a single self-contained file with no
 // code-splitting (MV3 does not support ES module content scripts) while the
-// service worker + popup + options page are ordinary ES modules that *can*
+// service worker + popup are ordinary ES modules that *can*
 // share chunks:
 //   1. adapter.js   — MAIN world,  library-mode IIFE, single entry
 //   1b. handoff.js  — ISOLATED world, document_start, IIFE: hands the
 //                     act-channel nonce to adapter.js (lib/act-auth.ts)
 //   2. content.js   — ISOLATED world, library-mode IIFE, single entry
-//   3. background.js + src/popup/index.html + src/options/index.html — ES
+//   3. background.js + src/popup/index.html — ES
 //
 // `virtual:autobuyer-loader` is aliased per target to
 // `engine/autobuyer-loader.ledger.ts` (no reference to `engine/autobuyer.ts`
 // at all) or `.auto.ts` (real loader) — this alias, not a runtime flag, is
 // what guarantees `engine/autobuyer.ts` never enters the `ledger` build's
 // module graph. See docs/06-extension.md for the full explanation.
-import { readFileSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { copyFileSync, readFileSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -224,6 +224,8 @@ function writeManifest() {
   });
   mkdirSync(outDir, { recursive: true });
   writeFileSync(path.join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+  mkdirSync(path.join(outDir, 'icons'), { recursive: true });
+  for (const file of Object.values(manifest.icons)) copyFileSync(path.join(root, 'src', file), path.join(outDir, file));
 }
 
 // ---- userscript target -------------------------------------------------------

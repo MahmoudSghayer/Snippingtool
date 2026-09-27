@@ -1,6 +1,6 @@
 # 13 — Roadmap
 
-Step-by-step implementation plan for The Sniper's Ledger, phase by phase.
+Step-by-step implementation plan for Nova Trade, phase by phase.
 Each phase lists concrete steps, exit criteria (what must be true before the
 next phase starts), and which milestone (M1/M2/M3) it serves. This mirrors
 the orchestrator's wave plan; "wave" groups phases that run in parallel

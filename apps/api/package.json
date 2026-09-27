@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "The Sniper's Ledger — Fastify backend: REST API, WebSocket gateway and BullMQ workers.",
+  "description": "Nova Trade — Fastify backend: REST API, WebSocket gateway and BullMQ workers.",
   "main": "./dist/server.js",
   "exports": {
     ".": "./dist/server.js",

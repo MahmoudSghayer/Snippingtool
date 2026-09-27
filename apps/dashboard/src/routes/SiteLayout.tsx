@@ -19,19 +19,22 @@ const SITE_NAV = [
   { href: '/#faq', label: 'FAQ' },
 ];
 
-/** The landing page's logo mark, copied from index.html. */
+/** The Nova Trade mark, the same artwork as public/favicon.svg. */
 function BrandMark() {
   return (
     <svg viewBox="0 0 32 32" aria-hidden="true">
-      <rect width="32" height="32" rx="7" fill="#151d1a" />
-      <circle cx="16" cy="16" r="9.5" fill="none" stroke="#ddb35c" strokeWidth="2" />
-      <path
-        d="M16 3.5v5M16 23.5v5M3.5 16h5M23.5 16h5"
-        stroke="#ddb35c"
-        strokeWidth="2"
-        strokeLinecap="round"
-      />
-      <circle cx="16" cy="16" r="2.75" fill="#6fbf9b" />
+      <defs>
+        <linearGradient id="nt-nova-g" x1="4" y1="4" x2="28" y2="28" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#b1ffff" />
+          <stop offset=".17" stopColor="#f2fcfc" />
+          <stop offset=".65" stopColor="#f1f0ff" />
+          <stop offset="1" stopColor="#e2d6ff" />
+        </linearGradient>
+      </defs>
+      <rect width="32" height="32" rx="7" fill="#151d29" />
+      <path d="M16 5.5Q16.8 15.2 26.5 16Q16.8 16.8 16 26.5Q15.2 16.8 5.5 16Q15.2 15.2 16 5.5Z" transform="rotate(45 16 16)" fill="#9d8cff" />
+      <path d="M16 3.8Q17.4 14.6 28.2 16Q17.4 17.4 16 28.2Q14.6 17.4 3.8 16Q14.6 14.6 16 3.8Z" fill="url(#nt-nova-g)" />
+      <circle cx="16" cy="16" r="2.4" fill="#ffffff" />
     </svg>
   );
 }

@@ -168,14 +168,14 @@ pnpm --filter @sl/extension build:auto      # dist/ledger-auto — self-hosted
 pnpm --filter @sl/extension build           # both
 ```
 
-|                       | `ledger`                               | `ledger-auto`                  |
-| --------------------- | -------------------------------------- | ------------------------------ |
-| Contains              | M1 recorder + M2 assist                | M1 + M2 + M3 automation        |
-| `name`                | "Sniper's Ledger"                      | "Sniper's Ledger (Automation)" |
-| `VITE_AUTOMATION`     | `'0'`                                  | `'1'`                          |
-| `update_url`          | absent (Chrome Web Store owns updates) | set from `VITE_UPDATE_URL`     |
-| `version_name`        | absent                                 | `"<version>-auto"`             |
-| `engine/autobuyer.ts` | **never in the module graph at all**   | included                       |
+|                       | `ledger`                               | `ledger-auto`              |
+| --------------------- | -------------------------------------- | -------------------------- |
+| Contains              | M1 recorder + M2 assist                | M1 + M2 + M3 automation    |
+| `name`                | "Nova Trade"                           | "Nova Trade"               |
+| `VITE_AUTOMATION`     | `'0'`                                  | `'1'`                      |
+| `update_url`          | absent (Chrome Web Store owns updates) | set from `VITE_UPDATE_URL` |
+| `version_name`        | absent                                 | `"<version>-auto"`         |
+| `engine/autobuyer.ts` | **never in the module graph at all**   | included                   |
 
 **How the exclusion is actually guaranteed.** `content/index.ts` imports
 `loadAutobuyer` from the bare specifier `virtual:autobuyer-loader`, never
@@ -408,7 +408,7 @@ Shape-specific limits, all to confirm on day one:
   not as a failure: it may have gone through. It is recorded as
   `attempted`, stays charged to the governor, is never retried, and if
   EA's answer arrives later the adapter sends a second, signed `late`
-  result that records the trade. An adapter *refusal* (price mismatch,
+  result that records the trade. An adapter _refusal_ (price mismatch,
   unknown listing, no entity, no act key) never reached EA, so the
   governor refunds what it charged for it.
 - The card id is `resourceId`, `definitionId` or `maskedDefId`, never
@@ -424,20 +424,20 @@ reachable:
 1. Load the extension, sign in, and open the real FC web app. Go to the
    transfer market and run one search by hand in EA's own UI.
 2. Open the extension's options page (right-click the toolbar icon →
-   Options) and click **Copy diagnostics** under *Diagnostics*. It asks the
+   Options) and click **Copy diagnostics** under _Diagnostics_. It asks the
    open EA tab's adapter for its report over the authenticated act channel
    and copies a JSON report (also shown below the button). Paste it into
    the team channel. It carries key names and types, never values: no
    tokens, emails or coin balances.
 3. Read `adapter.probe` and `adapter.candidates`:
    - **Good, observable shape:** `probe.ok: true`, `probe.shape:
-     "observable"`; `servicesKeys.Item` lists `searchTransferMarket` and
+"observable"`; `servicesKeys.Item` lists `searchTransferMarket` and
      `bid` as `"function"`; `globals.UTSearchCriteriaDTO` is `"function"`;
      `globals.searchHook` is `"installed"`, and the log has `search hook
-     installed`; after the human's own search the log shows no `hook:`
+installed`; after the human's own search the log shows no `hook:`
      errors and `lastMarketResponse.source` is `"hook:search"`;
      `lastMarketResponse.shape` (after an act search) has `success:
-     "boolean"` and `data.items["[0]"]` with `getAuctionData: "function"`
+"boolean"` and `data.items["[0]"]` with `getAuctionData: "function"`
      or an `_auction` object, plus one of
      `definitionId`/`resourceId`/`maskedDefId`.
    - **Good, promise shape:** `probe.ok: true`, `probe.shape: "promise"`;
@@ -449,7 +449,7 @@ reachable:
      outside `src/main/` needs to change: that is the never-forge-a-request
      seam.
 4. Check the passive side in the same report: `lastMarketResponse.source:
-   "passive"` with `shape.auctionInfo["[0]"]` holding `tradeId`,
+"passive"` with `shape.auctionInfo["[0]"]` holding `tradeId`,
    `buyNowPrice`, `expires` and `itemData.resourceId` as numbers, and
    `stats.failed` at 0. Diff it against
    `test/fixtures/mock-ea-app/payloads.js` if anything differs.
@@ -469,7 +469,7 @@ reachable:
 7. Only once 1–6 pass: flip a test account to a `ledger-auto`-entitled plan
    and watch one real, human-confirmed `assist.confirmBuy()` (M2, not M3) go
    through (`buy ok (<shape>)` in the log) before trusting the automated
-   loop at all. Confirm what a *failed* buy looks like too (outbid or
+   loop at all. Confirm what a _failed_ buy looks like too (outbid or
    expired listing): it must show as `buy failed`, never `buy ok`. Note
    how long a real `bid` takes to answer: a `timeout_unknown` in the log
    means EA took over 12 s, and a following `late buy answer` line says
@@ -523,7 +523,7 @@ falls back to the shipped default:
   see `packages/shared/src/schemas/settings.ts`, additive/backward-
   compatible).
 
-An allowed buy the adapter then *refuses* before calling EA (price
+An allowed buy the adapter then _refuses_ before calling EA (price
 mismatch, unknown listing, no entity, no act key), in a result whose MAC
 verified, is refunded with `Governor.refund(decision)`. An unsigned outcome
 is never refunded, even one reading `adapter_unauthenticated` (content's own

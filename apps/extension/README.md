@@ -1,4 +1,4 @@
-# @sl/extension — Sniper's Ledger
+# @sl/extension — Nova Trade
 
 The MV3 Chrome extension: a recorder for the EA FC transfer market (M1),
 a human-in-the-loop assist layer with an opportunity ranker and a visible

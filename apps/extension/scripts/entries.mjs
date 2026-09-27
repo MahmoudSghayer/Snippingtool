@@ -20,12 +20,11 @@ export const LIB_ENTRIES = Object.freeze([
   { entry: 'src/content/index.ts', fileName: 'content.js', globalName: 'SLContent' },
 ]);
 
-/** The ES-module group: background service worker, popup and options page
+/** The ES-module group: background service worker and popup
  * (these may share chunks). Emitted as `<name>.js`. */
 export const ES_GROUP_INPUTS = Object.freeze({
   background: 'src/background/index.ts',
   popup: 'src/popup/index.html',
-  options: 'src/options/index.html',
 });
 
 /** The userscript target (`build.mjs userscript [--template]`): one

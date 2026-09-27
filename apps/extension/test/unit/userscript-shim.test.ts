@@ -8,7 +8,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import browser, { RUNTIME_ID, setOptionsPageOpener } from '../../src/userscript/browser-shim.js';
+import browser, { RUNTIME_ID } from '../../src/userscript/browser-shim.js';
 import { gmFetch } from '../../src/userscript/gm-fetch.js';
 
 const gmStore = new Map<string, unknown>();
@@ -94,13 +94,6 @@ describe('userscript browser shim — messaging', () => {
     } finally {
       browser.runtime.onMessage.removeListener(listener);
     }
-  });
-
-  it('routes openOptionsPage to the launcher', async () => {
-    const open = vi.fn();
-    setOptionsPageOpener(open);
-    await browser.runtime.openOptionsPage();
-    expect(open).toHaveBeenCalledOnce();
   });
 });
 

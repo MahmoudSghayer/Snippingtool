@@ -1,12 +1,11 @@
 /*
- * ui-pages.spec.ts — loads the built `ledger` extension's popup and options
- * pages as real extension pages (`chrome-extension://<id>/...`), the way a
- * person actually opens them, and asserts:
- *   - no console errors / uncaught page errors on either page,
- *   - each page's key elements are present (status header + sign-in form
- *     for the popup's default logged-out state; every settings section for
- *     options),
- *   - zero serious/critical axe-core violations on either page.
+ * ui-pages.spec.ts — loads the built `ledger` extension's popup as a real
+ * extension page (`chrome-extension://<id>/...`), the way a person actually
+ * opens it, and asserts:
+ *   - no console errors / uncaught page errors,
+ *   - its key elements are present (status header + sign-in form for the
+ *     default logged-out state),
+ *   - zero serious/critical axe-core violations.
  *
  * Same persistent-context extension-loading approach as
  * `extension.spec.ts` (MV3 unpacked extensions need a headed context —
@@ -16,9 +15,8 @@
  *   pnpm --filter @sl/extension build:ledger
  *   xvfb-run -a pnpm --filter @sl/extension test:e2e
  *
- * Screenshots land in `apps/extension/screenshots/` at each page's natural
- * size — popup at its fixed 360x600 (docs/10-design-system.md §15), options
- * at a representative desktop width.
+ * Screenshots land in `apps/extension/screenshots/`, the popup at its fixed
+ * 360x600 (docs/10-design-system.md §15).
  */
 import { mkdirSync, existsSync } from 'node:fs';
 import path from 'node:path';
@@ -35,7 +33,7 @@ const distDir = path.join(extensionDir, 'dist', 'ledger');
 const screenshotsDir = path.join(extensionDir, 'screenshots');
 const chromiumPath = process.env.PLAYWRIGHT_CHROMIUM_PATH || '/opt/pw-browsers/chromium';
 
-test.describe('popup and options pages', () => {
+test.describe('popup page', () => {
   test.skip(!existsSync(distDir), `dist/ledger not built — run "pnpm --filter @sl/extension build:ledger" first`);
 
   let context: BrowserContext;
@@ -145,45 +143,6 @@ test.describe('popup and options pages', () => {
   test('popup: zero serious/critical axe-core violations', async () => {
     const page = await context.newPage();
     await page.goto(`chrome-extension://${extensionId}/src/popup/index.html`);
-    const results = await new AxeBuilder({ page }).analyze();
-    const serious = results.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical');
-    expect(serious, JSON.stringify(serious.map((v) => ({ id: v.id, impact: v.impact, nodes: v.nodes.length })), null, 2)).toEqual([]);
-    await page.close();
-  });
-
-  test('options: no console errors, every section present, screenshot', async () => {
-    const page = await context.newPage();
-    const tracked = trackConsoleErrors(page);
-    await page.setViewportSize({ width: 900, height: 1000 });
-    await page.goto(`chrome-extension://${extensionId}/src/options/index.html`);
-
-    await expect(page.locator('h1')).toContainText('Nova Trade');
-    for (const heading of [
-      'Account & license',
-      'Targets & budgets',
-      'Governor thresholds',
-      'Saved filters',
-      'Devices',
-      'Telemetry',
-      'What it sends',
-      'Diagnostics',
-    ]) {
-      await expect(page.getByRole('heading', { name: heading })).toBeVisible();
-    }
-    await expect(page.locator('#minProfit')).toBeVisible();
-    await expect(page.locator('#telemetry-optout')).toBeVisible();
-    await expect(page.locator('#export-logs')).toBeVisible();
-
-    await documentaryScreenshot(page, 'options-900.png', { fullPage: true });
-
-    expect(tracked.errors, `options console errors: ${JSON.stringify(tracked.errors)}`).toEqual([]);
-    await page.close();
-  });
-
-  test('options: zero serious/critical axe-core violations', async () => {
-    const page = await context.newPage();
-    await page.setViewportSize({ width: 900, height: 1000 });
-    await page.goto(`chrome-extension://${extensionId}/src/options/index.html`);
     const results = await new AxeBuilder({ page }).analyze();
     const serious = results.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical');
     expect(serious, JSON.stringify(serious.map((v) => ({ id: v.id, impact: v.impact, nodes: v.nodes.length })), null, 2)).toEqual([]);
