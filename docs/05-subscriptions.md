@@ -58,7 +58,10 @@ fully supported by the plans/subscriptions/licenses modules — they read
 (`@sl/shared`'s plan constants are the fixed-plan fast path for the
 extension/dashboard UI and the seed; the database row is always the runtime
 source of truth). `GET /plans` returns only `is_active = true`, non-deleted
-plans, ordered by `sort_order`.
+plans, ordered by `sort_order`. An archived (`is_active = false`) plan is
+off sale: payment claims (submission and approval) and coupon grants refuse
+it with `409 CONFLICT`. Only an admin's manual activate / grant-lifetime may
+still hand one out, e.g. to a legacy customer.
 
 **Server-side gating.** The API enforces these keys too, not just the
 extension and dashboard: routes list `fastify.requireFeature('<key>')`

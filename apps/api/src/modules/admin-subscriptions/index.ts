@@ -192,6 +192,8 @@ export default fp(
           planCode: request.body.planCode,
           periodDays: request.body.periodDays,
           grantedByAdminId: adminUserRowId,
+          // An admin may still grant an archived plan (a legacy customer).
+          allowInactivePlan: true,
         });
 
         await recordAdminAction({
@@ -243,6 +245,8 @@ export default fp(
           userId: request.params.userId,
           planCode: request.body.planCode,
           grantedByAdminId: adminUserRowId,
+          // An admin may still grant an archived plan (a legacy customer).
+          allowInactivePlan: true,
         });
 
         await recordAdminAction({

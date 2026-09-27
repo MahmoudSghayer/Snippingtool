@@ -112,6 +112,13 @@ export async function approveClaim(
   }
   const plan = await getPlanByCode(db, existing.planCode);
   if (!plan) throw AppErrors.notFound('plan');
+  // Archived while the claim waited. Checked before anything changes: a
+  // trial would otherwise be ended for a pass that is then refused.
+  if (!plan.isActive) {
+    throw AppErrors.conflict(
+      `${plan.name} is no longer offered. Reactivate the plan, or reject the payment or grant a pass by hand.`,
+    );
+  }
   const passDays =
     existing.planCode in PLAN_CATALOGUE
       ? PLAN_CATALOGUE[existing.planCode as keyof typeof PLAN_CATALOGUE].passDays
