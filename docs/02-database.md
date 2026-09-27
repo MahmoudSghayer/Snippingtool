@@ -789,8 +789,9 @@ and always keep ~12 months of headroom" is a reasonable default.
 
 **Rows in `_default`** block creating the partition that would cover them
 (Postgres refuses while the default holds rows for the new range). Ingest
-now rejects timestamps for the partitioned activity tables more than 5
-minutes ahead or 7 days back, which is what used to put them there, with a
+now rejects timestamps for the partitioned activity tables (extension
+telemetry and error reports included) more than 5 minutes ahead or 7 days
+back, which is what used to put them there, with a
 `TIMESTAMP_OUT_OF_WINDOW` 400 whose `details.indices` names the offending
 items. The unpartitioned `trades` table allows 400 days back (a card can
 be held for weeks), and the same 5 minutes ahead. `partitions.maintain` tries each table on its

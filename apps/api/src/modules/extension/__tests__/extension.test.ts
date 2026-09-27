@@ -260,6 +260,42 @@ describe('extension module: bootstrap/heartbeat + activity batch idempotency', (
     expect(after.some((r) => r.type === 'error')).toBe(true);
   });
 
+  // user_activity is partitioned by month on occurredAt: a far-future row
+  // would land in the default partition and block partitions.maintain.
+  it('telemetry and error reports reject an occurredAt outside the ingest window', async () => {
+    const mine = await bootstrapFor('tel-window@example.com', '198.51.100.24');
+    await grantPlan(app, mine.userId, 'pro');
+    const sixMonthsAhead = new Date(Date.now() + 182 * 24 * 60 * 60 * 1000).toISOString();
+
+    const telemetry = await app.inject({
+      method: 'POST',
+      url: '/api/v1/extension/telemetry',
+      headers: { authorization: `Bearer ${mine.accessToken}` },
+      payload: {
+        deviceId: mine.deviceId,
+        events: [
+          { name: 'ok', occurredAt: new Date().toISOString() },
+          { name: 'ahead', occurredAt: sixMonthsAhead },
+        ],
+      },
+    });
+    expect(telemetry.statusCode).toBe(400);
+    expect(telemetry.json().code).toBe('TIMESTAMP_OUT_OF_WINDOW');
+
+    const errors = await app.inject({
+      method: 'POST',
+      url: '/api/v1/extension/errors',
+      headers: { authorization: `Bearer ${mine.accessToken}` },
+      payload: {
+        deviceId: mine.deviceId,
+        extensionVersion: '0.1.0',
+        errors: [{ message: 'boom', occurredAt: sixMonthsAhead }],
+      },
+    });
+    expect(errors.statusCode).toBe(400);
+    expect(errors.json().code).toBe('TIMESTAMP_OUT_OF_WINDOW');
+  });
+
   it('GET /extension/version and /extension/kill-switch are unauthenticated and return sane defaults', async () => {
     const version = await app.inject({ method: 'GET', url: '/api/v1/extension/version' });
     expect(version.statusCode).toBe(200);
