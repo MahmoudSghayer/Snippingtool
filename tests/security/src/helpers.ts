@@ -5,7 +5,9 @@
 // itself uses), because there is no self-service "become an admin" API
 // route, by design (docs/04-auth.md §7).
 
-import { adminUsers, users } from '@sl/db';
+import { randomUUID } from 'node:crypto';
+
+import { adminUsers, plans, subscriptions, users } from '@sl/db';
 import { eq } from 'drizzle-orm';
 import { authenticator } from 'otplib';
 
@@ -212,6 +214,49 @@ export async function createAdminSession(
     accessToken: confirmBody.tokens.accessToken,
     refreshToken: confirmBody.tokens.refreshToken,
   };
+}
+
+/**
+ * Gives a user a live Monthly (`pro`) pass, written straight to `plans` /
+ * `subscriptions` through `app.db`: the ledger, filter, risk and analytics
+ * routes are plan-gated (`requireFeature`, `403 FEATURE_NOT_IN_PLAN`), and
+ * buying a pass is a PayPal claim an admin approves, with no self-service
+ * route to drive here. Only the subscription row matters to the gate (no
+ * licence is issued). Creates the `pro` plan row if `resetDatabase()` has
+ * truncated it.
+ */
+export async function grantMonthlyPass(app: TestApp, userId: string): Promise<void> {
+  let plan = await app.db.query.plans.findFirst({ where: eq(plans.code, 'pro') });
+  if (!plan) {
+    [plan] = await app.db
+      .insert(plans)
+      .values({
+        code: 'pro',
+        name: 'Monthly',
+        description: 'Monthly plan (security-test fixture).',
+        priceCents: 999,
+        interval: 'month',
+        isLifetime: false,
+        deviceLimit: 2,
+        features: {},
+        sortOrder: 1,
+        isActive: true,
+      })
+      .returning();
+  }
+  const now = new Date();
+  await app.db.insert(subscriptions).values({
+    id: randomUUID(),
+    userId,
+    planId: plan!.id,
+    status: 'active',
+    currentPeriodStart: now,
+    currentPeriodEnd: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
+    trialEndsAt: null,
+    cancelAtPeriodEnd: false,
+    autoRenew: false,
+    source: 'manual',
+  });
 }
 
 export function bearer(token: string): { authorization: string } {

@@ -15,6 +15,7 @@ import {
   PERMISSION_MATRIX,
   hasPermission,
   type AdminRole,
+  type FeatureKey,
   type Permission,
 } from '@sl/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -23,7 +24,9 @@ import {
   NIL_LIKE_UUID,
   bearer,
   createAdminSession,
+  createUserSession,
   buildTestApp,
+  grantMonthlyPass,
   type TestApp,
 } from './helpers.js';
 
@@ -251,4 +254,61 @@ describe('authz matrix: admin routes × admin roles', () => {
     });
     expect(res.statusCode).toBe(403);
   });
+});
+
+// Plan gate (`fastify.requireFeature`, apps/api/src/plugins/auth.ts): one
+// read route per gated feature. A signed-in user with no plan gets
+// `403 FEATURE_NOT_IN_PLAN` naming the feature; the same user with a
+// Monthly pass gets 200. apps/api's own
+// src/plugins/__tests__/require-feature.test.ts covers every gated route ×
+// basic/expired/trial/Monthly; this is the check against the built app.
+const TODAY = new Date().toISOString().slice(0, 10);
+const PLAN_GATED_ROUTES: Array<{ path: string; feature: FeatureKey }> = [
+  { path: '/api/v1/trades', feature: 'ledger.recorder' },
+  { path: `/api/v1/profits?from=${TODAY}&to=${TODAY}`, feature: 'ledger.recorder' },
+  { path: '/api/v1/filters', feature: 'assist.filter_rotation' },
+  { path: '/api/v1/risk-events', feature: 'assist.risk_meter' },
+  { path: '/api/v1/analytics/me/overview', feature: 'dashboard.analytics' },
+  { path: '/api/v1/market/movers', feature: 'dashboard.analytics' },
+];
+
+describe('authz matrix: plan-gated routes × plan', () => {
+  let app: TestApp;
+  let noPlan: string;
+  let monthly: string;
+
+  beforeAll(async () => {
+    app = await buildTestApp();
+    await resetDatabase(app.db);
+    app.mailer.sentEmails.length = 0;
+    noPlan = (await createUserSession(app, 'plan-none@example.com', 'plan-fp-none-000000000001'))
+      .accessToken;
+    const paid = await createUserSession(
+      app,
+      'plan-monthly@example.com',
+      'plan-fp-monthly-0000000001',
+    );
+    await grantMonthlyPass(app, paid.userId);
+    monthly = paid.accessToken;
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  for (const route of PLAN_GATED_ROUTES) {
+    it(`403 FEATURE_NOT_IN_PLAN without a plan → GET ${route.path}`, async () => {
+      const res = await app.inject({ method: 'GET', url: route.path, headers: bearer(noPlan) });
+      expect(res.statusCode, res.body).toBe(403);
+      expect(res.json()).toMatchObject({
+        code: 'FEATURE_NOT_IN_PLAN',
+        details: { feature: route.feature },
+      });
+    });
+
+    it(`200 with a Monthly pass → GET ${route.path}`, async () => {
+      const res = await app.inject({ method: 'GET', url: route.path, headers: bearer(monthly) });
+      expect(res.statusCode, res.body).toBe(200);
+    });
+  }
 });

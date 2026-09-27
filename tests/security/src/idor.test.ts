@@ -15,6 +15,7 @@ import {
   bearer,
   buildTestApp,
   createUserSession,
+  grantMonthlyPass,
   NIL_LIKE_UUID,
   type TestApp,
   type UserSession,
@@ -37,7 +38,9 @@ describe("IDOR: user A cannot read or mutate user B's own-scoped resources", () 
     await resetDatabase(app.db);
     app.mailer.sentEmails.length = 0;
     userA = await createUserSession(app, 'idor-a@example.com', 'idor-fp-a-000000000000001');
+    await grantMonthlyPass(app, userA.userId);
     userB = await createUserSession(app, 'idor-b@example.com', 'idor-fp-b-000000000000002');
+    await grantMonthlyPass(app, userB.userId);
   });
 
   it("devices: B cannot rename or revoke A's device", async () => {

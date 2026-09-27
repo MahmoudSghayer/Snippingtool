@@ -63,7 +63,7 @@ export default fp(
     app.get(
       '/api/v1/profits',
       {
-        onRequest: [fastify.authenticate],
+        onRequest: [fastify.requireFeature('ledger.recorder')],
         schema: {
           tags: ['profits'],
           querystring: profitQuerySchema,

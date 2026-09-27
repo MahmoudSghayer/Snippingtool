@@ -6911,7 +6911,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Start a 7-day trial. Denied with TRIAL_ABUSE_DETECTED on abuse signals. */
+        /** Start a 7-day trial, once per account. Denied with TRIAL_ALREADY_USED after a past trial, TRIAL_ABUSE_DETECTED on abuse signals. */
         post: {
             parameters: {
                 query?: never;

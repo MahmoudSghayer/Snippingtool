@@ -34,7 +34,7 @@ export default fp(
     app.get(
       '/api/v1/analytics/me/overview',
       {
-        onRequest: [fastify.authenticate],
+        onRequest: [fastify.requireFeature('dashboard.analytics')],
         schema: { tags: ['analytics'], response: { 200: meOverviewResponseSchema } },
       },
       async (request) => {
@@ -91,7 +91,7 @@ export default fp(
     app.get(
       '/api/v1/analytics/me/profits',
       {
-        onRequest: [fastify.authenticate],
+        onRequest: [fastify.requireFeature('dashboard.analytics')],
         schema: {
           tags: ['analytics'],
           querystring: meProfitsQuerySchema,
@@ -130,7 +130,7 @@ export default fp(
     app.get(
       '/api/v1/analytics/me/activity',
       {
-        onRequest: [fastify.authenticate],
+        onRequest: [fastify.requireFeature('dashboard.analytics')],
         schema: {
           tags: ['analytics'],
           querystring: meActivityQuerySchema,

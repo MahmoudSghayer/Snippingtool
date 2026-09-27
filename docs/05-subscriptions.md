@@ -34,13 +34,13 @@ and feature behaviour for (`@sl/shared`'s `PLAN_CODES`, `DEVICE_LIMITS`,
 `PLAN_FEATURES` — the single source of truth every module imports instead of
 re-declaring these numbers).
 
-| Plan       | Price          | Interval   | Device limit | `is_lifetime` | Feature keys (additive)                                                                                                       |
-| ---------- | -------------- | ---------- | ------------ | ------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `trial`    | 0¢             | 7 days¹    | 1            | false         | `ledger.recorder`, `ledger.price_model`, `assist.ranker`, `assist.filter_rotation`, `assist.session_pnl`, `assist.risk_meter` |
-| `basic`    | 499¢/mo        | month      | 1            | false         | `ledger.recorder`, `ledger.price_model`                                                                                       |
-| `pro`      | 999¢/mo        | month      | 2            | false         | `basic` + `assist.ranker`, `assist.filter_rotation`, `assist.session_pnl`, `assist.risk_meter`, `dashboard.analytics`         |
-| `ultimate` | 1999¢/mo       | month      | 3            | false         | `pro` + `automation.autobuyer`, `dashboard.multi_device`, `support.priority`                                                  |
-| `lifetime` | 9999¢ one-time | `one_time` | 3            | true          | same as `ultimate`                                                                                                            |
+| Plan       | Price          | Interval   | Device limit | `is_lifetime` | Feature keys (additive)                                                                                                                              |
+| ---------- | -------------- | ---------- | ------------ | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `trial`    | 0¢             | 7 days¹    | 1            | false         | `ledger.recorder`, `ledger.price_model`, `assist.ranker`, `assist.filter_rotation`, `assist.session_pnl`, `assist.risk_meter`, `dashboard.analytics` |
+| `basic`    | 499¢/mo        | month      | 1            | false         | `ledger.recorder`, `ledger.price_model`                                                                                                              |
+| `pro`      | 999¢/mo        | month      | 2            | false         | `basic` + `assist.ranker`, `assist.filter_rotation`, `assist.session_pnl`, `assist.risk_meter`, `dashboard.analytics`                                |
+| `ultimate` | 1999¢/mo       | month      | 3            | false         | `pro` + `automation.autobuyer`, `dashboard.multi_device`, `support.priority`                                                                         |
+| `lifetime` | 9999¢ one-time | `one_time` | 3            | true          | same as `ultimate`                                                                                                                                   |
 
 ¹ `trial` is priced at 0¢/mo in `plans` (so it fits the same billing shape as
 every other plan for the plans list/admin UI) but is never billed — its
@@ -58,6 +58,27 @@ fully supported by the plans/subscriptions/licenses modules — they read
 extension/dashboard UI and the seed; the database row is always the runtime
 source of truth). `GET /plans` returns only `is_active = true`, non-deleted
 plans, ordered by `sort_order`.
+
+**Server-side gating.** The API enforces these keys too, not just the
+extension and dashboard: routes list `fastify.requireFeature('<key>')`
+(`apps/api/src/plugins/auth.ts`) in `onRequest`, which authenticates, then
+checks the caller's live `features` (the `EntitlementProvider` snapshot in
+§4, cached in Redis for 60 s per user and deleted wherever
+`subscription.changed` is published). A caller without the key gets
+`403 FEATURE_NOT_IN_PLAN` with `details.feature`.
+
+| Feature key              | Routes                                                                                |
+| ------------------------ | ------------------------------------------------------------------------------------- |
+| `ledger.recorder`        | `/trades*`, `/sniping/attempts`, `/profits`, `POST /extension/telemetry`              |
+| `assist.filter_rotation` | `/filters*`                                                                           |
+| `assist.risk_meter`      | `/risk-events` (the admin `/admin/users/:id/risk-events` is permission-gated instead) |
+| `dashboard.analytics`    | `/analytics/me/*`, `/market/*`                                                        |
+
+Every live plan has `ledger.recorder`, so that gate means "has a live
+subscription". Extension bootstrap, heartbeat, error reports, licence
+validation and every account, billing, settings, notification, device,
+session and auth route stay ungated, so an expired user can still sign in,
+see that they have expired, and buy a pass.
 
 ---
 
@@ -275,6 +296,17 @@ throughout, and a blob without the claim never counts as "off".
 
 ## 5. Trial protection
 
+**One trial per account, ever.** An account that has ever had a trial gets
+`403 TRIAL_ALREADY_USED` (no flag; a live subscription is still the `409
+CONFLICT` it always was). "Has had a trial" means any `subscriptions` row on
+the `trial` plan, whatever its status and even if soft-deleted: expiry,
+upgrade and suspension keep that row (an upgrade inserts a new one), while
+`trial_ends_at` is cleared as soon as a trial stops trialing, so it is not
+the history. The email, device and IP checks below use the same definition
+for the other accounts they match, looked up through
+`subscriptions_user_id_plan_id_idx` (migrations/0035), with all their
+filters in SQL.
+
 `POST /subscriptions/trial` denies a trial (`403 TRIAL_ABUSE_DETECTED`) and
 writes a `flags` row (`kind = 'trial_abuse'`, `severity` per table below,
 `evidence` = the exact match(es) that triggered the denial) whenever **any**
@@ -284,11 +316,13 @@ match, so `evidence` can record every reason at once (useful for the
 abuse-review queue — a request that trips several heuristics at once is a
 stronger signal than one that trips one).
 
-| #   | Check                  | Key                                                                                                                                                                                                                 | Window                                                                                         | Data source                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| --- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | **Email**              | `normaliseEmailForAbuseCheck(email)` (`@sl/shared` — gmail dot/plus stripping + domain lowercasing)                                                                                                                 | unbounded (no lookback — a normalised email that has ever had a trial never gets a second one) | An indexed equality lookup against `users.email_normalised` (migrations/0025), a `GENERATED ALWAYS AS STORED` column Postgres computes and keeps in sync automatically from `email` via an IMMUTABLE SQL function (`normalise_email_for_abuse_check`) mirroring `normaliseEmailForAbuseCheck()` byte-for-byte — replacing the original scan-and-normalise-in-application-code approach (see the former "scaling note" this superseded). Joined to every subscription whose `trial_ends_at IS NOT NULL`. |
-| 2   | **Device fingerprint** | SHA-256 hash of the _authenticated request's own device_ fingerprint — `request.authUser.deviceId` (set by login/registration, not resubmitted by the trial call) looked up in `devices` for its `fingerprint_hash` | 30 days                                                                                        | Every other `devices` row (any user) sharing that `fingerprint_hash`, joined to that user's trial-having subscriptions, `devices.first_seen_at` within 30 days                                                                                                                                                                                                                                                                                                                                          |
-| 3   | **IP /24**             | The request IP's `/24` (first three octets for IPv4; `/48` for IPv6, same rationale — coarse enough to catch "same household/NAT/VPN exit" without flagging an entire ISP)                                          | 30 days                                                                                        | `ip_activity` (rows written by this module on every trial attempt, successful or not — `recordTrialIpActivity()`), joined to trial-having subscriptions                                                                                                                                                                                                                                                                                                                                                 |
+| #   | Check                  | Key                                                                                                                                                                                                                                                                                                                                                      | Window                                                                                                             | Data source                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| --- | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **Email**              | `normaliseEmailForAbuseCheck(email)` (`@sl/shared` — gmail dot/plus stripping + domain lowercasing)                                                                                                                                                                                                                                                      | unbounded (no lookback — a normalised email that has ever had a trial never gets a second one)                     | An indexed equality lookup against `users.email_normalised` (migrations/0025), a `GENERATED ALWAYS AS STORED` column Postgres computes and keeps in sync automatically from `email` via an IMMUTABLE SQL function (`normalise_email_for_abuse_check`) mirroring `normaliseEmailForAbuseCheck()` byte-for-byte — replacing the original scan-and-normalise-in-application-code approach (see the former "scaling note" this superseded). Restricted to users who have had a trial (any row on the `trial` plan). |
+| 2   | **Device fingerprint** | SHA-256 hash of the _authenticated request's own device_ fingerprint — `request.authUser.deviceId` (set by login/registration, not resubmitted by the trial call) looked up in `devices` for its `fingerprint_hash`                                                                                                                                      | 30 days                                                                                                            | Every other `devices` row (any user) sharing that `fingerprint_hash`, joined to that user's trial-having subscriptions, `devices.first_seen_at` within 30 days                                                                                                                                                                                                                                                                                                                                                  |
+| 3   | **IP /24**             | The request IP's `/24` (first three octets for IPv4; `/48` for IPv6, same rationale — coarse enough to catch "same household/NAT/VPN exit" without flagging an entire ISP)                                                                                                                                                                               | 30 days                                                                                                            | `ip_activity` (rows written by this module on every trial attempt, successful or not — `recordTrialIpActivity()`), joined to trial-having subscriptions                                                                                                                                                                                                                                                                                                                                                         |
+
+A former 4th check (Stripe customer) is gone along with Stripe.
 
 **Severity mapping** (written to `flags.severity`): 1 match → `low`; 2
 matches → `medium`; all 3 → `critical` (skipping `high` — several

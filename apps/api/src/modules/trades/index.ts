@@ -221,7 +221,7 @@ export default fp(
     app.post(
       '/api/v1/trades/batch',
       {
-        onRequest: [fastify.authenticate],
+        onRequest: [fastify.requireFeature('ledger.recorder')],
         preHandler: [fastify.verifyCsrf],
         config: { rateLimit: INGEST_RATE_LIMIT },
         schema: {
@@ -291,7 +291,7 @@ export default fp(
     app.post(
       '/api/v1/trades/:id/close',
       {
-        onRequest: [fastify.authenticate],
+        onRequest: [fastify.requireFeature('ledger.recorder')],
         preHandler: [fastify.verifyCsrf],
         schema: {
           tags: ['trades'],
@@ -377,7 +377,7 @@ export default fp(
     app.get(
       '/api/v1/trades',
       {
-        onRequest: [fastify.authenticate],
+        onRequest: [fastify.requireFeature('ledger.recorder')],
         schema: {
           tags: ['trades'],
           querystring: tradeListQuerySchema,
