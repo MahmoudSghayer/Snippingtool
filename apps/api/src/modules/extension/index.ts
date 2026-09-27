@@ -3,7 +3,7 @@
 // points (docs/01-architecture.md, "license bootstrap + heartbeat + offline
 // grace").
 
-import { devices, featureToggles, licenses, plans, subscriptions, userActivity } from '@sl/db';
+import { devices, featureToggles, licenses, plans, subscriptions, userActivity, users } from '@sl/db';
 import {
   bootstrapRequestSchema,
   bootstrapResponseSchema,
@@ -22,6 +22,7 @@ import fp from 'fastify-plugin';
 import { z } from 'zod';
 
 import { findOrRegisterDevice } from '../../lib/devices.js';
+import { AppErrors } from '../../lib/errors.js';
 import { newId } from '../../lib/ids.js';
 import { INGEST_RATE_LIMIT } from '../../lib/rate-limit-tiers.js';
 import { getOrCreateUserSettings } from '../../lib/settings.js';
@@ -86,6 +87,20 @@ async function loadSubscriptionAndLicenseDto(
   return { subscription, license };
 }
 
+/** The authenticated caller's own email — keyed only on the session's user
+ * id, never on anything from the request body. Bootstrap only (heartbeat
+ * does not return it). Never log the value. */
+async function loadOwnEmail(fastify: FastifyInstance, userId: string): Promise<string> {
+  const row = await fastify.db.query.users.findFirst({
+    where: eq(users.id, userId),
+    columns: { email: true, deletedAt: true },
+  });
+  // authenticate() just loaded this same row, so a miss means the account was
+  // removed mid-request.
+  if (!row || row.deletedAt) throw AppErrors.tokenInvalid('Account no longer exists.');
+  return row.email;
+}
+
 export default fp(
   async function extensionModule(fastify: FastifyInstance) {
     const app = fastify.withTypeProvider<ZodTypeProvider>();
@@ -116,11 +131,12 @@ export default fp(
           .set({ extensionVersion: request.body.extensionVersion })
           .where(eq(devices.id, deviceId));
 
-        const [entitlementSnapshot, { settings }, killSwitchActive, dtos] = await Promise.all([
+        const [entitlementSnapshot, { settings }, killSwitchActive, dtos, email] = await Promise.all([
           fastify.entitlements.getEntitlements(userId),
           getOrCreateUserSettings(fastify.db, userId),
           isKillSwitchActive(fastify),
           loadSubscriptionAndLicenseDto(fastify, userId),
+          loadOwnEmail(fastify, userId),
         ]);
 
         const entitlementBlob = await fastify.entitlements.signEntitlementBlob(
@@ -132,6 +148,7 @@ export default fp(
 
         return {
           userId,
+          email,
           deviceId,
           subscription: dtos.subscription,
           license: dtos.license,

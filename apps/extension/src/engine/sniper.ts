@@ -943,8 +943,8 @@ const STOP_MESSAGES: Record<SniperStopReason, string> = {
   session_length: 'session length limit reached',
   daily_limit: 'active hours per day limit reached — the bot can run again tomorrow',
   risk_unacknowledged:
-    'these settings are above low risk: confirm the risk on the Sniping Bot page first, or reset to recommended',
-  not_entitled: 'your plan no longer includes the Sniping Bot',
+    'these settings are above low risk: confirm the risk on the Nova AI page first, or reset to recommended',
+  not_entitled: 'your plan no longer includes Nova AI',
   other_tab: 'Nova Trade is running in another EA tab: stop the bot there, or close that tab, first',
   budget_unavailable:
     'the saved hourly limits could not be read (the extension may be restarting) — try Start again in a moment',

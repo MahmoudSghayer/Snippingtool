@@ -189,7 +189,7 @@ async function buildDeviceFingerprint() {
   };
 }
 
-async function cache(data: BootstrapResponse | (HeartbeatResponse & { userId: string })): Promise<void> {
+async function cache(data: BootstrapResponse | (HeartbeatResponse & { userId: string; email: string })): Promise<void> {
   const entry: CachedEntitlement = { bootstrap: data as BootstrapResponse, cachedAt: Date.now() };
   await setLocal(CACHE_KEY, entry);
 }
@@ -266,7 +266,9 @@ export async function heartbeat(deviceId: string, engineState: HeartbeatRequest[
     const data = await apiJson<HeartbeatResponse>('/api/v1/extension/heartbeat', { method: 'POST', body: JSON.stringify(body) });
     await recordServerTime(data.serverTime, sentAt, Date.now());
     const prior = await readUnverifiedCache();
-    await cache({ ...data, userId: prior?.bootstrap.userId ?? '' });
+    // The heartbeat response has no userId or email (bootstrap only): carry
+    // the last bootstrap's over, or the rewrite would drop them.
+    await cache({ ...data, userId: prior?.bootstrap.userId ?? '', email: prior?.bootstrap.email ?? '' });
     return data;
   } catch (err) {
     logger.warn(`heartbeat failed, extension falls back to the cached entitlement: ${String(err)}`, 'license');

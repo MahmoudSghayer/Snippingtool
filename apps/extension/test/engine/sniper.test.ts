@@ -518,6 +518,9 @@ describe('Sniper — the user\'s limits', () => {
     risky.sniper.start();
     expect(risky.sniper.isRunning()).toBe(false);
     expect(risky.sniper.state.stopReason).toBe('risk_unacknowledged');
+    expect(risky.sniper.state.stopDetail).toBe(
+      'these settings are above low risk: confirm the risk on the Nova AI page first, or reset to recommended',
+    );
 
     // The recommended defaults are low: no acknowledgment needed.
     const safe = setup({ settings: { ...DEFAULT_BOT_SETTINGS, riskAcknowledgedAt: null } });
@@ -802,7 +805,7 @@ describe('Sniper — the plan must still include the bot', () => {
     h.sniper.start();
     await h.done();
     expect(h.sniper.state.stopReason).toBe('not_entitled');
-    expect(h.sniper.state.stopDetail).toBe('your plan no longer includes the Sniping Bot');
+    expect(h.sniper.state.stopDetail).toBe('your plan no longer includes Nova AI');
     // Checked before the buy the second search found, not only the next search.
     expect(h.searches).toHaveLength(2);
     expect(h.buys).toEqual([]);

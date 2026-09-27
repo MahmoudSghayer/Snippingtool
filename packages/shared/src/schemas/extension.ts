@@ -21,6 +21,10 @@ export type BootstrapRequest = z.infer<typeof bootstrapRequestSchema>;
 
 export const bootstrapResponseSchema = z.object({
   userId: z.string().uuid(),
+  /** The signed-in user's own account email, so the extension can show who
+   * it is signed in as. Bootstrap only (omitted from heartbeat below); the
+   * API never logs it. */
+  email: z.string().email(),
   deviceId: z.string().uuid(),
   subscription: subscriptionDtoSchema.nullable(),
   license: licenseDtoSchema.nullable(),
@@ -55,7 +59,9 @@ export const heartbeatRequestSchema = z
   .strict();
 export type HeartbeatRequest = z.infer<typeof heartbeatRequestSchema>;
 
-export const heartbeatResponseSchema = bootstrapResponseSchema.omit({ userId: true });
+// Heartbeat omits `email` explicitly: `.omit()` only drops the keys it names,
+// so without it every heartbeat would have to carry (and look up) the email.
+export const heartbeatResponseSchema = bootstrapResponseSchema.omit({ userId: true, email: true });
 export type HeartbeatResponse = z.infer<typeof heartbeatResponseSchema>;
 
 /** `POST /extension/telemetry` — batched, opt-out respected client-side
