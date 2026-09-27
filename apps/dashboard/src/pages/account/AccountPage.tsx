@@ -1,9 +1,11 @@
 // /account: the customer's "My account" page, inside the website's header
-// and footer (routes/SiteLayout.tsx). One page, five sections, in the order
-// a customer needs them: what they have, the download, how to pay, where
-// they're signed in, and how they sign in.
+// and footer (routes/SiteLayout.tsx). A "Getting started" checklist for new
+// customers, then five sections in the order a customer needs them: what
+// they have, the download, how to pay, where they're signed in, and how
+// they sign in.
 import { PaymentHistory, PayWithPayPal, SubmitPayment } from '@/components/account/BuyPass.js';
 import { DevicesCard } from '@/components/account/DevicesCard.js';
+import { GettingStarted } from '@/components/account/GettingStarted.js';
 import { PassSummary } from '@/components/account/PassSummary.js';
 import {
   ChangePasswordCard,
@@ -60,6 +62,8 @@ export function AccountPage() {
           </p>
         )}
       </header>
+
+      <GettingStarted />
 
       <AccountSection id="pass" index={1} title="Your pass">
         <PassSummary />
