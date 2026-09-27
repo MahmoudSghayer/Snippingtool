@@ -15,6 +15,10 @@ import type { BootstrapResponse, LoginResponse, SubscriptionStatus, UserSettings
 let app: HTMLElement;
 
 const DASHBOARD_ORIGIN = (import.meta.env.VITE_DASHBOARD_ORIGIN ?? '').replace(/\/$/, '');
+// The listable (`ledger`) build carries no automation code at all — the
+// bundle must not even name the feature (test/unit/ledger-build-adapter.ts
+// greps dist/ledger for "Nova AI"), so every mention of it here is gated.
+const AUTOMATION_ENABLED = import.meta.env.VITE_AUTOMATION === '1';
 
 /** False on a web page (the userscript's drawer on ea.com): the browser's
  * password manager would offer that site's saved login — the user's EA
@@ -223,7 +227,7 @@ async function renderLoggedIn(): Promise<void> {
           ? ''
           : `<button class="link" id="plan-link">${sub ? 'Renew on the website' : 'Get a pass on the website'}</button>`
       }
-      ${killSwitch ? '<div class="error">Nova AI is paused by Nova Trade. All actions are blocked.</div>' : ''}
+      ${killSwitch && AUTOMATION_ENABLED ? '<div class="error">Nova AI is paused by Nova Trade. All actions are blocked.</div>' : ''}
     </div>
     <div class="card switch-row">
       <div>
@@ -233,7 +237,7 @@ async function renderLoggedIn(): Promise<void> {
       <button type="button" class="switch" id="share-usage" role="switch" aria-checked="${sharing}"
         aria-labelledby="share-label" aria-describedby="share-help"></button>
     </div>
-    <p class="hint">Open Nova AI from the left menu in the EA web app.</p>
+    ${AUTOMATION_ENABLED ? '<p class="hint">Open Nova AI from the left menu in the EA web app.</p>' : ''}
     <button class="secondary" id="logout">Sign out</button>
   `);
 

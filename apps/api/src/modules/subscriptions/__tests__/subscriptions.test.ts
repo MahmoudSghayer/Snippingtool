@@ -10,6 +10,8 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { buildApp } from '../../../app.js';
+import { hashSecret } from '../../../lib/crypto.js';
+import { newId } from '../../../lib/ids.js';
 import { reseedPlans } from '../../../test/reseed-reference-data.js';
 import { activateManual, expireDueSubscriptions, grantLifetime, startTrial } from '../service.js';
 
