@@ -70,7 +70,6 @@ export async function createPlan(
       isLifetime: input.isLifetime,
       deviceLimit: input.deviceLimit,
       features: featuresArrayToJsonb(input.features),
-      stripePriceId: input.stripePriceId ?? null,
       sortOrder: input.sortOrder,
       isActive: true,
       createdBy: actorId,
@@ -95,7 +94,6 @@ export async function updatePlan(
   if (input.priceCents !== undefined) patch.priceCents = input.priceCents;
   if (input.deviceLimit !== undefined) patch.deviceLimit = input.deviceLimit;
   if (input.features !== undefined) patch.features = featuresArrayToJsonb(input.features);
-  if (input.stripePriceId !== undefined) patch.stripePriceId = input.stripePriceId;
   if (input.isActive !== undefined) patch.isActive = input.isActive;
   if (input.sortOrder !== undefined) patch.sortOrder = input.sortOrder;
 

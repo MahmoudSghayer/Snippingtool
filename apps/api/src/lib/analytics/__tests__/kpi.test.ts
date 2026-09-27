@@ -86,7 +86,7 @@ describe('lib/analytics/kpi', () => {
       {
         id: newId(),
         userId: u1,
-        provider: 'stripe',
+        provider: 'manual',
         providerPaymentId: 'pay_in_range_1',
         amountCents: 500,
         status: 'succeeded',
@@ -95,7 +95,7 @@ describe('lib/analytics/kpi', () => {
       {
         id: newId(),
         userId: u1,
-        provider: 'stripe',
+        provider: 'manual',
         providerPaymentId: 'pay_in_range_2',
         amountCents: 250,
         status: 'succeeded',
@@ -104,7 +104,7 @@ describe('lib/analytics/kpi', () => {
       {
         id: newId(),
         userId: u1,
-        provider: 'stripe',
+        provider: 'manual',
         providerPaymentId: 'pay_failed',
         amountCents: 999,
         status: 'failed',
@@ -113,7 +113,7 @@ describe('lib/analytics/kpi', () => {
       {
         id: newId(),
         userId: u1,
-        provider: 'stripe',
+        provider: 'manual',
         providerPaymentId: 'pay_out_of_range',
         amountCents: 999,
         status: 'succeeded',

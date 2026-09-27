@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Cross-app end-to-end journeys (Playwright, tests/e2e) and load tests (k6, tests/load) for The Sniper's Ledger — the tests that exercise more than one app at once (extension <-> API, admin <-> WS <-> another user's session, Stripe webhook <-> dashboard). Single-app suites live with their own app (apps/dashboard/e2e, apps/extension/test/e2e) or as their own workspace package (tests/security). See README.md and docs/12-testing.md.",
+  "description": "Cross-app end-to-end journeys (Playwright, tests/e2e) and load tests (k6, tests/load) for The Sniper's Ledger — the tests that exercise more than one app at once (extension <-> API, admin <-> WS <-> another user's session). Single-app suites live with their own app (apps/dashboard/e2e, apps/extension/test/e2e) or as their own workspace package (tests/security). See README.md and docs/12-testing.md.",
   "scripts": {
     "test:e2e": "playwright test -c e2e/playwright.config.ts",
     "test:e2e:headed": "PWDEBUG=0 playwright test -c e2e/playwright.config.ts --headed",
@@ -29,7 +29,6 @@
     "dotenv": "^16.4.7",
     "otplib": "^12.0.1",
     "postgres": "^3.4.5",
-    "stripe": "^17.5.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
     "vite": "^8.3.0",

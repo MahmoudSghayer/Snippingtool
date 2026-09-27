@@ -3791,10 +3791,6 @@
                           "isActive": {
                             "type": "boolean"
                           },
-                          "stripePriceId": {
-                            "type": "string",
-                            "nullable": true
-                          },
                           "sortOrder": {
                             "type": "integer"
                           },
@@ -3818,7 +3814,6 @@
                           "features",
                           "isLifetime",
                           "isActive",
-                          "stripePriceId",
                           "sortOrder",
                           "createdAt",
                           "updatedAt"
@@ -3902,12 +3897,6 @@
                       "maxLength": 80
                     }
                   },
-                  "stripePriceId": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 200,
-                    "nullable": true
-                  },
                   "sortOrder": {
                     "type": "integer",
                     "default": 0
@@ -3976,10 +3965,6 @@
                     "isActive": {
                       "type": "boolean"
                     },
-                    "stripePriceId": {
-                      "type": "string",
-                      "nullable": true
-                    },
                     "sortOrder": {
                       "type": "integer"
                     },
@@ -4003,7 +3988,6 @@
                     "features",
                     "isLifetime",
                     "isActive",
-                    "stripePriceId",
                     "sortOrder",
                     "createdAt",
                     "updatedAt"
@@ -4055,12 +4039,6 @@
                       "minLength": 1,
                       "maxLength": 80
                     }
-                  },
-                  "stripePriceId": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 200,
-                    "nullable": true
                   },
                   "isActive": {
                     "type": "boolean"
@@ -4137,10 +4115,6 @@
                     "isActive": {
                       "type": "boolean"
                     },
-                    "stripePriceId": {
-                      "type": "string",
-                      "nullable": true
-                    },
                     "sortOrder": {
                       "type": "integer"
                     },
@@ -4164,7 +4138,6 @@
                     "features",
                     "isLifetime",
                     "isActive",
-                    "stripePriceId",
                     "sortOrder",
                     "createdAt",
                     "updatedAt"
@@ -4259,10 +4232,6 @@
                     "isActive": {
                       "type": "boolean"
                     },
-                    "stripePriceId": {
-                      "type": "string",
-                      "nullable": true
-                    },
                     "sortOrder": {
                       "type": "integer"
                     },
@@ -4286,7 +4255,6 @@
                     "features",
                     "isLifetime",
                     "isActive",
-                    "stripePriceId",
                     "sortOrder",
                     "createdAt",
                     "updatedAt"
@@ -12726,127 +12694,6 @@
         }
       }
     },
-    "/api/v1/payments/checkout": {
-      "post": {
-        "summary": "Create a Stripe Checkout session for a plan (coupon code optional).",
-        "tags": [
-          "payments"
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "planCode": {
-                    "type": "string",
-                    "enum": [
-                      "trial",
-                      "basic",
-                      "pro",
-                      "ultimate",
-                      "lifetime"
-                    ]
-                  },
-                  "successUrl": {
-                    "type": "string",
-                    "format": "uri"
-                  },
-                  "cancelUrl": {
-                    "type": "string",
-                    "format": "uri"
-                  },
-                  "couponCode": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 40
-                  }
-                },
-                "required": [
-                  "planCode",
-                  "successUrl",
-                  "cancelUrl"
-                ],
-                "additionalProperties": false
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "checkoutUrl": {
-                      "type": "string",
-                      "format": "uri"
-                    }
-                  },
-                  "required": [
-                    "checkoutUrl"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/payments/portal": {
-      "post": {
-        "summary": "Create a Stripe Customer Portal session.",
-        "tags": [
-          "payments"
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "returnUrl": {
-                    "type": "string",
-                    "format": "uri"
-                  }
-                },
-                "required": [
-                  "returnUrl"
-                ],
-                "additionalProperties": false
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "portalUrl": {
-                      "type": "string",
-                      "format": "uri"
-                    }
-                  },
-                  "required": [
-                    "portalUrl"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/payments/history": {
       "get": {
         "summary": "Current user's payment history, cursor-paginated.",
@@ -12948,35 +12795,6 @@
                   "required": [
                     "items",
                     "nextCursor"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/webhooks/stripe": {
-      "post": {
-        "summary": "Stripe webhook receiver — signature-verified, idempotent.",
-        "tags": [
-          "payments"
-        ],
-        "responses": {
-          "200": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "received": {
-                      "type": "boolean"
-                    }
-                  },
-                  "required": [
-                    "received"
                   ],
                   "additionalProperties": false
                 }

@@ -134,7 +134,6 @@ describe('payment claims (PayPal.me)', () => {
       email: 'trialist@example.com',
       fingerprintHash: null,
       ip: null,
-      stripeCustomerId: null,
     });
 
     const claim = await submit(buyer.token, { planCode: 'pro', paypalTransactionId: txn() });

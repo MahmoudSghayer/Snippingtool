@@ -1,8 +1,8 @@
 // EntitlementProvider: the interface `modules/extension`'s bootstrap/heartbeat
 // routes depend on to answer "what is this user entitled to". Defined here so
 // it is a stable seam — the subscriptions/payments agent may swap in a
-// richer implementation (e.g. one that also considers grace periods after a
-// failed Stripe charge) without `modules/extension` changing at all; it only
+// richer implementation (e.g. one that also considers grace periods)
+// without `modules/extension` changing at all; it only
 // ever imports this interface and calls `provider.getEntitlements(userId)`.
 //
 // The default implementation reads subscriptions/plans/licenses directly

@@ -2,8 +2,7 @@
 // data and sends no webhook, so the buyer tells us they paid: they submit the
 // PayPal transaction ID for a plan, and an admin checks it against the PayPal
 // account. Approval is what issues the pass. It also records a `payments`
-// row, so the revenue KPIs (lib/analytics/kpi.ts) count PayPal income the
-// same way they counted Stripe income.
+// row, so the revenue KPIs (lib/analytics/kpi.ts) count PayPal income.
 
 import { paymentClaims, payments, type Database } from '@sl/db';
 import { isPurchasablePlan, PLAN_CATALOGUE, type PaymentClaimDto } from '@sl/shared';

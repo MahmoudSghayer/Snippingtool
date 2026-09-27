@@ -1805,7 +1805,6 @@ export interface paths {
                                 features: string[];
                                 isLifetime: boolean;
                                 isActive: boolean;
-                                stripePriceId: string | null;
                                 sortOrder: number;
                                 /** Format: date-time */
                                 createdAt: string;
@@ -1841,7 +1840,6 @@ export interface paths {
                         isLifetime?: boolean;
                         deviceLimit: number;
                         features: string[];
-                        stripePriceId?: string | null;
                         /** @default 0 */
                         sortOrder?: number;
                         reason: string;
@@ -1867,7 +1865,6 @@ export interface paths {
                             features: string[];
                             isLifetime: boolean;
                             isActive: boolean;
-                            stripePriceId: string | null;
                             sortOrder: number;
                             /** Format: date-time */
                             createdAt: string;
@@ -1915,7 +1912,6 @@ export interface paths {
                         priceCents?: number;
                         deviceLimit?: number;
                         features?: string[];
-                        stripePriceId?: string | null;
                         isActive?: boolean;
                         sortOrder?: number;
                         reason: string;
@@ -1941,7 +1937,6 @@ export interface paths {
                             features: string[];
                             isLifetime: boolean;
                             isActive: boolean;
-                            stripePriceId: string | null;
                             sortOrder: number;
                             /** Format: date-time */
                             createdAt: string;
@@ -1999,7 +1994,6 @@ export interface paths {
                             features: string[];
                             isLifetime: boolean;
                             isActive: boolean;
-                            stripePriceId: string | null;
                             sortOrder: number;
                             /** Format: date-time */
                             createdAt: string;
@@ -6134,103 +6128,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/payments/checkout": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Create a Stripe Checkout session for a plan (coupon code optional). */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        planCode: "trial" | "basic" | "pro" | "ultimate" | "lifetime";
-                        /** Format: uri */
-                        successUrl: string;
-                        /** Format: uri */
-                        cancelUrl: string;
-                        couponCode?: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Default Response */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** Format: uri */
-                            checkoutUrl: string;
-                        };
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/payments/portal": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Create a Stripe Customer Portal session. */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        /** Format: uri */
-                        returnUrl: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Default Response */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** Format: uri */
-                            portalUrl: string;
-                        };
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/payments/history": {
         parameters: {
             query?: never;
@@ -6280,44 +6177,6 @@ export interface paths {
         };
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/webhooks/stripe": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Stripe webhook receiver — signature-verified, idempotent. */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Default Response */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            received: boolean;
-                        };
-                    };
-                };
-            };
-        };
         delete?: never;
         options?: never;
         head?: never;

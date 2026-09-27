@@ -11,14 +11,14 @@ import {
 } from '../../src/schemas/subscriptions.js';
 
 describe('paymentDtoSchema', () => {
-  it('accepts a succeeded stripe payment', () => {
+  it('accepts a succeeded manual (PayPal claim) payment', () => {
     const result = paymentDtoSchema.safeParse({
       id: '0198f2b1-0000-7000-8000-000000000001',
-      provider: 'stripe',
+      provider: 'manual',
       amountCents: 999,
       currency: 'usd',
       status: 'succeeded',
-      invoiceUrl: 'https://invoice.stripe.com/i/abc',
+      invoiceUrl: 'https://example.com/receipts/abc',
       createdAt: '2026-09-20T00:00:00.000Z',
     });
     expect(result.success).toBe(true);
@@ -40,7 +40,7 @@ describe('paymentDtoSchema', () => {
   it('rejects an invalid status', () => {
     const result = paymentDtoSchema.safeParse({
       id: '0198f2b1-0000-7000-8000-000000000001',
-      provider: 'stripe',
+      provider: 'manual',
       amountCents: 999,
       currency: 'usd',
       status: 'bogus',
