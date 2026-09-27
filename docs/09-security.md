@@ -581,10 +581,12 @@ anything a request body supplies.
 - **Account lockout / ban**: `users.status` (suspended/banned) is checked
   at `authenticate`. `bans` apply to open sessions as well as new logins:
   an account ban bumps `row_version` (invalidating every issued access
-  token) and revokes every session; a device ban revokes the sessions
-  opened from that device; an IP ban is checked on every request
-  (`isRequestBanned`, Redis-cached per user and IP, invalidated by any ban
-  or lift). An hwid ban is only known at login, so it is enforced there.
+  token) and revokes every session and active licence; a device ban
+  revokes the sessions opened from that device; an IP ban is checked on
+  every request (`isRequestBanned`, Redis-cached per user and IP,
+  invalidated by any ban or lift). Refresh and licence validation carry no
+  access token, so they call `checkBans` themselves. An hwid ban is only
+  known at login, so it is enforced there.
 - **Audit trail**: every admin action (including all of the above) is in
   `audit_logs` with a before/after diff, for after-the-fact review.
 - **Payment dispute**: `payment_claims` (with the PayPal transaction ID,

@@ -37,6 +37,26 @@ async function isKillSwitchActive(fastify: FastifyInstance): Promise<boolean> {
   return row?.enabled ?? false;
 }
 
+/** `deviceId` if it is one of this user's active devices, else null. The
+ * body's `deviceId` is only the client's claim: heartbeat signs an
+ * entitlement blob for it, and the reports attribute rows to it. */
+async function ownActiveDeviceId(
+  fastify: FastifyInstance,
+  userId: string,
+  deviceId: string,
+): Promise<string | null> {
+  const device = await fastify.db.query.devices.findFirst({
+    columns: { id: true },
+    where: and(
+      eq(devices.id, deviceId),
+      eq(devices.userId, userId),
+      eq(devices.status, 'active'),
+      isNull(devices.deletedAt),
+    ),
+  });
+  return device?.id ?? null;
+}
+
 async function loadSubscriptionAndLicenseDto(
   fastify: FastifyInstance,
   userId: string,
@@ -178,19 +198,14 @@ export default fp(
         const userId = request.authUser!.id;
         const { deviceId, extensionVersion, engineState } = request.body;
 
-        const device = await fastify.db.query.devices.findFirst({
-          where: and(
-            eq(devices.id, deviceId),
-            eq(devices.userId, userId),
-            isNull(devices.deletedAt),
-          ),
-        });
-        if (device) {
-          await fastify.db
-            .update(devices)
-            .set({ lastSeenAt: new Date(), extensionVersion, lastIp: request.ip })
-            .where(eq(devices.id, deviceId));
-        }
+        // Never sign a blob for a device that isn't the caller's, or that
+        // was revoked. The extension keeps its cached blob until its next
+        // bootstrap, which registers the device again within the limit.
+        if (!(await ownActiveDeviceId(fastify, userId, deviceId))) throw AppErrors.deviceNotFound();
+        await fastify.db
+          .update(devices)
+          .set({ lastSeenAt: new Date(), extensionVersion, lastIp: request.ip })
+          .where(eq(devices.id, deviceId));
 
         await fastify.db.insert(userActivity).values({
           id: newId(),
@@ -245,10 +260,11 @@ export default fp(
       },
       async (request) => {
         const userId = request.authUser!.id;
+        const deviceId = await ownActiveDeviceId(fastify, userId, request.body.deviceId);
         const rows = request.body.events.map((e) => ({
           id: newId(),
           userId,
-          deviceId: request.body.deviceId,
+          deviceId,
           type: 'other' as const,
           metadata: { name: e.name, data: e.data ?? {} },
           occurredAt: new Date(e.occurredAt),
@@ -272,10 +288,11 @@ export default fp(
       },
       async (request) => {
         const userId = request.authUser!.id;
+        const deviceId = await ownActiveDeviceId(fastify, userId, request.body.deviceId);
         const rows = request.body.errors.map((e) => ({
           id: newId(),
           userId,
-          deviceId: request.body.deviceId,
+          deviceId,
           type: 'error' as const,
           metadata: {
             message: e.message,

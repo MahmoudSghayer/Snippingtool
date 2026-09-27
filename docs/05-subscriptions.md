@@ -57,7 +57,10 @@ fully supported by the plans/subscriptions/licenses modules — they read
 (`@sl/shared`'s plan constants are the fixed-plan fast path for the
 extension/dashboard UI and the seed; the database row is always the runtime
 source of truth). `GET /plans` returns only `is_active = true`, non-deleted
-plans, ordered by `sort_order`.
+plans, ordered by `sort_order`. An archived (`is_active = false`) plan is
+off sale: payment claims (submission and approval) and coupon grants refuse
+it with `409 CONFLICT`. Only an admin's manual activate / grant-lifetime may
+still hand one out, e.g. to a legacy customer.
 
 **Server-side gating.** The API enforces these keys too, not just the
 extension and dashboard: routes list `fastify.requireFeature('<key>')`
@@ -213,6 +216,11 @@ looked up live), so a later plan edit doesn't retroactively change an
 already-issued license's device ceiling — an explicit device-limit override
 per license (Admin operations, §8) is the supported way to change one
 license's ceiling after the fact.
+
+**Validation** (`POST /licenses/validate`) finds the device the same way
+login does (docs/04-auth.md §5). A new device, or a revoked one coming
+back, must fit under `max_devices` counting _every_ active device of the
+user, not only those this license registered.
 
 ---
 
@@ -563,4 +571,4 @@ the task brief's deliverables.
 - **`recordAudit`** — used for every admin mutation's `audit_logs` write
   (§8).
 - **`checkBans`** — exported from `modules/bans/service.ts` for the auth
-  module's login path to call.
+  module's login and refresh paths, and licence validation, to call.

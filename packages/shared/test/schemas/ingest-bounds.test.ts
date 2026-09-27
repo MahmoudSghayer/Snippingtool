@@ -4,6 +4,7 @@ import {
   INGEST_MAX_FUTURE_MS,
   INGEST_MAX_PAST_MS,
   closeTradeRequestSchema,
+  extensionErrorReportSchema,
   isWithinTradeWindow,
   MAX_COIN_PRICE,
   TIMESTAMP_OUT_OF_WINDOW,
@@ -11,6 +12,7 @@ import {
   reportSnipingAttemptsRequestSchema,
   reportTradesRequestSchema,
   snipingAttemptSchema,
+  telemetryEventSchema,
   tradeIngestSchema,
   tradeSchema,
 } from '../../src/index.js';
@@ -85,7 +87,10 @@ describe('ingest bounds', () => {
     expect(old.error?.issues[0]?.message).toMatch(/7 days/);
     // Tagged, so the API can answer TIMESTAMP_OUT_OF_WINDOW with the item's
     // index instead of a generic validation failure.
-    expect(old.error?.issues[0]).toMatchObject({ code: 'custom', params: { code: TIMESTAMP_OUT_OF_WINDOW } });
+    expect(old.error?.issues[0]).toMatchObject({
+      code: 'custom',
+      params: { code: TIMESTAMP_OUT_OF_WINDOW },
+    });
   });
 
   it('sniping: prices are integers up to 15,000,000', () => {
@@ -119,8 +124,9 @@ describe('ingest bounds', () => {
   // ahead.
   it('trades: timestamps may be up to 400 days old', () => {
     expect(
-      tradeIngestSchema.safeParse(trade({ boughtAt: iso(-30 * DAY), sellPrice: 2000, soldAt: iso(-8 * DAY) }))
-        .success,
+      tradeIngestSchema.safeParse(
+        trade({ boughtAt: iso(-30 * DAY), sellPrice: 2000, soldAt: iso(-8 * DAY) }),
+      ).success,
     ).toBe(true);
     expect(tradeIngestSchema.safeParse(trade({ boughtAt: iso(-399 * DAY) })).success).toBe(true);
     expect(tradeIngestSchema.safeParse(trade({ boughtAt: iso(-401 * DAY) })).success).toBe(false);
@@ -134,5 +140,27 @@ describe('ingest bounds', () => {
     expect(tradeSchema.safeParse(trade({ boughtAt: iso(-400 * DAY), buyPrice: 0 })).success).toBe(
       true,
     );
+  });
+});
+
+describe('extension telemetry and error reports', () => {
+  const report = (occurredAt: string) => ({
+    deviceId: '6f1c1f5e-3b7a-4d0e-9c2a-6d1b8b0f4a12',
+    extensionVersion: '1.0.0',
+    errors: [{ message: 'boom', occurredAt }],
+  });
+
+  it('accept an occurredAt inside the ingest window', () => {
+    expect(telemetryEventSchema.safeParse({ name: 'x', occurredAt: iso(-DAY) }).success).toBe(true);
+    expect(extensionErrorReportSchema.safeParse(report(iso(-DAY))).success).toBe(true);
+  });
+
+  it('reject one too far ahead or behind, tagged TIMESTAMP_OUT_OF_WINDOW', () => {
+    for (const at of [iso(10 * MINUTE), iso(-8 * DAY)]) {
+      const event = telemetryEventSchema.safeParse({ name: 'x', occurredAt: at });
+      expect(event.success).toBe(false);
+      expect(JSON.stringify(event.error!.issues)).toContain(TIMESTAMP_OUT_OF_WINDOW);
+      expect(extensionErrorReportSchema.safeParse(report(at)).success).toBe(false);
+    }
   });
 });

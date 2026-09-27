@@ -32,6 +32,8 @@ export async function grantPlan(
       planCode,
       periodDays: 30,
       grantedByAdminId: null,
+      // Tests hold retired plans too (`basic`), as an admin grant can.
+      allowInactivePlan: true,
     });
     return { subscriptionId: subscription.id };
   }

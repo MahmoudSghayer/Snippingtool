@@ -82,6 +82,23 @@ export async function getPlanByCode(db: Database, code: string): Promise<PlanRow
   return row ?? null;
 }
 
+/** The plan a grant hands out. An archived (`is_active = false`) plan is off
+ * sale, so checkout, coupon and payment-claim grants refuse it; only an
+ * admin's manual grant passes `allowInactive` (a legacy customer on a
+ * retired plan). Reads that must see archived plans use `getPlanByCode`. */
+async function getGrantablePlan(
+  db: Database,
+  code: string,
+  allowInactive: boolean | undefined,
+): Promise<PlanRow> {
+  const plan = await getPlanByCode(db, code);
+  if (!plan) throw AppErrors.notFound('plan');
+  if (!plan.isActive && !allowInactive) {
+    throw AppErrors.conflict(`The ${plan.name} plan is no longer offered.`);
+  }
+  return plan;
+}
+
 export async function getPlanById(db: Database, planId: string): Promise<PlanRow | null> {
   const row = await db.query.plans.findFirst({ where: eq(plans.id, planId) });
   return row ?? null;
@@ -498,6 +515,8 @@ export async function activateManual(
     periodDays: number;
     grantedByAdminId: string | null;
     source?: 'manual' | 'coupon';
+    /** Admin manual grants only: see `getGrantablePlan`. */
+    allowInactivePlan?: boolean;
   },
 ): Promise<{
   subscription: SubscriptionRow;
@@ -506,8 +525,7 @@ export async function activateManual(
 }> {
   const existingLive = await getLiveSubscriptionForUser(db, input.userId);
   if (existingLive) throw AppErrors.conflict('User already has a live subscription.');
-  const plan = await getPlanByCode(db, input.planCode);
-  if (!plan) throw AppErrors.notFound('plan');
+  const plan = await getGrantablePlan(db, input.planCode, input.allowInactivePlan);
 
   const now = new Date();
   const periodEnd = new Date(now.getTime() + input.periodDays * DAY_MS);
@@ -548,6 +566,8 @@ export async function grantLifetime(
     planCode: string;
     grantedByAdminId: string | null;
     source?: 'manual' | 'coupon';
+    /** Admin manual grants only: see `getGrantablePlan`. */
+    allowInactivePlan?: boolean;
   },
 ): Promise<{
   subscription: SubscriptionRow;
@@ -556,8 +576,7 @@ export async function grantLifetime(
 }> {
   const existingLive = await getLiveSubscriptionForUser(db, input.userId);
   if (existingLive) throw AppErrors.conflict('User already has a live subscription.');
-  const plan = await getPlanByCode(db, input.planCode);
-  if (!plan) throw AppErrors.notFound('plan');
+  const plan = await getGrantablePlan(db, input.planCode, input.allowInactivePlan);
 
   const [row] = await db
     .insert(subscriptions)

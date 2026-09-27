@@ -1,13 +1,15 @@
 import { Writable } from 'node:stream';
 
-import { featureToggles } from '@sl/db';
+import { devices, featureToggles, userActivity } from '@sl/db';
 import { resetDatabase } from '@sl/db/test-utils';
 import { entitlementBlobClaimsSchema } from '@sl/shared';
+import { and, eq } from 'drizzle-orm';
 import { decodeProtectedHeader, importSPKI, jwtVerify } from 'jose';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { buildApp } from '../../../app.js';
 import { newId } from '../../../lib/ids.js';
+import { grantPlan } from '../../../test/plan-fixtures.js';
 
 import type { FastifyInstance } from 'fastify';
 
@@ -193,6 +195,131 @@ describe('extension module: bootstrap/heartbeat + activity batch idempotency', (
     expect(hbBody.killSwitchActive).toBe(true);
     const { payload: onClaims } = await jwtVerify(hbBody.entitlementBlob, publicKey);
     expect(entitlementBlobClaimsSchema.parse(onClaims).killSwitchActive).toBe(true);
+  });
+
+  // A deviceId in the body is only a claim. Heartbeat signs an entitlement
+  // blob for it, so it must be one of the caller's active devices; the
+  // telemetry and error reports just don't attribute to a device that isn't.
+  async function bootstrapFor(email: string, ip: string) {
+    const accessToken = await registerLoginVerified(app, email, ip);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/extension/bootstrap',
+      headers: { authorization: `Bearer ${accessToken}` },
+      payload: { device, extensionVersion: '0.1.0', buildTarget: 'ledger' },
+    });
+    const body = res.json();
+    return { accessToken, userId: body.userId as string, deviceId: body.deviceId as string };
+  }
+
+  it("heartbeat refuses another user's device and a revoked device of the caller's", async () => {
+    const mine = await bootstrapFor('hb-owner@example.com', '198.51.100.20');
+    const theirs = await bootstrapFor('hb-other@example.com', '198.51.100.21');
+    const heartbeat = (deviceId: string) =>
+      app.inject({
+        method: 'POST',
+        url: '/api/v1/extension/heartbeat',
+        headers: { authorization: `Bearer ${mine.accessToken}` },
+        payload: { deviceId, extensionVersion: '0.2.0', engineState: 'running' },
+      });
+
+    const foreign = await heartbeat(theirs.deviceId);
+    expect(foreign.statusCode).toBe(404);
+    expect(foreign.json().code).toBe('DEVICE_NOT_FOUND');
+
+    await app.db.update(devices).set({ status: 'revoked' }).where(eq(devices.id, mine.deviceId));
+    const revoked = await heartbeat(mine.deviceId);
+    expect(revoked.statusCode).toBe(404);
+    expect(revoked.json().code).toBe('DEVICE_NOT_FOUND');
+  });
+
+  it("telemetry and error reports store deviceId = null for a device that isn't the caller's", async () => {
+    const mine = await bootstrapFor('tel-owner@example.com', '198.51.100.22');
+    const theirs = await bootstrapFor('tel-other@example.com', '198.51.100.23');
+    await grantPlan(app, mine.userId, 'pro');
+
+    const telemetry = await app.inject({
+      method: 'POST',
+      url: '/api/v1/extension/telemetry',
+      headers: { authorization: `Bearer ${mine.accessToken}` },
+      payload: {
+        deviceId: theirs.deviceId,
+        events: [{ name: 'ping', occurredAt: new Date().toISOString() }],
+      },
+    });
+    expect(telemetry.statusCode).toBe(200);
+
+    const errors = await app.inject({
+      method: 'POST',
+      url: '/api/v1/extension/errors',
+      headers: { authorization: `Bearer ${mine.accessToken}` },
+      payload: {
+        deviceId: theirs.deviceId,
+        extensionVersion: '0.1.0',
+        errors: [{ message: 'boom', occurredAt: new Date().toISOString() }],
+      },
+    });
+    expect(errors.statusCode).toBe(200);
+
+    const rows = await app.db.query.userActivity.findMany({
+      where: and(eq(userActivity.userId, mine.userId)),
+    });
+    const reported = rows.filter((r) => r.type === 'other' || r.type === 'error');
+    expect(reported).toHaveLength(2);
+    for (const row of reported) expect(row.deviceId).toBeNull();
+
+    // The caller's own active device is still attributed.
+    const own = await app.inject({
+      method: 'POST',
+      url: '/api/v1/extension/errors',
+      headers: { authorization: `Bearer ${mine.accessToken}` },
+      payload: {
+        deviceId: mine.deviceId,
+        extensionVersion: '0.1.0',
+        errors: [{ message: 'mine', occurredAt: new Date().toISOString() }],
+      },
+    });
+    expect(own.statusCode).toBe(200);
+    const after = await app.db.query.userActivity.findMany({
+      where: and(eq(userActivity.userId, mine.userId), eq(userActivity.deviceId, mine.deviceId)),
+    });
+    expect(after.some((r) => r.type === 'error')).toBe(true);
+  });
+
+  // user_activity is partitioned by month on occurredAt: a far-future row
+  // would land in the default partition and block partitions.maintain.
+  it('telemetry and error reports reject an occurredAt outside the ingest window', async () => {
+    const mine = await bootstrapFor('tel-window@example.com', '198.51.100.24');
+    await grantPlan(app, mine.userId, 'pro');
+    const sixMonthsAhead = new Date(Date.now() + 182 * 24 * 60 * 60 * 1000).toISOString();
+
+    const telemetry = await app.inject({
+      method: 'POST',
+      url: '/api/v1/extension/telemetry',
+      headers: { authorization: `Bearer ${mine.accessToken}` },
+      payload: {
+        deviceId: mine.deviceId,
+        events: [
+          { name: 'ok', occurredAt: new Date().toISOString() },
+          { name: 'ahead', occurredAt: sixMonthsAhead },
+        ],
+      },
+    });
+    expect(telemetry.statusCode).toBe(400);
+    expect(telemetry.json().code).toBe('TIMESTAMP_OUT_OF_WINDOW');
+
+    const errors = await app.inject({
+      method: 'POST',
+      url: '/api/v1/extension/errors',
+      headers: { authorization: `Bearer ${mine.accessToken}` },
+      payload: {
+        deviceId: mine.deviceId,
+        extensionVersion: '0.1.0',
+        errors: [{ message: 'boom', occurredAt: sixMonthsAhead }],
+      },
+    });
+    expect(errors.statusCode).toBe(400);
+    expect(errors.json().code).toBe('TIMESTAMP_OUT_OF_WINDOW');
   });
 
   it('GET /extension/version and /extension/kill-switch are unauthenticated and return sane defaults', async () => {

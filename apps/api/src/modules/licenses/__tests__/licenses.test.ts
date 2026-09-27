@@ -3,13 +3,15 @@
 // rejection), POST /licenses/regenerate (revokes old, issues new), and the
 // signed entitlement blob verifying against ENTITLEMENT_PUBLIC_KEY.
 
-import { licenses } from '@sl/db';
+import { devices, licenses, users } from '@sl/db';
 import { resetDatabase } from '@sl/db/test-utils';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { importSPKI, jwtVerify } from 'jose';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { buildApp } from '../../../app.js';
+import { fastHash } from '../../../lib/crypto.js';
+import { newId } from '../../../lib/ids.js';
 import { reseedPlans } from '../../../test/reseed-reference-data.js';
 
 import type { FastifyInstance } from 'fastify';
@@ -206,6 +208,143 @@ describe('licenses module', () => {
     });
     expect(second.statusCode).toBe(409);
     expect(second.json().code).toBe('DEVICE_LIMIT_REACHED');
+  });
+
+  // The device-limit bypass: a revoked device used to come back without a
+  // limit check, and only devices tied to this licence were counted.
+  it('POST /licenses/validate: re-activating a revoked device respects the device limit', async () => {
+    const ip = nextIp();
+    const fpA = 'fp-bypass-a-0000000001';
+    const accessToken = await registerVerifyLogin('bypass@example.com', ip, fpA);
+    const { license } = await startTrial(ip, accessToken);
+    const validate = (fingerprint: string) =>
+      app.inject({
+        method: 'POST',
+        url: '/api/v1/licenses/validate',
+        remoteAddress: ip,
+        payload: { licenseKey: license.key, device: { fingerprint } },
+      });
+    const user = await app.db.query.users.findFirst({
+      where: eq(users.email, 'bypass@example.com'),
+    });
+
+    expect((await validate(fpA)).statusCode).toBe(200);
+    // Revoke A (as the dashboard's DELETE /devices/:id does).
+    await app.db.update(devices).set({ status: 'revoked' }).where(eq(devices.userId, user!.id));
+    expect((await validate('fp-bypass-b-0000000001')).statusCode).toBe(200);
+
+    const again = await validate(fpA);
+    expect(again.statusCode).toBe(409);
+    expect(again.json().code).toBe('DEVICE_LIMIT_REACHED');
+  });
+
+  it("POST /licenses/validate: counts every active device of the user, not only this licence's", async () => {
+    const ip = nextIp();
+    const accessToken = await registerVerifyLogin(
+      'count-all@example.com',
+      ip,
+      'fp-countall-login-00001',
+    );
+    const { license } = await startTrial(ip, accessToken);
+
+    // The login already registered one device; the trial allows one.
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/licenses/validate',
+      remoteAddress: ip,
+      payload: { licenseKey: license.key, device: { fingerprint: 'fp-countall-other-00001' } },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe('DEVICE_LIMIT_REACHED');
+  });
+
+  it('POST /licenses/validate: recognises the device the user logged in from (one row, not two)', async () => {
+    const ip = nextIp();
+    const fp = 'fp-samedevice-0000001';
+    const accessToken = await registerVerifyLogin('same-device@example.com', ip, fp);
+    const { license } = await startTrial(ip, accessToken);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/licenses/validate',
+      remoteAddress: ip,
+      payload: { licenseKey: license.key, device: { fingerprint: fp } },
+    });
+    expect(res.statusCode).toBe(200);
+
+    const user = await app.db.query.users.findFirst({
+      where: eq(users.email, 'same-device@example.com'),
+    });
+    const rows = await app.db.query.devices.findMany({ where: eq(devices.userId, user!.id) });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.fingerprintHash).toBe(fp);
+    expect(rows[0]!.licenseId).toBeTruthy();
+  });
+
+  // Rows the licence path wrote before it stored fingerprints the way login
+  // does held fastHash(fingerprint). They are recognised and rewritten.
+  it('POST /licenses/validate: adopts a legacy hashed-fingerprint row instead of adding a device', async () => {
+    const ip = nextIp();
+    const accessToken = await registerVerifyLogin(
+      'legacy-fp@example.com',
+      ip,
+      'fp-legacy-login-000001',
+    );
+    const { license } = await startTrial(ip, accessToken);
+    const user = await app.db.query.users.findFirst({
+      where: eq(users.email, 'legacy-fp@example.com'),
+    });
+    // Free the trial's single slot, then plant a legacy licence-path row.
+    await app.db.update(devices).set({ status: 'revoked' }).where(eq(devices.userId, user!.id));
+    const legacyFp = 'fp-legacy-ext-00000001';
+    const legacyId = newId();
+    await app.db.insert(devices).values({
+      id: legacyId,
+      userId: user!.id,
+      fingerprintHash: fastHash(legacyFp),
+      status: 'active',
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/licenses/validate',
+      remoteAddress: ip,
+      payload: { licenseKey: license.key, device: { fingerprint: legacyFp } },
+    });
+    expect(res.statusCode).toBe(200);
+    const row = await app.db.query.devices.findFirst({ where: eq(devices.id, legacyId) });
+    expect(row!.fingerprintHash).toBe(legacyFp);
+    expect(row!.status).toBe('active');
+  });
+
+  it('login adopts a legacy hashed-fingerprint row instead of adding a device', async () => {
+    const ip = nextIp();
+    const email = 'legacy-login@example.com';
+    const accessToken = await registerVerifyLogin(email, ip, 'fp-legacylogin-first01');
+    await startTrial(ip, accessToken);
+    const user = await app.db.query.users.findFirst({ where: eq(users.email, email) });
+    await app.db.update(devices).set({ status: 'revoked' }).where(eq(devices.userId, user!.id));
+    const legacyFp = 'fp-legacylogin-ext0001';
+    const legacyId = newId();
+    await app.db.insert(devices).values({
+      id: legacyId,
+      userId: user!.id,
+      fingerprintHash: fastHash(legacyFp),
+      status: 'active',
+    });
+
+    const login = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      remoteAddress: ip,
+      payload: { email, password: 'correcthorsebattery12', device: { fingerprint: legacyFp } },
+    });
+    expect(login.statusCode).toBe(200);
+    const active = await app.db.query.devices.findMany({
+      where: and(eq(devices.userId, user!.id), eq(devices.status, 'active')),
+    });
+    expect(active.map((d) => d.id)).toEqual([legacyId]);
+    expect(active[0]!.fingerprintHash).toBe(legacyFp);
   });
 
   it('POST /licenses/regenerate revokes the old key and issues a new one that validates; the old key is rejected', async () => {

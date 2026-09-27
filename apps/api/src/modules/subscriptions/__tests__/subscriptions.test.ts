@@ -4,14 +4,14 @@
 // one expired, for the same account or a linked one), POST
 // /subscriptions/cancel, POST /subscriptions/resume.
 
-import { flags, subscriptions, users } from '@sl/db';
+import { flags, plans, subscriptions, users } from '@sl/db';
 import { resetDatabase } from '@sl/db/test-utils';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { buildApp } from '../../../app.js';
 import { reseedPlans } from '../../../test/reseed-reference-data.js';
-import { expireDueSubscriptions } from '../service.js';
+import { activateManual, expireDueSubscriptions, grantLifetime, startTrial } from '../service.js';
 
 import type { FastifyInstance } from 'fastify';
 
@@ -447,5 +447,41 @@ describe('subscriptions module', () => {
       headers: { authorization: `Bearer ${accessToken}` },
     });
     expect(resumeRes.statusCode).toBe(409);
+  });
+
+  // An archived plan is off sale. Only an admin grant may still hand it out
+  // (e.g. to a legacy customer), and it has to say so.
+  it('activateManual and grantLifetime refuse an inactive plan unless the caller allows it', async () => {
+    const userId = newId();
+    await app.db.insert(users).values({
+      id: userId,
+      email: 'inactive-plan@example.com',
+      passwordHash: await hashSecret('irrelevant-password-123'),
+      emailVerifiedAt: new Date(),
+    });
+    await app.db.update(plans).set({ isActive: false }).where(eq(plans.code, 'lifetime'));
+
+    await expect(
+      activateManual(app.db, app.redis, {
+        userId,
+        planCode: 'basic',
+        periodDays: 30,
+        grantedByAdminId: null,
+      }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+    await expect(
+      grantLifetime(app.db, app.redis, { userId, planCode: 'lifetime', grantedByAdminId: null }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(
+      await app.db.query.subscriptions.findMany({ where: eq(subscriptions.userId, userId) }),
+    ).toHaveLength(0);
+
+    const { subscription } = await grantLifetime(app.db, app.redis, {
+      userId,
+      planCode: 'lifetime',
+      grantedByAdminId: null,
+      allowInactivePlan: true,
+    });
+    expect(subscription.status).toBe('lifetime');
   });
 });

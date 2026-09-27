@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { FEATURE_KEYS } from '../constants/plans.js';
 
 import { deviceFingerprintSchema } from './auth.js';
+import { ingestTimestampSchema } from './ingest-bounds.js';
 import { userSettingsSchema } from './settings.js';
 import { licenseDtoSchema, subscriptionDtoSchema } from './subscriptions.js';
 
@@ -71,7 +72,8 @@ export type HeartbeatResponse = z.infer<typeof heartbeatResponseSchema>;
 export const telemetryEventSchema = z
   .object({
     name: z.string().min(1).max(80),
-    occurredAt: z.string().datetime(),
+    // Stored in the month-partitioned `user_activity` (ingest-bounds.ts).
+    occurredAt: ingestTimestampSchema,
     data: z.record(z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
   })
   .strict();
@@ -97,7 +99,7 @@ export const extensionErrorReportSchema = z
             message: z.string().min(1).max(2000),
             stack: z.string().max(8000).optional(),
             context: z.string().min(1).max(120).optional(),
-            occurredAt: z.string().datetime(),
+            occurredAt: ingestTimestampSchema,
           })
           .strict(),
       )

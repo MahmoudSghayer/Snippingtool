@@ -3,8 +3,9 @@
 
 import { devices, type Database } from '@sl/db';
 import { deviceFingerprintSchema, type DeviceFingerprint } from '@sl/shared';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 
+import { fastHash } from './crypto.js';
 import { AppErrors } from './errors.js';
 import { newId } from './ids.js';
 
@@ -13,6 +14,45 @@ import type { EntitlementProvider } from './entitlements.js';
 export interface RegisteredDevice {
   id: string;
   isNew: boolean;
+}
+
+export type DeviceRow = typeof devices.$inferSelect;
+
+/**
+ * The user's live device row for a fingerprint. `devices.fingerprint_hash`
+ * holds the fingerprint exactly as the client sends it: the client value is
+ * already a salted hash (apps/extension/src/lib/fingerprint.ts) or a random
+ * id (the dashboard), never raw browser data. Licence validation used to
+ * store `fastHash(fingerprint)` instead, so the same browser could hold two
+ * rows. A legacy row is still recognised: it is rewritten to the plain
+ * fingerprint, or, when a plain row already exists, dropped as a duplicate.
+ * Shared by login/bootstrap (below) and licenses/service.ts.
+ */
+export async function findDeviceByFingerprint(
+  db: Database,
+  userId: string,
+  fingerprint: string,
+): Promise<DeviceRow | undefined> {
+  const legacyHash = fastHash(fingerprint);
+  const candidates = await db.query.devices.findMany({
+    where: and(
+      eq(devices.userId, userId),
+      inArray(devices.fingerprintHash, [fingerprint, legacyHash]),
+      isNull(devices.deletedAt),
+    ),
+  });
+  const current = candidates.find((d) => d.fingerprintHash === fingerprint);
+  const legacy = candidates.find((d) => d.fingerprintHash === legacyHash);
+  if (!legacy) return current;
+  if (current) {
+    await db
+      .update(devices)
+      .set({ status: 'revoked', deletedAt: new Date() })
+      .where(eq(devices.id, legacy.id));
+    return current;
+  }
+  await db.update(devices).set({ fingerprintHash: fingerprint }).where(eq(devices.id, legacy.id));
+  return { ...legacy, fingerprintHash: fingerprint };
 }
 
 /**
@@ -32,13 +72,7 @@ export async function findOrRegisterDevice(
 ): Promise<RegisteredDevice> {
   const parsed = deviceFingerprintSchema.parse(device);
 
-  const existing = await db.query.devices.findFirst({
-    where: and(
-      eq(devices.userId, userId),
-      eq(devices.fingerprintHash, parsed.fingerprint),
-      isNull(devices.deletedAt),
-    ),
-  });
+  const existing = await findDeviceByFingerprint(db, userId, parsed.fingerprint);
 
   if (existing && existing.status === 'active') {
     await db
