@@ -968,4 +968,45 @@ describe('Sniper — two EA tabs, one set of hourly budgets (multi-tab)', () => 
     expect(running.sniper.state.stopReason).toBe('other_tab');
     expect(running.searches).toHaveLength(1);
   });
+
+  it('a tab that lost the lease never saves its stale budget over the new holder’s (Q-I1)', async () => {
+    const budgetStore = { value: null as BotBudgetState | null };
+    const lease = { holder: 'A' as 'A' | 'B' };
+    // Tab A runs and buys once, then is frozen (its sleep never returns)
+    // while it still thinks it is running.
+    let freeze!: () => void;
+    const frozen = new Promise<void>((r) => (freeze = r));
+    const a = setup({
+      settings,
+      results: [[auction('t-a1', 1_000)]],
+      budgetStore,
+      exclusive: () => lease.holder === 'A',
+    });
+    (a.sniper as unknown as { sleep: () => Promise<void> }).sleep = () => frozen;
+    a.sniper.start();
+    await vi.waitFor(() => expect(a.buys).toEqual(['t-a1']));
+    expect(a.sniper.isRunning()).toBe(true);
+
+    // The lease passes to tab B, which loads A's windows, buys and saves.
+    lease.holder = 'B';
+    const b = setup({
+      settings,
+      results: [[auction('t-b1', 1_000)]],
+      maxSearches: 1,
+      budgetStore,
+      exclusive: () => lease.holder === 'B',
+      startAt: a.clock.t,
+    });
+    b.sniper.start();
+    await b.done();
+    expect(b.buys).toEqual(['t-b1']);
+    const bSaved = structuredClone(budgetStore.value);
+    expect(bSaved!.buyTimes).toHaveLength(2);
+
+    // Tab A wakes and is stopped (onLose, or its own exclusive check).
+    a.sniper.stop('other_tab');
+    freeze();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(budgetStore.value).toEqual(bSaved);
+  });
 });

@@ -828,6 +828,11 @@ export class Sniper {
     // it (a Stop pressed while `run()` still awaits `loadBudget`) would
     // overwrite the stored windows with empty ones and refill every budget.
     if (!this.budgetHydrated) return;
+    // A tab that no longer holds the engine lease has a stale copy: another
+    // tab has loaded, spent and saved the budgets since. Saving it (the
+    // Stop that follows losing the lease) would drop that tab's actions
+    // and refill them (review Q-I1).
+    if (this.deps.exclusive && !this.deps.exclusive()) return;
     const budget = this.getBudget();
     if (budget) this.deps.saveBudget?.(budget);
   }
