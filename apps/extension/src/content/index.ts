@@ -43,7 +43,6 @@ import { buildBoughtTrade } from '../lib/trade-report.js';
 import { createBotPage, type LiveSearch } from '../ui/bot-page.js';
 import { createConfirmOverlay, type ConfirmOverlay } from '../ui/confirm-overlay.js';
 import { installNavItem } from '../ui/ea-nav.js';
-import { onTrusted } from '../ui/trusted-events.js';
 
 import { createAdapterClient, pageWindow } from './adapter-client.js';
 import { confirmDetailsFor, installAssistHotkeys, selectionDetailsFor } from './assist-keys.js';
@@ -145,7 +144,6 @@ async function main(): Promise<void> {
   let recordQueue: TrimmedAuction[] = [];
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
   let lastResourceId: number | null = null;
-  let lastRating: number | null = null;
   const tracked = new Map<string, TrimmedAuction>();
 
   // Engine bindings are declared *here*, before any adapter callback is
@@ -221,9 +219,8 @@ async function main(): Promise<void> {
   adapter.onAuctions(
     createSearchObserver({
       tracked,
-      onDominant: (resourceId, rating) => {
+      onDominant: (resourceId) => {
         lastResourceId = resourceId;
-        lastRating = rating;
       },
       reportSearch: reportSearchActivity,
       record: (auctions) => {
