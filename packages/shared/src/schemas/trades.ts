@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { MIN_SALE_PRICE } from '../coins.js';
+
 import { granularitySchema } from './analytics.js';
 import { coinPriceSchema, MAX_COIN_PRICE, tradeTimestampSchema } from './ingest-bounds.js';
 import { paginationQuerySchema } from './pagination.js';
@@ -124,7 +126,10 @@ export type ReportTradesRequest = z.infer<typeof reportTradesRequestSchema>;
  * price and, optionally, when it sold (defaults to now). */
 export const closeTradeRequestSchema = z
   .object({
-    sellPrice: coinPriceSchema,
+    // Unlike an extension report (`coinPriceSchema`, where 0 is a quick
+    // sell), a sale recorded by hand is a market sale: EA's lowest Buy Now
+    // is 200, and anything under it is a typo such as a dropped `k`.
+    sellPrice: z.number().int().min(MIN_SALE_PRICE).max(MAX_COIN_PRICE),
     soldAt: tradeTimestampSchema.optional(),
   })
   .strict();

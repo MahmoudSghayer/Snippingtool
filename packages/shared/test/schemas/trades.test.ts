@@ -45,6 +45,16 @@ describe('closeTradeRequestSchema', () => {
   it('rejects fractional or negative prices and unknown keys', () => {
     expect(closeTradeRequestSchema.safeParse({ sellPrice: 12000.5 }).success).toBe(false);
     expect(closeTradeRequestSchema.safeParse({ sellPrice: -1 }).success).toBe(false);
-    expect(closeTradeRequestSchema.safeParse({ sellPrice: 1, netProfit: 5 }).success).toBe(false);
+    expect(closeTradeRequestSchema.safeParse({ sellPrice: 12000, netProfit: 5 }).success).toBe(
+      false,
+    );
+  });
+
+  it("enforces EA's 200-coin Buy Now floor, unlike an extension report's 0-coin quick sell", () => {
+    expect(closeTradeRequestSchema.safeParse({ sellPrice: 0 }).success).toBe(false);
+    expect(closeTradeRequestSchema.safeParse({ sellPrice: 199 }).success).toBe(false);
+    expect(closeTradeRequestSchema.safeParse({ sellPrice: 200 }).success).toBe(true);
+    expect(closeTradeRequestSchema.safeParse({ sellPrice: 15_000_000 }).success).toBe(true);
+    expect(closeTradeRequestSchema.safeParse({ sellPrice: 15_000_001 }).success).toBe(false);
   });
 });

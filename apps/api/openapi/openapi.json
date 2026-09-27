@@ -15283,7 +15283,7 @@
                 "properties": {
                   "sellPrice": {
                     "type": "integer",
-                    "minimum": 0,
+                    "minimum": 200,
                     "maximum": 15000000
                   },
                   "soldAt": {
