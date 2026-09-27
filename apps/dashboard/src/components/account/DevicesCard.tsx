@@ -1,11 +1,12 @@
 // "Devices" on /account: every device signed in to this account, with a
 // revoke button for all but the current one.
 import { Badge, Button, Card, CardContent, DataTable, formatDate, type ColumnDef } from '@sl/ui';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Laptop } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { api, apiErrorMessage } from '@/api/client.js';
+import { useDevices } from '@/components/account/queries.js';
 
 import type { DeviceDto } from '@sl/shared';
 
@@ -37,14 +38,7 @@ const deviceColumns: ColumnDef<DeviceDto, unknown>[] = [
 export function DevicesCard() {
   const queryClient = useQueryClient();
 
-  const devicesQuery = useQuery({
-    queryKey: ['devices'],
-    queryFn: async () => {
-      const { data, error } = await api.GET('/api/v1/devices');
-      if (error) throw error;
-      return data;
-    },
-  });
+  const devicesQuery = useDevices();
 
   const revokeDeviceMutation = useMutation({
     mutationFn: async (id: string) => {
