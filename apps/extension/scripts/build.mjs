@@ -25,7 +25,7 @@
 // at all) or `.auto.ts` (real loader) — this alias, not a runtime flag, is
 // what guarantees `engine/autobuyer.ts` never enters the `ledger` build's
 // module graph. See docs/06-extension.md for the full explanation.
-import { readFileSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { copyFileSync, readFileSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -224,6 +224,8 @@ function writeManifest() {
   });
   mkdirSync(outDir, { recursive: true });
   writeFileSync(path.join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+  mkdirSync(path.join(outDir, 'icons'), { recursive: true });
+  for (const file of Object.values(manifest.icons)) copyFileSync(path.join(root, 'src', file), path.join(outDir, file));
 }
 
 // ---- userscript target -------------------------------------------------------

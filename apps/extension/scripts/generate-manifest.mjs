@@ -15,6 +15,9 @@ export { EA_WEB_APP_MATCHES };
  * @param {'ledger' | 'ledger-auto'} target
  * @param {{ version: string; apiOrigin: string; updateUrl: string }} env
  */
+/** The Nova Trade logo (src/icons, rendered from apps/dashboard/public/favicon.svg); build.mjs copies them. */
+export const ICONS = { 16: 'icons/icon-16.png', 32: 'icons/icon-32.png', 48: 'icons/icon-48.png', 128: 'icons/icon-128.png' };
+
 export function buildManifest(target, env) {
   const isAuto = target === 'ledger-auto';
   const hostPermissions = [...EA_WEB_APP_MATCHES, `${env.apiOrigin}/*`];
@@ -27,6 +30,7 @@ export function buildManifest(target, env) {
     description: isAuto
       ? 'Nova Trade for the EA FC web app: finds and buys underpriced players, with a safety governor checking every action.'
       : 'Nova Trade for the EA FC web app: ranks transfer market opportunities, rotates your filters and shows your risk budget.',
+    icons: ICONS,
     permissions: ['storage', 'unlimitedStorage', 'alarms'],
     host_permissions: hostPermissions,
     background: {
@@ -64,6 +68,7 @@ export function buildManifest(target, env) {
     action: {
       default_popup: 'src/popup/index.html',
       default_title: 'Nova Trade',
+      default_icon: ICONS,
     },
     content_security_policy: {
       extension_pages: "script-src 'self'; object-src 'self'; base-uri 'none'; frame-ancestors 'none'",
