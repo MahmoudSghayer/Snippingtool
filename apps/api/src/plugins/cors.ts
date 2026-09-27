@@ -8,6 +8,8 @@
 import cors from '@fastify/cors';
 import fp from 'fastify-plugin';
 
+import { AppErrors } from '../lib/errors.js';
+
 import type { FastifyInstance } from 'fastify';
 
 function splitOrigins(value: string): string[] {
@@ -42,7 +44,7 @@ export default fp(
           callback(null, true);
           return;
         }
-        callback(new Error('Origin not allowed'), false);
+        callback(AppErrors.forbidden('Origin not allowed.'), false);
       },
       credentials: true,
       methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
