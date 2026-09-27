@@ -186,7 +186,10 @@ non-deleted rows. `fingerprint_hash` is computed **client-side** (the
 extension never sends anything more identifying than an opaque hash — no
 hardware serials, no EA account data) and treated as an opaque value
 server-side; the API never re-derives or validates its construction, only
-its uniqueness scope.
+its uniqueness scope. It is stored exactly as sent, on every path
+(`POST /licenses/validate` included); a legacy licence-path row holding
+`fastHash(fingerprint)` is recognised and rewritten
+(`lib/devices.ts findDeviceByFingerprint()`).
 
 `lib/devices.ts findOrRegisterDevice()` is the single seam every login,
 `/auth/device/register`, and `/extension/{bootstrap,heartbeat}` call goes

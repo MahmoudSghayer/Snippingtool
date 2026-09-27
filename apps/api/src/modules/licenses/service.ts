@@ -16,6 +16,7 @@ import { generateLicenseKey, LICENSE_KEY_RANDOM_BYTES, validateLicenseKeyFormat 
 import { and, desc, eq, isNotNull, isNull, lt } from 'drizzle-orm';
 
 import { fastHash } from '../../lib/crypto.js';
+import { findDeviceByFingerprint } from '../../lib/devices.js';
 import { AppError, AppErrors } from '../../lib/errors.js';
 import { newId } from '../../lib/ids.js';
 import { checkBans } from '../bans/service.js';
@@ -128,13 +129,13 @@ export async function regenerateForUser(
   });
 }
 
-async function countActiveDevicesForLicense(db: Database, licenseId: string): Promise<number> {
+/** Every active device of the user, whichever path registered it (login,
+ * bootstrap or this one), so a licence can't add devices on top of the
+ * ones the plan's limit already counts. */
+async function countActiveDevicesForUser(db: Database, userId: string): Promise<number> {
   const rows = await db.query.devices.findMany({
-    where: and(
-      eq(devices.licenseId, licenseId),
-      eq(devices.status, 'active'),
-      isNull(devices.deletedAt),
-    ),
+    columns: { id: true },
+    where: and(eq(devices.userId, userId), eq(devices.status, 'active'), isNull(devices.deletedAt)),
   });
   return rows.length;
 }
@@ -203,14 +204,21 @@ export async function validateLicense(
   if (banCheck.banned)
     throw AppErrors.forbidden('This account, device, or network has been banned.');
 
-  const fingerprintHash = fastHash(input.device.fingerprint);
-  const existingDevice = await db.query.devices.findFirst({
-    where: and(
-      eq(devices.userId, license.userId),
-      eq(devices.fingerprintHash, fingerprintHash),
-      isNull(devices.deletedAt),
-    ),
-  });
+  // Stored and matched the same way as at login and bootstrap, so the
+  // extension's login and its licence validation land on one row.
+  const { fingerprint } = input.device;
+  const existingDevice = await findDeviceByFingerprint(db, license.userId, fingerprint);
+
+  // Only an already-active device is free: a new one, or a revoked one
+  // coming back, must fit under the limit.
+  if (!existingDevice || existingDevice.status !== 'active') {
+    const activeCount = await countActiveDevicesForUser(db, license.userId);
+    if (activeCount >= license.maxDevices) {
+      throw new AppError('DEVICE_LIMIT_REACHED', 'Device limit reached for this license.', {
+        maxDevices: license.maxDevices,
+      });
+    }
+  }
 
   let deviceId: string;
   if (existingDevice) {
@@ -229,19 +237,13 @@ export async function validateLicense(
       .where(eq(devices.id, existingDevice.id));
     deviceId = existingDevice.id;
   } else {
-    const activeCount = await countActiveDevicesForLicense(db, license.id);
-    if (activeCount >= license.maxDevices) {
-      throw new AppError('DEVICE_LIMIT_REACHED', 'Device limit reached for this license.', {
-        maxDevices: license.maxDevices,
-      });
-    }
     const [created] = await db
       .insert(devices)
       .values({
         id: newId(),
         userId: license.userId,
         licenseId: license.id,
-        fingerprintHash,
+        fingerprintHash: fingerprint,
         lastIp: input.ip ?? null,
         name: input.device.name ?? null,
         browser: input.device.browser ?? null,

@@ -217,6 +217,11 @@ already-issued license's device ceiling — an explicit device-limit override
 per license (Admin operations, §8) is the supported way to change one
 license's ceiling after the fact.
 
+**Validation** (`POST /licenses/validate`) finds the device the same way
+login does (docs/04-auth.md §5). A new device, or a revoked one coming
+back, must fit under `max_devices` counting _every_ active device of the
+user, not only those this license registered.
+
 ---
 
 ## 4. Entitlement blob format
