@@ -46,6 +46,7 @@ const IAT_MS = API_SIGNED_IAT * 1000;
 function fakeBootstrapResponse(overrides: Partial<BootstrapResponse> = {}): BootstrapResponse {
   return {
     userId: FIXTURE_USER_ID,
+    email: 'user@example.com',
     deviceId: FIXTURE_DEVICE_ID,
     subscription: null,
     license: null,
@@ -230,6 +231,22 @@ describe('lib/license.ts: bootstrap/heartbeat caching', () => {
     const second = (await readUnverifiedCache())!;
     expect(second.cachedAt).toBeGreaterThan(first.cachedAt);
     expect(second.bootstrap.userId).toBe('user-42');
+  });
+
+  // Heartbeat responses carry no email (bootstrap only), and heartbeat()
+  // rewrites the whole cache entry: without carrying it over, the signed-in
+  // email would vanish from the cache 10 minutes after every bootstrap.
+  it('heartbeat() preserves the prior bootstrap’s email', async () => {
+    const fetchMock = vi.mocked(globalThis.fetch);
+    fetchMock.mockResolvedValueOnce(jsonResponse(fakeBootstrapResponse({ email: 'me@example.com' })));
+    await bootstrap();
+    expect((await readUnverifiedCache())!.bootstrap.email).toBe('me@example.com');
+
+    const { userId: _u, email: _e, ...hb } = fakeBootstrapResponse();
+    fetchMock.mockResolvedValueOnce(jsonResponse(hb));
+    await heartbeat('device-1', 'idle');
+
+    expect((await readUnverifiedCache())!.bootstrap.email).toBe('me@example.com');
   });
 
   it('heartbeat() returns null (never throws) on a network failure and leaves the prior cache untouched', async () => {

@@ -17,6 +17,7 @@ vi.mock('../../src/lib/auth.js', () => ({
 import { handleKillSwitchGet } from '../../src/background/kill-switch.js';
 import { handleLicenseBootstrap } from '../../src/background/license.js';
 import * as auth from '../../src/lib/auth.js';
+import { bootstrap, heartbeat } from '../../src/lib/license.js';
 import { removeLocal, setLocal } from '../../src/lib/storage.js';
 
 import { useRealChromeStorage } from './chrome-storage-stub.js';
@@ -31,6 +32,7 @@ const IAT_MS = API_SIGNED_IAT * 1000;
 function cachedResponse(overrides: Partial<BootstrapResponse>): BootstrapResponse {
   return {
     userId: FIXTURE_USER_ID,
+    email: 'user@example.com',
     deviceId: FIXTURE_DEVICE_ID,
     subscription: null,
     license: null,
@@ -79,6 +81,30 @@ describe('background: licence answers from the verified cache', () => {
     expect(result!.features).toEqual(['assist.ranker']);
     expect(result!.killSwitchActive).toBe(true);
     expect(globalThis.fetch).not.toHaveBeenCalled(); // fresh cache, no network
+  });
+
+  // The signed-in user's own email (bootstrap only) survives the whole trip:
+  // API bootstrap -> storage.local cache -> verified cache read -> the
+  // `license.bootstrap` answer, and a heartbeat (which carries no email)
+  // rewriting the cache in between.
+  it("the account email survives bootstrap -> cache -> read, and a heartbeat's cache rewrite", async () => {
+    vi.setSystemTime(IAT_MS + 60_000);
+    const entitlementBlob = await signBlob(claimsFor({ features: ['assist.ranker'], killSwitchActive: false, iat: API_SIGNED_IAT }));
+    const live = cachedResponse({ entitlementBlob, email: 'me@example.com' });
+    const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(json(live));
+    expect((await bootstrap()).email).toBe('me@example.com');
+    expect((await handleLicenseBootstrap())!.email).toBe('me@example.com');
+
+    const { userId: _u, email: _e, ...hb } = live;
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(json(hb));
+    expect(await heartbeat(FIXTURE_DEVICE_ID, 'idle')).not.toBeNull();
+
+    const fetchCalls = vi.mocked(globalThis.fetch).mock.calls.length;
+    const result = await handleLicenseBootstrap();
+    expect(result!.email).toBe('me@example.com');
+    expect(vi.mocked(globalThis.fetch).mock.calls.length).toBe(fetchCalls); // answered from the cache
   });
 
   it('API unreachable: a valid blob is honoured within the 24h grace', async () => {

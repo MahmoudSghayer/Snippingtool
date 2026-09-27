@@ -9100,6 +9100,10 @@
                       "type": "string",
                       "format": "uuid"
                     },
+                    "email": {
+                      "type": "string",
+                      "format": "email"
+                    },
                     "deviceId": {
                       "type": "string",
                       "format": "uuid"
@@ -9418,6 +9422,7 @@
                   },
                   "required": [
                     "userId",
+                    "email",
                     "deviceId",
                     "subscription",
                     "license",

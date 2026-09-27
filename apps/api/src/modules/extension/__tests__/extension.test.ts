@@ -1,3 +1,5 @@
+import { Writable } from 'node:stream';
+
 import { featureToggles } from '@sl/db';
 import { resetDatabase } from '@sl/db/test-utils';
 import { entitlementBlobClaimsSchema } from '@sl/shared';
@@ -79,6 +81,27 @@ describe('extension module: bootstrap/heartbeat + activity batch idempotency', (
     expect(body.killSwitchActive).toBe(false);
     expect(body.settings.governor).toBeTruthy();
     expect(Array.isArray(body.features)).toBe(true);
+    expect(body.email).toBe('bootstrap@example.com');
+  });
+
+  it("bootstrap returns only the caller's own email, never another user's", async () => {
+    const tokenA = await registerLoginVerified(app, 'owner-a@example.com', '198.51.100.20');
+    const tokenB = await registerLoginVerified(app, 'owner-b@example.com', '198.51.100.21');
+
+    const boot = (token: string) =>
+      app.inject({
+        method: 'POST',
+        url: '/api/v1/extension/bootstrap',
+        headers: { authorization: `Bearer ${token}` },
+        payload: { device, extensionVersion: '0.1.0', buildTarget: 'ledger' },
+      });
+    const [a, b] = [await boot(tokenA), await boot(tokenB)];
+    expect(a.statusCode).toBe(200);
+    expect(b.statusCode).toBe(200);
+    expect(a.json().email).toBe('owner-a@example.com');
+    expect(b.json().email).toBe('owner-b@example.com');
+    expect(a.body).not.toContain('owner-b@example.com');
+    expect(b.body).not.toContain('owner-a@example.com');
   });
 
   it('heartbeat updates device last-seen/version and returns the same shape minus userId', async () => {
@@ -100,6 +123,9 @@ describe('extension module: bootstrap/heartbeat + activity batch idempotency', (
     expect(hb.statusCode).toBe(200);
     expect(hb.json().deviceId).toBe(deviceId);
     expect(hb.json().userId).toBeUndefined();
+    // Email is a bootstrap-only field: heartbeat neither looks it up nor returns it.
+    expect(hb.json().email).toBeUndefined();
+    expect(hb.body).not.toContain('heartbeat@example.com');
   });
 
   it('activity batch ingest is idempotent for a byte-identical retried event', async () => {
@@ -177,5 +203,54 @@ describe('extension module: bootstrap/heartbeat + activity batch idempotency', (
     const killSwitch = await app.inject({ method: 'GET', url: '/api/v1/extension/kill-switch' });
     expect(killSwitch.statusCode).toBe(200);
     expect(killSwitch.json().active).toBe(false);
+  });
+});
+
+// The email bootstrap returns must never reach a log line. This app logs at
+// trace with NO redaction configured, so the test proves the email is never
+// handed to the logger at all (not merely censored by the default config's
+// `*.email` redact path).
+describe('extension bootstrap: the email is never logged', () => {
+  let app: FastifyInstance;
+  const lines: string[] = [];
+
+  beforeAll(async () => {
+    process.env.NODE_ENV = 'test';
+    const stream = new Writable({
+      write(chunk: Buffer, _enc, cb) {
+        lines.push(chunk.toString('utf8'));
+        cb();
+      },
+    });
+    app = await buildApp({ logger: { level: 'trace', stream } });
+    await app.ready();
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  beforeEach(async () => {
+    await resetDatabase(app.db);
+    app.mailer.sentEmails.length = 0;
+  });
+
+  it('logs the bootstrap request without the email', async () => {
+    const email = 'never-logged@example.com';
+    const accessToken = await registerLoginVerified(app, email, '198.51.100.30');
+    lines.length = 0;
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/extension/bootstrap',
+      headers: { authorization: `Bearer ${accessToken}` },
+      payload: { device, extensionVersion: '0.1.0', buildTarget: 'ledger' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().email).toBe(email);
+
+    const bootstrapLines = lines.filter((l) => l.includes('/api/v1/extension/bootstrap'));
+    expect(bootstrapLines.length).toBeGreaterThan(0);
+    for (const line of lines) expect(line).not.toContain(email);
   });
 });
