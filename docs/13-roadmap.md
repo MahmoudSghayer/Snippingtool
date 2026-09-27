@@ -34,7 +34,7 @@ checklist at the end.
 | 2 Database       | Done   | 26 migrations, `packages/db` (71 tests), `docs/02-database.md`              |
 | 3 Backend API    | Done   | 110+ OpenAPI routes, `apps/api` (198 tests), `docs/03-api.md`               |
 | 4 Authentication | Done   | `docs/04-auth.md`, auth + cookie attribute tests                            |
-| 5 Subscriptions  | Done   | `docs/05-subscriptions.md`, Stripe webhook + trial-abuse tests              |
+| 5 Subscriptions  | Done   | `docs/05-subscriptions.md`, payment-claim + trial-abuse tests               |
 | 6 Extension      | Done   | `apps/extension` (87 unit tests, 7 e2e), `docs/06-extension.md`             |
 | 7 Dashboard      | Done   | `apps/dashboard` + `packages/ui`, e2e with axe, `docs/07-dashboard.md`      |
 | 8 Analytics      | Done   | `docs/08-analytics.md`, materialisation jobs, exports                       |
@@ -110,8 +110,8 @@ Steps:
    `search_activity` (partitioned), `sniping_activity` (partitioned),
    `trades`, `profits`, `saved_filters` + `filter_stats`,
    `risk_budget_events`, `user_settings` + `settings_history`,
-   `notifications`, `payments` + `payment_history` +
-   `stripe_webhook_events`, `coupons` + `coupon_redemptions`, `bans` +
+   `notifications`, `payments` + `payment_history` + `payment_claims`,
+   `coupons` + `coupon_redemptions`, `bans` +
    `flags`, `audit_logs` (append-only, partitioned), `feature_toggles` +
    `system_config`, `ip_activity`, `extension_installs`,
    `analytics_daily` + MRR/ARR/churn views. **No `market_observations`
@@ -149,7 +149,7 @@ Steps:
 3. Cursor pagination (`@sl/shared`'s `paginationQuerySchema`) on every list
    route.
 4. Route groups: `auth/*`, `users/me`, `devices`, `sessions`,
-   `subscriptions`, `licenses`, `payments` (+ `webhooks/stripe`), `coupons`,
+   `subscriptions`, `licenses`, `payments`, `payment-claims`, `coupons`,
    `settings`, `notifications`, `activity`, `sniping`, `trades`, `profits`,
    `filters` (+ `filters/stats`), `risk-events`,
    `extension/{bootstrap,heartbeat,telemetry,errors,version,kill-switch}`,
@@ -212,7 +212,7 @@ Steps:
 
 ## Phase 5 — Subscriptions & payments (wave 2)
 
-**Delivers:** plans, Stripe integration, license keys, trial-abuse
+**Delivers:** plans, PayPal payment claims, license keys, trial-abuse
 protection, admin billing endpoints.
 
 Steps:
@@ -220,11 +220,12 @@ Steps:
 1. Seed plans (`trial` 7d/1 device, `basic` 1 device, `pro` 2 devices,
    `ultimate` 3 devices + all features, `lifetime` one-time) matching
    `@sl/shared`'s `DEVICE_LIMITS`/`PLAN_FEATURES`.
-2. Stripe Checkout + Customer Portal; webhook handlers
-   (`checkout.session.completed`, `invoice.paid`, `invoice.payment_failed`,
-   `customer.subscription.*`) — signature-verified, idempotent via
-   `stripe_webhook_events`. Local DB state is the source of truth,
-   reconciled by webhook + nightly sync job.
+2. PayPal payment claims: the buyer pays on PayPal.me and submits the
+   PayPal transaction ID + plan; an admin checks the PayPal account and
+   approves at `/admin/payments` (issues or extends the pass via
+   `activateManual`, records a `payments` row with `provider = 'manual'`)
+   or rejects with a reason. A Discord notice (`payments.notify`) tells the
+   operator about each new claim. Local DB state is the source of truth.
 3. License keys `SL-XXXX-XXXX-XXXX-XXXX` (Crockford base32 + checksum);
    only the hash is stored. `/extension/bootstrap` and
    `/extension/heartbeat` return entitlements per `01-architecture.md` §3.2,
@@ -233,19 +234,20 @@ Steps:
    (gmail dots/plus), per device fingerprint, per IP/24 within 30 days;
    violations write to `flags` and deny the trial (`TRIAL_ABUSE_DETECTED`).
 5. `abuse.scan` job: device-registration velocity, one license across many
-   IPs/ASNs, chargebacks → auto-suspend + flag.
+   IPs/ASNs, multi-account by fingerprint → auto-suspend + flag.
 6. Admin endpoints: activate/extend/suspend/cancel subscription, grant
    lifetime, create/disable coupons, ban/unban — every one audited
    (`01-architecture.md` §3.6).
 
 **Exit criteria:**
 
-- A full Stripe test-mode Checkout → webhook → entitlement flow works
-  end-to-end against Stripe's test clock for renewals/cancellations.
+- A full payment-claim flow works end-to-end: submit → admin approve →
+  entitlement (new pass, trial replaced, or same-plan pass extended), and
+  a rejected claim issues nothing.
 - Trial-abuse tests cover all three vectors (email/device/IP) with both a
   true positive and a false-positive-avoidance case.
-- `docs/05-subscriptions.md` documents the license format, webhook
-  idempotency strategy, and the offline-grace state machine.
+- `docs/05-subscriptions.md` documents the license format, the payment-claim
+  flow, and the offline-grace state machine.
 
 ---
 
@@ -306,7 +308,7 @@ Steps:
 2. Auth pages: Login, Register, Verify email, Reset password, 2FA — httpOnly
    cookie session, CSRF token on mutations.
 3. User area: Dashboard (profit/snipes/devices), Analytics, Subscriptions
-   (plans, checkout, portal, license key, devices), Settings (mirrors
+   (plans, PayPal payment claims, license key, devices), Settings (mirrors
    `@sl/shared`'s `userSettingsSchema` sections).
 4. Admin area: Overview KPIs (WS live counters), Users
    (search/edit/suspend/ban/reset/force-logout/subscription control), Profit
@@ -371,7 +373,7 @@ Steps:
    (`REVOKE UPDATE, DELETE` on `audit_logs`); dependency scanning in CI.
 4. `docs/threat-model.md`: STRIDE per component, with these attack vectors
    named explicitly and a mitigation + test reference each: token theft,
-   license sharing, trial abuse, webhook forgery, extension tampering,
+   license sharing, trial abuse, forged payment claims, extension tampering,
    replay, admin compromise, EA payload injection into the adapter, XSS via
    user-provided names/settings.
 
@@ -417,16 +419,16 @@ Steps:
 1. Unit: Vitest across API modules, `@sl/shared` schemas (already started
    in Phase 1), extension engine/model, dashboard components.
 2. Integration: API against Postgres+Redis (`pnpm test:integration`) —
-   auth flows, subscription lifecycle with mocked Stripe events, license
+   auth flows, subscription lifecycle incl. payment-claim approval, license
    validation, admin actions → audit rows, ingest → rollups.
-3. E2E (Playwright): dashboard (register→verify→login→2FA→checkout
-   mock→admin actions); extension loaded in Chromium against
+3. E2E (Playwright): dashboard (register→verify→login→2FA→payment
+   claim→admin actions); extension loaded in Chromium against
    `tests/fixtures/mock-ea-app` (a static page replaying recorded UTAS
    `transfermarket` payloads), verifying observation, panel, engine
    decisions and upload.
 4. Load: k6 scripts for auth, ingest, analytics endpoints with thresholds.
 5. Security tests: authz matrix, rate-limit/lockout, CSRF, injection payload
-   suites, webhook signature verification; optional ZAP baseline job in CI.
+   suites; optional ZAP baseline job in CI.
 6. CI runs everything except load tests on every PR; `docs/12-testing.md`
    documents the strategy and how to run each suite locally.
 
@@ -487,15 +489,14 @@ practice and what has to happen before it isn't.
 - [ ] Submit for review; `ledger-auto` is **not** submitted — it stays
       self-hosted per `update_url`, per CWS policy on gameplay automation.
 
-### Stripe live keys
+### PayPal payment claims
 
-- [ ] Swap test-mode keys for live-mode keys via the env/secrets mechanism
-      documented in `docs/09-security.md` — never committed, never logged.
-- [ ] Point the webhook endpoint at the live Stripe dashboard and verify one
-      real low-value transaction end-to-end (Checkout → webhook →
+- [ ] Set `PAYMENTS_DISCORD_WEBHOOK_URL` via the env/secrets mechanism
+      documented in `docs/09-security.md` — never committed, never logged —
+      and confirm a test claim posts to the operator's Discord channel.
+- [ ] Verify one real low-value PayPal.me payment end-to-end (pay →
+      submit the transaction ID → admin approves at `/admin/payments` →
       entitlement → extension bootstrap picks it up).
-- [ ] Confirm the nightly reconciliation job runs clean against live data
-      for at least one full cycle before relying on webhooks alone.
 
 ### DNS / TLS
 

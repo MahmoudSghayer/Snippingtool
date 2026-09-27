@@ -60,12 +60,12 @@ flowchart TB
         direction TB
         REST["REST /api/v1/*<br/>auth, users, devices, subscriptions,<br/>licenses, activity, sniping, trades,<br/>profits, filters, admin/*"]
         WS["WS gateway /ws<br/>channels: user:{id}, admin:overview"]
-        Jobs["BullMQ workers<br/>profits.rollup, analytics.daily,<br/>subscriptions.expire, abuse.scan, email.send"]
+        Jobs["BullMQ workers<br/>profits.rollup, analytics.daily,<br/>subscriptions.expire, abuse.scan, email.send,<br/>payments.notify"]
     end
 
     PG[("PostgreSQL 16<br/>packages/db<br/>NO market_observations table")]
     Redis[("Redis 7<br/>sessions, rate-limit,<br/>queues, pub/sub, presence")]
-    Stripe["Stripe<br/>Checkout + Customer Portal + webhooks"]
+    Discord["Discord webhook<br/>PayPal payment-claim notices"]
     Email["Email (Resend/SMTP)"]
     Monitoring["Prometheus + Grafana + Loki<br/>+ OpenTelemetry"]
     Dashboard["apps/dashboard (React)<br/>user + admin UI"]
@@ -90,8 +90,7 @@ flowchart TB
     Jobs --> PG
     Jobs --> Redis
     Jobs --> Email
-    REST <--> Stripe
-    Stripe -- webhooks --> REST
+    Jobs --> Discord
     REST -.-> Monitoring
     WS -.-> Monitoring
     Jobs -.-> Monitoring
@@ -131,7 +130,7 @@ flowchart TB
         end
     end
     ExtUsers["Extension users<br/>(host_permissions: EA + api origin only)"]
-    StripeCloud["Stripe"]
+    DiscordCloud["Discord webhook"]
     EmailCloud["Resend/SMTP"]
 
     Internet --> Caddy
@@ -145,7 +144,7 @@ flowchart TB
     Worker --> PGc
     Worker --> Redisc
     Worker --> EmailCloud
-    API1 <--> StripeCloud
+    Worker --> DiscordCloud
     API1 --> Prom
     Prom --> Graf
     API1 -.logs.-> Loki
@@ -475,7 +474,7 @@ sequenceDiagram
 | **content/background ↔ IndexedDB**            | Raw + trimmed observations, local settings cache.                                                                                                                                                                                                                                  | Nothing leaves this boundary at all — it's the terminus, not a hop.                                                          |
 | **Extension ↔ apps/api**                      | Auth (email + password/MFA code, never stored plaintext beyond the request), device fingerprint (opaque hash + browser/OS/ext version), activity metadata (§3.3b list, exhaustive), sniping attempts, trades, filter stats, risk events, telemetry/error pings, settings document. | Raw market listings, EA session/auth data, club contents, trade history from the game itself.                                |
 | **apps/api ↔ Postgres**                       | Everything the API persists, always parameterised (Drizzle query builder or `sql.raw()` with constants — never `sql` template interpolation, enforced by the repo ESLint rule).                                                                                                    | Plaintext passwords (argon2id only), plaintext refresh tokens (hashed), plaintext TOTP secrets (pgcrypto column encryption). |
-| **apps/api ↔ Stripe**                         | Checkout/portal session creation, webhook receipt (signature-verified).                                                                                                                                                                                                            | Full card data (Stripe-hosted Checkout/Portal only — PCI scope stays with Stripe).                                           |
+| **Buyer ↔ PayPal.me ↔ admin**                 | A PayPal transaction ID + plan code the buyer submits to `POST /api/v1/payment-claims`; an admin checks it against the PayPal account by hand before approving. The app never calls PayPal.                                                                                        | Card or PayPal account data — payment happens entirely on PayPal.me, outside this system.                                    |
 | **apps/api ↔ Dashboard**                      | Everything a role's permission matrix allows (`@sl/shared` `hasPermission`), via httpOnly cookie + CSRF, never a bearer token in JS-readable storage.                                                                                                                              | Any admin surface without a `requirePermission` check; any user's data outside their own session's `user_id` scope.          |
 | **host_permissions (extension manifest)**     | EA web-app origins + our own API origin. Nothing else.                                                                                                                                                                                                                             | Any third-party domain — there is no host permission that would let the extension talk to one.                               |
 

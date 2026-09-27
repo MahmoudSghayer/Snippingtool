@@ -238,27 +238,26 @@ The account root. Case-insensitive email uniqueness (via `citext`) is
 enforced only among live (`deleted_at IS NULL`) rows, so a deleted account's
 email can be reused by a new signup.
 
-| Column                                                  | Type                                | Notes                                                                                                                                                                                                               |
-| ------------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`                                                    | uuid PK                             |                                                                                                                                                                                                                     |
-| `email`                                                 | citext                              | unique among live rows                                                                                                                                                                                              |
-| `password_hash`                                         | text                                | argon2id                                                                                                                                                                                                            |
-| `email_verified_at`                                     | timestamptz                         | null until verified                                                                                                                                                                                                 |
-| `status`                                                | `user_status`                       | active / suspended / banned / deleted                                                                                                                                                                               |
-| `role`                                                  | `user_role`                         | user / admin (coarse; fine-grained admin permissions live in `admin_users`)                                                                                                                                         |
-| `totp_secret_enc`                                       | bytea                               | `pgp_sym_encrypt`-ed TOTP secret                                                                                                                                                                                    |
-| `totp_enabled_at`                                       | timestamptz                         | null = 2FA off even if a secret exists                                                                                                                                                                              |
-| `failed_login_count`                                    | smallint                            | drives lockout                                                                                                                                                                                                      |
-| `locked_until`                                          | timestamptz                         | login rejected while `now() < locked_until`                                                                                                                                                                         |
-| `last_login_at`, `last_ip`                              | timestamptz, inet                   |                                                                                                                                                                                                                     |
-| `timezone`                                              | text                                | default `UTC`                                                                                                                                                                                                       |
-| `referral_code`                                         | text                                | unique among live rows, format-checked                                                                                                                                                                              |
-| `stripe_customer_id`                                    | text                                | (0025) unique among non-null values; the 4th trial-abuse vector (docs/05-subscriptions.md §5) — persisted the first time this user's Stripe Checkout completes or their Customer Portal session resolves a customer |
-| `email_normalised`                                      | text, `GENERATED ALWAYS ... STORED` | (0025) SQL mirror of `normaliseEmailForAbuseCheck()`, indexed for the trial-abuse email check; never used for login/uniqueness                                                                                      |
-| `deleted_at`, `created_at`, `updated_at`, `row_version` | —                                   | standard, but see `row_version`'s own note below                                                                                                                                                                    |
+| Column                                                  | Type                                | Notes                                                                                                                          |
+| ------------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `id`                                                    | uuid PK                             |                                                                                                                                |
+| `email`                                                 | citext                              | unique among live rows                                                                                                         |
+| `password_hash`                                         | text                                | argon2id                                                                                                                       |
+| `email_verified_at`                                     | timestamptz                         | null until verified                                                                                                            |
+| `status`                                                | `user_status`                       | active / suspended / banned / deleted                                                                                          |
+| `role`                                                  | `user_role`                         | user / admin (coarse; fine-grained admin permissions live in `admin_users`)                                                    |
+| `totp_secret_enc`                                       | bytea                               | `pgp_sym_encrypt`-ed TOTP secret                                                                                               |
+| `totp_enabled_at`                                       | timestamptz                         | null = 2FA off even if a secret exists                                                                                         |
+| `failed_login_count`                                    | smallint                            | drives lockout                                                                                                                 |
+| `locked_until`                                          | timestamptz                         | login rejected while `now() < locked_until`                                                                                    |
+| `last_login_at`, `last_ip`                              | timestamptz, inet                   |                                                                                                                                |
+| `timezone`                                              | text                                | default `UTC`                                                                                                                  |
+| `referral_code`                                         | text                                | unique among live rows, format-checked                                                                                         |
+| `email_normalised`                                      | text, `GENERATED ALWAYS ... STORED` | (0025) SQL mirror of `normaliseEmailForAbuseCheck()`, indexed for the trial-abuse email check; never used for login/uniqueness |
+| `deleted_at`, `created_at`, `updated_at`, `row_version` | —                                   | standard, but see `row_version`'s own note below                                                                               |
 
 **Indexes:** partial unique on `email`; partial unique on `referral_code`;
-unique on `stripe_customer_id` (non-null only); btree on `email_normalised`
+btree on `email_normalised`
 (non-deleted only); partial btree on `status`, `role`, `last_login_at`;
 btree on `created_at`.
 **Constraints:** `failed_login_count >= 0`; `referral_code ~ '^[A-Z0-9]{4,16}$'`.
@@ -267,23 +266,23 @@ integrity (subscriptions, payments etc. `RESTRICT` against hard delete).
 
 **`row_version` is not the generic `bump_row_version()` trigger here** —
 `users` is the one table with its own trigger function,
-`bump_users_row_version()` (migrations/0026, docs/12-testing.md "Defects
-found" #8). `row_version` backs every access token's `ver` claim
-(`plugins/auth.ts` compares it on every authenticated request; a mismatch
-forces re-login), so a write that bumps it invalidates every live session
-for that user — appropriate for a password change, a role/status change, a
-2FA change, or a soft-delete, not for `stripe_customer_id` being backfilled
-by a Stripe webhook the account holder's own session had no part in (that
-was the reported defect: checkout completing 401'd the buyer's own
-already-open tab on their very next request). `bump_users_row_version()`
-bumps on any change **except** to `stripe_customer_id` alone (an
-exclude-list, not an allow-list of "security-relevant" columns — see the
-migration's own header comment for why: two existing call sites,
+`bump_users_row_version()` (migrations/0026, redefined in 0034;
+docs/12-testing.md "Defects found" #8). `row_version` backs every access
+token's `ver` claim (`plugins/auth.ts` compares it on every authenticated
+request; a mismatch forces re-login), so a write that bumps it invalidates
+every live session for that user — appropriate for a password change, a
+role/status change, a 2FA change, or a soft-delete.
+`bump_users_row_version()` bumps on any change **except** to the generated
+`email_normalised` column (its value in `NEW` reads NULL inside a `BEFORE
+ROW` trigger, so comparing it would make every UPDATE look like a change;
+it only ever changes when `email` does, and `email` is still compared).
+It is an exclude-list, not an allow-list of "security-relevant" columns —
+see the migration's own header comment for why: two existing call sites,
 `modules/auth/repo.ts`'s `bumpUserVersion()` — force-logout's enforcement,
 which deliberately touches only `updated_at` to trigger a bump — and
 `completeLogin()`'s `last_login_at`/`last_ip` bookkeeping, both depend on
 "any `users` UPDATE bumps `row_version`" beyond just those named columns,
-and a strict allow-list would have silently broken both).
+and a strict allow-list would have silently broken both.
 
 #### `admin_users`
 
@@ -397,20 +396,19 @@ plans) without a deploy.
 | `is_lifetime`             | boolean  |                                                  |
 | `device_limit`            | smallint | 1–10                                             |
 | `features`                | jsonb    | feature-flag object                              |
-| `stripe_price_id`         | text     | null for manual/lifetime/coupon-only plans       |
 | `is_active`, `sort_order` | —        |                                                  |
 | soft-delete + audit       | —        | standard incl. `created_by`/`updated_by`         |
 
 **Constraints:** `price_cents >= 0`; `device_limit BETWEEN 1 AND 10`;
 `interval` in the five allowed values; a lifetime plan must have
 `interval = 'one_time'` and vice versa. **Indexes:** partial unique `code`,
-partial unique `stripe_price_id`, partial btree `is_active`, GIN on
-`features`.
+partial btree `is_active`, GIN on `features`.
 
 #### `subscriptions`
 
-A user's entitlement over time. **Local state is the source of truth**;
-reconciled from Stripe by webhook + nightly sync. `user_id`/`plan_id` are
+A user's entitlement over time. **Local state is the source of truth** —
+every row is created locally (admin grant, approved PayPal payment claim,
+or trial) and ended by the `subscriptions.expire` job. `user_id`/`plan_id` are
 **RESTRICT** — financial/entitlement records are never silently orphaned.
 `granted_by_admin_id` is **SET NULL** (optional actor).
 
@@ -423,20 +421,24 @@ reconciled from Stripe by webhook + nightly sync. `user_id`/`plan_id` are
 | `current_period_start/end`           | timestamptz                         |                                                              |
 | `trial_ends_at`                      | timestamptz                         | only populated while `status = trialing`                     |
 | `cancel_at_period_end`, `auto_renew` | boolean                             |                                                              |
-| `stripe_subscription_id`             | text                                | unique; null unless `source = stripe`                        |
-| `source`                             | `subscription_source`               | stripe / manual / coupon                                     |
+| `source`                             | `subscription_source`               | manual / coupon (default `manual`)¹                          |
 | `granted_by_admin_id`                | uuid FK → admin_users, **SET NULL** |                                                              |
 | `canceled_at`, `ended_at`            | —                                   |                                                              |
 | soft-delete + audit                  | —                                   | standard incl. `created_by`/`updated_by`                     |
 
 **Constraints:** `current_period_end > current_period_start` (when both
-set); `trial_ends_at` only when `status = trialing`; `stripe_subscription_id`
-only when `source = stripe`; `status = lifetime` implies `source IN
-(manual, coupon)`. **Indexes:** unique `stripe_subscription_id`; **partial
+set); `trial_ends_at` only when `status = trialing`; `status = lifetime`
+implies `source IN (manual, coupon)`. **Indexes:** **partial
 unique on `user_id` where status is one of the "live" statuses** — a user
 may have historical (canceled/expired) subscriptions but only one live one
 at a time; partial btree on `user_id`, `plan_id`, `status`,
 `current_period_end`, `trial_ends_at`.
+
+¹ The `subscription_source` and `payment_provider` enum types still carry a
+`'stripe'` label. Stripe was removed in migration 0034
+(`0034_drop_stripe.sql`, which dropped its table and columns), but Postgres
+cannot drop an enum label without recreating the type, so the label stays
+as an unused legacy value; no code writes it.
 
 #### `licenses`
 
@@ -469,18 +471,22 @@ checksum, generated in the API). Only the hash is stored.
 `coupons` created before `payments` in migration order since `payments`
 references it.
 
+Nothing redeems coupons at the moment: redemption was only ever done by
+the old card-checkout flow, so no code writes `coupon_redemptions` or
+increments `redeemed_count` today. The tables, admin CRUD and the
+`POST /api/v1/coupons/validate` preview remain.
+
 | Table                | Key columns                                                                                                                                                                                            | Notes                                                                                                                           |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
 | `coupons`            | `code` (unique, live), `type` (`coupon_type`: percent/fixed/free_days/lifetime), `value`, `plan_ids uuid[]`, `max_redemptions`, `redeemed_count`, `expires_at`, `is_active`, `created_by` **SET NULL** | `value` range CHECK'd per `type` (percent 1–100, fixed/free_days ≥ 1, lifetime = 0 unused); `redeemed_count <= max_redemptions` |
 | `coupon_redemptions` | `coupon_id` **RESTRICT**, `user_id` **RESTRICT**, `subscription_id` **SET NULL**, `redeemed_at`                                                                                                        | append-only; unique `(coupon_id, user_id)` — one redemption per coupon per user                                                 |
 
-#### `payments` / `payment_history` / `stripe_webhook_events`
+#### `payments` / `payment_history`
 
-| Table                   | Key columns                                                                                                                                                                                           | Notes                                                         |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| `payments`              | `user_id` **RESTRICT**, `subscription_id` **RESTRICT**, `provider`, `provider_payment_id` (unique per provider — idempotency), `amount_cents >= 0`, `status`, `coupon_id` **SET NULL**, `invoice_url` | one row per charge/attempt                                    |
-| `payment_history`       | `payment_id` **CASCADE**, `event`, `raw_event jsonb`, `occurred_at`                                                                                                                                   | append-only event trail per payment                           |
-| `stripe_webhook_events` | `event_id` unique, `type`, `payload jsonb`, `processed_at`, `error`                                                                                                                                   | idempotency ledger — a re-delivered Stripe webhook is a no-op |
+| Table             | Key columns                                                                                                                                                                                                              | Notes                                                                                                                                 |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `payments`        | `user_id` **RESTRICT**, `subscription_id` **RESTRICT**, `provider` (default `manual`), `provider_payment_id` (unique per provider — idempotency), `amount_cents >= 0`, `status`, `coupon_id` **SET NULL**, `invoice_url` | one row per payment; an approved PayPal payment claim writes `provider = 'manual'`, `provider_payment_id = 'paypal:<transaction id>'` |
+| `payment_history` | `payment_id` **CASCADE**, `event`, `raw_event jsonb`, `occurred_at`                                                                                                                                                      | append-only event trail per payment                                                                                                   |
 
 ---
 
@@ -883,8 +889,7 @@ production`.
 | `profits_user_id_day_unique`                                                       | The rollup's upsert target (ingest routes and the hourly job alike).                                                                                                               |
 | `filter_stats_coins_per_hour_idx`                                                  | Ranker "best filters right now" queries and admin filter-performance leaderboards.                                                                                                 |
 | `coupon_redemptions_coupon_user_unique`                                            | Enforces "one redemption per coupon per user" and doubles as the existence check before applying a coupon.                                                                         |
-| `payments_provider_payment_id_unique`                                              | Webhook-driven insert idempotency (a re-delivered Stripe event for the same payment is a no-op).                                                                                   |
-| `stripe_webhook_events_event_id_unique`, `stripe_webhook_events_unprocessed_idx`   | Webhook idempotency + the retry sweep for events that didn't process cleanly.                                                                                                      |
+| `payments_provider_payment_id_unique`                                              | Insert idempotency (the same provider payment, e.g. one PayPal transaction id, is recorded at most once).                                                                          |
 | `bans_type_value_idx`                                                              | Login-time / request-time ban check by (type, value) — the hot path for every authenticated request.                                                                               |
 | `flags_status_idx`                                                                 | Admin fraud-review queue ("show open flags").                                                                                                                                      |
 | `audit_logs_entity_idx`                                                            | The admin "audit trail for this entity" diff-viewer screen.                                                                                                                        |

@@ -538,7 +538,7 @@ panel narrows which route; `docker compose logs api` or the Loki datasource
 (filtered `service="api" level="error"`) for the actual exception. Common
 causes: a bad deploy (check what changed — `git log` since the last known-good
 tag), Postgres/Redis connectivity (cross-check `DBDown`/connection-pool
-exhaustion), or a downstream dependency (Stripe, SMTP) timing out under
+exhaustion), or a downstream dependency (SMTP) timing out under
 load without a circuit breaker.
 
 #### high-p95-latency
@@ -897,8 +897,8 @@ time or regenerate them per host, but don't try to hold them as env vars.
       environment's `ENTITLEMENT_PUBLIC_KEY` before tagging a release: the
       extension zips embed it to verify licences offline, and the release
       build fails without it (`docs/06-extension.md` §3).
-- [ ] STRIPE\_\* set to **live** keys (not test) with the live webhook
-      endpoint registered, if billing is going live alongside this deploy
-      (`docs/05-subscriptions.md`).
+- [ ] `PAYMENTS_DISCORD_WEBHOOK_URL` set, if PayPal payment claims are
+      going live alongside this deploy, so each new claim reaches the
+      operator's Discord channel for review (`docs/05-subscriptions.md` §7).
 - [ ] A restore drill (§9) has actually been run against this
       environment's own backups at least once, not just against dev.

@@ -14,7 +14,7 @@ Budget about 30 minutes, most of it waiting on builds.
   page `/account` (pass, extension download, PayPal payment, devices,
   security). The dashboard becomes admin-only, with a new Payments queue.
 - **API:**
-  - PayPal payment claims with admin approval (Stripe is not used)
+  - PayPal payment claims with admin approval
   - the pass catalogue: Monthly $9.99, with Monthly + Mobile $13.99 and
     Season $24.99 coming soon
   - the extension download
@@ -178,7 +178,7 @@ If the CSP is missed, the website loads but can't reach the API.
 > - Security and correctness fixes from the audit: races, ban enforcement,
 >   rate limits, telemetry duplicates, SHA-pinned CI, Alertmanager, off-site
 >   backups.
-> - Payments move from Stripe to PayPal.me. Customers submit their
+> - Payments are PayPal.me only. Customers submit their
 >   transaction ID and an admin approves it, which issues or extends the
 >   pass. The catalogue is now Monthly $9.99 (Monthly + Mobile and Season
 >   coming soon).
