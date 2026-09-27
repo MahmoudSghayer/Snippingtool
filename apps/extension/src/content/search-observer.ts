@@ -23,6 +23,10 @@ export interface SearchObserverDeps {
   reportSearch: (filterHash: string, auctions: TrimmedAuction[]) => void;
   /** One batch of ledger rows. */
   record: (auctions: TrimmedAuction[]) => void;
+  /** This search's own listings, once tracked: the only ones assist offers
+   * and buys (P0 Task 13) — never a listing from an earlier search. Called
+   * for an empty search too (nothing to offer). */
+  onCurrentSearch?: (auctions: TrimmedAuction[]) => void;
 }
 
 function dominantResource(auctions: TrimmedAuction[]): number | null {
@@ -48,6 +52,7 @@ export function createSearchObserver(deps: SearchObserverDeps): (auctions: Trimm
     // Prune anything long expired so `tracked` doesn't grow without bound.
     const cutoff = Date.now() - TRACKED_TTL_MS;
     for (const [id, a] of deps.tracked) if (a.expiresAt != null && a.expiresAt < cutoff) deps.tracked.delete(id);
+    deps.onCurrentSearch?.(auctions);
 
     if (auctions.length === 0) return;
     const dominant = dominantResource(auctions);

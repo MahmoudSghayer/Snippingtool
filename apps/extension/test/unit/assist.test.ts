@@ -2,14 +2,14 @@
 // Unit coverage for engine/assist.ts's keyboard-driven filter cycling and
 // the governor gate on confirmBuy(), previously untested.
 
+import { DEFAULT_ASSIST_HOTKEYS, type AssistHotkeys, type GovernorSettings } from '@sl/shared';
 import { describe, expect, it, vi } from 'vitest';
 
-import { AssistEngine, DEFAULT_KEYBINDINGS, type FilterHandle } from '../../src/engine/assist.js';
+import { AssistEngine, CONFIRM_TIMEOUT_MS, activeFilterHandles, type FilterHandle } from '../../src/engine/assist.js';
 import { Governor } from '../../src/engine/governor.js';
 
 import type { AdapterClient } from '../../src/content/adapter-client.js';
 import type { ScoredOpportunity } from '../../src/engine/ranker.js';
-import type { GovernorSettings } from '@sl/shared';
 
 const SETTINGS: GovernorSettings = {
   actionsPerHour: 30,
@@ -51,7 +51,32 @@ function opportunity(overrides: Partial<ScoredOpportunity> = {}): ScoredOpportun
   };
 }
 
-function makeEngine(overrides: Partial<{ filters: FilterHandle[]; ranked: ScoredOpportunity[]; adapter: AdapterClient }> = {}) {
+/** The keydown a user's chord makes (`Alt+KeyB`, …). */
+function press(chord: string, extra: { repeat?: boolean } = {}) {
+  const parts = chord.split('+');
+  const mods = new Set(parts.slice(0, -1));
+  return {
+    code: parts[parts.length - 1]!,
+    key: '',
+    altKey: mods.has('Alt'),
+    ctrlKey: mods.has('Ctrl'),
+    shiftKey: mods.has('Shift'),
+    metaKey: mods.has('Meta'),
+    ...extra,
+  };
+}
+const K: AssistHotkeys = DEFAULT_ASSIST_HOTKEYS;
+
+function makeEngine(
+  overrides: Partial<{
+    filters: FilterHandle[];
+    ranked: ScoredOpportunity[];
+    adapter: AdapterClient;
+    canAct: () => boolean;
+    now: () => number;
+    hotkeys: AssistHotkeys;
+  }> = {},
+) {
   const filters = overrides.filters ?? [{ id: 'f1' }, { id: 'f2' }, { id: 'f3' }];
   const ranked = overrides.ranked ?? [opportunity()];
   const onFilterSelected = vi.fn();
@@ -60,6 +85,7 @@ function makeEngine(overrides: Partial<{ filters: FilterHandle[]; ranked: Scored
   const governor = new Governor(SETTINGS, { now: () => 0 });
   const adapter = overrides.adapter ?? fakeAdapter();
 
+  const confirm = { show: vi.fn(), hide: vi.fn() };
   const engine = new AssistEngine({
     governor,
     adapter,
@@ -68,38 +94,42 @@ function makeEngine(overrides: Partial<{ filters: FilterHandle[]; ranked: Scored
     onFilterSelected,
     onAttempt,
     onTrade,
+    confirm,
+    ...(overrides.canAct ? { canAct: overrides.canAct } : {}),
+    ...(overrides.now ? { now: overrides.now } : {}),
+    ...(overrides.hotkeys ? { hotkeys: overrides.hotkeys } : {}),
   });
 
-  return { engine, filters, ranked, onFilterSelected, onAttempt, onTrade, governor, adapter };
+  return { engine, filters, ranked, onFilterSelected, onAttempt, onTrade, governor, adapter, confirm };
 }
 
 describe('AssistEngine keyboard cycling', () => {
   it('cycles forward through filters on nextFilter, wrapping around', () => {
     const { engine, filters, onFilterSelected } = makeEngine();
 
-    expect(engine.handleKeydown(DEFAULT_KEYBINDINGS.nextFilter)).toBe(true);
+    expect(engine.handleKeydown(press(K.nextFilter))).toBe(true);
     expect(onFilterSelected).toHaveBeenNthCalledWith(1, filters[1]);
     expect(engine.activeFilter).toEqual(filters[1]);
 
-    engine.handleKeydown(DEFAULT_KEYBINDINGS.nextFilter);
+    engine.handleKeydown(press(K.nextFilter));
     expect(onFilterSelected).toHaveBeenNthCalledWith(2, filters[2]);
 
     // Wraps back to the first filter.
-    engine.handleKeydown(DEFAULT_KEYBINDINGS.nextFilter);
+    engine.handleKeydown(press(K.nextFilter));
     expect(onFilterSelected).toHaveBeenNthCalledWith(3, filters[0]);
   });
 
   it('cycles backward through filters on prevFilter, wrapping around', () => {
     const { engine, filters, onFilterSelected } = makeEngine();
 
-    engine.handleKeydown(DEFAULT_KEYBINDINGS.prevFilter);
+    engine.handleKeydown(press(K.prevFilter));
     expect(onFilterSelected).toHaveBeenCalledWith(filters[2]); // wraps to the last filter
     expect(engine.activeFilter).toEqual(filters[2]);
   });
 
   it('is a no-op with zero filters (never selects, never throws)', () => {
     const { engine, onFilterSelected } = makeEngine({ filters: [] });
-    expect(engine.handleKeydown(DEFAULT_KEYBINDINGS.nextFilter)).toBe(true);
+    expect(engine.handleKeydown(press(K.nextFilter))).toBe(true);
     expect(onFilterSelected).not.toHaveBeenCalled();
     expect(engine.activeFilter).toBeNull();
   });
@@ -107,36 +137,36 @@ describe('AssistEngine keyboard cycling', () => {
   it('togglePause stops cycling until toggled again', () => {
     const { engine, onFilterSelected } = makeEngine();
 
-    engine.handleKeydown(DEFAULT_KEYBINDINGS.togglePause);
+    engine.handleKeydown(press(K.togglePause));
     expect(engine.isPaused).toBe(true);
 
     // While paused, cycle keys are not handled at all (false = not consumed).
-    expect(engine.handleKeydown(DEFAULT_KEYBINDINGS.nextFilter)).toBe(false);
+    expect(engine.handleKeydown(press(K.nextFilter))).toBe(false);
     expect(onFilterSelected).not.toHaveBeenCalled();
 
-    engine.handleKeydown(DEFAULT_KEYBINDINGS.togglePause);
+    engine.handleKeydown(press(K.togglePause));
     expect(engine.isPaused).toBe(false);
-    expect(engine.handleKeydown(DEFAULT_KEYBINDINGS.nextFilter)).toBe(true);
+    expect(engine.handleKeydown(press(K.nextFilter))).toBe(true);
     expect(onFilterSelected).toHaveBeenCalledTimes(1);
   });
 
-  it('respects custom keybindings set via setKeybindings', () => {
-    const { engine, onFilterSelected } = makeEngine();
-    engine.setKeybindings({ nextFilter: 'j' });
+  it('respects the hotkeys it is given', () => {
+    const { engine, onFilterSelected } = makeEngine({ hotkeys: { ...K, nextFilter: 'Ctrl+Alt+KeyJ' } });
 
     // The old default no longer cycles...
-    expect(engine.handleKeydown('ArrowRight')).toBe(false);
+    expect(engine.handleKeydown(press(K.nextFilter))).toBe(false);
     expect(onFilterSelected).not.toHaveBeenCalled();
 
     // ...the new binding does.
-    expect(engine.handleKeydown('j')).toBe(true);
+    expect(engine.handleKeydown(press('Ctrl+Alt+KeyJ'))).toBe(true);
     expect(onFilterSelected).toHaveBeenCalledTimes(1);
   });
 
-  it('confirmBuy on the top-ranked candidate records a success attempt and updates session P&L', async () => {
+  it('buy + confirm on the top-ranked candidate records a success attempt and updates session P&L', async () => {
     const { engine, onAttempt, onTrade } = makeEngine({ ranked: [opportunity({ price: 500, tradeId: 'trade-x' })] });
 
-    engine.handleKeydown(DEFAULT_KEYBINDINGS.confirmBuy);
+    engine.handleKeydown(press(K.buy));
+    engine.handleKeydown(press(K.buy));
     await vi.waitFor(() => expect(onAttempt).toHaveBeenCalledTimes(1));
 
     expect(onAttempt).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'success', tradeId: 'trade-x' }));
@@ -149,7 +179,8 @@ describe('AssistEngine keyboard cycling', () => {
     const { engine, onAttempt, governor } = makeEngine({ adapter: fakeAdapter({ buy }) });
     governor.setKillSwitch(true, 'server kill switch');
 
-    engine.handleKeydown(DEFAULT_KEYBINDINGS.confirmBuy);
+    engine.handleKeydown(press(K.buy));
+    engine.handleKeydown(press(K.buy));
     await vi.waitFor(() => expect(onAttempt).toHaveBeenCalledTimes(1));
 
     expect(onAttempt).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'blocked', errorCode: 'kill_switch' }));
@@ -159,7 +190,7 @@ describe('AssistEngine keyboard cycling', () => {
 
   it('confirmBuy while paused does nothing at all', async () => {
     const { engine, onAttempt } = makeEngine();
-    engine.handleKeydown(DEFAULT_KEYBINDINGS.togglePause);
+    engine.handleKeydown(press(K.togglePause));
     await engine.confirmBuy();
     expect(onAttempt).not.toHaveBeenCalled();
   });
@@ -221,5 +252,122 @@ describe('AssistEngine: what reaches EA, and what the governor charges', () => {
     await vi.waitFor(() => expect(onTrade).toHaveBeenCalledWith(expect.objectContaining({ tradeId: 'trade-1', buyPrice: 1000 })));
     expect(onAttempt).toHaveBeenLastCalledWith(expect.objectContaining({ outcome: 'success', errorCode: null }));
     expect(engine.sessionPnl.trades).toBe(1);
+  });
+});
+
+describe('AssistEngine: selection and the confirm step (P0 Task 13)', () => {
+  const three = () => [
+    opportunity({ tradeId: 't1', price: 1000 }),
+    opportunity({ tradeId: 't2', price: 2000 }),
+    opportunity({ tradeId: 't3', price: 3000 }),
+  ];
+
+  it('the buy chord only shows the confirm overlay; nothing is bought until it is pressed again', async () => {
+    const buy = vi.fn(async () => ({ ok: true, latencyMs: 5 }));
+    const { engine, confirm } = makeEngine({ ranked: three(), adapter: fakeAdapter({ buy }) });
+    expect(engine.handleKeydown(press(K.buy))).toBe(true);
+    expect(confirm.show).toHaveBeenCalledWith(expect.objectContaining({ tradeId: 't1', price: 1000 }));
+    await Promise.resolve();
+    expect(buy).not.toHaveBeenCalled();
+    engine.handleKeydown(press(K.buy));
+    await vi.waitFor(() => expect(buy).toHaveBeenCalledWith('t1', 1000, { resourceId: 1 }));
+    expect(confirm.hide).toHaveBeenCalled();
+  });
+
+  it('Alt+Up/Down move the selection, and the buy names the selected listing', async () => {
+    const buy = vi.fn(async () => ({ ok: true, latencyMs: 5 }));
+    const { engine, confirm } = makeEngine({ ranked: three(), adapter: fakeAdapter({ buy }) });
+    expect(engine.selected()?.tradeId).toBe('t1');
+    expect(engine.handleKeydown(press(K.selectDown))).toBe(true);
+    engine.handleKeydown(press(K.selectDown));
+    expect(engine.selected()?.tradeId).toBe('t3');
+    engine.handleKeydown(press(K.selectUp));
+    expect(engine.selected()?.tradeId).toBe('t2');
+    engine.handleKeydown(press(K.buy));
+    expect(confirm.show).toHaveBeenLastCalledWith(expect.objectContaining({ tradeId: 't2' }));
+    engine.confirmPending();
+    await vi.waitFor(() => expect(buy).toHaveBeenCalledWith('t2', 2000, { resourceId: 1 }));
+  });
+
+  it('Escape cancels the confirm step, and is left to EA (never consumed)', async () => {
+    const buy = vi.fn(async () => ({ ok: true, latencyMs: 5 }));
+    const { engine, confirm } = makeEngine({ ranked: three(), adapter: fakeAdapter({ buy }) });
+    engine.handleKeydown(press(K.buy));
+    expect(engine.handleKeydown({ ...press('Escape'), key: 'Escape', altKey: false })).toBe(false);
+    expect(confirm.hide).toHaveBeenCalled();
+    engine.confirmPending();
+    await Promise.resolve();
+    expect(buy).not.toHaveBeenCalled();
+  });
+
+  it('a held-down chord (key repeat) never confirms', async () => {
+    const buy = vi.fn(async () => ({ ok: true, latencyMs: 5 }));
+    const { engine } = makeEngine({ ranked: three(), adapter: fakeAdapter({ buy }) });
+    engine.handleKeydown(press(K.buy));
+    engine.handleKeydown(press(K.buy, { repeat: true }));
+    engine.handleKeydown(press(K.buy, { repeat: true }));
+    await Promise.resolve();
+    expect(buy).not.toHaveBeenCalled();
+    expect(engine.pendingTradeId).toBe('t1');
+  });
+
+  it('never buys a listing that has left the current search since the overlay opened', async () => {
+    const buy = vi.fn(async () => ({ ok: true, latencyMs: 5 }));
+    let ranked = three();
+    const governor = new Governor(SETTINGS, { now: () => 0 });
+    const engine = new AssistEngine({
+      governor,
+      adapter: fakeAdapter({ buy }),
+      getFilters: () => [],
+      getRanked: () => ranked,
+      onFilterSelected: vi.fn(),
+      onAttempt: vi.fn(),
+      onTrade: vi.fn(),
+    });
+    engine.handleKeydown(press(K.buy)); // t1
+    ranked = [opportunity({ tradeId: 't9' })]; // a new search replaced the listings
+    engine.handleKeydown(press(K.buy));
+    await Promise.resolve();
+    expect(buy).not.toHaveBeenCalled();
+  });
+
+  it('a confirm step left open too long expires', async () => {
+    const buy = vi.fn(async () => ({ ok: true, latencyMs: 5 }));
+    let now = 0;
+    const { engine } = makeEngine({ ranked: three(), adapter: fakeAdapter({ buy }), now: () => now });
+    engine.handleKeydown(press(K.buy));
+    now = CONFIRM_TIMEOUT_MS + 1;
+    engine.handleKeydown(press(K.buy));
+    await Promise.resolve();
+    expect(buy).not.toHaveBeenCalled();
+  });
+
+  it('does nothing in a tab that may not act (another EA tab holds the engine)', async () => {
+    const buy = vi.fn(async () => ({ ok: true, latencyMs: 5 }));
+    const { engine, confirm } = makeEngine({ ranked: three(), adapter: fakeAdapter({ buy }), canAct: () => false });
+    expect(engine.handleKeydown(press(K.buy))).toBe(false);
+    expect(confirm.show).not.toHaveBeenCalled();
+    await engine.confirmBuy();
+    expect(buy).not.toHaveBeenCalled();
+  });
+
+  it('leaves every key that is not an assist chord alone', () => {
+    const { engine, confirm, onFilterSelected } = makeEngine({ ranked: three() });
+    for (const k of ['Enter', 'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyB'])
+      expect(engine.handleKeydown({ ...press(k), key: k })).toBe(false);
+    expect(confirm.show).not.toHaveBeenCalled();
+    expect(onFilterSelected).not.toHaveBeenCalled();
+  });
+});
+
+describe('activeFilterHandles', () => {
+  it('cycles only the filters the user left active, in their order', () => {
+    expect(
+      activeFilterHandles([
+        { id: 'a', isActive: true },
+        { id: 'b', isActive: false },
+        { id: 'c', isActive: true },
+      ]),
+    ).toEqual([{ id: 'a' }, { id: 'c' }]);
   });
 });

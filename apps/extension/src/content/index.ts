@@ -16,13 +16,24 @@
  * scripts are not a trusted context for it, the call throws, and a thrown
  * boot here used to take M1 recording down with it (docs/12-testing.md
  * "Defects found" row #10). Nothing in this file touches `lib/storage.ts`.
+ *
+ * Only one EA tab runs an engine at a time (P0 Task 13): the one holding
+ * the per-profile engine lease (content/engine-lease.ts,
+ * background/engine-lease.ts). Every other tab still records (M1), but its
+ * assist chords, autobuyer and Sniping Bot do nothing, so two tabs can never
+ * spend the hourly budgets twice.
  */
-import { DEFAULT_BOT_SETTINGS, extContentKillSwitchMessageSchema } from '@sl/shared';
+import {
+  DEFAULT_ASSIST_HOTKEYS,
+  DEFAULT_BOT_SETTINGS,
+  extContentKillSwitchMessageSchema,
+  extContentResetSessionMessageSchema,
+} from '@sl/shared';
 import browser from 'webextension-polyfill';
 
-import { AssistEngine } from '../engine/assist.js';
+import { AssistEngine, activeFilterHandles } from '../engine/assist.js';
 import { Governor, type GovernorState } from '../engine/governor.js';
-import { rankCandidates, type OpportunityCandidate, type ScoredOpportunity } from '../engine/ranker.js';
+import { rankCandidates, type ScoredOpportunity } from '../engine/ranker.js';
 import { countObservedSearches, governedSearch } from '../engine/search.js';
 import { readHandedOffNonce } from '../lib/act-auth.js';
 import { riskLevelChangeEvent } from '../lib/bot-safety.js';
@@ -31,13 +42,19 @@ import { singleFlight } from '../lib/single-flight.js';
 import { buildBoughtTrade } from '../lib/trade-report.js';
 import { setBotPageOpener } from '../ui/bot-opener.js';
 import { createBotPage } from '../ui/bot-page.js';
+import { createConfirmOverlay, type ConfirmOverlay } from '../ui/confirm-overlay.js';
 import { installNavItem } from '../ui/ea-nav.js';
 import { createPanel, type Panel } from '../ui/panel.js';
-import { onTrusted } from '../ui/trusted-events.js';
 
 import { createAdapterClient, pageWindow } from './adapter-client.js';
+import { confirmDetailsFor, installAssistHotkeys, selectionDetailsFor } from './assist-keys.js';
+import { createBackgroundClient } from './background-request.js';
+import { currentCandidates } from './candidates.js';
 import { createDiagnosticsResponder } from './diagnostics.js';
+import { EngineLease, engineStateOf } from './engine-lease.js';
+import { applySettingsToEngine, watchLiveSettings } from './live-settings.js';
 import { createSearchObserver } from './search-observer.js';
+import { createWatchdog } from './watchdog.js';
 
 import type { Autobuyer, StopReason } from '../engine/autobuyer.js';
 import type { Sniper } from '../engine/sniper.js';
@@ -49,7 +66,6 @@ import type {
   BotBudgetState,
   BotDailyUsage,
   BotSettings,
-  BackgroundResponse,
   BootstrapResponse,
   FeatureKey,
   LifecycleSessionPnl,
@@ -75,23 +91,24 @@ const WATCHDOG_STALE_MS = 60000;
  * cached `license.bootstrap`, refreshed by its heartbeat), so a plan that
  * loses the bot stops it mid-session. */
 const ENTITLEMENT_CHECK_MS = 30000;
+/** How often features and the kill switch are re-read from background's
+ * cached entitlement (refreshed by its heartbeat), so a plan change reaches
+ * an open tab without a reload (settings arrive by `storage.onChanged`). */
+const LIVE_TICK_MS = 30000;
+/** How often the engine lease is renewed (background/engine-lease.ts's
+ * `ENGINE_LEASE_RENEW_MS`; a lease lasts three minutes). */
+const LEASE_RENEW_MS = 20000;
 
 // ---- background messaging ---------------------------------------------------
 
-async function send<T = unknown>(type: string, payload?: unknown): Promise<T | null> {
-  try {
-    const res = (await browser.runtime.sendMessage({ type, payload })) as BackgroundResponse | undefined;
-    if (!res) return null; // dead/reloaded service worker
-    if (!res.ok) {
-      logger.warn(`background rejected '${type}': ${res.error}`, 'content');
-      return null;
-    }
-    return res.data as T;
-  } catch (err) {
-    logger.warn(`sendMessage('${type}') failed: ${String(err)}`, 'content');
-    return null;
-  }
-}
+// `send` answers null for "no data" whatever the reason; `bg.request` and
+// `bg.requireAnswer` tell a dead service worker apart from an answer, for
+// the callers where that matters (content/background-request.ts).
+const bg = createBackgroundClient(
+  (message) => browser.runtime.sendMessage(message),
+  (message) => logger.warn(message, 'content'),
+);
+const send = bg.send;
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -158,6 +175,15 @@ async function main(): Promise<void> {
   // The Sniping Bot (automation builds; see "M3: the Sniping Bot page"
   // below). Declared here so the kill switch above can stop it.
   let sniper: Sniper | null = null;
+  // The engine lease (this file's header), created once the bootstrap below
+  // knows there is an engine to run. Null: this tab runs none.
+  let lease: EngineLease | null = null;
+  // The current search's own listings (search-observer.ts): the only ones
+  // the ranker, assist and the autobuyer see. Ranked by `rerank()` once the
+  // engine is up (`engineReady`), on every search and every engine tick.
+  let currentSearch: TrimmedAuction[] = [];
+  let engineReady = false;
+  const lastSummaryByResource = new Map<number, PriceSummary>();
 
   async function flushRecordQueue(): Promise<void> {
     flushTimer = null;
@@ -235,14 +261,19 @@ async function main(): Promise<void> {
         recordQueue = recordQueue.concat(auctions);
         scheduleFlush();
       },
+      onCurrentSearch: (auctions) => {
+        currentSearch = auctions;
+        if (engineReady) void rerank();
+      },
     }),
   );
 
   // Every observed search response counts toward the governor's
   // buy/search ratio and actionsPerHour — the human searching in EA's own UI
   // is what keeps assist-mode buys allowed (engine/search.ts). A no-op until
-  // the bootstrap below has created a governor.
-  countObservedSearches(adapter, () => governor);
+  // the bootstrap below has created a governor. The unsubscribe is kept
+  // for the page's teardown (`pagehide` below).
+  const stopCountingSearches = countObservedSearches(adapter, () => governor);
 
   // The trader's own trade pile (defect C13): background's trade lifecycle
   // links each item to the buy it came from and reports its sale once
@@ -277,6 +308,7 @@ async function main(): Promise<void> {
   function engineHealthMessage(): string {
     if (!probeOk) return `Bundle probe failed — assist/automation are hard-stopped until adapter.ts is updated.`;
     if (killSwitchActive || governor?.isKillSwitchActive()) return 'Kill switch active — all actions blocked.';
+    if (lease && !lease.isHeld()) return 'Recording. Nova Trade’s engine is running in another EA tab: close that tab to use it here.';
     return assist ? 'Assist engine active.' : 'Recording. Nothing beyond product telemetry is sent.';
   }
 
@@ -309,6 +341,24 @@ async function main(): Promise<void> {
     return undefined;
   });
 
+  // "New session" (engine.resetSession, passed on by background/
+  // engine-lease.ts): the governor starts a new session — its clock and the
+  // per-session buy/search/spend counts, never a cooldown, the hourly
+  // windows or the kill switch (`Governor.resetSession`). Only the lease
+  // holder acts and saves; another tab loads the result when it gains the
+  // lease.
+  function resetSession(): void {
+    if (!governor || !lease?.isHeld()) return;
+    governor.resetSession();
+    assist?.resetSession();
+    void persistState();
+  }
+  browser.runtime.onMessage.addListener((message: unknown): undefined => {
+    if (!extContentResetSessionMessageSchema.safeParse(message).success) return undefined;
+    resetSession();
+    return undefined;
+  });
+
   // ---- M2/M3: engine bootstrap (account required) --------------------------
 
   let settingsCache: UserSettings = (await send<UserSettings>('settings.get')) ?? {
@@ -337,15 +387,71 @@ async function main(): Promise<void> {
   // Crash recovery: resume the governor's counters if this is a reload
   // within the same browsing session, not a brand-new one. Read via
   // background (see this file's header) — a `null` reply (nothing saved, or
-  // the service worker didn't answer) simply means "start fresh".
-  const savedState = await send<GovernorState | null>('engine.stateGet');
-  governor =
-    features.includes('assist.ranker') || AUTOMATION_ENABLED
-      ? savedState
-        ? Governor.hydrate(settingsCache.governor, savedState)
-        : new Governor(settingsCache.governor)
-      : null;
-  governor?.setKillSwitch(killSwitchActive, killSwitchActive ? 'server kill switch active at bootstrap' : undefined);
+  // the service worker didn't answer) simply means "start fresh". That is
+  // safe here because nothing acts before the engine lease is held, and
+  // gaining it loads the saved state again, this time failing closed.
+  //
+  // Called at load and on every live tick: an account whose plan gains
+  // assist after the page loaded gets its engine without a reload.
+  async function ensureGovernor(): Promise<void> {
+    if (governor || !(features.includes('assist.ranker') || AUTOMATION_ENABLED)) return;
+    const savedState = await send<GovernorState | null>('engine.stateGet');
+    if (governor) return; // another call got here first
+    const g = savedState ? Governor.hydrate(settingsCache.governor, savedState) : new Governor(settingsCache.governor);
+    g.setKillSwitch(killSwitchActive, killSwitchActive ? 'server kill switch active at bootstrap' : undefined);
+    applySettingsToEngine({ governor: g, automation: null }, settingsCache);
+    // Surface any denial reasons the governor accumulates as risk-budget
+    // telemetry — wrapped so every `allow()` call anywhere in this file's
+    // engine wiring reports through one path — and save the state after
+    // every decision, so a tab taking the lease over next sees it.
+    const originalAllow = g.allow.bind(g);
+    g.allow = (action, now) => {
+      const decision = originalAllow(action, now);
+      recordRiskEvents(decision.events);
+      void persistState();
+      return decision;
+    };
+    governor = g;
+
+    lease = new EngineLease({
+      ownerId: crypto.randomUUID(),
+      acquire: async (ownerId) => {
+        const answer = await bg.request<{ held: boolean; expiresAt: number }>('engine.lockAcquire', { ownerId });
+        return answer.ok ? answer.data : null;
+      },
+      release: (ownerId) => void send('engine.lockRelease', { ownerId }),
+      // Load what the last holder saved before acting. No answer from
+      // background: give the lease back and try again at the next renewal.
+      onGain: async () => {
+        const saved = await bg.request<GovernorState | null>('engine.stateGet');
+        if (!saved.ok) return false;
+        if (saved.data) governor?.loadState(saved.data);
+        return true;
+      },
+      onLose: () => {
+        assist?.cancelPending();
+        if (sniper?.isRunning()) sniper.stop('other_tab');
+      },
+    });
+    await renewLease();
+    setInterval(() => void renewLease(), LEASE_RENEW_MS);
+  }
+
+  /** Renews the lease and, while this tab holds it, reports its engine
+   * state for the heartbeat (background/engine-lease.ts). */
+  async function renewLease(): Promise<void> {
+    if (!lease) return;
+    await lease.refresh();
+    if (lease.isHeld()) {
+      const engineState = engineStateOf({
+        killSwitch: killSwitchActive || !!governor?.isKillSwitchActive(),
+        probeOk,
+        automationRunning: !!sniper?.isRunning() || (!!autobuyer && !autobuyer.isStopped()),
+        assistPaused: !!assist?.isPaused,
+      });
+      void send('engine.state', { engineState });
+    }
+  }
 
   let rankedCandidates: ScoredOpportunity[] = [];
 
@@ -395,26 +501,61 @@ async function main(): Promise<void> {
   let deviceIdCache: string | null = null;
   const sessionId = crypto.randomUUID();
 
-  // Saved filters: rotated by assist, searched by the Sniping Bot, edited
-  // on the Sniping Bot page. One array so all three see the same list.
+  // Saved filters: cycled by assist (the active ones), searched by the
+  // Sniping Bot, edited on the Sniping Bot page. One array so all three see
+  // the same list; a change saved elsewhere arrives by `storage.onChanged`
+  // (live settings, below).
   let filters = (await send<SavedFilter[]>('filters.list')) ?? [];
+  let autobuyer: Autobuyer | null = null;
 
-  if (governor && features.includes('assist.ranker')) {
+  await ensureGovernor();
+
+  // The assist chords (lib/hotkeys.ts): Alt+Up/Down select a listing of the
+  // current search, Alt+B shows the confirm overlay, a second Alt+B or a
+  // click buys it. Trusted key presses only, and EA's own keys are never
+  // prevented (content/assist-keys.ts).
+  let overlay: ConfirmOverlay | null = null;
+  const overlayUi = (): ConfirmOverlay => (overlay ??= createConfirmOverlay(document));
+  installAssistHotkeys(document, () => assist);
+
+  // Called at load and on every live tick (a plan that gains assist).
+  function ensureAssist(): void {
+    if (assist || !governor || !features.includes('assist.ranker')) return;
     assist = new AssistEngine({
       governor,
       adapter,
-      getFilters: () => filters.map((f) => ({ id: f.id })),
+      getFilters: () => activeFilterHandles(filters),
       getRanked: () => rankedCandidates,
+      // Only the lease holder acts, only while the plan includes assist, and
+      // never on an EA app that failed its probe.
+      canAct: () => !!lease?.isHeld() && features.includes('assist.ranker') && probeOk,
+      hotkeys: DEFAULT_ASSIST_HOTKEYS,
+      confirm: {
+        show: (candidate) =>
+          overlayUi().show(confirmDetailsFor(candidate, DEFAULT_ASSIST_HOTKEYS), {
+            onConfirm: () => assist?.confirmPending(),
+            onCancel: () => assist?.cancelPending(),
+          }),
+        hide: () => overlay?.hide(),
+      },
+      onSelectionChange: (tradeId) => {
+        const at = rankedCandidates.findIndex((c) => c.tradeId === tradeId);
+        const selected = rankedCandidates[at];
+        if (selected) overlayUi().showSelection(selectionDetailsFor(selected, at, rankedCandidates.length, DEFAULT_ASSIST_HOTKEYS));
+      },
       onFilterSelected: (handle) => {
         const filter = filters.find((f) => f.id === handle.id);
         if (!filter || !governor) return;
         // Engine-issued, so gated: a denied search is skipped (the denial is
-        // already reported as a risk event by the `allow` wrapper below).
+        // already reported as a risk event by the `allow` wrapper above).
         void governedSearch(governor, adapter, filter.filter)
           .then((result) => {
             if (!result.searched) logger.warn(`filter search skipped by the governor: ${result.decision.reason ?? 'denied'}`, 'governor');
           })
           .catch((err) => logger.error(`filter search failed: ${String(err)}`, 'adapter.search'));
+        // Reported whether or not the governor let the search through: the
+        // event records the user choosing this filter, not a search (a
+        // search that ran is reported on its own, as a `search` event).
         const event: ActivityEvent = {
           type: 'filter_change',
           occurredAt: nowIso(),
@@ -425,18 +566,9 @@ async function main(): Promise<void> {
       onAttempt: recordAttempt,
       onTrade: recordTrade,
     });
-
-    // Trusted key presses only: the confirm key buys, and a page script can
-    // dispatch a synthetic keydown on `document` (ui/trusted-events.ts).
-    onTrusted(document, 'keydown', (e) => {
-      const target = e.target as HTMLElement | null;
-      const typing = target && /^(input|textarea|select)$/i.test(target.tagName);
-      if (typing || !assist) return;
-      if (assist.handleKeydown(e.key)) e.preventDefault();
-    });
   }
+  ensureAssist();
 
-  let autobuyer: Autobuyer | null = null;
   if (AUTOMATION_ENABLED && governor && features.includes('automation.autobuyer')) {
     const { loadAutobuyer } = await import('virtual:autobuyer-loader');
     const mod = await loadAutobuyer();
@@ -450,6 +582,35 @@ async function main(): Promise<void> {
       });
     }
   }
+
+  // ---- live settings: no page reload needed --------------------------------
+  //
+  // Background rewrites the settings cache from every bootstrap, heartbeat
+  // and settings save; the Sniping Bot page saves the filters. Both reach
+  // this tab through `storage.onChanged` (content/live-settings.ts), and the
+  // governor's limits apply at once, clamped as at construction.
+  watchLiveSettings(browser.storage.onChanged, {
+    onSettings: (next) => {
+      settingsCache = next;
+      applySettingsToEngine({ governor, automation: autobuyer }, next);
+    },
+    onFilters: (next) => {
+      filters = next;
+    },
+  });
+
+  // Features and the kill switch from background's cached entitlement
+  // (no network while it is fresh; the heartbeat refreshes it).
+  async function liveTick(): Promise<void> {
+    const boot = await send<BootstrapResponse>('license.bootstrap');
+    if (!boot) return;
+    features = boot.features;
+    deviceIdCache = deviceIdCache ?? boot.deviceId;
+    if (boot.killSwitchActive && !killSwitchActive) applyKillSwitch(true, 'server kill switch active');
+    await ensureGovernor();
+    ensureAssist();
+  }
+  setInterval(() => void liveTick(), LIVE_TICK_MS);
 
   // ---- M3: the Sniping Bot page -------------------------------------------
   //
@@ -517,9 +678,13 @@ async function main(): Promise<void> {
           loadUsage: () => send<BotDailyUsage | null>('bot.usageGet'),
           saveUsage: (usage) => void send('bot.usageSet', usage),
           // The hourly budgets survive Stop/Start and a page reload too.
-          loadBudget: () => send<BotBudgetState | null>('bot.budgetGet'),
+          // Rejects when background did not answer, which the bot treats as
+          // "cannot start" — never as "nothing saved" (finding A).
+          loadBudget: () => bg.requireAnswer<BotBudgetState | null>('bot.budgetGet'),
           saveBudget: (budget) => void send('bot.budgetSet', budget),
           entitled: () => features.includes('automation.autobuyer'),
+          // One EA tab runs the bot: the one holding the engine lease.
+          exclusive: () => !!lease?.isHeld(),
           killSwitch: () => ({ active: killSwitchActive || !!governor?.isKillSwitchActive() }),
           onChange: () => botPage.refresh(),
           onAttempt: recordAttempt,
@@ -587,38 +752,11 @@ async function main(): Promise<void> {
     panel.setBotLauncher(() => botPage.open());
   }
 
-  function buildCandidatesFromTracked(): OpportunityCandidate[] {
-    // Cap the number of distinct cards summarised per tick — this is a
-    // content-script loop (rule 5 allows it here), but it should still be a
-    // handful of background round trips, not one per tracked auction.
-    const byResource = new Map<number, TrimmedAuction[]>();
-    for (const a of tracked.values()) {
-      if (a.expiresAt != null && a.expiresAt < Date.now()) continue;
-      const list = byResource.get(a.resourceId) ?? [];
-      list.push(a);
-      byResource.set(a.resourceId, list);
-    }
-    return Array.from(byResource.entries())
-      .slice(0, 20)
-      .flatMap(([, auctions]) =>
-        // A listing the adapter said it cannot buy never becomes a candidate
-        // (engine/ranker.ts drops `buyable: false` too, belt and braces).
-        auctions
-          .filter((a) => a.buyable !== false)
-          .map((a) => ({ resourceId: a.resourceId, tradeId: a.tradeId, price: a.buyNow, summary: lastSummaryByResource.get(a.resourceId) })),
-      )
-      .filter((c): c is OpportunityCandidate => c.summary != null);
-  }
-
-  const lastSummaryByResource = new Map<number, PriceSummary>();
-
-  async function refreshSummaries(): Promise<void> {
-    const resourceIds = new Set<number>();
-    for (const a of tracked.values()) resourceIds.add(a.resourceId);
-    // Capped at 20 distinct resources per tick (same cap as before) — fetched
-    // concurrently rather than one `send()` round trip at a time, since each
-    // request is independent of the others.
-    const capped = Array.from(resourceIds).slice(0, 20);
+  async function refreshSummaries(listings: readonly TrimmedAuction[]): Promise<void> {
+    // Capped at 20 distinct cards per search — fetched concurrently rather
+    // than one `send()` round trip at a time, since each request is
+    // independent of the others.
+    const capped = [...new Set(listings.map((a) => a.resourceId))].slice(0, 20);
     await Promise.all(
       capped.map(async (resourceId) => {
         const result = await send<{ resourceId: number; summary: PriceSummary }>('summary', {
@@ -630,18 +768,35 @@ async function main(): Promise<void> {
     );
   }
 
+  /** Ranks the current search's listings (content/candidates.ts) — never a
+   * listing from an earlier search, however recently it was tracked. On
+   * every search and every engine tick; a newer search arriving while this
+   * one awaits its summaries wins. */
+  let rankGeneration = 0;
+  async function rerank(): Promise<void> {
+    const generation = ++rankGeneration;
+    const listings = currentSearch;
+    await refreshSummaries(listings);
+    if (generation !== rankGeneration) return;
+    const candidates = currentCandidates(listings, lastSummaryByResource, Date.now());
+    rankedCandidates = rankCandidates(candidates, { minEv: settingsCache.targets.minProfitPerSnipe });
+    panel.setRanked(rankedCandidates);
+    // A confirm overlay for a listing no longer on offer is stale.
+    const pending = assist?.pendingTradeId;
+    if (pending && !rankedCandidates.some((c) => c.tradeId === pending)) assist?.cancelPending();
+  }
+  engineReady = true;
+
   async function engineTickImpl(): Promise<void> {
     if (!governor || !probeOk) return;
     const pulled = await send<{ active: boolean; reason?: string }>('license.killSwitchGet');
     if (pulled && pulled.active !== killSwitchActive) applyKillSwitch(pulled.active, pulled.reason);
     if (killSwitchActive) return; // nothing to rank or attempt while halted
-    await refreshSummaries();
-    const candidates = buildCandidatesFromTracked();
-    rankedCandidates = rankCandidates(candidates, { minEv: settingsCache.targets.minProfitPerSnipe });
-    panel.setRanked(rankedCandidates);
+    await rerank();
 
-    // The Sniping Bot buys on its own; never let two engines buy at once.
-    if (autobuyer && !autobuyer.isStopped() && !sniper?.isRunning()) {
+    // The Sniping Bot buys on its own; never let two engines buy at once —
+    // nor two tabs: only the engine lease holder runs the autobuyer.
+    if (lease?.isHeld() && autobuyer && !autobuyer.isStopped() && !sniper?.isRunning()) {
       await autobuyer.runCycle(rankedCandidates.slice(0, 5));
       const stop = autobuyer.getStopReason();
       if (stop) reportAutobuyerStop(stop.reason, stop.detail);
@@ -664,9 +819,8 @@ async function main(): Promise<void> {
     panel.setHealth('warn', `Automation stopped (${reason}): ${detail}`);
   }
 
-  if (governor) {
-    setInterval(() => void engineTick(), AUTOBUYER_TICK_MS);
-  }
+  // Returns at once while there is no governor (no engine on this account).
+  setInterval(() => void engineTick(), AUTOBUYER_TICK_MS);
 
   // ---- risk meter / session P&L UI tick ------------------------------------
 
@@ -677,53 +831,54 @@ async function main(): Promise<void> {
     if (!governor) return;
     const snapshot = governor.snapshot();
     panel.setRiskSnapshot(snapshot);
+    // Only the engine lease holder's numbers are the profile's: another
+    // tab's governor is idle and would show a stale copy.
+    if (!lease?.isHeld()) return;
     // Defect (docs/10-design-system.md §15 "Known gap"): the popup showed
     // no live risk gauge at all — only this in-page panel did. Pushing the
     // same snapshot the panel just rendered to background (cached in
     // `storage.session`, `background/governor.ts`) lets the popup show the
     // real segmented gauge too, without ever reconstructing/recomputing a
     // safety-critical number outside the governor's own math.
-    void send('governor.snapshotPush', snapshot);
+    // With the session budget, the snapshot is everything the session timer
+    // and budget meter show (lib/session-meters.ts).
+    void send('governor.snapshotPush', { ...snapshot, sessionCoinBudget: settingsCache.budgets.sessionCoinBudget });
   }, RISK_UI_TICK_MS);
 
   // ---- crash recovery: persist governor state via background -------------
 
+  // Only the engine lease holder saves: another tab's governor is a stale
+  // copy, and saving it would overwrite what the holder spent.
   async function persistState(): Promise<void> {
-    if (!governor) return;
+    if (!governor || !lease?.isHeld()) return;
     await send('engine.stateSet', governor.serialize());
   }
   setInterval(() => void persistState(), STATE_PERSIST_MS);
-  window.addEventListener('pagehide', () => void persistState());
+  window.addEventListener('pagehide', (e) => {
+    // Saved first, then the lease given back, so the next tab to gain it
+    // loads this tab's last numbers.
+    void persistState();
+    lease?.release();
+    // A page kept in the back/forward cache may come back: keep counting.
+    if (!e.persisted) stopCountingSearches();
+  });
 
   // ---- watchdog: notice a MAIN-world adapter that has gone quiet ----------
-
-  let lastProbeAt = Date.now();
-  adapter.onProbe(() => {
-    lastProbeAt = Date.now();
+  //
+  // Once per stall (content/watchdog.ts), not every 15 s while it lasts.
+  const watchdog = createWatchdog({
+    staleMs: WATCHDOG_STALE_MS,
+    warn: () => logger.warn('adapter has not reported a probe result recently — possible MAIN-world stall', 'watchdog'),
+    recovered: () => logger.info('adapter is reporting again', 'watchdog'),
   });
-  setInterval(() => {
-    if (Date.now() - lastProbeAt > WATCHDOG_STALE_MS) {
-      logger.warn('adapter has not reported a probe result recently — possible MAIN-world stall', 'watchdog');
-    }
-  }, WATCHDOG_MS);
+  adapter.onProbe(() => watchdog.seen());
+  setInterval(() => watchdog.check(), WATCHDOG_MS);
 
-  // periodic heartbeat with the live engine state, distinct from
-  // background's own 10-minute license heartbeat alarm — this one just
-  // keeps `deviceId` fresh for attempt/trade/risk-event reporting above.
+  // Keeps `deviceId` fresh for attempt/trade/risk-event reporting above.
+  // (The engine state for the heartbeat goes with every lease renewal:
+  // `renewLease()`.)
   const bootstrapForDevice = authStatus?.authenticated ? await send<BootstrapResponse>('license.bootstrap') : null;
-  deviceIdCache = bootstrapForDevice?.deviceId ?? null;
-
-  // Surface any denial reasons the governor accumulates as risk-budget
-  // telemetry — wrapped so every `allow()` call anywhere in this file's
-  // engine wiring reports through one path.
-  const originalAllow = governor?.allow.bind(governor);
-  if (governor && originalAllow) {
-    governor.allow = (action, now) => {
-      const decision = originalAllow(action, now);
-      recordRiskEvents(decision.events);
-      return decision;
-    };
-  }
+  deviceIdCache = bootstrapForDevice?.deviceId ?? deviceIdCache;
 }
 
 /** Shown on the Sniping Bot page when no act-channel nonce was handed off. */

@@ -101,6 +101,9 @@ const setHas = Set.prototype.has;
 const setAdd = Set.prototype.add;
 const promiseThen = Promise.prototype.then;
 const setTimer = setTimeout;
+const strReplace = String.prototype.replace;
+const strTrim = String.prototype.trim;
+const strSlice = String.prototype.slice;
 const SEARCH_HOOK_RECHECK_MS = 2000;
 function protoGetter(proto: object | undefined, name: string): ((this: unknown) => unknown) | undefined {
   return proto ? (Object.getOwnPropertyDescriptor(proto, name)?.get as ((this: unknown) => unknown) | undefined) : undefined;
@@ -283,7 +286,19 @@ function runProbeAndReport(): { result: ProbeResult; selection: ShapeSelection }
  * `TrimmedAuction` in the system passes through — the privacy seam named in
  * docs/01-architecture.md's trust-boundary table.
  */
+/** The card name for the panel and the assist confirm overlay: control
+ * characters out, trimmed, at most 80 characters (`trimmedAuctionSchema`);
+ * undefined when the item data carried none. */
+function cardName(name: string | undefined): string | undefined {
+  if (typeof name !== 'string') return undefined;
+  // eslint-disable-next-line no-control-regex -- stripping control characters is the point
+  const cleaned = apply(strTrim, apply(strReplace, name, [/[\u0000-\u001f\u007f]/g, '']), []) as string;
+  const bounded = apply(strTrim, apply(strSlice, cleaned, [0, 80]), []) as string;
+  return bounded ? bounded : undefined;
+}
+
 function trimAuction(a: NormalisedListing, seenAt: number): TrimmedAuction {
+  const name = cardName(a.name);
   return {
     tradeId: a.tradeId,
     resourceId: a.resourceId,
@@ -299,6 +314,9 @@ function trimAuction(a: NormalisedListing, seenAt: number): TrimmedAuction {
     // The card's own id: what links a buy to its later sale
     // (lib/trade-lifecycle.ts). An id, not account data.
     ...(a.itemId ? { itemId: a.itemId } : {}),
+    // The card's name, for the panel (P0 Task 13). Card data, like the
+    // rating: nothing about the account.
+    ...(name ? { name } : {}),
   };
 }
 

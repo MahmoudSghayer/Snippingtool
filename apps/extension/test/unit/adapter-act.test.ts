@@ -407,4 +407,26 @@ describe('passive observation of the trade pile', () => {
     await vi.waitFor(() => expect(posted.filter((m) => m.kind === 'auctions')).toHaveLength(1));
     expect((posted.find((m) => m.kind === 'auctions')!.data.auctions as { itemId?: string }[])[0]!.itemId).toBe('555');
   });
+
+  it('carries the card name from the item data, trimmed and bounded (the panel shows it)', async () => {
+    const url = EA + '/transfermarket?num=21';
+    nativeFetch.mockResolvedValueOnce(
+      networkResponse(
+        {
+          auctionInfo: [
+            { ...rawAuction(6101, 100), itemData: { id: 556, resourceId: 42, assetId: 42, rating: 85, name: '  Erling Haaland\u0000 ' } },
+            { ...rawAuction(6102, 100), itemData: { id: 557, resourceId: 43, assetId: 43, rating: 85, name: 'x'.repeat(200) } },
+            { ...rawAuction(6103, 100), itemData: { id: 558, resourceId: 44, assetId: 44, rating: 85 } },
+          ],
+        },
+        url,
+      ),
+    );
+    await window.fetch(url);
+    await vi.waitFor(() => expect(posted.filter((m) => m.kind === 'auctions')).toHaveLength(1));
+    const names = (posted.find((m) => m.kind === 'auctions')!.data.auctions as { name?: string }[]).map((a) => a.name);
+    expect(names[0]).toBe('Erling Haaland');
+    expect(names[1]).toHaveLength(80);
+    expect(names[2]).toBeUndefined();
+  });
 });

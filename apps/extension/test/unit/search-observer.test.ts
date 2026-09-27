@@ -55,3 +55,26 @@ describe('createSearchObserver', () => {
     expect(deps.tracked.has('new')).toBe(true);
   });
 });
+
+describe('createSearchObserver: the current search (P0 Task 13)', () => {
+  it('hands each search’s own listings over once they are tracked, empty searches too', () => {
+    const current: string[][] = [];
+    const deps = {
+      tracked: new Map<string, TrimmedAuction>(),
+      onSearch: vi.fn(),
+      reportSearch: vi.fn(),
+      record: vi.fn(),
+      onCurrentSearch: (auctions: TrimmedAuction[]) => {
+        // Already tracked by the time the callback runs.
+        for (const a of auctions) expect(deps.tracked.has(a.tradeId)).toBe(true);
+        current.push(auctions.map((a) => a.tradeId));
+      },
+    };
+    const observe = createSearchObserver(deps);
+    observe([auction('a', 1), auction('b', 1)]);
+    observe([auction('c', 2)]);
+    observe([]);
+    expect(current).toEqual([['a', 'b'], ['c'], []]);
+    expect([...deps.tracked.keys()]).toEqual(['a', 'b', 'c']);
+  });
+});
