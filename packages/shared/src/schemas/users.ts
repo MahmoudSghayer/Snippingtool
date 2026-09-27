@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { ADMIN_ROLES, PERMISSIONS } from '../permissions.js';
 
 import { emailSchema } from './auth.js';
+import { timeZoneSchema } from './timezone.js';
 
 export const USER_STATUSES = ['active', 'suspended', 'banned', 'deleted'] as const;
 export type UserStatus = (typeof USER_STATUSES)[number];
@@ -39,7 +40,10 @@ export type UserDto = z.infer<typeof userDtoSchema>;
 // not a silently-stripped no-op.
 export const updateProfileRequestSchema = z
   .object({
-    timezone: z.string().min(1).max(64).optional(),
+    // An IANA name (the dashboard offers a dropdown of them): the API
+    // buckets the trader's "today" in this zone, so a free-text typo would
+    // otherwise surface as a failed analytics query.
+    timezone: timeZoneSchema.optional(),
   })
   .strict();
 export type UpdateProfileRequest = z.infer<typeof updateProfileRequestSchema>;

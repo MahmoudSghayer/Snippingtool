@@ -5,6 +5,8 @@
 
 import { z } from 'zod';
 
+import { timeZoneSchema } from './timezone.js';
+
 // ---------------------------------------------------------------------------
 // Common range / granularity inputs
 // ---------------------------------------------------------------------------
@@ -266,11 +268,19 @@ export const meOverviewResponseSchema = z.object({
 });
 export type MeOverviewResponse = z.infer<typeof meOverviewResponseSchema>;
 
+/** `tz` (optional): bucket days in this IANA zone instead of UTC. The API
+ * then derives the series from `trades`/`sniping_activity` at query time,
+ * so it is limited to ranges of up to `TZ_SERIES_MAX_DAYS` days
+ * (docs/08-analytics.md "Timezone handling"). */
 export const meProfitsQuerySchema = z.object({
   from: z.string().date(),
   to: z.string().date(),
   granularity: granularitySchema.default('day'),
+  tz: timeZoneSchema.optional(),
 });
+
+/** Longest range `/analytics/me/profits` buckets in a non-UTC `tz`. */
+export const TZ_SERIES_MAX_DAYS = 90;
 export type MeProfitsQuery = z.infer<typeof meProfitsQuerySchema>;
 
 export const meActivityQuerySchema = analyticsRangeQuerySchema;
