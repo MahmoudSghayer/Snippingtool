@@ -23,6 +23,7 @@ function toDto(user: User, admin: AdminSessionInfo): UserDto {
     role: user.role,
     totpEnabled: Boolean(user.totpEnabledAt),
     timezone: user.timezone,
+    timezoneSetAt: user.timezoneSetAt ? user.timezoneSetAt.toISOString() : null,
     referralCode: user.referralCode,
     createdAt: user.createdAt.toISOString(),
     lastLoginAt: user.lastLoginAt ? user.lastLoginAt.toISOString() : null,
@@ -70,7 +71,11 @@ export default fp(
 
         const [after] = await fastify.db
           .update(users)
-          .set({ timezone: request.body.timezone ?? before.timezone })
+          .set({
+            timezone: request.body.timezone ?? before.timezone,
+            // Sending a zone is an explicit choice, even 'UTC' (0036).
+            ...(request.body.timezone !== undefined ? { timezoneSetAt: new Date() } : {}),
+          })
           .where(eq(users.id, request.authUser!.id))
           .returning();
 

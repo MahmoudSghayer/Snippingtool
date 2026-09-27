@@ -9,13 +9,20 @@ import {
   meOverviewResponseSchema,
   meProfitsQuerySchema,
   profitAnalyticsPointSchema,
+  TZ_SERIES_MAX_DAYS,
 } from '@sl/shared';
 import { and, eq } from 'drizzle-orm';
 import fp from 'fastify-plugin';
 import { z } from 'zod';
 
 import { getActivitySeries } from '../../lib/analytics/activity.js';
-import { getUserLifetimeProfit, getUserProfitSeries } from '../../lib/analytics/profits.js';
+import { listDays } from '../../lib/analytics/dates.js';
+import {
+  getUserLifetimeProfit,
+  getUserProfitSeries,
+  getUserProfitSeriesInZone,
+} from '../../lib/analytics/profits.js';
+import { AppErrors } from '../../lib/errors.js';
 
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
@@ -98,7 +105,23 @@ export default fp(
       },
       async (request) => {
         const userId = request.authUser!.id;
-        const { from, to, granularity } = request.query;
+        const { from, to, granularity, tz } = request.query;
+        // The `profits` rollup is per UTC day. Any other zone is bucketed
+        // from raw trades at query time, which is only cheap for a bounded
+        // range (docs/08-analytics.md "Timezone handling").
+        if (tz && tz !== 'UTC') {
+          if (listDays(from, to).length > TZ_SERIES_MAX_DAYS)
+            throw AppErrors.validation(
+              `A time zone other than UTC works for ranges of up to ${TZ_SERIES_MAX_DAYS} days.`,
+            );
+          const items = await getUserProfitSeriesInZone(fastify.db, userId, {
+            from,
+            to,
+            granularity,
+            tz,
+          });
+          return { granularity, items };
+        }
         const items = await getUserProfitSeries(fastify.db, userId, { from, to, granularity });
         return { granularity, items };
       },

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { ADMIN_ROLES, PERMISSIONS } from '../permissions.js';
 
 import { emailSchema } from './auth.js';
+import { timeZoneSchema } from './timezone.js';
 
 export const USER_STATUSES = ['active', 'suspended', 'banned', 'deleted'] as const;
 export type UserStatus = (typeof USER_STATUSES)[number];
@@ -18,6 +19,10 @@ export const userDtoSchema = z.object({
   role: z.enum(USER_ROLES),
   totpEnabled: z.boolean(),
   timezone: z.string().min(1).max(64).nullable(),
+  /** When `timezone` was last chosen explicitly (by the trader or an
+   * admin); `null` while it's still the signup default. `timezone` defaults
+   * to 'UTC', so this is what tells a deliberate UTC from "never set". */
+  timezoneSetAt: z.string().datetime().nullable(),
   referralCode: z.string().min(1).max(40).nullable(),
   createdAt: z.string().datetime(),
   lastLoginAt: z.string().datetime().nullable(),
@@ -39,7 +44,10 @@ export type UserDto = z.infer<typeof userDtoSchema>;
 // not a silently-stripped no-op.
 export const updateProfileRequestSchema = z
   .object({
-    timezone: z.string().min(1).max(64).optional(),
+    // An IANA name (the dashboard offers a dropdown of them): the API
+    // buckets the trader's "today" in this zone, so a free-text typo would
+    // otherwise surface as a failed analytics query.
+    timezone: timeZoneSchema.optional(),
   })
   .strict();
 export type UpdateProfileRequest = z.infer<typeof updateProfileRequestSchema>;

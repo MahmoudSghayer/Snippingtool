@@ -15,5 +15,6 @@ export * from './risk.js';
 export * from './settings.js';
 export * from './sniping.js';
 export * from './subscriptions.js';
+export * from './timezone.js';
 export * from './trades.js';
 export * from './users.js';

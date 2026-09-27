@@ -1,5 +1,6 @@
 export * from './constants/errors.js';
 export * from './constants/plans.js';
+export * from './coins.js';
 export * from './email-normalise.js';
 export * from './license-key.js';
 export * from './permissions.js';

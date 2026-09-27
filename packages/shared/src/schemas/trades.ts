@@ -1,7 +1,11 @@
 import { z } from 'zod';
 
+import { MIN_SALE_PRICE } from '../coins.js';
+
 import { granularitySchema } from './analytics.js';
 import { coinPriceSchema, MAX_COIN_PRICE, tradeTimestampSchema } from './ingest-bounds.js';
+import { paginationQuerySchema } from './pagination.js';
+import { timeZoneSchema } from './timezone.js';
 
 export const TRADE_STATUSES = ['bought', 'listed', 'sold', 'expired', 'unsold'] as const;
 export type TradeStatus = (typeof TRADE_STATUSES)[number];
@@ -55,6 +59,45 @@ export const tradeSchema = z
   .strict();
 export type Trade = z.infer<typeof tradeSchema>;
 
+/** `GET /trades` item: a trade plus the card's name, from `cards` for the
+ * current FC title (`null` when the card isn't known there yet; the
+ * dashboard then shows `#resourceId`). `rating` falls back to the card's
+ * when the extension didn't report one. */
+export const tradeListItemSchema = tradeSchema.extend({
+  cardName: z.string().nullable(),
+});
+export type TradeListItem = z.infer<typeof tradeListItemSchema>;
+
+/** Filters shared by `GET /trades`, `/trades/totals` and
+ * `/trades/export.csv`. `from`/`to` are inclusive calendar days of the
+ * purchase, in `tz` (so "today" means the trader's today). Sorting is on
+ * the purchase time only, server-side, because the list is cursor-paged:
+ * a client-side sort would only reorder the page on screen. */
+export const tradeFilterQuerySchema = z.object({
+  status: z.enum(TRADE_STATUSES).optional(),
+  from: z.string().date().optional(),
+  to: z.string().date().optional(),
+  tz: timeZoneSchema.default('UTC'),
+});
+export type TradeFilterQuery = z.infer<typeof tradeFilterQuerySchema>;
+
+export const tradeListQuerySchema = paginationQuerySchema.merge(tradeFilterQuerySchema).extend({
+  order: z.enum(['desc', 'asc']).default('desc'),
+});
+export type TradeListQuery = z.infer<typeof tradeListQuerySchema>;
+
+/** `GET /trades/totals`: sums over every trade the filter matches, not just
+ * the page on screen. `spent` counts every purchase; `revenue` and
+ * `netProfit` count sales only (net is after EA's tax). */
+export const tradeTotalsSchema = z.object({
+  count: z.number().int().min(0),
+  sold: z.number().int().min(0),
+  spent: z.number().int().min(0),
+  revenue: z.number().int().min(0),
+  netProfit: z.number().int(),
+});
+export type TradeTotals = z.infer<typeof tradeTotalsSchema>;
+
 /** A trade as the extension reports it (`POST /trades/batch`): the read
  * model above plus the ingest bounds (ingest-bounds.ts). Kept separate so
  * the list endpoint can still serialise trades older than the ingest
@@ -83,7 +126,10 @@ export type ReportTradesRequest = z.infer<typeof reportTradesRequestSchema>;
  * price and, optionally, when it sold (defaults to now). */
 export const closeTradeRequestSchema = z
   .object({
-    sellPrice: coinPriceSchema,
+    // Unlike an extension report (`coinPriceSchema`, where 0 is a quick
+    // sell), a sale recorded by hand is a market sale: EA's lowest Buy Now
+    // is 200, and anything under it is a typo such as a dropped `k`.
+    sellPrice: z.number().int().min(MIN_SALE_PRICE).max(MAX_COIN_PRICE),
     soldAt: tradeTimestampSchema.optional(),
   })
   .strict();

@@ -7,7 +7,7 @@
 // side-effects, parameterised Drizzle only.
 
 import { profits, users, vUserLifetimeProfit, type Database } from '@sl/db';
-import { and, asc, desc, eq, gte, lte, sum } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, lte, sql, sum } from 'drizzle-orm';
 
 import { aggregateIntoBuckets, type Granularity } from './dates.js';
 
@@ -141,6 +141,116 @@ export async function getUserProfitSeries(
     snipes: r.snipes,
     successes: r.successes,
     tradesClosed: r.tradesClosed,
+  }));
+  return aggregateIntoBuckets(
+    dayRows,
+    (r) => r.day,
+    params.from,
+    params.to,
+    params.granularity,
+    zeroAcc,
+    addRow,
+  ).map((b) => toPoint(b.bucket, b.value));
+}
+
+/** Per-user profit series with days bucketed in `tz`, derived from
+ * `trades` and `sniping_activity` at query time. The `profits` rollup is
+ * keyed on UTC days, so it can't answer "what did I make today" for a
+ * trader in Tokyo; this re-derives the same figures (same attribution as
+ * lib/analytics/rollup.ts: spend and snipes on the day they happened,
+ * earnings and net on the sale's day) from raw timestamps with
+ * `AT TIME ZONE`. It scans raw rows, so callers bound the range
+ * (`TZ_SERIES_MAX_DAYS`). `tz` must already be a valid IANA name
+ * (`timeZoneSchema`). */
+export async function getUserProfitSeriesInZone(
+  db: Database,
+  userId: string,
+  params: ProfitRangeParams & { tz: string },
+): Promise<ProfitSeriesPoint[]> {
+  const u = () => sql.param(userId);
+  const tz = () => sql.param(params.tz);
+  // [start, end) of the range as instants: local midnight of `from` and of
+  // the day after `to`.
+  const start = () =>
+    sql.join([sql`(`, sql.param(params.from), sql`::date::timestamp AT TIME ZONE `, tz(), sql`)`]);
+  const end = () =>
+    sql.join([
+      sql`((`,
+      sql.param(params.to),
+      sql`::date + 1)::timestamp AT TIME ZONE `,
+      tz(),
+      sql`)`,
+    ]);
+  const localDay = (column: 'bought_at' | 'sold_at' | 'occurred_at') =>
+    sql.join([
+      sql`to_char((`,
+      sql.identifier(column),
+      sql` AT TIME ZONE `,
+      tz(),
+      sql`)::date, 'YYYY-MM-DD')`,
+    ]);
+
+  const rows = (await db.execute(
+    sql.join([
+      sql`SELECT day,
+              sum(coins_spent)::bigint AS coins_spent,
+              sum(coins_earned)::bigint AS coins_earned,
+              sum(net_profit)::bigint AS net_profit,
+              sum(trades_closed)::int AS trades_closed,
+              sum(snipes)::int AS snipes,
+              sum(successes)::int AS successes
+         FROM (
+           SELECT `,
+      localDay('bought_at'),
+      sql` AS day, coalesce(buy_price, 0) AS coins_spent, 0 AS coins_earned,
+                  0 AS net_profit, 0 AS trades_closed, 0 AS snipes, 0 AS successes
+             FROM trades
+            WHERE user_id = `,
+      u(),
+      sql`::uuid AND deleted_at IS NULL AND bought_at >= `,
+      start(),
+      sql` AND bought_at < `,
+      end(),
+      sql`
+           UNION ALL
+           SELECT `,
+      localDay('sold_at'),
+      sql`, 0, coalesce(sell_price, 0), coalesce(net_profit, 0), 1, 0, 0
+             FROM trades
+            WHERE user_id = `,
+      u(),
+      sql`::uuid AND deleted_at IS NULL AND sold_at >= `,
+      start(),
+      sql` AND sold_at < `,
+      end(),
+      sql`
+           UNION ALL
+           SELECT `,
+      localDay('occurred_at'),
+      sql`, 0, 0, 0, 0, 1, (outcome = 'success')::int
+             FROM sniping_activity
+            WHERE user_id = `,
+      u(),
+      sql`::uuid AND occurred_at >= `,
+      start(),
+      sql` AND occurred_at < `,
+      end(),
+      sql`
+         ) AS events
+        GROUP BY day`,
+    ]),
+  )) as unknown as Array<Record<string, string | number>>;
+
+  // bigint columns come back as strings from postgres-js.
+  const dayRows: ProfitDayRow[] = rows.map((r) => ({
+    userId,
+    day: String(r.day),
+    netProfit: Number(r.net_profit),
+    coinsSpent: Number(r.coins_spent),
+    coinsEarned: Number(r.coins_earned),
+    snipes: Number(r.snipes),
+    successes: Number(r.successes),
+    tradesClosed: Number(r.trades_closed),
   }));
   return aggregateIntoBuckets(
     dayRows,

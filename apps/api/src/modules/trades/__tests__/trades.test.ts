@@ -455,9 +455,38 @@ describe('trades module (/api/v1/trades)', () => {
       method: 'POST',
       url: `/api/v1/trades/${row!.id}/close`,
       headers: { authorization: `Bearer ${token}` },
-      payload: { sellPrice: 1, soldAt: onUtcDay(3).toISOString() },
+      payload: { sellPrice: 30000, soldAt: onUtcDay(3).toISOString() },
     });
     expect(res.statusCode).toBe(400);
+    expect(res.json().message).toBe('A trade cannot be sold before it was bought.');
+  });
+
+  it('close: a sale below EA\'s 200-coin minimum is a typo, rejected before anything is stored', async () => {
+    const { userId, token } = await createUser(app, 'trades-close-floor@example.com');
+    await app.inject({
+      method: 'POST',
+      url: '/api/v1/trades/batch',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { trades: [tradePayload({ tradeId: 'floor' })] },
+    });
+    const row = await app.db.query.trades.findFirst({
+      where: and(eq(trades.userId, userId), eq(trades.tradeId, 'floor')),
+    });
+    const close = (sellPrice: number) =>
+      app.inject({
+        method: 'POST',
+        url: `/api/v1/trades/${row!.id}/close`,
+        headers: { authorization: `Bearer ${token}` },
+        payload: { sellPrice },
+      });
+
+    for (const tooLow of [0, 1, 199]) expect((await close(tooLow)).statusCode).toBe(400);
+    const stillOpen = await app.db.query.trades.findFirst({ where: eq(trades.id, row!.id) });
+    expect(stillOpen?.status).toBe('bought');
+
+    const atFloor = await close(200);
+    expect(atFloor.statusCode).toBe(200);
+    expect(atFloor.json()).toMatchObject({ status: 'sold', sellPrice: 200 });
   });
 
   it("close: another user's trade is a 404, never closed", async () => {
@@ -476,7 +505,7 @@ describe('trades module (/api/v1/trades)', () => {
       method: 'POST',
       url: `/api/v1/trades/${row!.id}/close`,
       headers: { authorization: `Bearer ${intruder}` },
-      payload: { sellPrice: 1 },
+      payload: { sellPrice: 30000 },
     });
     expect(res.statusCode).toBe(404);
     const after = await app.db.query.trades.findFirst({ where: eq(trades.id, row!.id) });
