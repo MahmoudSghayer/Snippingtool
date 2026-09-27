@@ -13,12 +13,21 @@
 // 2FA (admin login always requires TOTP, enforced in modules/auth, so simply
 // requiring role==='admin' here is sufficient; no separate step-up needed
 // mid-session).
+//
+// `requireFeature(feature)` is the plan gate, composed the same way: it runs
+// `authenticate`, then checks the caller's live entitlements
+// (`fastify.entitlements`, lib/entitlements.ts) for the feature, cached in
+// Redis for a minute per user and dropped on every `subscription.changed`.
+// Missing it is `403 FEATURE_NOT_IN_PLAN` with `details.feature`. It reads
+// the subscription, not the access token's `plan` claim, which is only as
+// fresh as the token.
 
 import { adminUsers, users } from '@sl/db';
-import { hasPermission, isAdminRole, type Permission } from '@sl/shared';
+import { hasPermission, isAdminRole, type FeatureKey, type Permission } from '@sl/shared';
 import { eq } from 'drizzle-orm';
 import fp from 'fastify-plugin';
 
+import { getCachedFeatures } from '../lib/entitlements.js';
 import { AppErrors } from '../lib/errors.js';
 import { verifyAccessToken, type AccessTokenClaims } from '../lib/tokens.js';
 import { isRequestBanned } from '../modules/bans/service.js';
@@ -47,6 +56,9 @@ declare module 'fastify' {
     requireAdmin: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
     requirePermission: (
       permission: Permission,
+    ) => (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
+    requireFeature: (
+      feature: FeatureKey,
     ) => (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
   }
 }
@@ -134,6 +146,18 @@ export default fp(
         }
       };
     });
+
+    fastify.decorate('requireFeature', (feature: FeatureKey) => {
+      return async (request: FastifyRequest, reply: FastifyReply) => {
+        await fastify.authenticate(request, reply);
+        const features = await getCachedFeatures(
+          fastify.entitlements,
+          fastify.redis,
+          request.authUser!.id,
+        );
+        if (!features.includes(feature)) throw AppErrors.featureNotInPlan(feature);
+      };
+    });
   },
-  { name: 'auth', dependencies: ['config', 'db', 'redis', 'cookie'] },
+  { name: 'auth', dependencies: ['config', 'db', 'redis', 'cookie', 'entitlements'] },
 );

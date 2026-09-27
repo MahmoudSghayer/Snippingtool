@@ -16,6 +16,7 @@ import {
 import { and, eq } from 'drizzle-orm';
 
 import { recordAudit } from '../../lib/audit.js';
+import { invalidateEntitlementCache } from '../../lib/entitlements.js';
 import { newId } from '../../lib/ids.js';
 import { publishToUser } from '../../ws/publish.js';
 import { toAuditSnapshot } from '../admin-subscriptions/admin-action-log.js';
@@ -224,6 +225,7 @@ async function handleCheckoutCompleted(
     return insertedRow!;
   });
 
+  await invalidateEntitlementCache(redis, userId);
   await publishToUser(redis, userId, {
     type: 'subscription.changed',
     subscription: toSubscriptionDto(row, plan),
@@ -292,6 +294,7 @@ async function handleInvoicePaid(
     rawEvent: event,
   });
 
+  await invalidateEntitlementCache(redis, sub.userId);
   if (plan)
     await publishToUser(redis, sub.userId, {
       type: 'subscription.changed',
@@ -333,6 +336,7 @@ async function handleInvoicePaymentFailed(
     rawEvent: event,
   });
 
+  await invalidateEntitlementCache(redis, sub.userId);
   if (plan)
     await publishToUser(redis, sub.userId, {
       type: 'subscription.changed',
@@ -377,6 +381,7 @@ async function handleSubscriptionUpdated(
     .returning();
 
   const plan = await getPlanById(db, after!.planId);
+  await invalidateEntitlementCache(redis, sub.userId);
   if (plan)
     await publishToUser(redis, sub.userId, {
       type: 'subscription.changed',
@@ -405,6 +410,7 @@ async function handleSubscriptionDeleted(
   if (license) await revokeLicense(db, license.id, 'subscription_ended');
 
   const plan = await getPlanById(db, after!.planId);
+  await invalidateEntitlementCache(redis, sub.userId);
   if (plan)
     await publishToUser(redis, sub.userId, {
       type: 'subscription.changed',

@@ -19,6 +19,7 @@ import {
   buildTestApp,
   createAdminSession,
   createUserSession,
+  grantMonthlyPass,
   type TestApp,
 } from './helpers.js';
 
@@ -97,6 +98,7 @@ describe('mass assignment: unrecognised extra keys are rejected, never silently 
       'mass-assign-filter@example.com',
       'mass-fp-filter-000000000001',
     );
+    await grantMonthlyPass(app, user.userId);
 
     const res = await app.inject({
       method: 'POST',

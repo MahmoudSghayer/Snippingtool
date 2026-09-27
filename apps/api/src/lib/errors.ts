@@ -59,6 +59,8 @@ export const AppErrors = {
       retryAfterSeconds ? { retryAfterSeconds } : undefined,
     ),
   killSwitchActive: () => new AppError('KILL_SWITCH_ACTIVE', 'The kill switch is active.'),
+  featureNotInPlan: (feature: string) =>
+    new AppError('FEATURE_NOT_IN_PLAN', 'Your plan does not include this feature.', { feature }),
 };
 
 /**

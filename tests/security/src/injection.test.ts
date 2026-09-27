@@ -19,6 +19,7 @@ import {
   bearer,
   buildTestApp,
   createUserSession,
+  grantMonthlyPass,
   TEST_PASSWORD,
   nextIp,
   type TestApp,
@@ -64,6 +65,7 @@ describe('injection payload suite', () => {
         `sqli-${SQLI_PAYLOADS.indexOf(payload)}@example.com`,
         `sqli-fp-${SQLI_PAYLOADS.indexOf(payload)}-000000001`,
       );
+      await grantMonthlyPass(app, user.userId);
 
       const createRes = await app.inject({
         method: 'POST',
@@ -100,6 +102,7 @@ describe('injection payload suite', () => {
         `xss-${idx}@example.com`,
         `xss-fp-${idx}-00000000000001`,
       );
+      await grantMonthlyPass(app, user.userId);
 
       const res = await app.inject({
         method: 'POST',
@@ -157,6 +160,7 @@ describe('injection payload suite', () => {
       'sqli-cursor@example.com',
       'sqli-cursor-fp-0000000000001',
     );
+    await grantMonthlyPass(app, user.userId);
     const res = await app.inject({
       method: 'GET',
       url: `/api/v1/trades?cursor=${encodeURIComponent(`' OR '1'='1`)}`,
@@ -188,6 +192,7 @@ describe('injection payload suite', () => {
 
   it('an oversize payload (well past every documented .max()) is rejected, not accepted or crashed on', async () => {
     const user = await createUserSession(app, 'oversize@example.com', 'oversize-fp-00000000000001');
+    await grantMonthlyPass(app, user.userId);
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/filters',

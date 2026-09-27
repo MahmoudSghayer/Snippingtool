@@ -35,13 +35,13 @@ and feature behaviour for (`@sl/shared`'s `PLAN_CODES`, `DEVICE_LIMITS`,
 `PLAN_FEATURES` — the single source of truth every module imports instead of
 re-declaring these numbers).
 
-| Plan       | Price          | Interval   | Device limit | `is_lifetime` | Feature keys (additive)                                                                                                       |
-| ---------- | -------------- | ---------- | ------------ | ------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `trial`    | 0¢             | 7 days¹    | 1            | false         | `ledger.recorder`, `ledger.price_model`, `assist.ranker`, `assist.filter_rotation`, `assist.session_pnl`, `assist.risk_meter` |
-| `basic`    | 499¢/mo        | month      | 1            | false         | `ledger.recorder`, `ledger.price_model`                                                                                       |
-| `pro`      | 999¢/mo        | month      | 2            | false         | `basic` + `assist.ranker`, `assist.filter_rotation`, `assist.session_pnl`, `assist.risk_meter`, `dashboard.analytics`         |
-| `ultimate` | 1999¢/mo       | month      | 3            | false         | `pro` + `automation.autobuyer`, `dashboard.multi_device`, `support.priority`                                                  |
-| `lifetime` | 9999¢ one-time | `one_time` | 3            | true          | same as `ultimate`                                                                                                            |
+| Plan       | Price          | Interval   | Device limit | `is_lifetime` | Feature keys (additive)                                                                                                                              |
+| ---------- | -------------- | ---------- | ------------ | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `trial`    | 0¢             | 7 days¹    | 1            | false         | `ledger.recorder`, `ledger.price_model`, `assist.ranker`, `assist.filter_rotation`, `assist.session_pnl`, `assist.risk_meter`, `dashboard.analytics` |
+| `basic`    | 499¢/mo        | month      | 1            | false         | `ledger.recorder`, `ledger.price_model`                                                                                                              |
+| `pro`      | 999¢/mo        | month      | 2            | false         | `basic` + `assist.ranker`, `assist.filter_rotation`, `assist.session_pnl`, `assist.risk_meter`, `dashboard.analytics`                                |
+| `ultimate` | 1999¢/mo       | month      | 3            | false         | `pro` + `automation.autobuyer`, `dashboard.multi_device`, `support.priority`                                                                         |
+| `lifetime` | 9999¢ one-time | `one_time` | 3            | true          | same as `ultimate`                                                                                                                                   |
 
 ¹ `trial` is priced at 0¢/mo in `plans` (so it fits the same billing shape as
 every other plan for the plans list/admin UI) but is never billed — its
@@ -59,6 +59,27 @@ fully supported by the plans/subscriptions/licenses modules — they read
 extension/dashboard UI and the seed; the database row is always the runtime
 source of truth). `GET /plans` returns only `is_active = true`, non-deleted
 plans, ordered by `sort_order`.
+
+**Server-side gating.** The API enforces these keys too, not just the
+extension and dashboard: routes list `fastify.requireFeature('<key>')`
+(`apps/api/src/plugins/auth.ts`) in `onRequest`, which authenticates, then
+checks the caller's live `features` (the `EntitlementProvider` snapshot in
+§4, cached in Redis for 60 s per user and deleted wherever
+`subscription.changed` is published). A caller without the key gets
+`403 FEATURE_NOT_IN_PLAN` with `details.feature`.
+
+| Feature key              | Routes                                                                                |
+| ------------------------ | ------------------------------------------------------------------------------------- |
+| `ledger.recorder`        | `/trades*`, `/sniping/attempts`, `/profits`, `POST /extension/telemetry`              |
+| `assist.filter_rotation` | `/filters*`                                                                           |
+| `assist.risk_meter`      | `/risk-events` (the admin `/admin/users/:id/risk-events` is permission-gated instead) |
+| `dashboard.analytics`    | `/analytics/me/*`, `/market/*`                                                        |
+
+Every live plan has `ledger.recorder`, so that gate means "has a live
+subscription". Extension bootstrap, heartbeat, error reports, licence
+validation and every account, billing, settings, notification, device,
+session and auth route stay ungated, so an expired user can still sign in,
+see that they have expired, and buy a pass.
 
 ---
 

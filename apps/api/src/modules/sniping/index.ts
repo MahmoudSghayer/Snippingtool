@@ -20,7 +20,7 @@ export default fp(
     app.post(
       '/api/v1/sniping/attempts',
       {
-        onRequest: [fastify.authenticate],
+        onRequest: [fastify.requireFeature('ledger.recorder')],
         preHandler: [fastify.verifyCsrf],
         config: { rateLimit: INGEST_RATE_LIMIT },
         schema: {

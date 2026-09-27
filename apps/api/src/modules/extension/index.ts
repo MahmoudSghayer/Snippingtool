@@ -211,10 +211,13 @@ export default fp(
       },
     );
 
+    // Telemetry is part of the recorder, so it needs a live plan. Bootstrap,
+    // heartbeat and error reports stay ungated: an expired user's extension
+    // must still learn that it has expired, and still report its failures.
     app.post(
       '/api/v1/extension/telemetry',
       {
-        onRequest: [fastify.authenticate],
+        onRequest: [fastify.requireFeature('ledger.recorder')],
         preHandler: [fastify.verifyCsrf],
         config: { rateLimit: INGEST_RATE_LIMIT },
         schema: {

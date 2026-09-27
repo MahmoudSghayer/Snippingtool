@@ -327,8 +327,8 @@ code.
 
 Codes owned by the subscriptions/licensing domain (`LICENSE_INVALID`,
 `LICENSE_EXPIRED`, `LICENSE_REVOKED`, `SUBSCRIPTION_REQUIRED`,
-`FEATURE_NOT_ENTITLED`, `TRIAL_ABUSE_DETECTED`, `TRIAL_ALREADY_USED`) are
-documented in [`05-subscriptions.md`](./05-subscriptions.md).
+`FEATURE_NOT_ENTITLED`, `FEATURE_NOT_IN_PLAN`, `TRIAL_ABUSE_DETECTED`,
+`TRIAL_ALREADY_USED`) are documented in [`05-subscriptions.md`](./05-subscriptions.md).
 
 ## 5. OpenAPI
 

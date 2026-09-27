@@ -12,6 +12,7 @@ import { buildApp } from '../../../app.js';
 import { hashSecret } from '../../../lib/crypto.js';
 import { newId } from '../../../lib/ids.js';
 import { signAccessToken } from '../../../lib/tokens.js';
+import { grantPlan } from '../../../test/plan-fixtures.js';
 
 import type { FastifyInstance } from 'fastify';
 
@@ -26,6 +27,8 @@ async function createUser(
     passwordHash: await hashSecret('irrelevant-password-123'),
     emailVerifiedAt: new Date(),
   });
+  // A Monthly pass: these routes are plan-gated (requireFeature).
+  await grantPlan(app, userId);
   const token = await signAccessToken(
     { sub: userId, sid: newId(), did: null, role: 'user', plan: null, ver: 0 },
     app.config.JWT_PRIVATE_KEY!,

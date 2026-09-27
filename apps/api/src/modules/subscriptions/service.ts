@@ -35,6 +35,7 @@ import {
   type SQL,
 } from 'drizzle-orm';
 
+import { invalidateEntitlementCache } from '../../lib/entitlements.js';
 import { AppError, AppErrors, isUniqueViolation } from '../../lib/errors.js';
 import { newId } from '../../lib/ids.js';
 import { upsertIpActivity } from '../../lib/ip-activity.js';
@@ -140,6 +141,8 @@ async function publishSubscriptionChanged(
   row: SubscriptionRow,
   plan: PlanRow,
 ): Promise<void> {
+  // Before the push, so a client refetching on it can't re-cache the old plan.
+  await invalidateEntitlementCache(redis, row.userId);
   await publishToUser(redis, row.userId, {
     type: 'subscription.changed',
     subscription: toSubscriptionDto(row, plan),

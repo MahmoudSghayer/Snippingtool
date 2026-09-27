@@ -6,6 +6,7 @@
 import { payments, subscriptions, users, type Database } from '@sl/db';
 import { and, desc, eq, inArray, isNotNull, lt } from 'drizzle-orm';
 
+import { invalidateEntitlementCache } from '../../lib/entitlements.js';
 import { AppErrors } from '../../lib/errors.js';
 import { decodeCursor, paginate } from '../../lib/pagination.js';
 import { publishToUser } from '../../ws/publish.js';
@@ -286,6 +287,7 @@ export async function reconcileStripeSubscriptions(
 
     const plan = await getPlanById(db, sub.planId);
     if (plan && after) {
+      await invalidateEntitlementCache(redis, sub.userId);
       await publishToUser(redis, sub.userId, {
         type: 'subscription.changed',
         subscription: toSubscriptionDto(after, plan),

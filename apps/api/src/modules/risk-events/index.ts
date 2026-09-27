@@ -42,7 +42,7 @@ export default fp(
     app.post(
       '/api/v1/risk-events',
       {
-        onRequest: [fastify.authenticate],
+        onRequest: [fastify.requireFeature('assist.risk_meter')],
         preHandler: [fastify.verifyCsrf],
         config: { rateLimit: INGEST_RATE_LIMIT },
         schema: {
@@ -75,7 +75,7 @@ export default fp(
     app.get(
       '/api/v1/risk-events',
       {
-        onRequest: [fastify.authenticate],
+        onRequest: [fastify.requireFeature('assist.risk_meter')],
         schema: {
           tags: ['risk'],
           querystring: riskEventQuerySchema,
