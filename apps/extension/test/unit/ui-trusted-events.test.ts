@@ -1,6 +1,5 @@
-// The in-page panel (ui/panel.ts) and the userscript's drawer
-// (userscript/launcher.ts) share EA's page with its scripts: both render in
-// closed shadow roots, and ignore events a script made (ui/trusted-events.ts).
+// The userscript's drawer (userscript/launcher.ts) shares EA's page with its
+// scripts: it renders in closed shadow roots, and ignore events a script made (ui/trusted-events.ts).
 // The Sniping Bot page has its own tests (bot-risk.test.ts).
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -29,34 +28,6 @@ describe('onTrusted', () => {
     trustTestEvents();
     el.click();
     expect(handler).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe('in-page panel', () => {
-  it('is closed to page scripts, and its bot button ignores script clicks', async () => {
-    const { createPanel } = await import('../../src/ui/panel.js');
-    const shadows = captureShadowRoots();
-    const panel = createPanel();
-    shadows.restore();
-    const host = document.getElementById('ledger-root')!;
-    expect(host.shadowRoot).toBeNull();
-
-    const open = vi.fn();
-    panel.setBotLauncher(open);
-    const button = shadows.rootOf(host).getElementById('bot-open') as HTMLButtonElement;
-    expect(button.hidden).toBe(false);
-    button.click();
-    expect(open).not.toHaveBeenCalled();
-    trustTestEvents();
-    button.click();
-    expect(open).toHaveBeenCalledTimes(1);
-
-    // Replacing the launcher does not stack a second listener.
-    const other = vi.fn();
-    panel.setBotLauncher(other);
-    button.click();
-    expect(open).toHaveBeenCalledTimes(1);
-    expect(other).toHaveBeenCalledTimes(1);
   });
 });
 

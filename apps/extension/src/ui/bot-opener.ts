@@ -1,7 +1,6 @@
 /*
  * bot-opener.ts — lets surfaces other than EA's navigation open the Sniping
- * Bot page: the in-page panel, and the userscript's SL drawer and
- * Tampermonkey menu. `content/index.ts` registers the page once it exists.
+ * Bot page: the userscript's SL drawer and Tampermonkey menu. `content/index.ts` registers the page once it exists.
  */
 let opener: (() => void) | null = null;
 const listeners = new Set<(available: boolean) => void>();

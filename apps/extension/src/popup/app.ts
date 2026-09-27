@@ -11,8 +11,7 @@
  * `background/governor.ts` for whatever `content/index.ts` most recently
  * pushed it (`governor.snapshotGet`, a real message handler, addressing
  * what this comment used to call out as file-ownership-boundary future
- * work) and renders the exact segmented gauge `ui/panel.ts` does
- * (`riskGaugeHtml`/`meterHtml` below mirror its `meterClass`/`setMeter`).
+ * work) and renders it as a segmented gauge (`riskGaugeHtml`/`meterHtml`).
  * If no EA tab has reported a snapshot recently, this shows an honest
  * "no live EA tab" message instead of a fabricated number (see
  * `renderLoggedIn`'s "Risk budget" card).
@@ -143,9 +142,7 @@ async function openDashboardRegister(): Promise<void> {
   if (import.meta.env.VITE_BUILD_TARGET !== 'userscript') window.close();
 }
 
-/** Mirrors `ui/panel.ts`'s `meterClass`/`setMeter` exactly (same 80%/100%
- * bands, same clamping) so the popup's gauge and the in-page panel's read
- * identically for the same snapshot. */
+/** One risk meter: 80% "high" and 100% "over" bands, clamped at 120%. */
 function meterHtml(value: number, limit: number): string {
   const ratio = limit > 0 ? Math.min(1.2, value / limit) : 0;
   const cls = ratio >= 1 ? 'meter over' : ratio >= 0.8 ? 'meter high' : 'meter';
@@ -168,7 +165,7 @@ function riskGaugeHtml(snapshot: RiskSnapshot | null, killSwitch: boolean): stri
     return `
       <div class="row"><span class="k">Risk budget</span><span class="v">No live EA tab</span></div>
       <p class="hint" style="margin:6px 0 0;">Open the EA Web App in a tab while sniping to see actions/hour, buy:search ratio
-        and coin flow live here — the panel on that page shows the same numbers.</p>
+        and coin flow live here.</p>
     `;
   }
   return `

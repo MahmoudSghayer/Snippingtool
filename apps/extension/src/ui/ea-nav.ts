@@ -6,7 +6,7 @@
  * `.ut-tab-bar` element whose items are `.ut-tab-bar-item` buttons (Transfers
  * carries `icon-transfer`), and the top bar is `.ut-navigation-bar-view`.
  * If that is not what the page has, nothing is added and nothing breaks: the
- * page still opens from the in-page panel and the userscript's SL menu.
+ * page still opens from the userscript's SL menu.
  * `NAV_SELECTORS`, `TRANSFERS_SELECTOR` and `HEADER_SELECTORS` are the lines
  * to update when EA renames them.
  *

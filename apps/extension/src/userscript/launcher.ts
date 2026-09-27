@@ -9,7 +9,7 @@
  * popup's and options page's stylesheets — both written for a whole page of
  * their own — cannot collide with each other. `:root` and `body` in those
  * stylesheets are rewritten to the shadow host and a wrapper element, the
- * same way `ui/panel.ts` adapts `tokens.css`.
+ * same way for `tokens.css`.
  *
  * Every shadow root here is closed and every handler ignores script-made
  * events (`onTrusted`), including the popup's and options page's own

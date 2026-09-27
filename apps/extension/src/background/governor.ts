@@ -1,15 +1,14 @@
 /*
  * background/governor.ts — caches the latest live risk-budget snapshot the
  * content script pushes, so the popup can render the real segmented gauge
- * instead of the static "open the panel" card (docs/10-design-system.md
+ * instead of a static placeholder card (docs/10-design-system.md
  * §15's "Known gap", docs/12-testing.md "Defects found").
  *
  * The governor itself only ever runs inside the content script attached to
  * the active EA tab (docs/01-architecture.md, "safety governor") — this
  * file never recomputes or reconstructs a risk number, it only relays and
  * caches the exact object `engine/governor.ts`'s own `snapshot()` produced,
- * on the same UI tick that already updates the in-page panel
- * (`content/index.ts`'s risk-meter interval). If no EA tab has pushed a
+ * on `content/index.ts`'s risk snapshot interval. If no EA tab has pushed a
  * snapshot recently (no tab open, or the cached one is stale), the popup
  * gets `null` and falls back to its honest static message — never a
  * fabricated or reconstructed number.

@@ -31,7 +31,6 @@ import { singleFlight } from '../lib/single-flight.js';
 import { setBotPageOpener } from '../ui/bot-opener.js';
 import { createBotPage } from '../ui/bot-page.js';
 import { installNavItem } from '../ui/ea-nav.js';
-import { createPanel, type Panel } from '../ui/panel.js';
 import { onTrusted } from '../ui/trusted-events.js';
 
 import { createAdapterClient, pageWindow } from './adapter-client.js';
@@ -97,7 +96,6 @@ function nowIso(): string {
 // ---- boot --------------------------------------------------------------------
 
 async function main(): Promise<void> {
-  const panel: Panel = createPanel();
   // The act-channel nonce content/handoff.ts minted at document_start (the
   // userscript's setup.ts, in that build). Without it every act call fails
   // closed (assist/automation cannot buy); M1 recording does not need it.
@@ -124,9 +122,6 @@ async function main(): Promise<void> {
     adapter.requestCatalog();
   }
 
-  panel.setHealth('live', 'Recording. Nothing beyond product telemetry (docs/06-extension.md) is sent.');
-  send('counts').then((data) => data && panel.setTotals(data as { auctions: number; playersLast24h: number }));
-
   // ---- M1: passive observation (always on, no account required) -----------
 
   let recordQueue: TrimmedAuction[] = [];
@@ -147,8 +142,7 @@ async function main(): Promise<void> {
   // having booted.
   let governor: Governor | null = null;
   let assist: AssistEngine | null = null;
-  // Server kill switch, tracked here as well as inside the governor so the
-  // panel reports it even on an account with no engine (M1-only), and so
+  // Server kill switch, tracked here as well as inside the governor so
   // an `engine.killSwitch` push arriving before the M2 bootstrap finishes
   // is not lost (it is re-applied to the governor once one exists).
   let killSwitchActive = false;
@@ -163,26 +157,7 @@ async function main(): Promise<void> {
     recordQueue = [];
 
     const result = await send('record', { auctions: batch });
-    if (!result) {
-      panel.setHealth('warn', 'Recorded nothing — the extension background may have reloaded.');
-      return;
-    }
-
-    const totals = await send<{ auctions: number; playersLast24h: number }>('counts');
-    if (totals) panel.setTotals(totals);
-
-    if (lastResourceId != null) {
-      const summary = await send<{
-        resourceId: number;
-        summary: PriceSummary;
-        maxSnipe: number | null;
-        recentPrices?: number[];
-      }>('summary', { resourceId: lastResourceId, minProfit: settingsCache.targets.minProfitPerSnipe });
-      if (summary) {
-        panel.setCard({ resourceId: summary.resourceId, rating: lastRating, summary: summary.summary, maxSnipe: summary.maxSnipe });
-        panel.setSparkline(summary.recentPrices ?? []);
-      }
-    }
+    if (!result) logger.warn('recorded nothing — the extension background may have reloaded', 'record');
   }
 
   function scheduleFlush(): void {
@@ -219,10 +194,6 @@ async function main(): Promise<void> {
   adapter.onAuctions(
     createSearchObserver({
       tracked,
-      onSearch: (count) => {
-        panel.setSearches(count);
-        panel.setHealth(engineHealthState(), engineHealthMessage());
-      },
       onDominant: (resourceId, rating) => {
         lastResourceId = resourceId;
         lastRating = rating;
@@ -251,24 +222,11 @@ async function main(): Promise<void> {
         items: [{ type: 'error', occurredAt: nowIso(), metadata: { code: 'ADAPTER_PROBE_FAILED', message: status.reason ?? 'unknown', context: 'adapter.probe' } }] satisfies ActivityEvent[],
       });
     }
-    panel.setHealth(engineHealthState(), engineHealthMessage());
   });
 
   adapter.onShape((reason) => {
     logger.warn(`market payload shape changed: ${reason}`, 'adapter.shape');
-    panel.setHealth('warn', `Not recording — the market response changed shape (${reason}). adapter.ts needs updating.`);
   });
-
-  function engineHealthState(): 'live' | 'warn' | 'risk' {
-    if (!probeOk) return 'warn';
-    if (killSwitchActive || governor?.isKillSwitchActive()) return 'risk';
-    return 'live';
-  }
-  function engineHealthMessage(): string {
-    if (!probeOk) return `Bundle probe failed — assist/automation are hard-stopped until adapter.ts is updated.`;
-    if (killSwitchActive || governor?.isKillSwitchActive()) return 'Kill switch active — all actions blocked.';
-    return assist ? 'Assist engine active.' : 'Recording. Nothing beyond product telemetry is sent.';
-  }
 
   // ---- server kill switch: push (background -> this tab) + pull ------------
   //
@@ -289,7 +247,6 @@ async function main(): Promise<void> {
       if (active) logger.warn(`kill switch active — ${reason ?? 'server kill switch active'}`, 'kill-switch');
       else logger.info('kill switch cleared by the server', 'kill-switch');
     }
-    panel.setHealth(engineHealthState(), engineHealthMessage());
   }
 
   browser.runtime.onMessage.addListener((message: unknown): undefined => {
@@ -580,7 +537,6 @@ async function main(): Promise<void> {
     });
     botPage.onOpenChange((open) => nav.setActive(open));
     setBotPageOpener(() => botPage.open());
-    panel.setBotLauncher(() => botPage.open());
   }
 
   function buildCandidatesFromTracked(): OpportunityCandidate[] {
@@ -634,7 +590,6 @@ async function main(): Promise<void> {
     await refreshSummaries();
     const candidates = buildCandidatesFromTracked();
     rankedCandidates = rankCandidates(candidates, { minEv: settingsCache.targets.minProfitPerSnipe });
-    panel.setRanked(rankedCandidates);
 
     // The Sniping Bot buys on its own; never let two engines buy at once.
     if (autobuyer && !autobuyer.isStopped() && !sniper?.isRunning()) {
@@ -657,27 +612,20 @@ async function main(): Promise<void> {
 
   function reportAutobuyerStop(reason: StopReason, detail: string): void {
     logger.error(`autobuyer stopped: ${reason} — ${detail}`, 'autobuyer');
-    panel.setHealth('warn', `Automation stopped (${reason}): ${detail}`);
   }
 
   if (governor) {
     setInterval(() => void engineTick(), AUTOBUYER_TICK_MS);
   }
 
-  // ---- risk meter / session P&L UI tick ------------------------------------
+  // ---- risk snapshot push ---------------------------------------------------
 
+  // The popup's risk gauge reads the governor's own snapshot, cached by
+  // background (`storage.session`, `background/governor.ts`), so it never
+  // recomputes a safety-critical number outside the governor's math.
   setInterval(() => {
     if (!governor) return;
-    const snapshot = governor.snapshot();
-    panel.setRiskSnapshot(snapshot);
-    if (assist) panel.setSessionPnl(assist.sessionPnl);
-    // Defect (docs/10-design-system.md §15 "Known gap"): the popup showed
-    // no live risk gauge at all — only this in-page panel did. Pushing the
-    // same snapshot the panel just rendered to background (cached in
-    // `storage.session`, `background/governor.ts`) lets the popup show the
-    // real segmented gauge too, without ever reconstructing/recomputing a
-    // safety-critical number outside the governor's own math.
-    void send('governor.snapshotPush', snapshot);
+    void send('governor.snapshotPush', governor.snapshot());
   }, RISK_UI_TICK_MS);
 
   // ---- crash recovery: persist governor state via background -------------
@@ -736,6 +684,6 @@ function start(): void {
 // The extension injects this file at document_idle, so the first branch is
 // never taken there. The userscript build evaluates it at document-start (so
 // the MAIN-world adapter is in place before EA's first market call) and the
-// panel needs a <body> to attach to.
+// bot page needs a <body> to attach to.
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
 else start();
