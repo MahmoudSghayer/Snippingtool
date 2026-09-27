@@ -110,6 +110,10 @@ export async function findSessionById(db: Database, id: string) {
  * would match nothing at all after rotation (not "found but revoked"),
  * making reuse silently indistinguishable from "never existed" — a real bug
  * caught by this module's own integration test.
+ *
+ * The revoke is conditional (`revoked_at IS NULL`): two refreshes racing on
+ * the same token both read it as live, but only one UPDATE can match. The
+ * loser gets `null` back and must treat its token as reused.
  */
 export async function rotateSession(
   db: Database,
@@ -123,8 +127,13 @@ export async function rotateSession(
   },
   newRefreshTokenHash: string,
   expiresAt: Date,
-): Promise<string> {
-  await revokeSession(db, previous.id, 'rotated');
+): Promise<string | null> {
+  const [revoked] = await db
+    .update(sessions)
+    .set({ revokedAt: new Date(), revokedReason: 'rotated' })
+    .where(and(eq(sessions.id, previous.id), isNull(sessions.revokedAt)))
+    .returning({ id: sessions.id });
+  if (!revoked) return null;
   return createSession(db, {
     userId: previous.userId,
     deviceId: previous.deviceId,

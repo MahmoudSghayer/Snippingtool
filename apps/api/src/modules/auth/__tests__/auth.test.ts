@@ -159,6 +159,36 @@ describe('auth module', () => {
     expect(res.json().code).toBe('AUTH_EMAIL_NOT_VERIFIED');
   });
 
+  // Two refreshes racing on the same token both read the row before either
+  // revokes it. Only the one whose conditional revoke wins may rotate; the
+  // other is token reuse.
+  it('refresh rotation race: two concurrent refreshes with one token, exactly one succeeds', async () => {
+    const ip = nextIp();
+    const email = 'rotation-race@example.com';
+    await registerAndVerify(email, ip);
+    const loginRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      remoteAddress: ip,
+      payload: { email, password: 'correcthorsebattery12', device },
+    });
+    const { refreshToken } = loginRes.json();
+
+    const results = await Promise.all(
+      [0, 1].map(() =>
+        app.inject({
+          method: 'POST',
+          url: '/api/v1/auth/refresh',
+          remoteAddress: ip,
+          payload: { refreshToken },
+        }),
+      ),
+    );
+    const codes = results.map((r) => r.statusCode).sort();
+    expect(codes).toEqual([200, 401]);
+    expect(results.find((r) => r.statusCode === 401)!.json().code).toBe('AUTH_TOKEN_REUSED');
+  });
+
   it('refresh rotation: old refresh token is rejected after rotation, reuse revokes the family', async () => {
     const ip = nextIp();
     const email = 'rotation@example.com';

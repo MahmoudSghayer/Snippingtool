@@ -116,7 +116,9 @@ via a plain unique index instead of scanning). **30 day** lifetime
 4. Otherwise: the _old_ session row is marked `revoked_at`/`revoked_reason =
 'rotated'`, and a **new** session row is inserted (new id, new
    `refresh_token_hash`, same `family_id`/`user_id`/`device_id`). A fresh
-   access token is signed with the new session's id as `sid`.
+   access token is signed with the new session's id as `sid`. The revoke is
+   conditional (`WHERE revoked_at IS NULL`), so of two refreshes racing on
+   one token only one rotates; the other is treated as reuse (step 2).
 
 ```mermaid
 sequenceDiagram

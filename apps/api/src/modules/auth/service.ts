@@ -481,6 +481,12 @@ export async function refresh(
     newRefresh.hash,
     new Date(Date.now() + REFRESH_TOKEN_TTL_MS),
   );
+  if (!newSessionId) {
+    // A concurrent refresh with the same token rotated it first: two
+    // holders of one refresh token is exactly what reuse detection is for.
+    await repo.revokeSessionFamily(ctx.db, session.familyId, 'token_reuse_detected');
+    throw AppErrors.tokenReused();
+  }
 
   const entitlements = await ctx.entitlements.getEntitlements(user.id);
   const accessToken = await signAccessToken(
