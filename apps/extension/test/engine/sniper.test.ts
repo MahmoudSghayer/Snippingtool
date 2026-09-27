@@ -7,6 +7,7 @@
 import {
   BOT_LIMITS,
   DEFAULT_BOT_SETTINGS,
+  type BotBudgetState,
   type BotDailyUsage,
   type BotSettings,
   type TrimmedAuction,
@@ -46,6 +47,8 @@ interface Harness {
   searchTimes: number[];
   savedUsage: BotDailyUsage[];
   buys: string[];
+  /** The card each buy named (`adapter.buy`'s third argument). */
+  buyCards: unknown[];
   waits: { phase: string; ms: number }[];
   killSwitch: { active: boolean };
   probe: (ok: boolean) => void;
@@ -65,6 +68,12 @@ function setup(opts: {
   maxSearches?: number;
   /** Today's active time as an earlier page saved it. */
   usage?: BotDailyUsage | null;
+  /** Where the hourly budgets are saved (share one to simulate a reload). */
+  budgetStore?: { value: BotBudgetState | null };
+  /** Whether the plan includes the bot, asked before every action. */
+  entitled?: () => boolean;
+  /** The clock's start (to continue another harness's clock). */
+  startAt?: number;
 }): Harness {
   // Ratio 1 so a buy on the very first search is allowed; the ratio itself
   // is the governor's concern and is covered in governor.test.ts. No
@@ -77,7 +86,7 @@ function setup(opts: {
     safety: { ...DEFAULT_BOT_SETTINGS.safety, buyToSearchRatio: 1, cooldownSeconds: 0 },
     ...opts.settings,
   };
-  const clock = { t: 1_000_000 };
+  const clock = { t: opts.startAt ?? 1_000_000 };
   const auctionsListeners = new Set<(a: TrimmedAuction[]) => void>();
   const probeListeners = new Set<
     (s: { ok: boolean; checkedAt: number; reason?: string }) => void
@@ -86,6 +95,7 @@ function setup(opts: {
   const searchTimes: number[] = [];
   const savedUsage: BotDailyUsage[] = [];
   const buys: string[] = [];
+  const buyCards: unknown[] = [];
   const waits: { phase: string; ms: number }[] = [];
   const killSwitch = { active: false };
   const results = opts.results ?? [[]];
@@ -101,8 +111,9 @@ function setup(opts: {
         for (const cb of auctionsListeners) cb(batch);
         return { ok: true, latencyMs: 5 };
       },
-      buy: async (tradeId) => {
+      buy: async (tradeId, _price, card) => {
         buys.push(tradeId);
+        buyCards.push(card);
         if (opts.buyResult) return opts.buyResult(tradeId);
         const ok = opts.buyOk ? opts.buyOk(tradeId) : true;
         return ok ? { ok: true, latencyMs: 5 } : { ok: false, error: 'item sold', latencyMs: 5 };
@@ -122,6 +133,13 @@ function setup(opts: {
     estimateSellPrice: async () => (opts.sellPrice === undefined ? 20_000 : opts.sellPrice),
     loadUsage: async () => opts.usage ?? null,
     saveUsage: (u) => void savedUsage.push(u),
+    ...(opts.budgetStore
+      ? {
+          loadBudget: async () => opts.budgetStore!.value,
+          saveBudget: (b: BotBudgetState) => void (opts.budgetStore!.value = structuredClone(b)),
+        }
+      : {}),
+    ...(opts.entitled ? { entitled: opts.entitled } : {}),
     killSwitch: () => ({
       active: killSwitch.active,
       reason: killSwitch.active ? 'test kill switch' : undefined,
@@ -153,6 +171,7 @@ function setup(opts: {
     searchTimes,
     savedUsage,
     buys,
+    buyCards,
     waits,
     killSwitch,
     probe: (ok) =>
@@ -502,6 +521,59 @@ describe('Sniper — the user\'s limits', () => {
     safe.sniper.stop();
   });
 
+  it('rates every limit: 1e9 coins an hour with no acknowledgment does not start', () => {
+    const h = setup({
+      settings: {
+        ...DEFAULT_BOT_SETTINGS,
+        riskAcknowledgedAt: null,
+        safety: { ...DEFAULT_BOT_SETTINGS.safety, maxCoinFlowPerHour: 1_000_000_000 },
+      },
+    });
+    h.sniper.start();
+    expect(h.sniper.isRunning()).toBe(false);
+    expect(h.sniper.state.stopReason).toBe('risk_unacknowledged');
+    expect(h.searches).toHaveLength(0);
+
+    // Likewise a cooldown of 0, or a buy on every search.
+    for (const patch of [{ cooldownSeconds: 0 }, { buyToSearchRatio: 1 }]) {
+      const other = setup({
+        settings: {
+          ...DEFAULT_BOT_SETTINGS,
+          riskAcknowledgedAt: null,
+          safety: { ...DEFAULT_BOT_SETTINGS.safety, ...patch },
+        },
+      });
+      other.sniper.start();
+      expect(other.sniper.state.stopReason).toBe('risk_unacknowledged');
+    }
+
+    // Acknowledged, the user may raise it (up to BOT_LIMITS).
+    const acked = setup({
+      settings: {
+        ...DEFAULT_BOT_SETTINGS,
+        riskAcknowledgedAt: '2026-09-24T00:00:00.000Z',
+        safety: { ...DEFAULT_BOT_SETTINGS.safety, maxCoinFlowPerHour: 1_000_000_000 },
+      },
+    });
+    acked.sniper.start();
+    expect(acked.sniper.isRunning()).toBe(true);
+    expect(acked.sniper.getGovernor()!.getSettings().maxCoinFlowPerHour).toBe(1_000_000_000);
+    acked.sniper.stop();
+  });
+
+  it('stops when settings are raised above low while running, without an acknowledgment', () => {
+    const h = setup({ settings: { ...DEFAULT_BOT_SETTINGS, riskAcknowledgedAt: null } });
+    h.sniper.start();
+    expect(h.sniper.isRunning()).toBe(true);
+    h.sniper.setSettings({
+      ...DEFAULT_BOT_SETTINGS,
+      riskAcknowledgedAt: null,
+      safety: { ...DEFAULT_BOT_SETTINGS.safety, maxCoinFlowPerHour: 1_000_000_000 },
+    });
+    expect(h.sniper.isRunning()).toBe(false);
+    expect(h.sniper.state.stopReason).toBe('risk_unacknowledged');
+  });
+
   it('the kill switch and a probe failure still stop the bot on any settings', async () => {
     const k = setup({ settings: { ...quick }, results: [[auction('t-a', 8_000)]] });
     k.killSwitch.active = true;
@@ -559,5 +631,194 @@ describe('Sniper — the adapter\'s answers (lib/act-auth.ts)', () => {
     };
     expect(await run(true)).toEqual(['t-refused', 't-next']);
     expect(await run(false)).toEqual(['t-refused']);
+  });
+});
+
+describe('Sniper — hourly budgets survive Stop/Start and a page reload', () => {
+  const settings = (patch: Partial<BotSettings['safety']>): Partial<BotSettings> => ({
+    searchDelay: { min: 1, max: 1 },
+    breaks: { ...DEFAULT_BOT_SETTINGS.breaks, enabled: false },
+    rest: { ...DEFAULT_BOT_SETTINGS.rest, enabled: false },
+    safety: { ...DEFAULT_BOT_SETTINGS.safety, buyToSearchRatio: 1, cooldownSeconds: 0, ...patch },
+  });
+
+  it('Stop then Start does not refill the searches-per-hour window or the governor', async () => {
+    const budgetStore = { value: null as BotBudgetState | null };
+    const h = setup({ settings: settings({ maxSearchesPerHour: 3 }), maxSearches: 3, budgetStore });
+    h.sniper.start();
+    await h.done();
+    expect(h.searches).toHaveLength(3);
+    const actions = h.sniper.getGovernor()!.snapshot().actionsLastHour;
+    expect(actions).toBe(3);
+
+    // Start again straight away: the fourth search still waits for the
+    // first to leave the one-hour window.
+    const stopped = new Promise<void>((resolve) => {
+      const check = setInterval(() => {
+        if (!h.sniper.isRunning()) {
+          clearInterval(check);
+          resolve();
+        }
+      }, 1);
+    });
+    h.sniper.start();
+    expect(h.sniper.getGovernor()!.snapshot().actionsLastHour).toBe(3);
+    await stopped;
+    expect(h.searches).toHaveLength(4);
+    expect(h.searchTimes[3]! - h.searchTimes[0]!).toBeGreaterThanOrEqual(3_600_000);
+    expect(h.sniper.getLog().some((e) => e.message.includes('3 searches in the last hour'))).toBe(
+      true,
+    );
+    expect(budgetStore.value!.searchTimes.length).toBeGreaterThan(0);
+  });
+
+  it('a new page (a reload) picks the saved budgets up: searches, buys and coins', async () => {
+    const budgetStore = { value: null as BotBudgetState | null };
+    const first = setup({
+      settings: settings({ maxSearchesPerHour: 3, maxCoinFlowPerHour: 20_000 }),
+      results: [[auction('t-a', 9_000)], [auction('t-b', 9_000)], []],
+      maxSearches: 3,
+      budgetStore,
+    });
+    first.sniper.start();
+    await first.done();
+    expect(first.buys).toEqual(['t-a', 't-b']);
+    expect(budgetStore.value!.searchTimes).toHaveLength(3);
+    expect(budgetStore.value!.buyTimes).toHaveLength(2);
+    expect(budgetStore.value!.governor.coinFlow.map((c) => c.coins)).toEqual([9_000, 9_000]);
+
+    // The reloaded page: a new Sniper, the same storage, the same clock.
+    const second = setup({
+      settings: settings({ maxSearchesPerHour: 3, maxCoinFlowPerHour: 20_000 }),
+      results: [[auction('t-c', 9_000)]],
+      maxSearches: 1,
+      budgetStore,
+      startAt: first.clock.t,
+    });
+    second.sniper.start();
+    await second.done();
+    // Its first search waited for the saved window to free up...
+    expect(second.searchTimes[0]! - first.searchTimes[0]!).toBeGreaterThanOrEqual(3_600_000);
+    // ...and by then the saved coin flow had drained too, so it could buy.
+    expect(second.buys).toEqual(['t-c']);
+  });
+
+  it('a reload inside the hour keeps the coin flow spent', async () => {
+    const budgetStore = { value: null as BotBudgetState | null };
+    const first = setup({
+      settings: settings({ maxCoinFlowPerHour: 10_000 }),
+      results: [[auction('t-a', 9_000)]],
+      maxSearches: 1,
+      budgetStore,
+    });
+    first.sniper.start();
+    await first.done();
+    expect(first.buys).toEqual(['t-a']);
+
+    const second = setup({
+      settings: settings({ maxCoinFlowPerHour: 10_000 }),
+      results: [[auction('t-b', 9_000)]],
+      maxSearches: 1,
+      budgetStore,
+      startAt: first.clock.t,
+    });
+    second.sniper.start();
+    await second.done();
+    expect(second.buys).toEqual([]);
+    expect(second.sniper.getLog().some((e) => e.message.includes('coin flow'))).toBe(true);
+  });
+});
+
+describe('Sniper — a Stop before the saved budget loads', () => {
+  it('leaves the saved budget alone instead of saving an empty one over it', async () => {
+    const start = 10_000_000;
+    const saved: BotBudgetState = {
+      governor: {
+        sessionStartedAt: start - 60_000,
+        actionTimestamps: [start - 60_000],
+        searchCount: 1,
+        buyCount: 0,
+        coinFlow: [],
+        cooldownUntil: 0,
+        killSwitchActive: false,
+      },
+      searchTimes: [start - 60_000],
+      buyTimes: [],
+    };
+    const budgetStore = { value: saved as BotBudgetState | null };
+    const h = setup({ maxSearches: 1, budgetStore, startAt: start });
+    h.sniper.start();
+    h.sniper.stop('manual'); // before run() has awaited loadBudget
+    await new Promise((r) => setTimeout(r, 0));
+    expect(budgetStore.value).toBe(saved);
+  });
+});
+
+describe('Sniper — the buy:search ratio does not bank a long history', () => {
+  it('starts its counts over once the last hour holds no action', async () => {
+    const start = 10_000_000;
+    const budgetStore = {
+      value: {
+        governor: {
+          sessionStartedAt: 0,
+          actionTimestamps: [start - 2 * 3_600_000],
+          searchCount: 1_000,
+          buyCount: 0,
+          coinFlow: [],
+          cooldownUntil: 0,
+          killSwitchActive: false,
+        },
+        searchTimes: [start - 2 * 3_600_000],
+        buyTimes: [],
+      } as BotBudgetState | null,
+    };
+    const h = setup({ maxSearches: 1, budgetStore, startAt: start });
+    h.sniper.start();
+    await h.done();
+    expect(budgetStore.value!.governor.searchCount).toBe(1);
+  });
+});
+
+describe('Sniper — the plan must still include the bot', () => {
+  it('stops with a reason when the entitlement loses the bot mid-session', async () => {
+    // The plan loses the bot after the second search (a heartbeat refreshed
+    // the entitlement without `automation.autobuyer`).
+    let searchesSoFar = () => 0;
+    const h = setup({
+      settings: {
+        searchDelay: { min: 1, max: 1 },
+        breaks: { ...DEFAULT_BOT_SETTINGS.breaks, enabled: false },
+        rest: { ...DEFAULT_BOT_SETTINGS.rest, enabled: false },
+      },
+      results: [[], [auction('t-a', 8_000)]],
+      entitled: () => searchesSoFar() < 2,
+    });
+    searchesSoFar = () => h.searches.length;
+    h.sniper.start();
+    await h.done();
+    expect(h.sniper.state.stopReason).toBe('not_entitled');
+    expect(h.sniper.state.stopDetail).toBe('your plan no longer includes the Sniping Bot');
+    // Checked before the buy the second search found, not only the next search.
+    expect(h.searches).toHaveLength(2);
+    expect(h.buys).toEqual([]);
+  });
+
+  it('will not start without it', () => {
+    const h = setup({ entitled: () => false });
+    h.sniper.start();
+    expect(h.sniper.isRunning()).toBe(false);
+    expect(h.sniper.state.stopReason).toBe('not_entitled');
+  });
+});
+
+describe('Sniper — binds each buy to the matched card', () => {
+  it("names the listing's resourceId and assetId, so the adapter can check them", async () => {
+    const h = setup({
+      results: [[auction('t-special', 9_000, { resourceId: 50_331_748, assetId: 100 })]],
+      maxSearches: 1,
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.buyCards).toEqual([{ resourceId: 50_331_748, assetId: 100 }]);
   });
 });

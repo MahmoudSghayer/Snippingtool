@@ -204,6 +204,68 @@ describe('botRiskLevel', () => {
     ]);
   });
 
+  /** The recommended defaults with one safety limit changed. */
+  const withSafety = (patch: Partial<BotSettings['safety']>): BotSettings => ({
+    ...DEFAULT_BOT_SETTINGS,
+    safety: { ...DEFAULT_BOT_SETTINGS.safety, ...patch },
+  });
+
+  it('coins an hour: 1M / 3M / 10M boundaries', () => {
+    const at = (coins: number) => botRiskLevel(withSafety({ maxCoinFlowPerHour: coins })).level;
+    expect(at(1_000_000)).toBe('low');
+    expect(at(1_000_001)).toBe('moderate');
+    expect(at(3_000_000)).toBe('moderate');
+    expect(at(3_000_001)).toBe('high');
+    expect(at(10_000_000)).toBe('high');
+    expect(at(10_000_001)).toBe('very_high');
+    expect(at(1_000_000_000)).toBe('very_high');
+    expect(botRiskLevel(withSafety({ maxCoinFlowPerHour: 2_000_000 })).reasons).toEqual([
+      'Up to 2,000,000 coins an hour — above the 1,000,000 low limit',
+    ]);
+  });
+
+  it('cooldown after a buy: 8 / 4 / 1 second boundaries', () => {
+    const at = (seconds: number) => botRiskLevel(withSafety({ cooldownSeconds: seconds })).level;
+    expect(at(8)).toBe('low');
+    expect(at(7)).toBe('moderate');
+    expect(at(4)).toBe('moderate');
+    expect(at(3)).toBe('high');
+    expect(at(1)).toBe('high');
+    expect(at(0)).toBe('very_high');
+    expect(botRiskLevel(withSafety({ cooldownSeconds: 2 })).reasons).toEqual([
+      'A 2 s cooldown after a buy — under the 4 s moderate minimum',
+    ]);
+  });
+
+  it('buy-to-search ratio: 0.35 / 0.5 / 0.75 boundaries', () => {
+    const at = (ratio: number) => botRiskLevel(withSafety({ buyToSearchRatio: ratio })).level;
+    expect(at(0.35)).toBe('low');
+    expect(at(0.36)).toBe('moderate');
+    expect(at(0.5)).toBe('moderate');
+    expect(at(0.51)).toBe('high');
+    expect(at(0.75)).toBe('high');
+    expect(at(0.76)).toBe('very_high');
+    expect(botRiskLevel(withSafety({ buyToSearchRatio: 1 })).reasons).toEqual([
+      'Up to 1 buys per search — above the 0.75 high limit',
+    ]);
+  });
+
+  it('does not rate the max buy price: it caps a buy, not how the bot behaves', () => {
+    const s: BotSettings = {
+      ...DEFAULT_BOT_SETTINGS,
+      thresholds: { ...DEFAULT_BOT_SETTINGS.thresholds, maxBuyPrice: 15_000_000 },
+    };
+    expect(botRiskLevel(s).level).toBe('low');
+  });
+
+  it('rates every raised limit at once: the finding that 1e9 coins/h with no cooldown was "low"', () => {
+    const risk = botRiskLevel(
+      withSafety({ maxCoinFlowPerHour: 1_000_000_000, cooldownSeconds: 0, buyToSearchRatio: 1 }),
+    );
+    expect(risk.level).toBe('very_high');
+    expect(risk.reasons).toHaveLength(3);
+  });
+
   it('takes the worst factor and lists every reason', () => {
     const risk = botRiskLevel(probe({ delay: 5, buysPerHour: 30, searchesPerHour: 100 }));
     expect(risk.level).toBe('very_high');

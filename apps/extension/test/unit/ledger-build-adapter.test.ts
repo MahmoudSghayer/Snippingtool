@@ -112,6 +112,32 @@ describe('dist/ledger contents', () => {
       expect(readFileSync(full, 'utf8').toLowerCase().includes('autobuyer'), `${path.relative(outDir, full)} mentions autobuyer`).toBe(false);
     }
   });
+
+  // The listable build has no Sniping Bot: no page, no engine, and none of
+  // its background handlers (background/index.ts registers them only when
+  // VITE_AUTOMATION is '1'; the message names live in @sl/shared's
+  // automation-messages.ts, which only automation code imports).
+  it('carries none of the Sniping Bot: no page, no loop, no bot/catalog handlers', () => {
+    const forbidden = [
+      'Sniping Bot',
+      'runCycle',
+      'catalog.save',
+      'catalog.get',
+      'cards.names',
+      'bot.settingsGet',
+      'bot.settingsSet',
+      'bot.usageGet',
+      'bot.usageSet',
+      'bot.budgetGet',
+      'bot.budgetSet',
+    ];
+    const files = readdirSync(outDir, { recursive: true, withFileTypes: true }).filter((e) => e.isFile());
+    for (const file of files) {
+      const full = path.join(file.parentPath, file.name);
+      const text = readFileSync(full, 'utf8');
+      for (const word of forbidden) expect(text.includes(word), `${path.relative(outDir, full)} contains "${word}"`).toBe(false);
+    }
+  });
 });
 
 describe('dist/ledger manifest', () => {

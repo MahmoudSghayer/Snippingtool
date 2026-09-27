@@ -11,7 +11,8 @@
  * is unchanged, just typed and merged into this larger message router.
  */
 import {
-  backgroundMessageEnvelopeSchema,
+  backgroundMessageEnvelopeSchemaFor,
+  extBackgroundBotBudgetSetPayloadSchema,
   extBackgroundBotSettingsSetPayloadSchema,
   extBackgroundBotUsageSetPayloadSchema,
   extBackgroundCardNamesPayloadSchema,
@@ -38,6 +39,8 @@ import * as db from '../store/db.js';
 
 import { handleAuthLogin, handleAuthLogout, handleAuthMfaVerify, handleAuthRegister, handleAuthResendVerification, handleAuthStatus } from './auth.js';
 import {
+  handleBotBudgetGet,
+  handleBotBudgetSet,
   handleBotSettingsGet,
   handleBotSettingsSet,
   handleBotUsageGet,
@@ -67,6 +70,12 @@ import type { BackgroundResponse } from '@sl/shared';
 import type { Runtime } from 'webextension-polyfill';
 
 const WINDOW_MS = 7 * 24 * 60 * 60 * 1000; // a week of history per card
+
+/** Automation builds only: the Sniping Bot's handlers below. The listable
+ * `ledger` build registers none of them (constant-folded at build time, so
+ * `background/bot.ts` and these message names never enter its bundle —
+ * test/unit/ledger-build-adapter.test.ts greps for them). */
+const AUTOMATION_ENABLED = import.meta.env.VITE_AUTOMATION === '1';
 
 type Handler = (payload: unknown) => Promise<unknown>;
 
@@ -128,14 +137,25 @@ const handlers: Record<string, Handler> = {
     return { ok: true };
   },
 
-  'bot.settingsGet': () => handleBotSettingsGet(),
-  'bot.settingsSet': (payload) => handleBotSettingsSet(payload as never),
-  'bot.usageGet': () => handleBotUsageGet(),
-  'bot.usageSet': (payload) => handleBotUsageSet(payload as never),
-  'cards.names': (payload) => handleCardNames((payload as { resourceIds: number[] }).resourceIds),
-  'catalog.get': () => handleCatalogGet(),
-  'catalog.save': (payload) => handleCatalogSave(payload as never),
 };
+
+// The Sniping Bot page's handlers (@sl/shared `AUTOMATION_BACKGROUND_MESSAGE_TYPES`).
+if (AUTOMATION_ENABLED) {
+  Object.assign(handlers, {
+    'bot.settingsGet': () => handleBotSettingsGet(),
+    'bot.settingsSet': (payload) => handleBotSettingsSet(payload as never),
+    'bot.usageGet': () => handleBotUsageGet(),
+    'bot.usageSet': (payload) => handleBotUsageSet(payload as never),
+    'bot.budgetGet': () => handleBotBudgetGet(),
+    'bot.budgetSet': (payload) => handleBotBudgetSet(payload as never),
+    'cards.names': (payload) => handleCardNames((payload as { resourceIds: number[] }).resourceIds),
+    'catalog.get': () => handleCatalogGet(),
+    'catalog.save': (payload) => handleCatalogSave(payload as never),
+  } satisfies Record<string, Handler>);
+}
+
+/** The envelope accepts exactly the registered handlers' types. */
+const envelopeSchema = backgroundMessageEnvelopeSchemaFor(Object.keys(handlers));
 
 // Per-type payload validation (docs/09-security.md "Extension"): every
 // handler that takes a payload now has a dedicated `@sl/shared` zod schema
@@ -166,11 +186,16 @@ const payloadSchemas: Partial<Record<string, { safeParse: (v: unknown) => { succ
   'telemetry.enqueue': extBackgroundTelemetryEnqueuePayloadSchema,
   'governor.snapshotPush': extBackgroundGovernorSnapshotPushPayloadSchema,
   'engine.stateSet': extBackgroundEngineStateSetPayloadSchema,
-  'bot.settingsSet': extBackgroundBotSettingsSetPayloadSchema,
-  'bot.usageSet': extBackgroundBotUsageSetPayloadSchema,
-  'cards.names': extBackgroundCardNamesPayloadSchema,
-  'catalog.save': extBackgroundCatalogSavePayloadSchema,
 };
+if (AUTOMATION_ENABLED) {
+  Object.assign(payloadSchemas, {
+    'bot.settingsSet': extBackgroundBotSettingsSetPayloadSchema,
+    'bot.usageSet': extBackgroundBotUsageSetPayloadSchema,
+    'bot.budgetSet': extBackgroundBotBudgetSetPayloadSchema,
+    'cards.names': extBackgroundCardNamesPayloadSchema,
+    'catalog.save': extBackgroundCatalogSavePayloadSchema,
+  });
+}
 
 // webextension-polyfill's promise-based `onMessage` API: a listener that
 // returns a `Promise<unknown>` (rather than the raw MV3 callback +
@@ -186,9 +211,10 @@ browser.runtime.onMessage.addListener((message: unknown, sender: Runtime.Message
   // is defense in depth against that assumption ever quietly changing.
   if (sender.id !== browser.runtime.id) return undefined;
 
-  const parsed = backgroundMessageEnvelopeSchema.safeParse(message);
+  const parsed = envelopeSchema.safeParse(message);
   if (!parsed.success) return undefined;
   const envelope = parsed.data;
+  if (!Object.hasOwn(handlers, envelope.type)) return undefined;
   const handler = handlers[envelope.type];
   if (!handler) return undefined;
   const type = envelope.type;

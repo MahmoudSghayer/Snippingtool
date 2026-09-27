@@ -53,9 +53,16 @@ export const CACHE_CLOCK_SKEW_MS = 5 * 60 * 1000;
 
 const EXTENSION_VERSION = import.meta.env.VITE_EXTENSION_VERSION;
 // The userscript carries the same M1–M3 surface as `ledger-auto` and reports
-// itself as such, so it works against an API deployed before `userscript`
-// joined `bootstrapRequestSchema`'s enum. The server only validates this
-// field. Send `userscript` once every deployed API accepts it.
+// itself as such, on purpose, for now:
+//   - it works against an API deployed before `userscript` joined
+//     `bootstrapRequestSchema`'s enum;
+//   - the API has no userscript target to act on: it only validates this
+//     field, and its kill switch and entitlements are per user, not per
+//     build target, so there is nothing a `userscript` value would switch
+//     off separately today (release-2 security review, finding 9 — accepted
+//     as is).
+// When the API gains per-target controls, send `userscript` here so the
+// userscript can be singled out.
 const BUILD_TARGET = import.meta.env.VITE_BUILD_TARGET === 'userscript' ? 'ledger-auto' : import.meta.env.VITE_BUILD_TARGET;
 const PUBLIC_KEY_MATERIAL = import.meta.env.VITE_LICENSE_PUBLIC_KEY;
 

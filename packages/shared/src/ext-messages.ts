@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { ADAPTER_CHANNEL } from './adapter-channel.js';
+import { ADAPTER_CHANNEL, isEaAssetUrl } from './adapter-channel.js';
 import { activityEventSchema } from './schemas/activity.js';
 import { emailSchema, passwordSchema } from './schemas/auth.js';
 import { botDailyUsageSchema, botSettingsSchema } from './schemas/bot.js';
@@ -8,6 +8,8 @@ import { filterCriteriaSchema, filterStatsSchema, savedFilterSchema } from './sc
 import { riskBudgetEventSchema } from './schemas/risk.js';
 import { snipingAttemptSchema } from './schemas/sniping.js';
 import { tradeIngestSchema } from './schemas/trades.js';
+
+import type { AutomationBackgroundMessageType } from './automation-messages.js';
 
 /**
  * Typed message shapes for the extension's two internal channels. These are
@@ -22,7 +24,7 @@ import { tradeIngestSchema } from './schemas/trades.js';
 // and the `act` surface (search/buy/readResult) alongside passive observation.
 // Re-exported from `./adapter-channel.js` (zod-free — see that file) so
 // every existing `import { ADAPTER_CHANNEL } from '@sl/shared'` keeps working.
-export { ADAPTER_CHANNEL };
+export { ADAPTER_CHANNEL, EA_ASSET_DOMAINS, isEaAssetUrl } from './adapter-channel.js';
 
 export const trimmedAuctionSchema = z.object({
   tradeId: z.string(),
@@ -107,12 +109,20 @@ export const adapterListingsBuyableMessageSchema = z.object({
   data: z.object({ tradeIds: z.array(z.string().min(1).max(40)).max(500) }),
 });
 
+/** An image URL in the catalog: https on an EA host only
+ * (`isEaAssetUrl`). The catalog is built in the page's MAIN world from
+ * page globals, so anything else is refused, never shown. */
+const eaAssetUrlSchema = z
+  .string()
+  .max(600)
+  .refine(isEaAssetUrl, { message: 'must be an https URL on an EA host' });
+
 const catalogOptionSchema = z
   .object({
     id: z.number().int(),
     value: z.string().max(40),
     label: z.string().min(1).max(120),
-    img: z.string().max(600).optional(),
+    img: eaAssetUrlSchema.optional(),
     levels: z.boolean().optional(),
   })
   .strict();
@@ -135,7 +145,7 @@ export const adapterCatalogSchema = z
           .strict(),
       )
       .max(100_000),
-    portrait: z.string().max(600).optional(),
+    portrait: eaAssetUrlSchema.optional(),
     levels: z.array(catalogOptionSchema).max(20),
     rarities: z.array(catalogOptionSchema).max(1_000),
     positions: z.array(catalogOptionSchema).max(50),
@@ -261,6 +271,15 @@ export const adapterActRequestMessageSchema = z.object({
        * (0) never matches. `main/adapter.ts`'s zod-free `asActRequest`
        * re-checks this shape by hand — keep the two in sync. */
       price: z.number().int().positive(),
+      /** The card content means to buy. When present the adapter also
+       * refuses (`resource_mismatch`) unless the listing it saw for
+       * `tradeId` is this card — the `auctions` messages content matched
+       * the filter against are unsigned, so they could claim any tradeId
+       * is the target card. */
+      resourceId: z.number().int().positive().optional(),
+      /** Likewise the card's base player id (a filter can target a player
+       * by it): when present it must match the listing's too. */
+      assetId: z.number().int().positive().optional(),
     }),
     z.object({
       action: z.literal('readResult'),
@@ -379,36 +398,41 @@ export const backgroundMessageTypeSchema = z.enum([
   /** Exports `lib/logger.ts`'s ring buffer for the options page's "Export
    * logs" button — local only, no network call. */
   'logs.export',
-  /** The Sniping Bot page's settings (`BotSettings`, `storage.local`). Local
-   * only: nothing about how a user paces their bot goes to the server. */
-  'bot.settingsGet',
-  'bot.settingsSet',
-  /** The bot's active time today, for its hours-per-day limit
-   * (`BotDailyUsage`, `storage.local`). Local only. */
-  'bot.usageGet',
-  'bot.usageSet',
-  /** Player names for resource ids, for the bot log and search results.
-   * Background resolves them from `/api/v1/market/cards/:id` and caches
-   * them in `storage.local`. */
-  'cards.names',
-  /** EA's own player list and club/league/nation names, captured from the
-   * web app's search data (`apps/extension` `model/catalog.ts`) and kept in
-   * `storage.local` for the Snipe Targets form. */
-  'catalog.get',
-  'catalog.save',
 ]);
-export type BackgroundMessageType = z.infer<typeof backgroundMessageTypeSchema>;
+/** Every message type background handles in every build: the core types
+ * above plus the automation builds' own (`AUTOMATION_BACKGROUND_MESSAGE_TYPES`,
+ * kept in their own module so the listable build never carries them). */
+export type BackgroundMessageType =
+  z.infer<typeof backgroundMessageTypeSchema> | AutomationBackgroundMessageType;
 
 /** Generic envelope every `chrome.runtime.sendMessage` call uses; `payload`
  * is typed per `BackgroundMessageType` by the sender/handler, not by this
  * shared shape, since the content/background split (unlike the adapter
  * channel) is internal to the extension and does not need a discriminated
- * union validated at the boundary. */
+ * union validated at the boundary. This one accepts the core types only;
+ * background builds its own from its handler table
+ * (`backgroundMessageEnvelopeSchemaFor`), so the automation types are
+ * accepted exactly where their handlers are registered. */
 export const backgroundMessageEnvelopeSchema = z.object({
   type: backgroundMessageTypeSchema,
   payload: z.unknown().optional(),
 });
 export type BackgroundMessageEnvelope = z.infer<typeof backgroundMessageEnvelopeSchema>;
+
+/** The envelope for exactly `types`: apps/extension `background/index.ts`
+ * passes its handler table's keys, so the envelope can never drift from
+ * what is registered (and a `__proto__`-style key is never a type). */
+export function backgroundMessageEnvelopeSchemaFor(types: readonly string[]) {
+  const allowed = new Set(types);
+  return z.object({
+    type: z
+      .string()
+      .min(1)
+      .max(64)
+      .refine((t) => allowed.has(t), { message: 'unknown message type' }),
+    payload: z.unknown().optional(),
+  });
+}
 
 export const backgroundResponseSchema = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(true), data: z.unknown() }),
@@ -652,3 +676,17 @@ export const extBackgroundEngineStateSetPayloadSchema = z
   })
   .strict();
 export type ExtEngineStateSetPayload = z.infer<typeof extBackgroundEngineStateSetPayloadSchema>;
+
+/** `bot.budgetSet` (automation builds): the Sniping Bot's hourly budgets —
+ * its own governor's state (`Governor.serialize()`) and its sliding
+ * one-hour search and buy windows (apps/extension `engine/sniper.ts`).
+ * Kept in `storage.local` and hydrated on every start, so Stop/Start and a
+ * page reload never refill them. Bounded by `BOT_LIMITS`' hourly maxima. */
+export const extBackgroundBotBudgetSetPayloadSchema = z
+  .object({
+    governor: extBackgroundEngineStateSetPayloadSchema,
+    searchTimes: z.array(z.number().min(0)).max(10_000),
+    buyTimes: z.array(z.number().min(0)).max(10_000),
+  })
+  .strict();
+export type BotBudgetState = z.infer<typeof extBackgroundBotBudgetSetPayloadSchema>;

@@ -50,6 +50,9 @@ export const ACT_ERROR = {
    * returned (main/shape-observable.ts), and the adapter's own act search
    * never returned this tradeId — it was only seen passively. */
   listingEntityUnknown: 'listing_entity_unknown',
+  /** The listing the adapter saw for this tradeId is a different card from
+   * the one content asked to buy (its `resourceId`). */
+  resourceMismatch: 'resource_mismatch',
   /** No nonce was handed off, so no act request can be authenticated. */
   unauthenticated: 'adapter_unauthenticated',
   /** Not a refusal: the buy reached EA, and EA had not answered when the
@@ -64,6 +67,7 @@ export const ACT_ERROR = {
  * retry). `timeout_unknown` is deliberately not one of them. */
 const REFUSALS: ReadonlySet<string> = new Set([
   ACT_ERROR.priceMismatch,
+  ACT_ERROR.resourceMismatch,
   ACT_ERROR.listingUnknown,
   ACT_ERROR.listingEntityUnknown,
   ACT_ERROR.unauthenticated,
@@ -204,10 +208,35 @@ export function handOffNonce(doc: Document = document, isolatedGlobal: object = 
  */
 let bundleNonceHolder: object | null = null;
 
+/**
+ * Whether it is still safe to put the nonce on <html>: the document is
+ * still being parsed and holds no <script> element yet, so no page script
+ * can have run. The extension's handoff.js is guaranteed that by running at
+ * `document_start`; a userscript is not (Tampermonkey can inject late — a
+ * slow browser start, a script enabled on an open tab, "instant" injection
+ * off). A page script that ran first could watch <html> with a
+ * MutationObserver (`attributeOldValue` shows the nonce as it is removed)
+ * or hook `crypto.subtle.importKey`, and with the nonce forge results and
+ * catalogs.
+ */
+export function isSafeToHandOff(doc: Document = document): boolean {
+  if (doc.readyState !== 'loading') return false;
+  // Some script managers (Tampermonkey MV2 and on Firefox, Violentmonkey's
+  // page mode) run the userscript from an inline <script> they add, which is
+  // still in the DOM while it runs: that one is ours, not a page script.
+  const own = doc.currentScript;
+  for (const script of Array.from(doc.getElementsByTagName('script'))) if (script !== own) return false;
+  return true;
+}
+
 /** Userscript only: `handOffNonce` with content's copy kept in this
- * module's closure (see above). Call before injecting the adapter. */
-export function handOffNonceWithinBundle(doc: Document = document): string {
+ * module's closure (see above). Call before injecting the adapter. Fails
+ * closed: when `isSafeToHandOff` says a page script may already have run,
+ * nothing is handed off and it returns null, so the act channel stays
+ * locked for this page load (content tells the user to reload). */
+export function handOffNonceWithinBundle(doc: Document = document): string | null {
   bundleNonceHolder = {};
+  if (!isSafeToHandOff(doc)) return null;
   return handOffNonce(doc, bundleNonceHolder);
 }
 
@@ -230,7 +259,11 @@ export function readHandedOffNonce(isolatedGlobal: object = bundleNonceHolder ??
  * script can run before that happens (the parser runs a microtask
  * checkpoint before executing each script), so a value that shows up after
  * it could have come from a page script and is never taken. */
-export function takeHandedOffNonce(doc: Document, onNonce: (nonce: string) => void): void {
+export function takeHandedOffNonce(
+  doc: Document,
+  onNonce: (nonce: string) => void,
+  opts: { lateFallback?: boolean } = {},
+): void {
   const root = doc.documentElement;
   if (!root) return;
 
@@ -243,6 +276,11 @@ export function takeHandedOffNonce(doc: Document, onNonce: (nonce: string) => vo
   };
 
   if (take()) return;
+  // The userscript sets the attribute and injects the adapter synchronously,
+  // so the attribute is either there now or never: it passes
+  // `lateFallback: false`, and a value that appears later (which could only
+  // be a page script's) is never taken.
+  if (opts.lateFallback === false) return;
   if (typeof MutationObserver !== 'function') return;
   const observer = new MutationObserver((records) => {
     if (take() || records.some((r) => r.type === 'childList')) observer.disconnect();

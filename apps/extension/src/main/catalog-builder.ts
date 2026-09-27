@@ -18,7 +18,25 @@
  *      uses) when that list builds cleanly. Each list on its own: one that
  *      fails keeps its layer-1 version.
  * Problems are kept in `notes` and shown on the page, not swallowed.
+ *
+ * Its inputs are pinned, because this runs in the MAIN world page scripts
+ * share (the signed `catalog` message stops a page script forging the
+ * message, not feeding the builder):
+ *   - the `fut_*` globals it reads are captured when the page first sets
+ *     them (`capturePageGlobals`, installed at document_start with the
+ *     adapter), so a page script that rewrites `fut_resourceRoot` later
+ *     cannot repoint the data files;
+ *   - it fetches only https URLs on EA hosts (`isEaAssetUrl`: ea.com,
+ *     ea2.com, easports.com), whatever a global or an EA helper returns;
+ *   - it keeps only images on those hosts, and content validates the whole
+ *     catalog against the strict `adapterCatalogSchema` (which applies the
+ *     same host rule) before anything reads it.
+ * What it cannot pin: a page script that hooks EA's own list functions
+ * (`factories.DataProvider`) can still skew names in the lists; every
+ * filter it produces is still just a search the user reviews.
  */
+import { isEaAssetUrl } from '@sl/shared/adapter-channel.js';
+
 import { buildStaticLists } from '../model/catalog-static.js';
 import { POSITION_ZONES, parsePlayersFile, type Catalog, type CatalogOption } from '../model/catalog.js';
 
@@ -49,20 +67,88 @@ interface EaCatalogGlobals {
 const ea = window as unknown as EaCatalogGlobals;
 
 interface PageGlobals {
-  fut_resourceRoot?: string;
-  fut_resourceBase?: string;
-  fut_guid?: string;
-  fut_year?: string;
   factories?: { DataProvider?: Record<string, (...a: unknown[]) => EaDataEntry[]> };
 }
+
+/** The page globals the data files are found with. */
+export const FUT_GLOBALS = ['fut_resourceRoot', 'fut_resourceBase', 'fut_guid', 'fut_year'] as const;
+export type FutGlobals = Partial<Record<(typeof FUT_GLOBALS)[number], string>>;
+
+/**
+ * Pins the `fut_*` globals at the first string value the page gives each
+ * (EA's own bootstrap sets them; the adapter installs this at
+ * document_start, before any page script). Returns the captured values,
+ * filled in as the page sets them; later writes still reach the page's own
+ * view of the global, but never this one. A global already set when this
+ * runs is captured as it is.
+ */
+export function capturePageGlobals(win: object = window): FutGlobals {
+  const captured: FutGlobals = {};
+  for (const name of FUT_GLOBALS) {
+    const desc = Object.getOwnPropertyDescriptor(win, name);
+    if (desc && 'value' in desc) {
+      if (typeof desc.value === 'string') captured[name] = desc.value;
+      continue;
+    }
+    if (desc && !desc.configurable) continue;
+    let current: unknown = undefined;
+    try {
+      Object.defineProperty(win, name, {
+        configurable: true,
+        enumerable: true,
+        get: () => current,
+        set: (value: unknown) => {
+          current = value;
+          if (captured[name] === undefined && typeof value === 'string') captured[name] = value;
+        },
+      });
+    } catch {
+      /* the page made it unconfigurable first: leave it uncaptured */
+    }
+  }
+  return captured;
+}
+
+/** The page's own URL, captured at load: relative URLs from EA's helpers
+ * resolve against it, not `document.baseURI` (a page script can add a
+ * <base>). */
+const PAGE_URL = window.location.href;
 
 function absolute(url: string | undefined | null): string | undefined {
   if (!url) return undefined;
   try {
-    return new URL(url, document.baseURI).toString();
+    return new URL(url, PAGE_URL).toString();
   } catch {
     return undefined;
   }
+}
+
+/** `url` made absolute, if it is an https URL on an EA host; else undefined. */
+function eaUrl(url: string | undefined | null): string | undefined {
+  const abs = absolute(url);
+  return abs && isEaAssetUrl(abs) ? abs : undefined;
+}
+
+/** Only fetches https URLs on EA hosts (`isEaAssetUrl`); anything else is
+ * refused before a request is made. */
+function pinnedGetJson(getJson: GetJson): GetJson {
+  return (url) => {
+    const target = eaUrl(url);
+    if (!target) return Promise.reject(new Error('refused: not an https URL on an EA host'));
+    return getJson(target);
+  };
+}
+
+/** Drops every image (and the portrait template) that is not on an EA host,
+ * so one bad URL loses its image, not the whole catalog (which content's
+ * strict schema would refuse). */
+function keepEaImages(c: Catalog): void {
+  const clean = (options: CatalogOption[]) => {
+    for (const o of options) if (o.img !== undefined && !isEaAssetUrl(o.img)) delete o.img;
+  };
+  for (const list of [c.levels, c.rarities, c.positions, c.playStyles, c.nations, c.leagues]) clean(list);
+  for (const clubs of Object.values(c.clubs)) clean(clubs);
+  if (c.portrait !== undefined && !isEaAssetUrl(c.portrait)) delete c.portrait;
 }
 
 /** The locale file the web app itself loaded, else en-US. */
@@ -78,8 +164,7 @@ function webAppLocale(): string {
   return 'en-US';
 }
 
-async function buildStaticCatalog(getJson: GetJson): Promise<Catalog | null> {
-  const g = window as unknown as PageGlobals;
+async function buildStaticCatalog(getJson: GetJson, g: FutGlobals): Promise<Catalog | null> {
   if (!g.fut_resourceRoot || !g.fut_resourceBase || !g.fut_guid || !g.fut_year) return null;
   const base = `${g.fut_resourceRoot}${g.fut_resourceBase}`;
   const root = `${base}${g.fut_guid}/${g.fut_year}/fut/`;
@@ -151,7 +236,7 @@ function applyLiveLists(c: Catalog): boolean {
   const notes = c.notes ?? (c.notes = []);
   const image = (filter: string | undefined, value: unknown): string | undefined => {
     try {
-      return filter ? absolute(A.getFilterImage(filter, value)) : undefined;
+      return filter ? eaUrl(A.getFilterImage(filter, value)) : undefined;
     } catch {
       return undefined;
     }
@@ -222,7 +307,7 @@ function applyLiveLists(c: Catalog): boolean {
     }
   }
   try {
-    const p = absolute(A.getPortraitImageUri(987654321));
+    const p = eaUrl(A.getPortraitImageUri(987654321));
     if (p) c.portrait = p.replace('987654321', '{id}');
   } catch {
     /* keep the static template */
@@ -242,18 +327,25 @@ export interface CatalogBuilder {
   refresh(): Promise<{ catalog: Catalog | null; complete: boolean }>;
 }
 
-export function createCatalogBuilder(getJson: GetJson): CatalogBuilder {
+/** `globals` defaults to capturing them now: call this at document_start
+ * (main/adapter.ts does, at load). */
+export function createCatalogBuilder(
+  fetchJson: GetJson,
+  globals: FutGlobals = capturePageGlobals(),
+): CatalogBuilder {
+  const getJson = pinnedGetJson(fetchJson);
   let catalog: Catalog | null = null;
   let liveApplied = false;
   let building: Promise<{ catalog: Catalog | null; complete: boolean }> | null = null;
 
   async function build(): Promise<{ catalog: Catalog | null; complete: boolean }> {
     try {
-      if (!catalog) catalog = (await buildStaticCatalog(getJson)) ?? (await emptyLiveCatalog(getJson));
+      if (!catalog) catalog = (await buildStaticCatalog(getJson, globals)) ?? (await emptyLiveCatalog(getJson));
       if (catalog && !liveApplied) liveApplied = applyLiveLists(catalog);
     } catch (err) {
       if (catalog) (catalog.notes ??= []).push(String(err));
     }
+    if (catalog) keepEaImages(catalog);
     if (catalog?.notes) {
       catalog.notes = catalog.notes.slice(-MAX_NOTES).map((n) => n.slice(0, MAX_NOTE_LENGTH));
     }

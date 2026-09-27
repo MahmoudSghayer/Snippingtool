@@ -32,6 +32,7 @@ import { setBotPageOpener } from '../ui/bot-opener.js';
 import { createBotPage } from '../ui/bot-page.js';
 import { installNavItem } from '../ui/ea-nav.js';
 import { createPanel, type Panel } from '../ui/panel.js';
+import { onTrusted } from '../ui/trusted-events.js';
 
 import { createAdapterClient, pageWindow } from './adapter-client.js';
 import { createDiagnosticsResponder } from './diagnostics.js';
@@ -44,6 +45,7 @@ import type { Catalog } from '../model/catalog.js';
 import type { PriceSummary } from '../model/prices.js';
 import type {
   ActivityEvent,
+  BotBudgetState,
   BotDailyUsage,
   BotSettings,
   BackgroundResponse,
@@ -66,6 +68,10 @@ const RISK_UI_TICK_MS = 3000;
 const AUTOBUYER_TICK_MS = 8000;
 const WATCHDOG_MS = 15000;
 const WATCHDOG_STALE_MS = 60000;
+/** How often a running Sniping Bot re-reads the entitlement (background's
+ * cached `license.bootstrap`, refreshed by its heartbeat), so a plan that
+ * loses the bot stops it mid-session. */
+const ENTITLEMENT_CHECK_MS = 30000;
 
 // ---- background messaging ---------------------------------------------------
 
@@ -146,6 +152,9 @@ async function main(): Promise<void> {
   // an `engine.killSwitch` push arriving before the M2 bootstrap finishes
   // is not lost (it is re-applied to the governor once one exists).
   let killSwitchActive = false;
+  // The Sniping Bot (automation builds; see "M3: the Sniping Bot page"
+  // below). Declared here so the kill switch above can stop it.
+  let sniper: Sniper | null = null;
 
   async function flushRecordQueue(): Promise<void> {
     flushTimer = null;
@@ -273,6 +282,9 @@ async function main(): Promise<void> {
     const changed = active !== killSwitchActive;
     killSwitchActive = active;
     governor?.setKillSwitch(active, active ? (reason ?? 'server kill switch active') : undefined);
+    // The Sniping Bot runs its own governor: stop it now rather than at its
+    // next action (it re-reads the switch before every one anyway).
+    if (active && sniper?.isRunning()) sniper.stop('kill_switch', reason ?? 'server kill switch active');
     if (changed) {
       if (active) logger.warn(`kill switch active — ${reason ?? 'server kill switch active'}`, 'kill-switch');
       else logger.info('kill switch cleared by the server', 'kill-switch');
@@ -410,7 +422,9 @@ async function main(): Promise<void> {
       onTrade: recordTrade,
     });
 
-    document.addEventListener('keydown', (e) => {
+    // Trusted key presses only: the confirm key buys, and a page script can
+    // dispatch a synthetic keydown on `document` (ui/trusted-events.ts).
+    onTrusted(document, 'keydown', (e) => {
       const target = e.target as HTMLElement | null;
       const typing = target && /^(input|textarea|select)$/i.test(target.tagName);
       if (typing || !assist) return;
@@ -438,7 +452,6 @@ async function main(): Promise<void> {
   // Automation builds only (the listable build never loads `engine/sniper.ts`
   // — see `engine/autobuyer-loader.*.ts`). The bot runs its own governor from
   // the page's Safety limits; the server kill switch still stops it.
-  let sniper: Sniper | null = null;
   if (AUTOMATION_ENABLED) {
     let botSettings: BotSettings | null = await send<BotSettings>('bot.settingsGet');
     let unavailableReason: string | null = null;
@@ -446,7 +459,19 @@ async function main(): Promise<void> {
     // Called at load and whenever the page opens: a user who signs in from
     // the SL drawer after the page loaded gets the bot without a reload.
     const prepareSniper = async (fresh: boolean): Promise<void> => {
-      if (sniper) return;
+      if (sniper) {
+        // A plan lost mid-session (the check below) empties `features`, and
+        // the bot then refuses to start. Opening the page re-checks, so a
+        // user who signs back in or renews gets the bot without a reload.
+        if (fresh && !features.includes('automation.autobuyer')) {
+          const boot = await send<BootstrapResponse>('license.bootstrap');
+          if (boot) {
+            features = boot.features;
+            killSwitchActive = killSwitchActive || boot.killSwitchActive;
+          }
+        }
+        return;
+      }
       let signedIn = !!authStatus?.authenticated;
       let allowed = features.includes('automation.autobuyer');
       if (fresh) {
@@ -454,12 +479,17 @@ async function main(): Promise<void> {
         const boot = signedIn ? await send<BootstrapResponse>('license.bootstrap') : null;
         allowed = !!boot?.features.includes('automation.autobuyer');
         if (boot) {
+          features = boot.features;
           killSwitchActive = killSwitchActive || boot.killSwitchActive;
           deviceIdCache = deviceIdCache ?? boot.deviceId;
         }
       }
       botSettings = botSettings ?? (await send<BotSettings>('bot.settingsGet'));
-      if (!signedIn) unavailableReason = 'Sign in (NT button) to use the Sniping Bot.';
+      // No act-channel nonce: the adapter cannot authenticate a single
+      // search or buy. In the userscript that means page scripts had already
+      // run when it installed (userscript/setup.ts refuses the handoff then).
+      if (!actNonce) unavailableReason = NO_ACT_CHANNEL_REASON;
+      else if (!signedIn) unavailableReason = 'Sign in (NT button) to use the Sniping Bot.';
       else if (!allowed) unavailableReason = 'Your plan does not include the Sniping Bot.';
       else if (!botSettings) unavailableReason = 'The extension could not load the bot settings. Reload the page.';
       else unavailableReason = null;
@@ -482,6 +512,10 @@ async function main(): Promise<void> {
           // The hours-per-day limit survives a page reload.
           loadUsage: () => send<BotDailyUsage | null>('bot.usageGet'),
           saveUsage: (usage) => void send('bot.usageSet', usage),
+          // The hourly budgets survive Stop/Start and a page reload too.
+          loadBudget: () => send<BotBudgetState | null>('bot.budgetGet'),
+          saveBudget: (budget) => void send('bot.budgetSet', budget),
+          entitled: () => features.includes('automation.autobuyer'),
           killSwitch: () => ({ active: killSwitchActive || !!governor?.isKillSwitchActive() }),
           onChange: () => botPage.refresh(),
           onAttempt: recordAttempt,
@@ -491,6 +525,32 @@ async function main(): Promise<void> {
       );
     };
     await prepareSniper(false);
+
+    // A plan that loses the bot mid-session (the heartbeat refreshes
+    // background's cached entitlement) stops it with a reason, not at the
+    // next page load. The kill switch has its own push and pull above.
+    let entitlementMisses = 0;
+    setInterval(() => {
+      const autobuyerRunning = !!autobuyer && !autobuyer.isStopped();
+      if (!sniper?.isRunning() && !autobuyerRunning) return;
+      void send<BootstrapResponse>('license.bootstrap').then((boot) => {
+        if (boot) {
+          entitlementMisses = 0;
+          features = boot.features;
+          if (boot.killSwitchActive) applyKillSwitch(true, 'server kill switch active');
+        } else if (++entitlementMisses >= 2) {
+          // No entitlement at all (signed out, or background has none to
+          // give): fail closed.
+          features = [];
+        }
+        if (features.includes('automation.autobuyer')) return;
+        sniper?.stop('not_entitled');
+        if (autobuyer && !autobuyer.isStopped()) {
+          autobuyer.stop('not_entitled', 'your plan no longer includes automation');
+          reportAutobuyerStop('not_entitled', 'your plan no longer includes automation');
+        }
+      });
+    }, ENTITLEMENT_CHECK_MS);
 
     const botPage = createBotPage({
       getSniper: () => sniper,
@@ -659,6 +719,10 @@ async function main(): Promise<void> {
     };
   }
 }
+
+/** Shown on the Sniping Bot page when no act-channel nonce was handed off. */
+const NO_ACT_CHANNEL_REASON =
+  "Nova Trade could not open a secure connection to EA's web app on this page load, so the Sniping Bot is locked. Reload the page to use it.";
 
 function start(): void {
   void main().catch((err) => {

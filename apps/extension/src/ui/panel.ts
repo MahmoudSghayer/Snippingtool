@@ -12,6 +12,8 @@
  */
 import tokensCss from '../styles/tokens.css?raw';
 
+import { onTrusted } from './trusted-events.js';
+
 import type { SessionPnl } from '../engine/assist.js';
 import type { RiskSnapshot } from '../engine/governor.js';
 import type { ScoredOpportunity } from '../engine/ranker.js';
@@ -143,7 +145,9 @@ const BOT_LAUNCHER_HTML =
 export function createPanel(doc: Document = document): Panel {
   const host = doc.createElement('div');
   host.id = 'ledger-root';
-  const root = host.attachShadow({ mode: 'open' });
+  // Closed, and every handler below ignores script-made events
+  // (`onTrusted`): page scripts can neither read nor drive the panel.
+  const root = host.attachShadow({ mode: 'closed' });
 
   const style = doc.createElement('style');
   style.textContent = css;
@@ -206,7 +210,11 @@ export function createPanel(doc: Document = document): Panel {
 
   const $ = <T extends Element = Element>(id: string): T => root.getElementById(id) as unknown as T;
 
-  panel.querySelector('.head')?.addEventListener('click', () => {
+  let botLauncher: (() => void) | null = null;
+  let botLauncherWired = false;
+
+  const head = panel.querySelector('.head');
+  if (head) onTrusted(head, 'click', () => {
     panel.classList.toggle('collapsed');
     $('chev').textContent = panel.classList.contains('collapsed') ? '▸' : '▾';
   });
@@ -338,7 +346,11 @@ export function createPanel(doc: Document = document): Panel {
       const btn = root.getElementById('bot-open') as HTMLButtonElement | null;
       if (!btn) return;
       btn.hidden = open == null;
-      btn.onclick = open;
+      botLauncher = open;
+      if (!botLauncherWired) {
+        botLauncherWired = true;
+        onTrusted(btn, 'click', () => botLauncher?.());
+      }
     },
     destroy() {
       host.remove();

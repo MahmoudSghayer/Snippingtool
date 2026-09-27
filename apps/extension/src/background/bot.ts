@@ -13,8 +13,11 @@
  */
 import {
   DEFAULT_BOT_SETTINGS,
+  adapterCatalogSchema,
   botDailyUsageSchema,
+  extBackgroundBotBudgetSetPayloadSchema,
   botSettingsSchema,
+  type BotBudgetState,
   type BotDailyUsage,
   type BotSettings,
   type MarketCardHistoryResponse,
@@ -31,6 +34,7 @@ const SETTINGS_KEY = 'sl.bot.settings.v1';
 const NAMES_KEY = 'sl.cards.names.v1';
 const CATALOG_KEY = 'sl.catalog.v1';
 const USAGE_KEY = 'sl.bot.usage.v1';
+const BUDGET_KEY = 'sl.bot.budget.v1';
 const MISS_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_LOOKUPS_PER_CALL = 10;
 
@@ -66,8 +70,27 @@ export async function handleBotUsageSet(usage: BotDailyUsage): Promise<{ ok: tru
   return { ok: true };
 }
 
+/** The bot's hourly budgets (engine/sniper.ts): its governor's state and
+ * its search/buy windows. In `storage.local`, not `storage.session` like the
+ * main governor's crash-recovery state: the windows are one hour long and
+ * prune themselves, and a browser restart must not refill them either. A
+ * stored value that no longer parses reads as none. */
+export async function handleBotBudgetGet(): Promise<BotBudgetState | null> {
+  const parsed = extBackgroundBotBudgetSetPayloadSchema.safeParse(await getLocal<unknown>(BUDGET_KEY, null));
+  return parsed.success ? parsed.data : null;
+}
+
+export async function handleBotBudgetSet(budget: BotBudgetState): Promise<{ ok: true }> {
+  await setLocal(BUDGET_KEY, budget);
+  return { ok: true };
+}
+
+/** The saved catalog, re-validated on the way out against the same strict
+ * schema `catalog.save` and content applied on the way in (an older build's
+ * catalog, or an edited `storage.local`, reads as none). */
 export async function handleCatalogGet(): Promise<Catalog | null> {
-  return getLocal<Catalog | null>(CATALOG_KEY, null);
+  const parsed = adapterCatalogSchema.safeParse(await getLocal<unknown>(CATALOG_KEY, null));
+  return parsed.success ? (parsed.data as Catalog) : null;
 }
 
 /** The adapter sends the whole catalog at once, built from the web app's

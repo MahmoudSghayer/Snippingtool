@@ -173,7 +173,7 @@ describe('AssistEngine: what reaches EA, and what the governor charges', () => {
     });
     await engine.confirmBuy();
     expect(buy).toHaveBeenCalledTimes(1);
-    expect(buy).toHaveBeenCalledWith('buyable', 1000);
+    expect(buy).toHaveBeenCalledWith('buyable', 1000, { resourceId: 1 });
   });
 
   it.each(['price_mismatch', 'listing_unknown', 'listing_entity_unknown', 'adapter_unauthenticated'])(

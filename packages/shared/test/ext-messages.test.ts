@@ -411,3 +411,102 @@ describe('the Sniping Bot catalog on the adapter channel', () => {
     ).toBe(false);
   });
 });
+
+describe('catalog image URLs (only https on an EA host)', () => {
+  it('accepts EA hosts and refuses every other URL', async () => {
+    const { isEaAssetUrl } = await import('../src/adapter-channel.js');
+    for (const ok of [
+      'https://www.ea.com/ea-sports-fc/ultimate-team/web-app/content/x.png',
+      'https://ea.com/x.png',
+      'https://utas.mob.v4.prd.futc-ext.gcp.ea.com/x',
+      'https://media.contentapi.ea2.com/x.png',
+      'https://www.easports.com/x.png',
+      'https://www.ea.com/x/portraits/{id}.png',
+    ])
+      expect(isEaAssetUrl(ok)).toBe(true);
+    for (const bad of [
+      'http://www.ea.com/x.png',
+      'https://www.ea.com.evil.example/x.png',
+      'https://evilea.com/x.png',
+      'https://www.ea.com:8443/x.png',
+      'https://user:pw@www.ea.com/x.png',
+      'javascript:alert(1)',
+      'data:image/png;base64,AAAA',
+      '/relative/x.png',
+      '',
+      null,
+    ])
+      expect(isEaAssetUrl(bad)).toBe(false);
+  });
+
+  it('rejects a catalog with an image or portrait off EA', () => {
+    const base = {
+      players: [],
+      levels: [],
+      rarities: [],
+      positions: [],
+      playStyles: [],
+      nations: [],
+      leagues: [],
+      clubs: {},
+      capturedAt: 1,
+    };
+    const post = (c: unknown) =>
+      adapterCatalogMessageSchema.safeParse({
+        channel: 'ledger:v2',
+        kind: 'catalog',
+        data: { catalog: c },
+        mac: 'a'.repeat(64),
+      }).success;
+    expect(post({ ...base, portrait: 'https://www.ea.com/p/{id}.png' })).toBe(true);
+    expect(post({ ...base, portrait: 'https://tracker.example/p/{id}.png' })).toBe(false);
+    expect(
+      post({
+        ...base,
+        nations: [{ id: 1, value: '1', label: 'x', img: 'https://evil.example/1.png' }],
+      }),
+    ).toBe(false);
+  });
+});
+
+describe('automation message types', () => {
+  it('are not in the core envelope, and are accepted where background registers them', async () => {
+    const { AUTOMATION_BACKGROUND_MESSAGE_TYPES } = await import('../src/automation-messages.js');
+    const { backgroundMessageEnvelopeSchemaFor, backgroundMessageTypeSchema } =
+      await import('../src/ext-messages.js');
+    for (const t of AUTOMATION_BACKGROUND_MESSAGE_TYPES) {
+      expect(backgroundMessageTypeSchema.safeParse(t).success).toBe(false);
+      expect(backgroundMessageEnvelopeSchema.safeParse({ type: t }).success).toBe(false);
+    }
+    const envelope = backgroundMessageEnvelopeSchemaFor(['counts', 'bot.settingsSet']);
+    expect(envelope.safeParse({ type: 'bot.settingsSet', payload: {} }).success).toBe(true);
+    expect(envelope.safeParse({ type: 'counts' }).success).toBe(true);
+    expect(envelope.safeParse({ type: 'catalog.save' }).success).toBe(false);
+    expect(envelope.safeParse({ type: '__proto__' }).success).toBe(false);
+    expect(envelope.safeParse({ type: 'constructor' }).success).toBe(false);
+  });
+
+  it('bot.budgetSet carries a governor state and the hourly windows, nothing else', async () => {
+    const { extBackgroundBotBudgetSetPayloadSchema } = await import('../src/ext-messages.js');
+    const budget = {
+      governor: {
+        sessionStartedAt: 1,
+        actionTimestamps: [2, 3],
+        searchCount: 2,
+        buyCount: 0,
+        coinFlow: [],
+        cooldownUntil: 0,
+        killSwitchActive: false,
+      },
+      searchTimes: [2, 3],
+      buyTimes: [],
+    };
+    expect(extBackgroundBotBudgetSetPayloadSchema.safeParse(budget).success).toBe(true);
+    expect(extBackgroundBotBudgetSetPayloadSchema.safeParse({ ...budget, extra: 1 }).success).toBe(
+      false,
+    );
+    expect(
+      extBackgroundBotBudgetSetPayloadSchema.safeParse({ ...budget, searchTimes: [-1] }).success,
+    ).toBe(false);
+  });
+});

@@ -20,6 +20,7 @@
 import browser from 'webextension-polyfill';
 
 import { BackgroundError, send } from '../lib/bg-client.js';
+import { onTrusted } from '../ui/trusted-events.js';
 
 import type { RiskSnapshot } from '../engine/governor.js';
 import type { BootstrapResponse, LoginResponse, UserSettings } from '@sl/shared';
@@ -46,6 +47,18 @@ let allowAutofill = true;
  * page in the userscript build (`src/userscript/launcher.ts`). */
 function byId(id: string): HTMLElement | null {
   return app.querySelector<HTMLElement>(`#${CSS.escape(id)}`);
+}
+
+/** A user-action listener on `#id`, if it exists, that ignores script-made
+ * events (ui/trusted-events.ts): in the userscript this page shares EA's
+ * document with page scripts. */
+function onTrustedById<K extends keyof HTMLElementEventMap>(
+  id: string,
+  type: K,
+  handler: (event: HTMLElementEventMap[K]) => void,
+): void {
+  const el = byId(id);
+  if (el) onTrusted(el, type, handler);
 }
 
 function h(html: string): void {
@@ -107,11 +120,11 @@ async function renderLoggedOut(error?: string, email = ''): Promise<void> {
       <button class="link" id="register-link">Create an account</button>
     </p>
   `);
-  byId('login-form')?.addEventListener('submit', (e) => {
+  onTrustedById('login-form', 'submit', (e) => {
     e.preventDefault();
     void onLoginSubmit();
   });
-  byId('register-link')?.addEventListener('click', () => void openDashboardRegister());
+  onTrustedById('register-link', 'click', () => void openDashboardRegister());
   (byId(email ? 'password' : 'email') as HTMLInputElement | null)?.focus();
 }
 
@@ -180,7 +193,7 @@ function renderMfa(mfaTicket: string, error?: string, email = ''): void {
     </form>
   `);
   (byId('code') as HTMLInputElement | null)?.focus();
-  byId('mfa-form')?.addEventListener('submit', async (e) => {
+  onTrustedById('mfa-form', 'submit', async (e) => {
     e.preventDefault();
     const code = (byId('code') as HTMLInputElement).value.trim();
     if (!code) return renderMfa(mfaTicket, 'Enter the 6-digit code.', email);
@@ -263,12 +276,12 @@ async function renderLoggedIn(): Promise<void> {
     <button class="secondary" id="logout" style="margin-top:8px;">Sign out</button>
   `);
 
-  byId('telemetry-toggle')?.addEventListener('click', async () => {
+  onTrustedById('telemetry-toggle', 'click', async () => {
     await send('settings.set', { telemetryOptOut: !optedOut });
     await renderLoggedIn();
   });
-  byId('options-link')?.addEventListener('click', () => browser.runtime.openOptionsPage());
-  byId('logout')?.addEventListener('click', async () => {
+  onTrustedById('options-link', 'click', () => browser.runtime.openOptionsPage());
+  onTrustedById('logout', 'click', async () => {
     await send('auth.logout', { allDevices: false });
     await renderLoggedOut();
   });

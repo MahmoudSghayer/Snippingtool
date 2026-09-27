@@ -57,7 +57,10 @@ export interface ProbeStatus {
 export interface AdapterClient {
   readonly probeStatus: ProbeStatus | null;
   search(filter: FilterCriteria): Promise<ActionOutcome>;
-  buy(tradeId: string, price: number): Promise<ActionOutcome>;
+  /** `card`, when given, binds the buy to that card: the adapter refuses
+   * (`resource_mismatch`) unless the listing it saw for `tradeId` has the
+   * same resourceId (and assetId, when given). */
+  buy(tradeId: string, price: number, card?: { resourceId: number; assetId?: number }): Promise<ActionOutcome>;
   readResult(tradeId: string): Promise<ActionOutcome>;
   /** The adapter's read-only diagnostics report, over the same
    * authenticated channel as every act call (docs/06-extension.md §4). */
@@ -282,8 +285,19 @@ export function createAdapterClient(target: Window, nonce: string | null, option
     search: (filter) => call({ action: 'search', filter }),
     // A listing with no buy-now price (0) can never match; the adapter would
     // drop the request anyway, so refuse here rather than time out.
-    buy: (tradeId, price) =>
-      price > 0 ? call({ action: 'buy', tradeId, price }) : Promise.resolve({ ok: false, error: ACT_ERROR.priceMismatch, latencyMs: 0 }),
+    buy: (tradeId, price, card) =>
+      price > 0
+        ? call({
+            action: 'buy',
+            tradeId,
+            price,
+            // Only real ids: EA listings can lack one (ea-listing.ts reads it
+            // as 0), and the adapter drops a request with a non-positive id
+            // unanswered, which would surface as a timeout, not a refusal.
+            ...(card && card.resourceId > 0 ? { resourceId: card.resourceId } : {}),
+            ...(card?.assetId !== undefined && card.assetId > 0 ? { assetId: card.assetId } : {}),
+          })
+        : Promise.resolve({ ok: false, error: ACT_ERROR.priceMismatch, latencyMs: 0 }),
     readResult: (tradeId) => call({ action: 'readResult', tradeId }),
     diagnostics: () => call({ action: 'diagnostics' }),
     onProbe: (cb) => {

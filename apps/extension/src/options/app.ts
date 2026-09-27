@@ -20,6 +20,7 @@ import browser from 'webextension-polyfill';
 import { EA_WEB_APP_MATCHES } from '../../ea-origins.mjs';
 import { send } from '../lib/bg-client.js';
 import { collectDiagnostics } from '../lib/diagnostics.js';
+import { onTrusted } from '../ui/trusted-events.js';
 
 /** Structural, not `import type { ZodTypeAny } from 'zod'` — `zod` is a
  * transitive dependency (via `@sl/shared`), not one this package declares
@@ -36,6 +37,18 @@ let app: HTMLElement;
  * page in the userscript build (`src/userscript/launcher.ts`). */
 function byId(id: string): HTMLElement | null {
   return app.querySelector<HTMLElement>(`#${CSS.escape(id)}`);
+}
+
+/** A user-action listener on `#id`, if it exists, that ignores script-made
+ * events (ui/trusted-events.ts): in the userscript this page shares EA's
+ * document with page scripts. */
+function onTrustedById<K extends keyof HTMLElementEventMap>(
+  id: string,
+  type: K,
+  handler: (event: HTMLElementEventMap[K]) => void,
+): void {
+  const el = byId(id);
+  if (el) onTrusted(el, type, handler);
 }
 
 function esc(s: string): string {
@@ -99,7 +112,7 @@ function wireSectionValidation(saveButtonId: string, fields: { id: string; schem
     return allValid;
   }
   for (const f of fields) {
-    byId(f.id)?.addEventListener('input', revalidateAll);
+    onTrustedById(f.id, 'input', revalidateAll);
   }
   revalidateAll();
 }
@@ -260,7 +273,7 @@ async function render(): Promise<void> {
     { id: 'maxCoinFlowPerHour', schema: governorSettingsSchema.shape.maxCoinFlowPerHour as FieldSchema, parse: parseRequiredNumber },
   ]);
 
-  byId('save-targets')?.addEventListener('click', async () => {
+  onTrustedById('save-targets', 'click', async () => {
     const minProfitValid = validateField('minProfit', targetsSchema.shape.minProfitPerSnipe as FieldSchema, parseRequiredNumber);
     const maxCoinsValid = validateField('maxCoinsPerSnipe', budgetsSchema.shape.maxCoinsPerSnipe as FieldSchema, parseRequiredNumber);
     const sessionBudgetValid = validateField('sessionCoinBudget', budgetsSchema.shape.sessionCoinBudget as FieldSchema, parseNullableNumber);
@@ -282,7 +295,7 @@ async function render(): Promise<void> {
     }
   });
 
-  byId('save-governor')?.addEventListener('click', async () => {
+  onTrustedById('save-governor', 'click', async () => {
     const read = (id: string) => Number((byId(id) as HTMLInputElement).value);
     const fields: [string, FieldSchema][] = [
       ['actionsPerHour', governorSettingsSchema.shape.actionsPerHour as FieldSchema],
@@ -312,7 +325,7 @@ async function render(): Promise<void> {
     }
   });
 
-  byId('add-filter')?.addEventListener('click', async () => {
+  onTrustedById('add-filter', 'click', async () => {
     const name = (byId('new-filter-name') as HTMLInputElement).value.trim();
     if (!name) return;
     const minRating = (byId('new-filter-min-rating') as HTMLInputElement).value;
@@ -331,7 +344,7 @@ async function render(): Promise<void> {
   });
 
   app.querySelectorAll<HTMLButtonElement>('[data-remove]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
+    onTrusted(btn, 'click', async () => {
       const idx = Number(btn.dataset.remove);
       const next = filterList.filter((_, i) => i !== idx);
       await send('filters.save', { filters: next });
@@ -339,12 +352,12 @@ async function render(): Promise<void> {
     });
   });
 
-  byId('telemetry-optout')?.addEventListener('change', async (e) => {
+  onTrustedById('telemetry-optout', 'change', async (e) => {
     await send('settings.set', { telemetryOptOut: (e.target as HTMLInputElement).checked });
     toast('Saved.');
   });
 
-  byId('copy-diagnostics')?.addEventListener('click', async () => {
+  onTrustedById('copy-diagnostics', 'click', async () => {
     const report = await collectDiagnostics({
       version: import.meta.env.VITE_EXTENSION_VERSION,
       buildTarget: import.meta.env.VITE_BUILD_TARGET,
@@ -367,7 +380,7 @@ async function render(): Promise<void> {
     }
   });
 
-  byId('export-logs')?.addEventListener('click', async () => {
+  onTrustedById('export-logs', 'click', async () => {
     const logs = (await send('logs.export')) ?? [];
     const blob = new Blob([JSON.stringify(logs, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);

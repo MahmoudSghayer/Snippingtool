@@ -24,7 +24,13 @@
  *      Targets choices, built with the app's own lists and images
  *      (main/catalog-builder.ts). Asked for with an authenticated
  *      `act_request`, and sent back only as a `catalog` message signed
- *      under the same nonce, so no page script can feed the bot's form.
+ *      under the same nonce, so no page script can forge or alter the
+ *      message itself. What goes into it is read in this MAIN world, which
+ *      page scripts share: the builder pins the `fut_*` globals it reads at
+ *      document_start, fetches only https URLs on EA hosts, and keeps only
+ *      EA-hosted images, and content validates the catalog against the
+ *      strict schema — but a page script that hooks EA's own list
+ *      functions can still skew the names in it (docs/threat-model.md §3.1).
  *
  * When EA reshuffles their bundle, this is the one file that breaks — and it
  * is written to break LOUDLY. Passive observation reports every market call
@@ -66,9 +72,14 @@ const CATALOG_ENABLED = import.meta.env.VITE_AUTOMATION === '1';
 // removed as it is read. With no nonce, `signer` stays null and every
 // act_request is ignored — passive observation keeps working regardless.
 let signer: ActSigner | null = null;
-takeHandedOffNonce(document, (nonce) => {
-  signer = createActSigner(nonce);
-});
+takeHandedOffNonce(
+  document,
+  (nonce) => {
+    signer = createActSigner(nonce);
+  },
+  // The userscript hands off synchronously, never late (lib/act-auth.ts).
+  { lateFallback: !USERSCRIPT_BUILD },
+);
 
 // Captured at load for the same reason as lib/act-auth.ts's primitives: a
 // page script that runs later cannot swap what the adapter reads with. This
@@ -391,6 +402,10 @@ let lastMarketResponse: { source: string; at: number; value: unknown } | null = 
  */
 interface SeenListing {
   buyNow: number;
+  /** The card, as EA's own response said: a buy that names a resourceId
+   * must match it (`priceCheck`), and likewise an assetId. */
+  resourceId: number;
+  assetId: number;
   expiresAt: number | null;
   /** The item entity an act search returned for this listing, for shapes
    * that buy on the entity. Absent for a listing only seen passively. */
@@ -411,7 +426,10 @@ function rememberListing(a: TrimmedAuction, entity: unknown): SeenListing {
   // A passive sighting after an act search keeps the entity: it is still
   // the same listing (a relist gets a new tradeId).
   const keep = entity ?? previous?.entity;
-  const seen: SeenListing = keep === undefined ? { buyNow: a.buyNow, expiresAt: a.expiresAt } : { buyNow: a.buyNow, expiresAt: a.expiresAt, entity: keep };
+  const seen: SeenListing =
+    keep === undefined
+      ? { buyNow: a.buyNow, resourceId: a.resourceId, assetId: a.assetId, expiresAt: a.expiresAt }
+      : { buyNow: a.buyNow, resourceId: a.resourceId, assetId: a.assetId, expiresAt: a.expiresAt, entity: keep };
   apply(mapSet, lastSeenListings, [a.tradeId, seen]);
   return seen;
 }
@@ -718,22 +736,32 @@ async function actSearch(requestId: string, filter: FilterCriteria): Promise<voi
   }
 }
 
+/** The card a buy is for, when content names it. */
+interface CardIds {
+  resourceId?: number;
+  assetId?: number;
+}
+
 /** Refuse unless the listing's buy-now price, as the adapter last saw it,
- * is exactly the price content expects to pay (see `lastSeenListings`). */
-function priceCheck(tradeId: string, price: number, at: number): string | null {
+ * is exactly the price content expects to pay (see `lastSeenListings`), and,
+ * when content names the card (`resourceId` / `assetId`), the listing is
+ * that card. */
+function priceCheck(tradeId: string, price: number, at: number, card: CardIds): string | null {
   const listing = apply(mapGet, lastSeenListings, [tradeId]) as SeenListing | undefined;
   if (!listing || (listing.expiresAt != null && listing.expiresAt <= at)) return ACT_ERROR.listingUnknown;
+  if (card.resourceId !== undefined && listing.resourceId !== card.resourceId) return ACT_ERROR.resourceMismatch;
+  if (card.assetId !== undefined && listing.assetId !== card.assetId) return ACT_ERROR.resourceMismatch;
   // buyNow 0 means the listing has no buy-now price: nothing to match.
   if (listing.buyNow <= 0 || listing.buyNow !== price) return ACT_ERROR.priceMismatch;
   return null;
 }
 
-async function actBuy(requestId: string, tradeId: string, price: number): Promise<void> {
+async function actBuy(requestId: string, tradeId: string, price: number, card: CardIds): Promise<void> {
   const requestedAt = now();
   const { result, selection } = runProbeAndReport();
   const shape = selection.shape;
   if (!result.ok || !shape) return fail('buy', requestId, requestedAt, result.reason);
-  const refusal = priceCheck(tradeId, price, requestedAt);
+  const refusal = priceCheck(tradeId, price, requestedAt, card);
   if (refusal) return fail('buy', requestId, requestedAt, refusal);
   const entity = (apply(mapGet, lastSeenListings, [tradeId]) as SeenListing | undefined)?.entity;
   if (shape.buysOnEntity && entity === undefined) return fail('buy', requestId, requestedAt, ACT_ERROR.listingEntityUnknown);
@@ -828,7 +856,7 @@ const consumedRequestIds = new Set<string>();
 
 type ActRequest =
   | { action: 'search'; requestId: string; filter: FilterCriteria }
-  | { action: 'buy'; requestId: string; tradeId: string; price: number }
+  | { action: 'buy'; requestId: string; tradeId: string; price: number; resourceId?: number; assetId?: number }
   | { action: 'readResult'; requestId: string; tradeId: string }
   | { action: 'diagnostics'; requestId: string }
   | { action: 'catalog'; requestId: string };
@@ -843,7 +871,11 @@ function asActRequest(value: unknown): ActRequest | null {
   if (d.action === 'diagnostics' || d.action === 'catalog') return d as unknown as ActRequest;
   if (typeof d.tradeId !== 'string' || d.tradeId === '') return null;
   if (d.action === 'readResult') return d as unknown as ActRequest;
-  if (d.action === 'buy') return isInteger(d.price) && (d.price as number) > 0 ? (d as unknown as ActRequest) : null;
+  if (d.action === 'buy') {
+    if (!isInteger(d.price) || (d.price as number) <= 0) return null;
+    for (const id of [d.resourceId, d.assetId]) if (id !== undefined && (!isInteger(id) || (id as number) <= 0)) return null;
+    return d as unknown as ActRequest;
+  }
   return null;
 }
 
@@ -861,7 +893,7 @@ async function handleActRequest(data: unknown, mac: unknown): Promise<void> {
   apply(setAdd, consumedRequestIds, [request.requestId]);
 
   if (request.action === 'search') await actSearch(request.requestId, request.filter);
-  else if (request.action === 'buy') await actBuy(request.requestId, request.tradeId, request.price);
+  else if (request.action === 'buy') await actBuy(request.requestId, request.tradeId, request.price, { resourceId: request.resourceId, assetId: request.assetId });
   else if (request.action === 'readResult') await actReadResult(request.requestId, request.tradeId);
   else if (request.action === 'catalog') await refreshCatalog(true);
   else actDiagnostics(request.requestId);

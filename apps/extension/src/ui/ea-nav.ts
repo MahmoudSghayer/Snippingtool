@@ -13,6 +13,7 @@
  * The item only toggles `ui/bot-page.ts`; clicking any of EA's own items
  * closes the page again so EA's navigation keeps working as users expect.
  */
+import { onTrusted } from './trusted-events.js';
 
 const NAV_SELECTORS = ['.ut-tab-bar', 'nav.ut-tab-bar-view', '.ut-tab-bar-view'];
 const ITEM_SELECTOR = '.ut-tab-bar-item';
@@ -62,7 +63,7 @@ export function installNavItem(hooks: NavHooks, doc: Document = document): NavIt
     btn.setAttribute('aria-label', 'Sniping Bot');
     btn.innerHTML = `${ICON}<span>Sniping Bot</span>`;
     btn.style.cssText = 'color:inherit;background:none;border:0;cursor:pointer;';
-    btn.addEventListener('click', (e) => {
+    onTrusted(btn, 'click', (e) => {
       e.stopPropagation();
       hooks.onToggle();
     });
@@ -81,7 +82,8 @@ export function installNavItem(hooks: NavHooks, doc: Document = document): NavIt
     if (nav !== navEl) {
       navEl = nav;
       // Capture phase, so this runs even if EA stops propagation.
-      nav.addEventListener(
+      onTrusted(
+        nav,
         'click',
         (e) => {
           const target = e.target as HTMLElement | null;

@@ -16,7 +16,10 @@
  * `RISK_ACKNOWLEDGMENT`, and stores `riskAcknowledgedAt`; after that it only
  * shows the level. "Reset to recommended" restores the defaults.
  *
- * Renders in its own shadow root; EA's styles cannot reach in. All text
+ * Renders in its own closed shadow root: EA's styles cannot reach in, and
+ * neither can page scripts (`host.shadowRoot` is null to them). Every
+ * user-action handler ignores events a script made (`onTrusted`), so a page
+ * script cannot change a limit, acknowledge the risk or press Start. All text
  * that comes from data (filter names, card names, error messages) goes
  * through `esc()`.
  */
@@ -44,6 +47,8 @@ import {
   type CatalogOption,
   type CatalogPlayer,
 } from '../model/catalog.js';
+
+import { onTrusted } from './trusted-events.js';
 
 import type { Sniper, SniperLogEntry, SniperPhase, SniperSearchResult } from '../engine/sniper.js';
 
@@ -387,7 +392,8 @@ const CSS = `
 export function createBotPage(deps: BotPageDeps, doc: Document = document): BotPage {
   const host = doc.createElement('div');
   host.id = 'ledger-bot-page';
-  const root = host.attachShadow({ mode: 'open' });
+  // Closed: the only reference is this closure's.
+  const root = host.attachShadow({ mode: 'closed' });
   const style = doc.createElement('style');
   style.textContent = CSS;
   const page = doc.createElement('div');
@@ -967,7 +973,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     $('saved').textContent = text;
   };
 
-  $('targets').addEventListener('click', (e) => {
+  onTrusted($('targets'), 'click', (e) => {
     const el = (e.target as HTMLElement).closest<HTMLElement>('[data-clear],button');
     if (!el) return;
     if (el.dataset.clear) {
@@ -1024,7 +1030,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     true,
   );
 
-  $('targets').addEventListener('input', (e) => {
+  onTrusted($('targets'), 'input', (e) => {
     const t = e.target as HTMLInputElement;
     if (t.id === 'nf-player') {
       form.playerQuery = t.value;
@@ -1035,7 +1041,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     else if (t.id === 'nf-name') form.name = t.value;
   });
 
-  $('targets').addEventListener('change', (e) => {
+  onTrusted($('targets'), 'change', (e) => {
     const t = e.target as HTMLInputElement;
     if (t.id === 'nf-minovr' || t.id === 'nf-maxovr') {
       const n = Number(t.value);
@@ -1049,7 +1055,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     }
   });
 
-  $('targets').addEventListener('keydown', (e) => {
+  onTrusted($('targets'), 'keydown', (e) => {
     const t = e.target as HTMLInputElement;
     if (t.id === 'nf-player' && e.key === 'Enter' && suggestions[0]) {
       e.preventDefault();
@@ -1297,7 +1303,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     's-flow': 100_000,
   };
 
-  $('settings').addEventListener('click', (e) => {
+  onTrusted($('settings'), 'click', (e) => {
     const el = (e.target as HTMLElement).closest('button');
     if (!el) return;
     if (el.dataset.step) {
@@ -1334,7 +1340,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     if (el.closest('summary')) e.preventDefault();
   });
 
-  $('settings').addEventListener('change', (e) => {
+  onTrusted($('settings'), 'change', (e) => {
     const input = e.target as HTMLInputElement;
     if (input.id === 'ack-check') {
       ($('ack-confirm') as HTMLButtonElement).disabled = !input.checked;
@@ -1524,7 +1530,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     });
   }
 
-  $('start').addEventListener('click', () => {
+  onTrusted($('start'), 'click', () => {
     const sniper = deps.getSniper();
     if (!sniper) return;
     if (sniper.isRunning()) sniper.stop('manual');
@@ -1537,12 +1543,12 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     }
     refreshLive();
   });
-  $('reset').addEventListener('click', () => {
+  onTrusted($('reset'), 'click', () => {
     deps.getSniper()?.reset();
     refreshLive();
   });
-  $('close').addEventListener('click', () => api.close());
-  page.addEventListener('keydown', (e) => {
+  onTrusted($('close'), 'click', () => api.close());
+  onTrusted(page, 'keydown', (e) => {
     if (e.key === 'Escape') api.close();
   });
 

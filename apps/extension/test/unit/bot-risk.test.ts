@@ -11,14 +11,19 @@ import {
 } from '@sl/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { Sniper } from '../../src/engine/sniper.js';
 import { riskLevelChangeEvent } from '../../src/lib/bot-safety.js';
 import { createBotPage, type BotPage } from '../../src/ui/bot-page.js';
 
-function mount(initial: BotSettings = DEFAULT_BOT_SETTINGS) {
+import { captureShadowRoots, trustTestEvents, untrustedEvents } from './ui-test-helpers.js';
+
+
+function mount(initial: BotSettings = DEFAULT_BOT_SETTINGS, sniper: Sniper | null = null) {
   let stored = initial;
   const saves: BotSettings[] = [];
+  const shadows = captureShadowRoots();
   const page: BotPage = createBotPage({
-    getSniper: () => null,
+    getSniper: () => sniper,
     getUnavailableReason: () => 'test',
     prepare: async () => undefined,
     getSettings: () => stored,
@@ -32,7 +37,9 @@ function mount(initial: BotSettings = DEFAULT_BOT_SETTINGS) {
     getCatalog: async () => null,
   });
   page.open();
-  const root = document.getElementById('ledger-bot-page')!.shadowRoot!;
+  shadows.restore();
+  const host = document.getElementById('ledger-bot-page')!;
+  const root = shadows.rootOf(host);
   const $ = <T extends HTMLElement>(id: string) => root.getElementById(id) as T | null;
   const flush = () => vi.advanceTimersByTime(500);
   /** Types into a settings field and fires its change event. */
@@ -41,15 +48,17 @@ function mount(initial: BotSettings = DEFAULT_BOT_SETTINGS) {
     input.value = value;
     input.dispatchEvent(new Event('change', { bubbles: true }));
   };
-  return { page, root, $, saves, flush, type, current: () => stored };
+  return { page, host, root, $, saves, flush, type, current: () => stored };
 }
 
 beforeEach(() => {
   vi.useFakeTimers();
   document.body.innerHTML = '';
+  trustTestEvents();
 });
 afterEach(() => {
   vi.useRealTimers();
+  untrustedEvents();
 });
 
 describe('bot page — risk meter', () => {
@@ -129,6 +138,61 @@ describe('bot page — risk meter', () => {
     const { $ } = mount({ ...DEFAULT_BOT_SETTINGS, searchDelay: { min: 3, max: 5 } });
     expect($('risk')!.textContent).toBe('Risk: High');
     expect($('ackbox')!.hidden).toBe(false);
+  });
+});
+
+describe('bot page — page scripts cannot drive it', () => {
+  it('renders in a closed shadow root', () => {
+    const { host } = mount();
+    expect(host.shadowRoot).toBeNull();
+  });
+
+  it('ignores script-made events: no limit change, no acknowledgment, no Start', () => {
+    const sniper = new Sniper(
+      {
+        adapter: {
+          search: vi.fn(),
+          buy: vi.fn(),
+          onAuctions: () => () => undefined,
+          onProbe: () => () => undefined,
+          onShape: () => () => undefined,
+        },
+        getFilters: () => [],
+        estimateSellPrice: async () => null,
+        killSwitch: () => ({ active: false }),
+        onChange: () => undefined,
+      },
+      DEFAULT_BOT_SETTINGS,
+    );
+    const start = vi.spyOn(sniper, 'start');
+    const { $, saves, flush, type, current } = mount(DEFAULT_BOT_SETTINGS, sniper);
+    untrustedEvents(); // from here on, the browser's rule: isTrusted only
+
+    // A page script sets a limit and fires `change`: ignored.
+    type('s-flow', '1000000000');
+    flush();
+    expect($('risk')!.textContent).toBe('Risk: Low');
+    expect(saves).toHaveLength(0);
+
+    // Ticks the acknowledgment and confirms it: ignored.
+    const ack = $<HTMLInputElement>('ack-check')!;
+    ack.checked = true;
+    ack.dispatchEvent(new Event('change', { bubbles: true }));
+    const confirm = $<HTMLButtonElement>('ack-confirm')!;
+    confirm.disabled = false;
+    confirm.click();
+    flush();
+    expect(saves).toHaveLength(0);
+    expect(current().riskAcknowledgedAt).toBeNull();
+
+    // Presses Start: ignored.
+    $<HTMLButtonElement>('start')!.click();
+    expect(start).not.toHaveBeenCalled();
+
+    // The same Start, from the user: the handler runs.
+    trustTestEvents();
+    $<HTMLButtonElement>('start')!.click();
+    expect(start).toHaveBeenCalledTimes(1);
   });
 });
 

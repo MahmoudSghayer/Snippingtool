@@ -184,6 +184,27 @@ describe('buy price re-check', () => {
     expect(buyNow).not.toHaveBeenCalled();
   });
 
+  it('refuses a buy for a different card than the listing the adapter saw (resourceId / assetId bound)', async () => {
+    await seeListing(5005, 11_000); // resourceId 42, assetId 42 (rawAuction)
+    deliver(await signedRequest({ action: 'buy', requestId: 'buy-wrong-card', tradeId: '5005', price: 11_000, resourceId: 77 }));
+    expect((await resultFor('buy-wrong-card')).data).toMatchObject({ ok: false, error: 'resource_mismatch' });
+    deliver(await signedRequest({ action: 'buy', requestId: 'buy-wrong-asset', tradeId: '5005', price: 11_000, resourceId: 42, assetId: 77 }));
+    expect((await resultFor('buy-wrong-asset')).data).toMatchObject({ ok: false, error: 'resource_mismatch' });
+    expect(buyNow).not.toHaveBeenCalled();
+
+    deliver(await signedRequest({ action: 'buy', requestId: 'buy-right-card', tradeId: '5005', price: 11_000, resourceId: 42, assetId: 42 }));
+    expect((await resultFor('buy-right-card')).data).toMatchObject({ ok: true });
+    expect(buyNow).toHaveBeenCalledWith('5005');
+  });
+
+  it('drops a buy request whose resourceId is not a positive integer', async () => {
+    await seeListing(5006, 11_000);
+    deliver(await signedRequest({ action: 'buy', requestId: 'buy-bad-id', tradeId: '5006', price: 11_000, resourceId: -1 }));
+    await settle();
+    expect(results().find((r) => r.data.requestId === 'buy-bad-id')).toBeUndefined();
+    expect(buyNow).not.toHaveBeenCalled();
+  });
+
   it('uses the latest price seen for a tradeId', async () => {
     await seeListing(5003, 12_000);
     await seeListing(5003, 15_000);

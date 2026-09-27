@@ -314,6 +314,12 @@ export const BOT_RISK_THRESHOLDS = {
   buysPerDay: { low: 100, moderate: 150, high: 250 },
   /** Shortest search delay, seconds: at least this for the tier. */
   minDelaySeconds: { low: 6, moderate: 4, high: 2 },
+  /** Coins the bot may spend an hour (`maxCoinFlowPerHour`). */
+  coinsPerHour: { low: 1_000_000, moderate: 3_000_000, high: 10_000_000 },
+  /** Cooldown after a buy, seconds: at least this for the tier. */
+  cooldownSeconds: { low: 8, moderate: 4, high: 1 },
+  /** Buys allowed per search (`buyToSearchRatio`). */
+  buyToSearchRatio: { low: 0.35, moderate: 0.5, high: 0.75 },
 } as const;
 
 export interface BotRisk {
@@ -339,13 +345,26 @@ export function projectedActiveHoursPerDay(s: BotSettings): number {
 }
 
 /**
- * How risky the user's settings are, live. Three factors, each rated on
+ * How risky the user's settings are, live. Every limit the user can raise
+ * that changes how the bot looks to EA is a factor, each rated on
  * `BOT_RISK_THRESHOLDS`; the worst one wins:
  *
  *   - searches a day = min(maxSearchesPerHour, 3600 / shortest delay)
  *     × active hours a day (`projectedActiveHoursPerDay`)
  *   - buys a day     = maxBuysPerHour × active hours a day
  *   - the shortest search delay itself
+ *   - coins spent an hour (maxCoinFlowPerHour)
+ *   - the cooldown after a buy
+ *   - the buy-to-search ratio
+ *
+ * Deliberately not a factor: the max buy price (`thresholds.maxBuyPrice`,
+ * and each filter's own max price). It caps what one buy may cost, not how
+ * often or how fast the bot acts, so it does not change how detectable the
+ * bot is; the coins-per-hour factor already rates how much it can spend.
+ *
+ * The engine refuses to start (and stops) on anything above `low` until the
+ * user has acknowledged the risk (`riskAcknowledgedAt`), whichever factor
+ * raised it (apps/extension `engine/sniper.ts`).
  */
 export function botRiskLevel(s: BotSettings): BotRisk {
   const c = clampBotSettings(s);
@@ -403,9 +422,37 @@ export function botRiskLevel(s: BotSettings): BotRisk {
     );
   }
 
-  const level = [searchesLevel, buysLevel, delayLevel].reduce((worst, l) =>
-    rank(l) > rank(worst) ? l : worst,
-  );
+  const coinsPerHour = c.safety.maxCoinFlowPerHour;
+  const coinsLevel = upTo(coinsPerHour, T.coinsPerHour);
+  if (coinsLevel !== 'low') {
+    const b = below(coinsLevel);
+    reasons.push(
+      `Up to ${fmt(coinsPerHour)} coins an hour — above the ${fmt(T.coinsPerHour[b])} ${b} limit`,
+    );
+  }
+  const cooldown = c.safety.cooldownSeconds;
+  const cooldownLevel = atLeast(cooldown, T.cooldownSeconds);
+  if (cooldownLevel !== 'low') {
+    const b = below(cooldownLevel);
+    reasons.push(
+      `A ${cooldown} s cooldown after a buy — under the ${T.cooldownSeconds[b]} s ${b} minimum`,
+    );
+  }
+  const ratio = c.safety.buyToSearchRatio;
+  const ratioLevel = upTo(ratio, T.buyToSearchRatio);
+  if (ratioLevel !== 'low') {
+    const b = below(ratioLevel);
+    reasons.push(`Up to ${ratio} buys per search — above the ${T.buyToSearchRatio[b]} ${b} limit`);
+  }
+
+  const level = [
+    searchesLevel,
+    buysLevel,
+    delayLevel,
+    coinsLevel,
+    cooldownLevel,
+    ratioLevel,
+  ].reduce((worst, l) => (rank(l) > rank(worst) ? l : worst));
   return {
     level,
     reasons,

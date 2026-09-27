@@ -20,6 +20,12 @@ setFetchImpl(gmFetch);
 // script: it takes the attribute and removes it, so no page script ever
 // sees the nonce, and every act request, result and catalog between the
 // page and this script is signed under it, as in the extension.
+//
+// Only if this really is before any page script: Tampermonkey does not
+// guarantee it. When the document is past `loading`, or already holds a
+// <script>, nothing is handed off — the adapter still records (M1), but the
+// act channel stays locked, and the Sniping Bot page asks for a reload
+// (content/index.ts). Fail closed, never open.
 handOffNonceWithinBundle(document);
 
 // `GM_addElement` injects past the page's CSP. The element can go as soon as

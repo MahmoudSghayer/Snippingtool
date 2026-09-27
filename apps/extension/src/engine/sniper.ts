@@ -22,9 +22,17 @@
  *   - max coins per hour and the buy:search ratio, through the governor;
  *   - the cooldown after every buy.
  *
- * Settings above low risk need the user's one-time acknowledgment
- * (`riskAcknowledgedAt`), which the page asks for; without it the bot will
- * not start.
+ * The hourly budgets — the governor's windows and this file's own search and
+ * buy windows — are one set per user, not per start: the governor lives as
+ * long as this object (Stop/Start keeps it), and its state and the windows
+ * are saved through `saveBudget` after every action and hydrated through
+ * `loadBudget` on the first start after a page reload.
+ *
+ * Settings above low risk (`botRiskLevel`, which rates every limit the user
+ * can raise) need the user's one-time acknowledgment (`riskAcknowledgedAt`),
+ * which the page asks for. The engine enforces it itself: without it the
+ * bot will not start, and settings changed to above low while it runs stop
+ * it.
  *
  * What the user cannot turn off: every search and every buy still goes
  * through `governor.allow()`, the server kill switch stops the loop, and so
@@ -44,7 +52,13 @@ import { Governor } from './governor.js';
 
 import type { AttemptInput, TradeInput } from './types.js';
 import type { AdapterClient } from '../content/adapter-client.js';
-import type { BotDailyUsage, BotSettings, FilterCriteria, TrimmedAuction } from '@sl/shared';
+import type {
+  BotBudgetState,
+  BotDailyUsage,
+  BotSettings,
+  FilterCriteria,
+  TrimmedAuction,
+} from '@sl/shared';
 
 /** EA keeps 5% of every sale. */
 const EA_TAX = 0.05;
@@ -100,6 +114,7 @@ export type SniperStopReason =
   | 'session_length'
   | 'daily_limit'
   | 'risk_unacknowledged'
+  | 'not_entitled'
   | 'search_failing';
 
 export interface SniperLogEntry {
@@ -162,6 +177,13 @@ export interface SniperDeps {
   /** Today's active time, as saved by an earlier page (null = none). */
   loadUsage?: () => Promise<BotDailyUsage | null>;
   saveUsage?: (usage: BotDailyUsage) => void;
+  /** The hourly budgets as saved by an earlier page (null = none). */
+  loadBudget?: () => Promise<BotBudgetState | null>;
+  saveBudget?: (budget: BotBudgetState) => void;
+  /** Whether the user's plan still includes the bot (`automation.autobuyer`
+   * in the current entitlement). Checked before every action; omitted =
+   * always. */
+  entitled?: () => boolean;
   /** The server kill switch as the content script currently knows it. */
   killSwitch: () => { active: boolean; reason?: string };
   onChange: () => void;
@@ -211,6 +233,8 @@ export class Sniper {
   private activeSince: number | null = null;
   private usageSavedAt = 0;
   private governor: Governor | null = null;
+  /** Whether the saved budgets have been loaded yet (once per page load). */
+  private budgetHydrated = false;
   private abort: AbortController | null = null;
   private stats: SniperStats = emptyStats();
   private stateValue: SniperState = {
@@ -286,6 +310,13 @@ export class Sniper {
   setSettings(settings: BotSettings): void {
     this.settings = clampBotSettings(settings);
     this.governor?.setSettings(botGovernorSettings(this.settings), BOT_GOVERNOR_BOUNDS);
+    // Settings raised above low while running, with no acknowledgment: the
+    // same rule as start(), enforced here, not only on the page.
+    if (this.isRunning() && this.riskUnacknowledged()) this.stop('risk_unacknowledged');
+  }
+
+  private riskUnacknowledged(): boolean {
+    return botRiskLevel(this.settings).level !== 'low' && !this.settings.riskAcknowledgedAt;
   }
 
   start(): void {
@@ -300,8 +331,7 @@ export class Sniper {
       });
       return;
     }
-    const risk = botRiskLevel(this.settings);
-    if (risk.level !== 'low' && !this.settings.riskAcknowledgedAt) {
+    if (this.riskUnacknowledged()) {
       this.setState({
         phase: 'stopped',
         phaseEndsAt: null,
@@ -310,13 +340,27 @@ export class Sniper {
       });
       return;
     }
+    if (this.deps.entitled && !this.deps.entitled()) {
+      this.setState({
+        phase: 'stopped',
+        phaseEndsAt: null,
+        stopReason: 'not_entitled',
+        stopDetail: STOP_MESSAGES.not_entitled,
+      });
+      return;
+    }
     this.abort = new AbortController();
-    this.governor = new Governor(botGovernorSettings(this.settings), {
-      now: this.now,
-      bounds: BOT_GOVERNOR_BOUNDS,
-    });
-    this.searchTimes = [];
-    this.buyTimes = [];
+    // One governor for the life of this object: Stop/Start keeps its
+    // windows (and the search/buy windows below) rather than refilling them.
+    if (this.governor) {
+      this.governor.setSettings(botGovernorSettings(this.settings), BOT_GOVERNOR_BOUNDS);
+    } else {
+      this.governor = new Governor(botGovernorSettings(this.settings), {
+        now: this.now,
+        bounds: BOT_GOVERNOR_BOUNDS,
+      });
+    }
+    this.freshRatioIfIdle();
     this.stats = { ...emptyStats(), startedAt: this.now() };
     this.filterIndex = 0;
     this.addLog({ kind: 'info', message: 'Bot started' });
@@ -328,6 +372,7 @@ export class Sniper {
     this.abort.abort();
     this.abort = null;
     this.pauseActive(true);
+    this.persistBudget();
     const message = detail ?? STOP_MESSAGES[reason];
     this.addLog({ kind: 'info', message: `Bot stopped: ${message}` });
     this.setState({ phase: 'stopped', phaseEndsAt: null, stopReason: reason, stopDetail: message });
@@ -356,6 +401,12 @@ export class Sniper {
     this.usage =
       saved && saved.day === localDay(this.now()) ? { ...saved } : { day: localDay(this.now()), activeMs: 0 };
     this.activeSince = this.now();
+    if (!this.budgetHydrated) {
+      const budget = await this.deps.loadBudget?.().catch(() => null);
+      if (signal.aborted) return;
+      this.budgetHydrated = true;
+      if (budget) this.hydrateBudget(budget);
+    }
 
     while (!signal.aborted) {
       if (this.dailyLimitReached()) return this.stop('daily_limit');
@@ -379,7 +430,7 @@ export class Sniper {
       if (filters.length === 0) return this.stop('no_filters');
       const target = filters[this.filterIndex++ % filters.length]!;
 
-      if (this.applyKillSwitch()) return;
+      if (this.applyKillSwitch() || this.applyEntitlement()) return;
       // The user's searches-per-hour limit, on its own window.
       const searchWait = this.windowWait(this.searchTimes, s().safety.maxSearchesPerHour);
       if (searchWait > 0) {
@@ -392,6 +443,7 @@ export class Sniper {
       }
       const decision = this.governor!.allow({ kind: 'search' });
       if (!decision.allowed) {
+        this.persistBudget(); // a hard stop's cooldown is part of the budget
         if (decision.reason === 'kill_switch') return this.stop('kill_switch', decision.detail);
         if (decision.detail?.startsWith('session_length')) return this.stop('session_length');
         const snapshot = this.governor!.snapshot();
@@ -416,6 +468,7 @@ export class Sniper {
       const searchFilter: FilterCriteria =
         cap == null ? target.filter : { ...target.filter, maxPrice: cap };
       this.searchTimes.push(this.now());
+      this.persistBudget();
       const outcome = await this.deps.adapter.search(searchFilter);
       off();
       if (signal.aborted) return;
@@ -475,7 +528,7 @@ export class Sniper {
       // may simply not have seen this card sell yet.
       if (t.minProfit > 0 && profit != null && profit < t.minProfit) continue;
 
-      if (this.applyKillSwitch()) return true;
+      if (this.applyKillSwitch() || this.applyEntitlement()) return true;
       if (this.windowWait(this.buyTimes, this.settings.safety.maxBuysPerHour) > 0) {
         this.addLog({
           kind: 'blocked',
@@ -488,6 +541,7 @@ export class Sniper {
         return false;
       }
       const decision = this.governor!.allow({ kind: 'buy', coins: m.buyNow });
+      this.persistBudget();
       if (!decision.allowed) {
         this.deps.onAttempt?.({
           ...this.attemptBase(m),
@@ -512,7 +566,14 @@ export class Sniper {
       }
 
       this.buyTimes.push(this.now());
-      const result = await this.deps.adapter.buy(m.tradeId, m.buyNow);
+      this.persistBudget();
+      // The resourceId binds the buy to the card this filter targets: the
+      // adapter refuses it unless the listing it saw for this tradeId is
+      // that card (a forged `auctions` message can claim any tradeId).
+      const result = await this.deps.adapter.buy(m.tradeId, m.buyNow, {
+        resourceId: m.resourceId,
+        assetId: m.assetId,
+      });
       if (result.error === ACT_ERROR.timeoutUnknown) {
         // It reached EA, which had not answered in time: it may have bought.
         // Never retried (a retry could buy twice), still charged to the
@@ -559,6 +620,7 @@ export class Sniper {
         if (result.signed && isAdapterRefusal(result.error)) {
           this.governor!.refund(decision);
           this.buyTimes.pop();
+          this.persistBudget();
         }
         this.stats.failures++;
         this.addLog({
@@ -682,6 +744,62 @@ export class Sniper {
     return this.usage.activeMs >= this.settings.safety.maxActiveHoursPerDay * ONE_HOUR_MS;
   }
 
+  /** Stops the bot when the user's plan no longer includes it. */
+  private applyEntitlement(): boolean {
+    if (!this.deps.entitled || this.deps.entitled()) return false;
+    this.stop('not_entitled');
+    return true;
+  }
+
+  /** The hourly budgets as they stand, for `saveBudget`. */
+  getBudget(): BotBudgetState | null {
+    if (!this.governor) return null;
+    const cutoff = this.now() - ONE_HOUR_MS;
+    return {
+      governor: this.governor.serialize(),
+      searchTimes: this.searchTimes.filter((t) => t > cutoff),
+      buyTimes: this.buyTimes.filter((t) => t > cutoff),
+    };
+  }
+
+  private persistBudget(): void {
+    // Until the saved budget is loaded, this governor is a fresh one: saving
+    // it (a Stop pressed while `run()` still awaits `loadBudget`) would
+    // overwrite the stored windows with empty ones and refill every budget.
+    if (!this.budgetHydrated) return;
+    const budget = this.getBudget();
+    if (budget) this.deps.saveBudget?.(budget);
+  }
+
+  /** Takes the saved budgets over (the first start after a page load). The
+   * saved governor state keeps its windows and cooldown; the kill switch is
+   * re-read before every action anyway, so the saved flag is dropped. The
+   * windows are merged with anything this page already counted. */
+  private hydrateBudget(budget: BotBudgetState): void {
+    const cutoff = this.now() - ONE_HOUR_MS;
+    const merge = (a: number[], b: number[]) =>
+      [...new Set([...a, ...b])].filter((t) => t > cutoff && t <= this.now()).sort((x, y) => x - y);
+    this.governor = new Governor(botGovernorSettings(this.settings), {
+      now: this.now,
+      bounds: BOT_GOVERNOR_BOUNDS,
+      state: { ...budget.governor, killSwitchActive: false, killSwitchReason: undefined },
+    });
+    this.searchTimes = merge(this.searchTimes, budget.searchTimes);
+    this.buyTimes = merge(this.buyTimes, budget.buyTimes);
+    this.freshRatioIfIdle();
+  }
+
+  /** The governor's buy:search ratio counts since its session began, and
+   * the bot's governor session never expires on its own. Carried across
+   * starts for good, a long history of searches would let a burst of buys
+   * through, so the counts start over — but only once the last hour holds
+   * no action at all, when the hourly windows are empty anyway and there is
+   * nothing to refill. */
+  private freshRatioIfIdle(): void {
+    const g = this.governor;
+    if (g && g.snapshot().actionsLastHour === 0) g.resetSession();
+  }
+
   private applyKillSwitch(): boolean {
     const ks = this.deps.killSwitch();
     this.governor?.setKillSwitch(ks.active, ks.reason);
@@ -744,5 +862,6 @@ const STOP_MESSAGES: Record<SniperStopReason, string> = {
   daily_limit: 'active hours per day limit reached — the bot can run again tomorrow',
   risk_unacknowledged:
     'these settings are above low risk: confirm the risk on the Sniping Bot page first, or reset to recommended',
+  not_entitled: 'your plan no longer includes the Sniping Bot',
   search_failing: 'searches keep failing',
 };

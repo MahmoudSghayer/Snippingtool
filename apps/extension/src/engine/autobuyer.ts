@@ -38,7 +38,7 @@ export interface AutobuyerDeps {
   sessionCoinBudget?: number | null;
 }
 
-export type StopReason = 'probe_failure' | 'shape_mismatch' | 'manual' | 'session_budget_exhausted';
+export type StopReason = 'probe_failure' | 'shape_mismatch' | 'manual' | 'session_budget_exhausted' | 'not_entitled';
 
 /** A sold-out / no-longer-available auction is not a retryable failure —
  * matching these error strings against the ASSUMED SHAPE's rejection
@@ -156,7 +156,7 @@ export class Autobuyer {
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       if (this.stopped) return false;
 
-      const result = await this.deps.adapter.buy(candidate.tradeId, candidate.price);
+      const result = await this.deps.adapter.buy(candidate.tradeId, candidate.price, { resourceId: candidate.resourceId });
 
       if (result.ok) {
         this.recordSuccess(candidate, result.latencyMs);

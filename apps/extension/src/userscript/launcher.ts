@@ -10,6 +10,11 @@
  * their own — cannot collide with each other. `:root` and `body` in those
  * stylesheets are rewritten to the shadow host and a wrapper element, the
  * same way `ui/panel.ts` adapts `tokens.css`.
+ *
+ * Every shadow root here is closed and every handler ignores script-made
+ * events (`onTrusted`), including the popup's and options page's own
+ * (`popup/app.ts`, `options/app.ts`): on the EA page, unlike in the
+ * extension, they share a document with page scripts.
  */
 import { mountOptions } from '../options/app.js';
 import optionsCss from '../options/style.css?raw';
@@ -17,6 +22,7 @@ import { mountPopup } from '../popup/app.js';
 import popupCss from '../popup/style.css?raw';
 import tokensCss from '../styles/tokens.css?raw';
 import { onBotPageAvailable, openBotPage } from '../ui/bot-opener.js';
+import { onTrusted } from '../ui/trusted-events.js';
 
 import { setOptionsPageOpener } from './browser-shim.js';
 
@@ -63,7 +69,7 @@ function forShadow(css: string): string {
 function createView(pageCss: string, extraCss: string): { host: HTMLElement; app: HTMLElement } {
   const host = document.createElement('div');
   host.className = 'view';
-  const root = host.attachShadow({ mode: 'open' });
+  const root = host.attachShadow({ mode: 'closed' });
   const style = document.createElement('style');
   style.textContent = forShadow(tokensCss) + forShadow(pageCss) + extraCss;
   const page = document.createElement('div');
@@ -78,7 +84,7 @@ function createView(pageCss: string, extraCss: string): { host: HTMLElement; app
 export function installLauncher(): void {
   const host = document.createElement('div');
   host.id = 'ledger-launcher';
-  const root = host.attachShadow({ mode: 'open' });
+  const root = host.attachShadow({ mode: 'closed' });
 
   const style = document.createElement('style');
   style.textContent = forShadow(tokensCss) + LAUNCHER_CSS;
@@ -123,7 +129,7 @@ export function installLauncher(): void {
     const btn = tabButtons[tab];
     btn.type = 'button';
     btn.setAttribute('role', 'tab');
-    btn.addEventListener('click', () => show(tab));
+    onTrusted(btn, 'click', () => show(tab));
     tabs.append(btn);
   }
   // Opens the full Sniping Bot page (automation builds, once the content
@@ -133,7 +139,7 @@ export function installLauncher(): void {
   botButton.className = 'bot';
   botButton.textContent = 'Sniping Bot ▸';
   botButton.hidden = true;
-  botButton.addEventListener('click', () => {
+  onTrusted(botButton, 'click', () => {
     if (openBotPage()) hide();
   });
   tabs.append(botButton);
@@ -161,8 +167,8 @@ export function installLauncher(): void {
     fab.setAttribute('aria-expanded', 'false');
   }
 
-  fab.addEventListener('click', () => (drawer.hidden ? show('account') : hide()));
-  drawer.addEventListener('keydown', (e) => {
+  onTrusted(fab, 'click', () => (drawer.hidden ? show('account') : hide()));
+  onTrusted(drawer, 'keydown', (e) => {
     if (e.key === 'Escape') {
       hide();
       fab.focus();

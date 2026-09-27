@@ -146,7 +146,7 @@ export class AssistEngine {
       return;
     }
 
-    const result = await this.deps.adapter.buy(top.tradeId, top.price);
+    const result = await this.deps.adapter.buy(top.tradeId, top.price, { resourceId: top.resourceId });
     if (result.ok) {
       this.recordSuccess(top, result.latencyMs);
       return;
