@@ -489,8 +489,8 @@ async function main(): Promise<void> {
       // search or buy. In the userscript that means page scripts had already
       // run when it installed (userscript/setup.ts refuses the handoff then).
       if (!actNonce) unavailableReason = NO_ACT_CHANNEL_REASON;
-      else if (!signedIn) unavailableReason = 'Sign in (NT button) to use the Sniping Bot.';
-      else if (!allowed) unavailableReason = 'Your plan does not include the Sniping Bot.';
+      else if (!signedIn) unavailableReason = 'Sign in (NT button) to use Nova AI.';
+      else if (!allowed) unavailableReason = 'Your plan does not include Nova AI.';
       else if (!botSettings) unavailableReason = 'The extension could not load the bot settings. Reload the page.';
       else unavailableReason = null;
       if (unavailableReason || !botSettings) return;
@@ -498,7 +498,7 @@ async function main(): Promise<void> {
       const { loadSniper } = await import('virtual:autobuyer-loader');
       const mod = await loadSniper();
       if (!mod) {
-        unavailableReason = 'The Sniping Bot is not available in this build.';
+        unavailableReason = 'Nova AI is not available in this build.';
         return;
       }
       sniper = new mod.Sniper(
@@ -722,7 +722,7 @@ async function main(): Promise<void> {
 
 /** Shown on the Sniping Bot page when no act-channel nonce was handed off. */
 const NO_ACT_CHANNEL_REASON =
-  "Nova Trade could not open a secure connection to EA's web app on this page load, so the Sniping Bot is locked. Reload the page to use it.";
+  "Nova Trade could not open a secure connection to EA's web app on this page load, so Nova AI is locked. Reload the page to use it.";
 
 function start(): void {
   void main().catch((err) => {

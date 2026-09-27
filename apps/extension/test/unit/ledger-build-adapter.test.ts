@@ -120,6 +120,7 @@ describe('dist/ledger contents', () => {
   it('carries none of the Sniping Bot: no page, no loop, no bot/catalog handlers', () => {
     const forbidden = [
       'Sniping Bot',
+      'Nova AI',
       'runCycle',
       'catalog.save',
       'catalog.get',

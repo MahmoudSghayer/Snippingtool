@@ -861,7 +861,7 @@ const STOP_MESSAGES: Record<SniperStopReason, string> = {
   session_length: 'session length limit reached',
   daily_limit: 'active hours per day limit reached — the bot can run again tomorrow',
   risk_unacknowledged:
-    'these settings are above low risk: confirm the risk on the Sniping Bot page first, or reset to recommended',
-  not_entitled: 'your plan no longer includes the Sniping Bot',
+    'these settings are above low risk: confirm the risk on the Nova AI page first, or reset to recommended',
+  not_entitled: 'your plan no longer includes Nova AI',
   search_failing: 'searches keep failing',
 };
