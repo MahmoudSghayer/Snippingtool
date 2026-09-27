@@ -210,13 +210,13 @@ describe('trades module (/api/v1/trades)', () => {
     const yesterday = onUtcDay(1);
     const today = onUtcDay(0);
 
+    // A trade still in flight re-reported with another purchase day. (A
+    // stored sale no longer moves: the stored `sold` row wins, see the
+    // close-stands test below.)
     const first = tradePayload({
       tradeId: 'moved',
       buyPrice: 1000,
-      sellPrice: 2000,
-      status: 'sold',
       boughtAt: yesterday.toISOString(),
-      soldAt: yesterday.toISOString(),
     });
     await app.inject({
       method: 'POST',
@@ -228,13 +228,13 @@ describe('trades module (/api/v1/trades)', () => {
       method: 'POST',
       url: '/api/v1/trades/batch',
       headers: { authorization: `Bearer ${token}` },
-      payload: { trades: [{ ...first, soldAt: today.toISOString() }] },
+      payload: { trades: [{ ...first, boughtAt: today.toISOString() }] },
     });
 
     const rows = await app.db.query.profits.findMany({ where: eq(profits.userId, userId) });
     const byDay = Object.fromEntries(rows.map((r) => [r.day, r]));
-    expect(byDay[day(yesterday)]).toMatchObject({ coinsEarned: 0, netProfit: 0, tradesClosed: 0 });
-    expect(byDay[day(today)]).toMatchObject({ coinsEarned: 2000, netProfit: 900, tradesClosed: 1 });
+    expect(byDay[day(yesterday)]).toMatchObject({ coinsSpent: 0 });
+    expect(byDay[day(today)]).toMatchObject({ coinsSpent: 1000 });
   });
 
   it('close: records the sale, computes the profit and rolls the day up', async () => {
@@ -333,6 +333,109 @@ describe('trades module (/api/v1/trades)', () => {
       where: eq(profits.userId, userId),
     });
     expect(profitRow).toMatchObject({ netProfit: 8500, tradesClosed: 1 });
+  });
+
+  it('batch: the extension\'s sale report closes the bought trade, and the server computes the profit', async () => {
+    // What lib/trade-lifecycle.ts sends: the buy's own tradeId, `sold`,
+    // the sale price and time, and no profit figure of its own.
+    const { userId, token } = await createUser(app, 'trades-lifecycle@example.com');
+    const boughtAt = new Date(Date.now() - 10 * 60_000).toISOString();
+    const bought = tradePayload({ tradeId: 'life-1', buyPrice: 10000, rating: 88, boughtAt });
+    const first = await app.inject({
+      method: 'POST',
+      url: '/api/v1/trades/batch',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { trades: [bought] },
+    });
+    expect(first.statusCode).toBe(200);
+
+    const sale = {
+      ...bought,
+      id: newId(),
+      status: 'sold',
+      sellPrice: 13500,
+      soldAt: new Date(Date.now() - 60_000).toISOString(),
+      netProfit: null,
+    };
+    for (let i = 0; i < 2; i++) {
+      // Sent twice (a retried flush): still one trade, one closed sale.
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/v1/trades/batch',
+        headers: { authorization: `Bearer ${token}` },
+        payload: { trades: [sale] },
+      });
+      expect(res.statusCode).toBe(200);
+    }
+
+    const rows = await app.db.query.trades.findMany({ where: eq(trades.userId, userId) });
+    expect(rows).toHaveLength(1);
+    // 5% of 13,500 = 675; 13,500 - 675 - 10,000 = 2,825.
+    expect(rows[0]).toMatchObject({ tradeId: 'life-1', status: 'sold', buyPrice: 10000, sellPrice: 13500, eaTax: 675, netProfit: 2825, rating: 88 });
+    expect(rows[0]!.boughtAt?.toISOString()).toBe(boughtAt);
+    const profitRows = await app.db.query.profits.findMany({ where: eq(profits.userId, userId) });
+    expect(profitRows.reduce((sum, r) => sum + r.netProfit, 0)).toBe(2825);
+    expect(profitRows.reduce((sum, r) => sum + r.tradesClosed, 0)).toBe(1);
+  });
+
+  it('batch: a sale recorded with close stands against a later extension sale report', async () => {
+    const { userId, token } = await createUser(app, 'trades-close-wins@example.com');
+    const bought = tradePayload({ tradeId: 'close-wins', buyPrice: 20000, boughtAt: new Date(Date.now() - 10 * 60_000).toISOString() });
+    await app.inject({
+      method: 'POST',
+      url: '/api/v1/trades/batch',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { trades: [bought] },
+    });
+    const row = await app.db.query.trades.findFirst({
+      where: and(eq(trades.userId, userId), eq(trades.tradeId, 'close-wins')),
+    });
+    const closedAt = new Date(Date.now() - 5 * 60_000).toISOString();
+    const closed = await app.inject({
+      method: 'POST',
+      url: `/api/v1/trades/${row!.id}/close`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { sellPrice: 30000, soldAt: closedAt },
+    });
+    expect(closed.statusCode).toBe(200);
+    const profitsBefore = await app.db.query.profits.findMany({ where: eq(profits.userId, userId) });
+    expect(profitsBefore.find((r) => r.day === closedAt.slice(0, 10))).toMatchObject({ netProfit: 8500, tradesClosed: 1 });
+
+    // The extension then reports its own view of the sale, at another price.
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/trades/batch',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { trades: [{ ...bought, id: newId(), status: 'sold', sellPrice: 25000, soldAt: new Date(Date.now() - 60_000).toISOString() }] },
+    });
+    expect(res.statusCode).toBe(200);
+
+    const after = await app.db.query.trades.findFirst({ where: eq(trades.id, row!.id) });
+    expect(after).toMatchObject({ status: 'sold', sellPrice: 30000, netProfit: 8500 });
+    expect(after!.soldAt?.toISOString()).toBe(closedAt);
+    // The rollup is untouched by the ignored report.
+    const profitsAfter = await app.db.query.profits.findMany({ where: eq(profits.userId, userId) });
+    expect(profitsAfter.find((r) => r.day === closedAt.slice(0, 10))).toMatchObject({ netProfit: 8500, tradesClosed: 1 });
+    expect(profitsAfter.reduce((sum, r) => sum + r.netProfit, 0)).toBe(8500);
+  });
+
+  it('batch: an expired trade can still be reported sold', async () => {
+    const { userId, token } = await createUser(app, 'trades-expired-sold@example.com');
+    const boughtAt = new Date(Date.now() - 10 * 60_000).toISOString();
+    const expired = tradePayload({ tradeId: 'exp-sold', buyPrice: 20000, boughtAt, status: 'expired' });
+    for (const t of [expired, { ...expired, id: newId(), status: 'sold', sellPrice: 30000, soldAt: new Date(Date.now() - 60_000).toISOString() }]) {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/v1/trades/batch',
+        headers: { authorization: `Bearer ${token}` },
+        payload: { trades: [t] },
+      });
+      expect(res.statusCode).toBe(200);
+    }
+    const after = await app.db.query.trades.findFirst({
+      where: and(eq(trades.userId, userId), eq(trades.tradeId, 'exp-sold')),
+    });
+    expect(after).toMatchObject({ status: 'sold', sellPrice: 30000, netProfit: 8500 });
   });
 
   it('close: rejects a sale dated before the purchase', async () => {

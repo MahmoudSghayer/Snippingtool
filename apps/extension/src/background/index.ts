@@ -20,6 +20,8 @@ import {
   extBackgroundEngineStateSetPayloadSchema,
   extBackgroundFiltersSavePayloadSchema,
   extBackgroundLicenseHeartbeatPayloadSchema,
+  extBackgroundLifecycleBuyPayloadSchema,
+  extBackgroundLifecyclePilePayloadSchema,
   extBackgroundLoginPayloadSchema,
   extBackgroundLogoutPayloadSchema,
   extBackgroundRecordPayloadSchema,
@@ -52,6 +54,7 @@ import { installGlobalErrorHandlers, handleErrorsReport, ensureErrorFlushAlarm, 
 import { handleEngineStateGet, handleEngineStateSet } from './governor.js';
 import { handleKillSwitchGet } from './kill-switch.js';
 import { ensureHeartbeatAlarm, handleLicenseBootstrap, handleLicenseHeartbeat, onHeartbeatAlarm, runBootstrap } from './license.js';
+import { handleLifecycleBuy, handleLifecyclePile, handleLifecycleSessionPnl, handleLifecycleStats, retryUnreportedSales } from './lifecycle.js';
 import {
   handleDevicesList,
   handleFiltersList,
@@ -130,6 +133,11 @@ const handlers: Record<string, Handler> = {
   'engine.stateSet': (payload) => handleEngineStateSet(payload as never),
   'engine.stateGet': () => handleEngineStateGet(),
 
+  'lifecycle.buy': (payload) => handleLifecycleBuy(payload as never),
+  'lifecycle.pile': (payload) => handleLifecyclePile(payload as never),
+  'lifecycle.sessionPnl': () => handleLifecycleSessionPnl(),
+  'lifecycle.stats': () => handleLifecycleStats(),
+
   async 'engine.state'() {
     return { ok: true };
   },
@@ -182,6 +190,8 @@ const payloadSchemas: Partial<Record<string, { safeParse: (v: unknown) => { succ
   'filters.save': extBackgroundFiltersSavePayloadSchema,
   'telemetry.enqueue': extBackgroundTelemetryEnqueuePayloadSchema,
   'engine.stateSet': extBackgroundEngineStateSetPayloadSchema,
+  'lifecycle.buy': extBackgroundLifecycleBuyPayloadSchema,
+  'lifecycle.pile': extBackgroundLifecyclePilePayloadSchema,
 };
 if (AUTOMATION_ENABLED) {
   Object.assign(payloadSchemas, {
@@ -231,7 +241,11 @@ browser.runtime.onMessage.addListener((message: unknown, sender: Runtime.Message
 });
 
 browser.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === 'sl.license.heartbeat') void onHeartbeatAlarm();
+  if (alarm.name === 'sl.license.heartbeat') {
+    void onHeartbeatAlarm();
+    // A sale that could not be queued (signed out, say) is retried here.
+    void retryUnreportedSales();
+  }
   else if (alarm.name === 'sl.telemetry.flush') void onFlushAlarm();
   else if (alarm.name === 'sl.errors.flush') void onErrorFlushAlarm();
 });

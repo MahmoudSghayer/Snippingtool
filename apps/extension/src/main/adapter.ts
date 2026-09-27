@@ -50,13 +50,13 @@ import { scrubText } from '../lib/redact.js';
 
 import { createCatalogBuilder } from './catalog-builder.js';
 import { createAdapterLog, describeKeys } from './diagnostics.js';
-import { normaliseListing, normaliseListings, type NormalisedListing } from './ea-listing.js';
+import { normaliseListing, normaliseListings, normalisePileItems, type NormalisedListing } from './ea-listing.js';
 import { TimeoutUnknownError, describeError, extractListingArray } from './ea-response.js';
 import { createSearchHook } from './search-hook.js';
 import { selectShape, type ServiceShape, type ShapeName, type ShapeSelection } from './shapes.js';
 
 import type { Catalog } from '../model/catalog.js';
-import type { AdapterDiagnostics, FilterCriteria, TrimmedAuction } from '@sl/shared';
+import type { AdapterDiagnostics, FilterCriteria, TradePileItem, TrimmedAuction } from '@sl/shared';
 
 /** The userscript build injects this file into the page itself; see the
  * act channel listener at the bottom for the one thing that changes. */
@@ -179,6 +179,18 @@ const MARKET_PATH = /\/ut\/game\/[^/]+\/transfermarket\b/i;
 // and have the adapter record (and later price-check against) whatever
 // listing it made up.
 const EA_HOST = /(^|\.)ea\.com$/i;
+// The trader's own items (defect C13: sales, relists and expiries were
+// never seen). Every one of these paths is an assumption until the market
+// opens (docs/06-extension.md, day-one checklist), and all of them sit
+// behind the same https + EA host check as the market. `/tradepile` is
+// expected to carry a list of auctions: one that does not is a shape
+// change, reported like a market one. The item-move and relist responses
+// may well carry no auction at all, so for those an unreadable body is
+// only logged. Deliberately NOT `/watchlist` or `/trade/status`: those
+// show auctions the trader bid on or bought, and a won auction reads as
+// `closed` at the price paid, which is a purchase, not a sale.
+const PILE_PATH = /\/ut\/game\/[^/]+\/(tradepile|auctionhouse\/relist|item)\/?$/i;
+const FULL_PILE_PATH = /\/tradepile\/?$/i;
 
 const stats = { seen: 0, parsed: 0, failed: 0 };
 
@@ -186,6 +198,7 @@ function post(kind: 'ready', data: { channel: string }): void;
 function post(kind: 'probe', data: { ok: boolean; checkedAt: number; reason?: string; shape?: ShapeName; actReady: boolean }): void;
 function post(kind: 'shape', data: { seen: number; parsed: number; failed: number; reason: string }): void;
 function post(kind: 'listings_buyable', data: { tradeIds: string[] }): void;
+function post(kind: 'tradepile', data: { url: string; seenAt: number; items: TradePileItem[]; full?: boolean }): void;
 function post(
   kind: 'auctions',
   data: { url: string; seenAt: number; auctions: TrimmedAuction[]; stats: { seen: number; parsed: number; failed: number } },
@@ -283,6 +296,9 @@ function trimAuction(a: NormalisedListing, seenAt: number): TrimmedAuction {
     // expires arrives as seconds remaining; an absolute time is what we can compare later
     expiresAt: a.expires != null && isFiniteNumber(a.expires) ? seenAt + a.expires * 1000 : null,
     seenAt,
+    // The card's own id: what links a buy to its later sale
+    // (lib/trade-lifecycle.ts). An id, not account data.
+    ...(a.itemId ? { itemId: a.itemId } : {}),
   };
 }
 
@@ -382,6 +398,9 @@ function postBuyable(tradeIds: string[]): void {
 /** The last market response the adapter read, for the diagnostics report
  * (described there by key names and types only — never stored as text). */
 let lastMarketResponse: { source: string; at: number; value: unknown } | null = null;
+/** The last trade-pile response, for the diagnostics report (keys and
+ * types only ever leave: `describeKeys`). */
+let lastPileResponse: { path: string; at: number; value: unknown } | null = null;
 
 /*
  * The buy-now price the adapter itself last saw for each tradeId, from a
@@ -532,20 +551,81 @@ function handleBody(url: string, body: unknown, actIssued: boolean): void {
   emitListings(String(url).split('?')[0] ?? url, listings, { kind: 'passive', actIssued });
 }
 
+/** A trade-pile response: its items go out as one `tradepile` message
+ * (never `auctions`: this is not a search, and nothing is counted). */
+function handlePileBody(path: string, body: unknown, method: string): void {
+  const loud = FULL_PILE_PATH.test(path);
+  const failure = (reason: string): void => {
+    if (loud) shapeFailure(`trade pile: ${reason}`);
+    else adapterLog.add(`passive: trade pile ${path.replace(/^.*\/ut\/game\/[^/]+/, '')}: ${reason}`);
+  };
+  let payload: unknown;
+  try {
+    payload = typeof body === 'string' && body.length > 0 ? parseJson(body) : undefined;
+  } catch {
+    payload = undefined;
+  }
+  const r = payload !== null && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;
+  if (!r) return failure('response was not a JSON object');
+  lastPileResponse = { path, at: now(), value: r };
+  // `auctionInfo` (tradepile, watchlist, trade status) or `itemData` (an
+  // item move): both assumed envelopes.
+  const list = Array.isArray(r.auctionInfo) ? r.auctionInfo : Array.isArray(r.itemData) ? r.itemData : null;
+  if (!list) return failure('no auctionInfo / itemData list in response');
+  let items: TradePileItem[];
+  let skipped = 0;
+  const logSkipped = skippedEntries('trade pile');
+  try {
+    items = normalisePileItems(list, (count) => {
+      skipped = count;
+      logSkipped(count);
+    });
+  } catch (err) {
+    return failure(err instanceof Error ? err.message : String(err));
+  }
+  // A plain GET of the trade pile is plausibly the whole transfer list:
+  // the lifecycle may then retire followed items missing from it. Any
+  // other method, path or envelope is a partial view. Sent even when
+  // empty, since an empty full pile is news too.
+  // And only when every entry was read: an unreadable one might be a
+  // followed card, which would then be wrongly retired.
+  const full = loud && method.toUpperCase() === 'GET' && Array.isArray(r.auctionInfo) && skipped === 0;
+  if (items.length > 0 || full) post('tradepile', { url: path, seenAt: now(), items, full });
+}
+
 function shapeFailure(reason: string): void {
   stats.failed++;
   adapterLog.add(`passive: ${reason}`);
   post('shape', { ...stats, reason });
 }
 
-function isMarket(url: unknown): url is string {
-  if (typeof url !== 'string' || url === '') return false;
+/** What an EA response is: the market, the trader's own trade pile, or
+ * nothing the adapter reads. Only https on an EA host is ever either. */
+function classify(url: unknown): 'market' | 'pile' | null {
+  if (typeof url !== 'string' || url === '') return null;
   try {
     const parsed = new URLCtor(url, window.location.href);
-    return parsed.protocol === 'https:' && EA_HOST.test(parsed.hostname) && MARKET_PATH.test(parsed.pathname);
+    if (parsed.protocol !== 'https:' || !EA_HOST.test(parsed.hostname)) return null;
+    if (MARKET_PATH.test(parsed.pathname)) return 'market';
+    if (PILE_PATH.test(parsed.pathname)) return 'pile';
+    return null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+function pathOf(url: string): string {
+  try {
+    return new URLCtor(url, window.location.href).pathname;
+  } catch {
+    return '';
+  }
+}
+
+/** Route one response body the network really delivered. */
+function handleResponse(kind: 'market' | 'pile', url: string, body: unknown, actIssued: boolean, method: string): void {
+  if (kind === 'market') handleBody(url, body, actIssued);
+  else handlePileBody(pathOf(url), body, method);
 }
 
 // ---- XMLHttpRequest --------------------------------------------------------
@@ -563,9 +643,10 @@ function readXhr(getter: ((this: unknown) => unknown) | undefined, xhr: XMLHttpR
   return getter ? apply(getter, xhr, []) : undefined;
 }
 
-proto.open = function (this: XMLHttpRequest & { __ledgerUrl?: string }, method: string, url: string | URL, ...rest: unknown[]) {
+proto.open = function (this: XMLHttpRequest & { __ledgerUrl?: string; __ledgerMethod?: string }, method: string, url: string | URL, ...rest: unknown[]) {
   try {
     this.__ledgerUrl = typeof url === 'string' ? url : String(url);
+    this.__ledgerMethod = typeof method === 'string' ? method : 'GET';
   } catch {
     /* ignore */
   }
@@ -573,10 +654,11 @@ proto.open = function (this: XMLHttpRequest & { __ledgerUrl?: string }, method: 
   return nativeOpen.call(this, method, url, ...rest);
 };
 
-proto.send = function (this: XMLHttpRequest & { __ledgerUrl?: string }, ...args: unknown[]) {
+proto.send = function (this: XMLHttpRequest & { __ledgerUrl?: string; __ledgerMethod?: string }, ...args: unknown[]) {
   try {
-    if (isMarket(this.__ledgerUrl)) {
-      stats.seen++;
+    const kind = classify(this.__ledgerUrl);
+    if (kind) {
+      if (kind === 'market') stats.seen++;
       // Tagged at send time: a request that goes out during one of the
       // adapter's act searches is that search's own (isSecondSighting).
       const actIssued = actSearchesInFlight > 0;
@@ -587,13 +669,13 @@ proto.send = function (this: XMLHttpRequest & { __ledgerUrl?: string }, ...args:
           // can dispatch a synthetic 'load' on any XHR it likes.
           if (!event.isTrusted) return;
           const finalUrl = readXhr(xhrResponseURL, this);
-          if (xhrResponseURL && !isMarket(finalUrl)) return;
+          if (xhrResponseURL && classify(finalUrl) !== kind) return;
           const type = readXhr(xhrResponseType, this);
           if (type === '' || type === 'text') {
-            handleBody(this.__ledgerUrl as string, readXhr(xhrResponseText, this), actIssued);
+            handleResponse(kind, this.__ledgerUrl as string, readXhr(xhrResponseText, this), actIssued, this.__ledgerMethod ?? 'GET');
           } else if (type === 'json' && readXhr(xhrResponse, this)) {
-            handleBody(this.__ledgerUrl as string, stringifyJson(readXhr(xhrResponse, this)), actIssued);
-          } else {
+            handleResponse(kind, this.__ledgerUrl as string, stringifyJson(readXhr(xhrResponse, this)), actIssued, this.__ledgerMethod ?? 'GET');
+          } else if (kind === 'market') {
             shapeFailure('unreadable responseType: ' + type);
           }
         } catch {
@@ -617,8 +699,10 @@ const responseText = ResponseProto?.text;
 if (typeof nativeFetch === 'function' && responseClone && responseText) {
   window.fetch = function (input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
     let url = '';
+    let method = 'GET';
     try {
       url = typeof input === 'string' ? input : input instanceof Request ? input.url : input instanceof URL ? input.toString() : '';
+      method = typeof init?.method === 'string' ? init.method : input instanceof Request ? input.method : 'GET';
     } catch {
       /* ignore */
     }
@@ -629,9 +713,10 @@ if (typeof nativeFetch === 'function' && responseClone && responseText) {
     // Response of its own into what the adapter records. The page gets the
     // native promise back untouched.
     const promise = apply(nativeFetch, window, [input, init]) as Promise<Response>;
-    if (!isMarket(url)) return promise;
+    const kind = classify(url);
+    if (!kind) return promise;
 
-    stats.seen++;
+    if (kind === 'market') stats.seen++;
     const actIssued = actSearchesInFlight > 0; // see the XHR patch above
     apply(promiseThen, promise, [
       (res: Response) => {
@@ -641,10 +726,10 @@ if (typeof nativeFetch === 'function' && responseClone && responseText) {
           // a Response built in script has no URL at all. Either way, not
           // recorded (fail closed).
           const finalUrl = responseUrl ? apply(responseUrl, res, []) : '';
-          if (!isMarket(finalUrl)) return;
+          if (classify(finalUrl) !== kind) return;
           const body = apply(responseText, apply(responseClone, res, []) as Response, []) as Promise<string>;
           apply(promiseThen, body, [
-            (text: string) => handleBody(url, text, actIssued),
+            (text: string) => handleResponse(kind, url, text, actIssued, method),
             () => {
               stats.failed++;
             },
@@ -826,6 +911,9 @@ function diagnosticsReport(): AdapterDiagnostics {
       searchHook: searchHook.isInstalled(services) ? 'installed' : 'not installed',
     },
     lastMarketResponse: last ? { source: last.source, at: last.at, shape: describeKeys(last.value, 6) } : null,
+    lastTradePileResponse: lastPileResponse
+      ? { path: scrubText(lastPileResponse.path).slice(0, 200), at: lastPileResponse.at, shape: describeKeys(lastPileResponse.value, 6) }
+      : null,
     stats: { ...stats },
     log: adapterLog.lines(),
   };

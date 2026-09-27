@@ -474,6 +474,39 @@ installed`; after the human's own search the log shows no `hook:`
    how long a real `bid` takes to answer: a `timeout_unknown` in the log
    means EA took over 12 s, and a following `late buy answer` line says
    how it went. Several of those mean the limit is too short.
+8. **Trade pile (profit capture, lib/trade-lifecycle.ts).** All assumed:
+   - The paths `/ut/game/<title>/tradepile` (a missing list there is a
+     shape change), `/item` and `/auctionhouse/relist` (only logged).
+     `/watchlist` and `/trade/status` are deliberately not read: they show
+     auctions the trader won or bought as `closed` at the price paid, which
+     is a purchase, and was once misread as a sale.
+   - The envelope `auctionInfo` (or `itemData`); the item id at
+     `itemData.id` (an entity's `id`), and the same id on a market
+     listing's `itemData`.
+   - `tradeState` of `active`, `closed` (sold) or `expired`, null or absent
+     when unlisted, with `tradeId` 0. A sold listing's price is its
+     `currentBid` (falling back to `buyNowPrice`). **A card must be seen
+     listed (active or expired) at least once for its sale to count**;
+     after that, any `closed` tradeId of the card other than the one it was
+     bought on is its sale, even a relist never seen active (e.g. "Relist
+     all"). The tradeId it was bought on is never a sale.
+   - A plain GET of `/tradepile` in which every entry was readable is the
+     whole transfer list: a listed or expired card missing from it is
+     marked gone (no longer listed value). An entry with a price outside
+     0–15,000,000 is skipped, so that response is not treated as full.
+   - `soldAt` is when the sale was *seen* on the pile, not when it
+     happened (EA gives no sale time), clamped to be no earlier than the
+     purchase.
+
+   To check: open the transfer list in EA's UI, then **Copy diagnostics**
+   and read `lastTradePileResponse` (path, keys and types) and `lifecycle`
+   (`buysWithoutItemId`, counted per browser session, above 0 means
+   market listings carry no item id).
+   Then list a card an engine bought, let it sell, reopen the transfer
+   list, and confirm the dashboard shows that trade `sold` at the right
+   price. `trade pile:` lines in the log mean one of the above is wrong. A
+   card bought outside the extension is never followed (no buy price to
+   close it with).
 
 ## 5. Safety governor: thresholds and math
 

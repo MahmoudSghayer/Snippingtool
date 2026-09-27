@@ -16,7 +16,7 @@ import { ADAPTER_CHANNEL, adapterMessageSchema } from '@sl/shared';
 import { ACT_ERROR, canonicalActMessage, createActSigner } from '../lib/act-auth.js';
 
 import type { Catalog } from '../model/catalog.js';
-import type { AdapterDiagnostics, FilterCriteria, TrimmedAuction } from '@sl/shared';
+import type { AdapterDiagnostics, FilterCriteria, TradePileItem, TrimmedAuction } from '@sl/shared';
 
 const ACTION_TIMEOUT_MS = 15_000;
 /** How long a `timeout_unknown` buy waits for EA's late answer before it is
@@ -77,6 +77,9 @@ export interface AdapterClient {
   /** Asks the adapter for them, over the authenticated act channel (it
    * sends them once the web app is ready). Nothing is sent without a key. */
   requestCatalog(): void;
+  /** The trader's own trade-pile items the adapter read. Not a search. */
+  /** `full`: a plain GET of the whole trade pile (see the message schema). */
+  onTradePile(cb: (items: TradePileItem[], full: boolean) => void): () => void;
   dispose(): void;
 }
 
@@ -127,6 +130,7 @@ export function createAdapterClient(target: Window, nonce: string | null, option
   const shapeListeners = new Set<(reason: string) => void>();
   const auctionsListeners = new Set<(auctions: TrimmedAuction[]) => void>();
   const catalogListeners = new Set<(catalog: Catalog) => void>();
+  const pileListeners = new Set<(items: TradePileItem[], full: boolean) => void>();
   let probeStatus: ProbeStatus | null = null;
 
   function onMessage(event: MessageEvent): void {
@@ -149,6 +153,10 @@ export function createAdapterClient(target: Window, nonce: string | null, option
     }
     if (msg.kind === 'auctions') {
       for (const cb of auctionsListeners) cb(msg.data.auctions);
+      return;
+    }
+    if (msg.kind === 'tradepile') {
+      for (const cb of pileListeners) cb(msg.data.items, msg.data.full === true);
       return;
     }
     if (msg.kind === 'listings_buyable') {
@@ -321,6 +329,10 @@ export function createAdapterClient(target: Window, nonce: string | null, option
       return () => catalogListeners.delete(cb);
     },
     requestCatalog: () => notify({ action: 'catalog' }),
+    onTradePile: (cb) => {
+      pileListeners.add(cb);
+      return () => pileListeners.delete(cb);
+    },
     dispose: () => {
       target.removeEventListener('message', onMessage);
       pending.clear();
@@ -331,6 +343,7 @@ export function createAdapterClient(target: Window, nonce: string | null, option
       shapeListeners.clear();
       auctionsListeners.clear();
       catalogListeners.clear();
+      pileListeners.clear();
     },
   };
 }

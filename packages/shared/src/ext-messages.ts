@@ -5,6 +5,7 @@ import { activityEventSchema } from './schemas/activity.js';
 import { emailSchema, passwordSchema } from './schemas/auth.js';
 import { botDailyUsageSchema, botSettingsSchema } from './schemas/bot.js';
 import { filterCriteriaSchema, filterStatsSchema, savedFilterSchema } from './schemas/filters.js';
+import { coinPriceSchema, MAX_COIN_PRICE } from './schemas/ingest-bounds.js';
 import { riskBudgetEventSchema } from './schemas/risk.js';
 import { snipingAttemptSchema } from './schemas/sniping.js';
 import { tradeIngestSchema } from './schemas/trades.js';
@@ -43,6 +44,11 @@ export const trimmedAuctionSchema = z.object({
    * (apps/extension/src/main/adapter.ts). Absent means unknown (older
    * records); the ranker only drops an explicit `false`. */
   buyable: z.boolean().optional(),
+  /** EA's id for the card itself (`itemData.id`), which, unlike the
+   * tradeId, survives a purchase and every relist. The trade lifecycle
+   * (apps/extension/src/lib/trade-lifecycle.ts) keys on it to link a buy to
+   * its later sale. Absent when the listing did not carry one. */
+  itemId: z.string().min(1).max(40).optional(),
 });
 export type TrimmedAuction = z.infer<typeof trimmedAuctionSchema>;
 
@@ -157,6 +163,48 @@ export const adapterCatalogSchema = z
     notes: z.array(z.string().max(500)).max(50).optional(),
   })
   .strict();
+/** One item on the trader's own trade pile (or watch list, or a
+ * relist/status response), as main/ea-listing.ts's `normalisePileItem`
+ * reads it. Every EA path and field behind it is an assumption
+ * (docs/06-extension.md, day-one checklist). `tradeState` is EA's word
+ * for the listing: `active` (listed), `closed` (sold), `expired`, or null
+ * (on the pile, not listed). Prices are what EA reports: for a `closed`
+ * listing, `currentBid` is the sale price. */
+export const TRADE_PILE_STATES = ['active', 'closed', 'expired'] as const;
+export const tradePileItemSchema = z.object({
+  itemId: z.string().min(1).max(40),
+  tradeId: z.string().max(40).nullable(),
+  resourceId: z.number().int().positive(),
+  rating: z.number().int().min(0).max(99).nullable(),
+  tradeState: z.enum(TRADE_PILE_STATES).nullable(),
+  // Bounded like every price the API takes: an out-of-range one would
+  // otherwise reach /trades/batch and 400 the whole chunk the sale is in.
+  currentBid: coinPriceSchema,
+  buyNowPrice: coinPriceSchema,
+  /** Seconds left on the listing when read, or null if unknown. */
+  expires: z.number().nullable(),
+});
+export type TradePileItem = z.infer<typeof tradePileItemSchema>;
+
+/** The trader's own items, read passively from an EA trade-pile response
+ * (main/adapter.ts). Not a search: content counts nothing for it, and
+ * forwards the items to background's trade lifecycle. Unsigned, like
+ * `auctions`: a forged one could at worst report a sale the server then
+ * records for a trade the extension itself bought (the lifecycle ignores
+ * any item it has no buy for). */
+export const adapterTradePileMessageSchema = z.object({
+  channel: z.literal(ADAPTER_CHANNEL),
+  kind: z.literal('tradepile'),
+  data: z.object({
+    url: z.string().max(500),
+    seenAt: z.number(),
+    items: z.array(tradePileItemSchema).max(500),
+    /** A plain GET of `/tradepile`: plausibly the whole transfer list, so
+     * a followed item missing from it has left the pile (sold while not
+     * watched, quick-sold or moved to the club). */
+    full: z.boolean().optional(),
+  }),
+});
 
 /** HMAC-SHA256 (hex) of an act-channel message under the per-page-load
  * nonce (apps/extension/src/lib/act-auth.ts). Optional in these schemas so
@@ -208,6 +256,13 @@ export const adapterDiagnosticsSchema = z.object({
   lastMarketResponse: z
     .object({ source: z.string().max(40), at: z.number(), shape: diagnosticsKeyTreeSchema })
     .nullable(),
+  /** The last trade-pile response (tradepile, watchlist, relist, trade
+   * status) the adapter saw, keys and types only: the trade-pile paths
+   * and fields are unverified assumptions (docs/06-extension.md). */
+  lastTradePileResponse: z
+    .object({ path: z.string().max(200), at: z.number(), shape: diagnosticsKeyTreeSchema })
+    .nullable()
+    .optional(),
   stats: z.object({ seen: z.number(), parsed: z.number(), failed: z.number() }),
   /** The adapter's last 50 log lines, already scrubbed. */
   log: z.array(z.string().max(1000)).max(50),
@@ -325,6 +380,7 @@ export const adapterMessageSchema = z.discriminatedUnion('kind', [
   adapterShapeMessageSchema,
   adapterAuctionsMessageSchema,
   adapterListingsBuyableMessageSchema,
+  adapterTradePileMessageSchema,
   adapterActionResultMessageSchema,
   adapterCatalogMessageSchema,
 ]);
@@ -398,6 +454,14 @@ export const backgroundMessageTypeSchema = z.enum([
   /** Exports `lib/logger.ts`'s ring buffer for the options page's "Export
    * logs" button — local only, no network call. */
   'logs.export',
+  /** The trade lifecycle (apps/extension/src/lib/trade-lifecycle.ts, run
+   * in background so every tab shares one record per item): a buy the
+   * engine made, the trade-pile items content saw, and the session P&L the
+   * panel and popup show. */
+  'lifecycle.buy',
+  'lifecycle.pile',
+  'lifecycle.sessionPnl',
+  'lifecycle.stats',
 ]);
 /** Every message type background handles in every build: the core types
  * above plus the automation builds' own (`AUTOMATION_BACKGROUND_MESSAGE_TYPES`,
@@ -476,6 +540,49 @@ export const extBackgroundRecordPayloadSchema = z
     auctions: z.array(trimmedAuctionSchema).max(500),
   })
   .strict();
+
+/** `lifecycle.buy` — a card the engine just bought, keyed by the item it
+ * bought (not the listing), with the purchase exactly as reported to
+ * `/trades/batch`, so the later sale report updates that same trade. */
+export const extBackgroundLifecycleBuyPayloadSchema = z
+  .object({
+    /** Null when the bought listing carried no item id: the buy cannot be
+     * followed, and is only counted (diagnostics). */
+    itemId: z.string().min(1).max(40).nullable(),
+    tradeId: z.string().min(1).max(64),
+    resourceId: z.number().int().positive(),
+    rating: z.number().int().min(0).max(99).nullable(),
+    buyPrice: z.number().int().min(1).max(MAX_COIN_PRICE),
+    boughtAt: z.string().datetime(),
+  })
+  .strict();
+export type LifecycleBuy = z.infer<typeof extBackgroundLifecycleBuyPayloadSchema>;
+
+/** `lifecycle.pile` — trade-pile items the adapter read. */
+export const extBackgroundLifecyclePilePayloadSchema = z
+  .object({ items: z.array(tradePileItemSchema).max(500), full: z.boolean().optional() })
+  .strict();
+
+/** `lifecycle.stats` reply, for the diagnostics report: buys that carried
+ * no item id (since background last started), items being followed, and
+ * sales reported (kept 30 days). */
+export interface LifecycleStats {
+  buysWithoutItemId: number;
+  followed: number;
+  salesReported: number;
+}
+
+/** `lifecycle.sessionPnl` reply. `realised` is net of EA's tax
+ * (`computeTradeProfit`); `unrealised` is what the items still listed are
+ * listed at. A display figure only: the server recomputes every stored
+ * trade's profit itself. */
+export interface LifecycleSessionPnl {
+  realised: number;
+  unrealised: number;
+  sales: number;
+  listed: number;
+  since: number;
+}
 
 /** `summary` — one resource's floor/median/sell-through/max-snipe card. */
 export const extBackgroundSummaryPayloadSchema = z

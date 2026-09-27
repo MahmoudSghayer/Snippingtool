@@ -28,6 +28,7 @@ import { readHandedOffNonce } from '../lib/act-auth.js';
 import { riskLevelChangeEvent } from '../lib/bot-safety.js';
 import { logger } from '../lib/logger.js';
 import { singleFlight } from '../lib/single-flight.js';
+import { buildBoughtTrade } from '../lib/trade-report.js';
 import { createBotPage, type LiveSearch } from '../ui/bot-page.js';
 import { installNavItem } from '../ui/ea-nav.js';
 import { onTrusted } from '../ui/trusted-events.js';
@@ -53,6 +54,7 @@ import type {
   SavedFilter,
   SnipingAttempt,
   Trade,
+  TradePileItem,
   TrimmedAuction,
   UserSettings,
 } from '@sl/shared';
@@ -210,6 +212,13 @@ async function main(): Promise<void> {
   // the bootstrap below has created a governor.
   countObservedSearches(adapter, () => governor);
 
+  // The trader's own trade pile (defect C13): background's trade lifecycle
+  // links each item to the buy it came from and reports its sale once
+  // (lib/trade-lifecycle.ts). Not a search: nothing is counted here.
+  adapter.onTradePile((items: TradePileItem[], full: boolean) => {
+    void send('lifecycle.pile', { items, full });
+  });
+
   let probeOk = true;
   adapter.onProbe((status) => {
     probeOk = status.ok;
@@ -313,21 +322,15 @@ async function main(): Promise<void> {
   }
 
   function recordTrade(input: TradeInput): void {
-    const trade: Trade = {
-      id: crypto.randomUUID(),
-      tradeId: input.tradeId,
-      resourceId: input.resourceId,
-      assetId: null,
-      rating: lastRating,
-      buyPrice: input.buyPrice,
-      sellPrice: null,
-      eaTax: 0.05,
-      netProfit: null,
-      status: 'bought',
-      boughtAt: nowIso(),
-      soldAt: null,
-    };
+    // Card fields from the listing that was bought, never the last card
+    // searched for (lib/trade-report.ts); and, when the listing carried the
+    // item's id, the lifecycle entry that later reports its sale against
+    // this same tradeId.
+    const { trade, lifecycle } = buildBoughtTrade(input, tracked.get(input.tradeId), nowIso());
     void send('telemetry.enqueue', { kind: 'trades', items: [trade] satisfies Trade[] });
+    // Sent even with no item id: background counts those (diagnostics).
+    void send('lifecycle.buy', lifecycle);
+    if (!lifecycle.itemId) logger.warn(`bought trade ${input.tradeId} carried no item id: its sale cannot be followed`, 'lifecycle');
   }
 
   function recordRiskEvents(events: { kind: RiskBudgetEvent['kind']; value: number; threshold: number }[]): void {
@@ -615,6 +618,12 @@ async function main(): Promise<void> {
     setInterval(() => void engineTick(), AUTOBUYER_TICK_MS);
   }
 
+  // The session P&L (lifecycle.sessionPnl) and risk-snapshot UI ticks that
+  // used to push into the in-page panel are gone with the panel itself
+  // (claude/bot-page-redesign) — the governor-snapshot relay's only
+  // consumer was the popup gauge, also removed. The underlying data
+  // (background/lifecycle.ts, lib/trade-lifecycle.ts) is untouched and can
+  // be surfaced on the Nova AI bot page directly if wanted.
   // ---- crash recovery: persist governor state via background -------------
 
   async function persistState(): Promise<void> {
