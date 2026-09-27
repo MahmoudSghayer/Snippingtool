@@ -12,7 +12,7 @@
     },
     {
       "source": "/((?!assets/|site/|api/|terms$|terms/|refund-policy$|refund-policy/|app\\.html$|.*\\.[a-zA-Z0-9]+$).+)",
-      "destination": "/app.html"
+      "destination": "/app"
     }
   ],
   "headers": [
