@@ -261,7 +261,7 @@ const NON_LIVE_SUBSCRIPTION_STATUSES = new Set(['canceled', 'expired', 'suspende
  * docs/05-subscriptions.md §9): expires any `active` license past its
  * `expires_at`, and revokes any `active` license whose subscription has
  * since left every "live" status. The synchronous paths elsewhere
- * (`subscriptions.expire`, admin suspend/cancel, the Stripe webhook) should
+ * (`subscriptions.expire`, admin suspend/cancel) should
  * already have handled each of these — this is the backstop for anything
  * that slipped through. */
 export async function revalidateLicenses(

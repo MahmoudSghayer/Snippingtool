@@ -22,7 +22,6 @@ import {
   type couponRedemptions,
   type payments,
   type paymentHistory,
-  type stripeWebhookEvents,
 } from './billing.js';
 import { type userSettings, type settingsHistory, type notifications } from './settings.js';
 import { type plans, type subscriptions, type licenses } from './subscriptions.js';
@@ -66,8 +65,6 @@ export type Payment = InferSelectModel<typeof payments>;
 export type NewPayment = InferInsertModel<typeof payments>;
 export type PaymentHistoryEntry = InferSelectModel<typeof paymentHistory>;
 export type NewPaymentHistoryEntry = InferInsertModel<typeof paymentHistory>;
-export type StripeWebhookEvent = InferSelectModel<typeof stripeWebhookEvents>;
-export type NewStripeWebhookEvent = InferInsertModel<typeof stripeWebhookEvents>;
 
 export type Device = InferSelectModel<typeof devices>;
 export type NewDevice = InferInsertModel<typeof devices>;

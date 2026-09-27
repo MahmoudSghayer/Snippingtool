@@ -1,8 +1,6 @@
 // Hourly abuse-detection sweep (docs/05-subscriptions.md §6): device-
 // registration velocity, one license seen from too many distinct networks,
-// and multi-account-by-fingerprint. Chargebacks are handled synchronously
-// by the Stripe webhook (`charge.dispute.created`, `modules/payments/
-// webhooks.ts`), not re-scanned here. Every finding writes a `flags` row
+// and multi-account-by-fingerprint. Every finding writes a `flags` row
 // and, once its severity crosses `abuse.auto_suspend_severity_threshold`,
 // suspends the affected user's live subscription the same way an admin
 // suspend does — `actor_type = 'system'` in the resulting `audit_logs` row.

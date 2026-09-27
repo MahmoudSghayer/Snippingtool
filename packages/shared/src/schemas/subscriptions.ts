@@ -65,31 +65,13 @@ export const licenseDtoSchema = z.object({
 });
 export type LicenseDto = z.infer<typeof licenseDtoSchema>;
 
-export const checkoutRequestSchema = z
-  .object({
-    planCode: z.enum(PLAN_CODES),
-    successUrl: z.string().url(),
-    cancelUrl: z.string().url(),
-    couponCode: z.string().min(1).max(40).optional(),
-  })
-  .strict();
-export type CheckoutRequest = z.infer<typeof checkoutRequestSchema>;
-
-export const checkoutResponseSchema = z.object({
-  checkoutUrl: z.string().url(),
-});
-export type CheckoutResponse = z.infer<typeof checkoutResponseSchema>;
-
-export const billingPortalResponseSchema = z.object({
-  portalUrl: z.string().url(),
-});
-export type BillingPortalResponse = z.infer<typeof billingPortalResponseSchema>;
-
 export const PAYMENT_STATUSES = ['pending', 'succeeded', 'failed', 'refunded', 'disputed'] as const;
 export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
 
 export const paymentDtoSchema = z.object({
   id: z.string().uuid(),
+  // 'stripe' is a legacy label kept in the payment_provider type (see
+  // migrations/0034_drop_stripe.sql); new rows are always 'manual'.
   provider: z.enum(['stripe', 'manual']),
   amountCents: z.number().int(),
   currency: z.string(),
@@ -196,7 +178,6 @@ export const planCreateRequestSchema = z
     isLifetime: z.boolean().default(false),
     deviceLimit: z.number().int().min(1).max(10),
     features: z.array(z.string().min(1).max(80)),
-    stripePriceId: z.string().min(1).max(200).nullable().optional(),
     sortOrder: z.number().int().default(0),
     reason: z.string().min(1).max(1000),
   })
@@ -210,7 +191,6 @@ export const planUpdateRequestSchema = z
     priceCents: z.number().int().min(0).optional(),
     deviceLimit: z.number().int().min(1).max(10).optional(),
     features: z.array(z.string().min(1).max(80)).optional(),
-    stripePriceId: z.string().min(1).max(200).nullable().optional(),
     isActive: z.boolean().optional(),
     sortOrder: z.number().int().optional(),
     reason: z.string().min(1).max(1000),

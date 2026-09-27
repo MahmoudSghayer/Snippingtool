@@ -32,7 +32,7 @@ export const autoPrefix = '/api/v1/admin/plans';
  * one's `code` is restricted to the five fixed `PLAN_CODES`, but an admin
  * may create a plan with any code (e.g. a one-off lifetime "founders" plan),
  * so this admin-facing DTO widens `code` to a free-form string and adds the
- * admin-only fields (`isActive`, `stripePriceId`, `sortOrder`, timestamps). */
+ * admin-only fields (`isActive`, `sortOrder`, timestamps). */
 const adminPlanDtoSchema = z.object({
   id: z.string().uuid(),
   code: z.string(),
@@ -44,7 +44,6 @@ const adminPlanDtoSchema = z.object({
   features: z.array(z.string()),
   isLifetime: z.boolean(),
   isActive: z.boolean(),
-  stripePriceId: z.string().nullable(),
   sortOrder: z.number().int(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
@@ -62,7 +61,6 @@ function toAdminPlanDto(row: PlanRow) {
     features: featuresJsonbToArray(row.features),
     isLifetime: row.isLifetime,
     isActive: row.isActive,
-    stripePriceId: row.stripePriceId,
     sortOrder: row.sortOrder,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),

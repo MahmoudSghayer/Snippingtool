@@ -59,17 +59,6 @@ const apiEnv = {
   APP_ORIGIN: API_ORIGIN,
   DASHBOARD_ORIGIN,
   EXTENSION_IDS: EXTENSION_ID,
-  // journey (d), subscription-via-webhook: a fixed, known webhook secret +
-  // syntactically-valid-but-fake Stripe keys — see helpers/stripe.ts and
-  // apps/api/src/modules/payments/__tests__/payments.test.ts's own
-  // "never a real network call" pattern. No real Stripe account/network
-  // access is used anywhere in this suite.
-  STRIPE_SECRET_KEY: 'sk_test_e2e_cross_app_fake_key',
-  STRIPE_WEBHOOK_SECRET: 'whsec_e2e_cross_app_test_secret',
-  STRIPE_PRICE_BASIC: 'price_e2e_basic',
-  STRIPE_PRICE_PRO: 'price_e2e_pro',
-  STRIPE_PRICE_ULTIMATE: 'price_e2e_ultimate',
-  STRIPE_PRICE_LIFETIME: 'price_e2e_lifetime',
   // Same reasoning as apps/dashboard/playwright.config.ts's identical block
   // (docs/12-testing.md "Defects found" #10): this suite's journeys
   // register/log in several fresh users and an admin per run, and a

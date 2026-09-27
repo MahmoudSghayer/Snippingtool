@@ -1,8 +1,8 @@
-// Coupon validate + redemption integration tests: percent (Stripe-applied,
-// tested at the eligibility/preview layer) and free_days (grants instantly,
-// no Stripe involvement — docs/05-subscriptions.md §8).
+// Coupon validate + eligibility integration tests (docs/05-subscriptions.md
+// §8). Redemption rows are inserted directly: nothing in the app redeems
+// coupons at the moment.
 
-import { coupons, plans, subscriptions } from '@sl/db';
+import { couponRedemptions, coupons, plans, subscriptions } from '@sl/db';
 import { resetDatabase } from '@sl/db/test-utils';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -11,11 +11,9 @@ import { buildApp } from '../../../app.js';
 import { hashSecret } from '../../../lib/crypto.js';
 import { newId } from '../../../lib/ids.js';
 import { reseedPlans } from '../../../test/reseed-reference-data.js';
-import { createCheckoutSession } from '../../payments/service.js';
-import { checkCouponEligibility, redeemCoupon } from '../service.js';
+import { checkCouponEligibility, type CouponRow } from '../service.js';
 
 import type { FastifyInstance } from 'fastify';
-import type Stripe from 'stripe';
 
 async function createVerifiedUser(app: FastifyInstance, email: string): Promise<string> {
   const { users } = await import('@sl/db');
@@ -27,6 +25,23 @@ async function createVerifiedUser(app: FastifyInstance, email: string): Promise<
     emailVerifiedAt: new Date(),
   });
   return id;
+}
+
+/** Records a redemption the way the removed checkout flow did: a
+ * coupon_redemptions row plus the redeemed_count increment. */
+async function recordRedemption(
+  app: FastifyInstance,
+  coupon: CouponRow,
+  userId: string,
+  subscriptionId: string | null,
+): Promise<void> {
+  await app.db
+    .insert(couponRedemptions)
+    .values({ id: newId(), couponId: coupon.id, userId, subscriptionId, redeemedAt: new Date() });
+  await app.db
+    .update(coupons)
+    .set({ redeemedCount: coupon.redeemedCount + 1 })
+    .where(eq(coupons.id, coupon.id));
 }
 
 async function insertCoupon(
@@ -140,7 +155,7 @@ describe('coupons module', () => {
         source: 'coupon',
       })
       .returning();
-    await redeemCoupon(app.db, coupon, userId, sub!.id);
+    await recordRedemption(app, coupon, userId, sub!.id);
 
     const anotherUser = await createVerifiedUser(app, 'second-redeemer@example.com');
     const result = await checkCouponEligibility(app.db, 'LIMITED1', proPlan!.id, anotherUser);
@@ -153,58 +168,10 @@ describe('coupons module', () => {
     const coupon = await insertCoupon(app, { code: 'ONEPERUSER', type: 'percent', value: 15 });
 
     const userId = await createVerifiedUser(app, 'once-only@example.com');
-    await redeemCoupon(app.db, coupon, userId, null);
+    await recordRedemption(app, coupon, userId, null);
 
     const result = await checkCouponEligibility(app.db, 'ONEPERUSER', proPlan!.id, userId);
     expect(result.eligible).toBe(false);
     expect(result.reason).toBe('ALREADY_REDEEMED');
-  });
-
-  it('a free_days coupon at checkout grants the subscription instantly with no Stripe session', async () => {
-    await insertCoupon(app, { code: 'WELCOME14', type: 'free_days', value: 14 });
-
-    const userId = await createVerifiedUser(app, 'free-days@example.com');
-    let stripeCheckoutCalled = false;
-    const fakeStripe = {
-      checkout: {
-        sessions: {
-          create: async () => {
-            stripeCheckoutCalled = true;
-            return { id: 'cs_should_not_be_called', url: 'https://irrelevant' };
-          },
-        },
-      },
-    } as unknown as Stripe;
-
-    const result = await createCheckoutSession(
-      fakeStripe,
-      app.db,
-      app.redis,
-      {
-        secretKey: 'sk_test',
-        webhookSecret: 'whsec_test',
-        priceIds: { basic: 'p', pro: 'p', ultimate: 'p', lifetime: 'p' },
-      },
-      {
-        userId,
-        email: 'free-days@example.com',
-        planCode: 'pro',
-        successUrl: 'https://app/success',
-        cancelUrl: 'https://app/cancel',
-        couponCode: 'WELCOME14',
-      },
-    );
-
-    expect(stripeCheckoutCalled).toBe(false);
-    expect(result.kind).toBe('granted');
-    if (result.kind === 'granted') {
-      expect(result.subscription.status).toBe('active');
-      expect(result.subscription.plan.code).toBe('pro');
-    }
-
-    const couponRow = await app.db.query.coupons.findFirst({
-      where: eq(coupons.code, 'WELCOME14'),
-    });
-    expect(couponRow!.redeemedCount).toBe(1);
   });
 });

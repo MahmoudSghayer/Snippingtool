@@ -106,6 +106,8 @@ export const subscriptionStatusEnum = pgEnum('subscription_status', [
   'expired',
   'lifetime',
 ]);
+// 'stripe' is a legacy label: Postgres cannot drop an enum label, and nothing
+// writes it since migrations/0034_drop_stripe.sql.
 export const subscriptionSourceEnum = pgEnum('subscription_source', ['stripe', 'manual', 'coupon']);
 
 export const licenseStatusEnum = pgEnum('license_status', ['active', 'revoked', 'expired']);
@@ -162,6 +164,8 @@ export const notificationChannelEnum = pgEnum('notification_channel', [
   'ws',
 ]);
 
+// 'stripe' is a legacy label, as for subscription_source above. New payment
+// rows (approved PayPal claims) are 'manual'.
 export const paymentProviderEnum = pgEnum('payment_provider', ['stripe', 'manual']);
 export const paymentClaimStatusEnum = pgEnum('payment_claim_status', [
   'pending',

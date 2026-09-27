@@ -1,4 +1,5 @@
-// Matches migrations/0017_coupons.sql, 0018_billing.sql, 0031_payment_claims.sql.
+// Matches migrations/0017_coupons.sql, 0018_billing.sql, 0031_payment_claims.sql
+// and 0034_drop_stripe.sql.
 
 import { isNull, relations } from 'drizzle-orm';
 import {
@@ -112,7 +113,7 @@ export const payments = pgTable(
       onDelete: 'restrict',
     }),
 
-    provider: paymentProviderEnum('provider').notNull().default('stripe'),
+    provider: paymentProviderEnum('provider').notNull().default('manual'),
     providerPaymentId: text('provider_payment_id').notNull(),
 
     amountCents: integer('amount_cents').notNull(),
@@ -170,28 +171,6 @@ export const paymentHistory = pgTable(
 export const paymentHistoryRelations = relations(paymentHistory, ({ one }) => ({
   payment: one(payments, { fields: [paymentHistory.paymentId], references: [payments.id] }),
 }));
-
-// ---------------------------------------------------------------------------
-
-export const stripeWebhookEvents = pgTable(
-  'stripe_webhook_events',
-  {
-    id: idPk(),
-    eventId: text('event_id').notNull(),
-
-    type: text('type').notNull(),
-    payload: jsonb('payload').notNull().$type<Record<string, unknown>>(),
-    processedAt: timestamptz('processed_at'),
-    error: text('error'),
-
-    createdAt: createdAt(),
-  },
-  (t) => [
-    uniqueIndex('stripe_webhook_events_event_id_unique').on(t.eventId),
-    index('stripe_webhook_events_type_idx').on(t.type),
-    index('stripe_webhook_events_unprocessed_idx').on(t.createdAt).where(isNull(t.processedAt)),
-  ],
-);
 
 // ---------------------------------------------------------------------------
 
