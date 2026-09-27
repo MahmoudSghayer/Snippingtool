@@ -23,10 +23,14 @@
  *   - the cooldown after every buy.
  *
  * The hourly budgets — the governor's windows and this file's own search and
- * buy windows — are one set per user, not per start: the governor lives as
- * long as this object (Stop/Start keeps it), and its state and the windows
- * are saved through `saveBudget` after every action and hydrated through
- * `loadBudget` on the first start after a page reload.
+ * buy windows — are one set per user, not per start or per tab: the governor
+ * lives as long as this object (Stop/Start keeps it), its state and the
+ * windows are saved through `saveBudget` after every action, and every
+ * start loads them again through `loadBudget` before acting, so a start in
+ * this tab sees what another EA tab spent since (only one tab runs the bot
+ * at a time: `exclusive`, the engine lease in content/engine-lease.ts). If
+ * they cannot be loaded (the service worker did not answer), the bot does
+ * not start, and nothing is saved over the stored windows.
  *
  * Settings above low risk (`botRiskLevel`, which rates every limit the user
  * can raise) need the user's one-time acknowledgment (`riskAcknowledgedAt`),
@@ -86,6 +90,28 @@ function startOfLocalDay(t: number): number {
   return d.getTime();
 }
 
+/** The union of two saved copies of one window: each entry as many times
+ * as the copy holding it more often has it. Two buys in the same
+ * millisecond are two buys; a plain Set would count them as one. */
+function mergeCounted<T>(a: readonly T[], b: readonly T[], key: (item: T) => string): T[] {
+  const count = (items: readonly T[]) => {
+    const m = new Map<string, { item: T; n: number }>();
+    for (const item of items) {
+      const k = key(item);
+      const e = m.get(k);
+      if (e) e.n++;
+      else m.set(k, { item, n: 1 });
+    }
+    return m;
+  };
+  const merged = count(a);
+  for (const [k, e] of count(b)) {
+    const mine = merged.get(k);
+    if (!mine || mine.n < e.n) merged.set(k, e);
+  }
+  return [...merged.values()].flatMap((e) => Array.from({ length: e.n }, () => e.item));
+}
+
 export interface SniperFilter {
   id: string;
   name: string;
@@ -115,6 +141,8 @@ export type SniperStopReason =
   | 'daily_limit'
   | 'risk_unacknowledged'
   | 'not_entitled'
+  | 'other_tab'
+  | 'budget_unavailable'
   | 'search_failing';
 
 export interface SniperLogEntry {
@@ -177,13 +205,18 @@ export interface SniperDeps {
   /** Today's active time, as saved by an earlier page (null = none). */
   loadUsage?: () => Promise<BotDailyUsage | null>;
   saveUsage?: (usage: BotDailyUsage) => void;
-  /** The hourly budgets as saved by an earlier page (null = none). */
+  /** The hourly budgets as saved by an earlier page or another tab (null =
+   * none saved). Must reject when they could not be read (no answer from
+   * the service worker): a null there would refill every budget. */
   loadBudget?: () => Promise<BotBudgetState | null>;
   saveBudget?: (budget: BotBudgetState) => void;
   /** Whether the user's plan still includes the bot (`automation.autobuyer`
    * in the current entitlement). Checked before every action; omitted =
    * always. */
   entitled?: () => boolean;
+  /** Whether this tab holds the engine lease (only one EA tab runs an
+   * engine at a time). Checked before every action; omitted = always. */
+  exclusive?: () => boolean;
   /** The server kill switch as the content script currently knows it. */
   killSwitch: () => { active: boolean; reason?: string };
   onChange: () => void;
@@ -233,7 +266,8 @@ export class Sniper {
   private activeSince: number | null = null;
   private usageSavedAt = 0;
   private governor: Governor | null = null;
-  /** Whether the saved budgets have been loaded yet (once per page load). */
+  /** Whether this start has loaded the saved budgets yet. Until it has, the
+   * budgets are never saved (they would overwrite the stored ones). */
   private budgetHydrated = false;
   private abort: AbortController | null = null;
   private stats: SniperStats = emptyStats();
@@ -349,7 +383,17 @@ export class Sniper {
       });
       return;
     }
+    if (this.deps.exclusive && !this.deps.exclusive()) {
+      this.setState({
+        phase: 'stopped',
+        phaseEndsAt: null,
+        stopReason: 'other_tab',
+        stopDetail: STOP_MESSAGES.other_tab,
+      });
+      return;
+    }
     this.abort = new AbortController();
+    this.budgetHydrated = false;
     // One governor for the life of this object: Stop/Start keeps its
     // windows (and the search/buy windows below) rather than refilling them.
     if (this.governor) {
@@ -401,12 +445,22 @@ export class Sniper {
     this.usage =
       saved && saved.day === localDay(this.now()) ? { ...saved } : { day: localDay(this.now()), activeMs: 0 };
     this.activeSince = this.now();
-    if (!this.budgetHydrated) {
-      const budget = await this.deps.loadBudget?.().catch(() => null);
+    // Every start: another EA tab may have spent some of the budgets since
+    // this one last ran. Marked loaded only on a real answer (finding A: a
+    // failed load used to count as "nothing saved", and the next save then
+    // wrote fresh, empty windows over the stored ones).
+    if (this.deps.loadBudget) {
+      let budget: BotBudgetState | null;
+      try {
+        budget = await this.deps.loadBudget();
+      } catch {
+        if (signal.aborted) return;
+        return this.stop('budget_unavailable');
+      }
       if (signal.aborted) return;
-      this.budgetHydrated = true;
       if (budget) this.hydrateBudget(budget);
     }
+    this.budgetHydrated = true;
 
     while (!signal.aborted) {
       if (this.dailyLimitReached()) return this.stop('daily_limit');
@@ -430,7 +484,7 @@ export class Sniper {
       if (filters.length === 0) return this.stop('no_filters');
       const target = filters[this.filterIndex++ % filters.length]!;
 
-      if (this.applyKillSwitch() || this.applyEntitlement()) return;
+      if (this.applyKillSwitch() || this.applyEntitlement() || this.applyExclusive()) return;
       // The user's searches-per-hour limit, on its own window.
       const searchWait = this.windowWait(this.searchTimes, s().safety.maxSearchesPerHour);
       if (searchWait > 0) {
@@ -528,7 +582,7 @@ export class Sniper {
       // may simply not have seen this card sell yet.
       if (t.minProfit > 0 && profit != null && profit < t.minProfit) continue;
 
-      if (this.applyKillSwitch() || this.applyEntitlement()) return true;
+      if (this.applyKillSwitch() || this.applyEntitlement() || this.applyExclusive()) return true;
       if (this.windowWait(this.buyTimes, this.settings.safety.maxBuysPerHour) > 0) {
         this.addLog({
           kind: 'blocked',
@@ -751,6 +805,13 @@ export class Sniper {
     return true;
   }
 
+  /** Stops the bot when another EA tab holds the engine lease. */
+  private applyExclusive(): boolean {
+    if (!this.deps.exclusive || this.deps.exclusive()) return false;
+    this.stop('other_tab');
+    return true;
+  }
+
   /** The hourly budgets as they stand, for `saveBudget`. */
   getBudget(): BotBudgetState | null {
     if (!this.governor) return null;
@@ -771,18 +832,34 @@ export class Sniper {
     if (budget) this.deps.saveBudget?.(budget);
   }
 
-  /** Takes the saved budgets over (the first start after a page load). The
-   * saved governor state keeps its windows and cooldown; the kill switch is
-   * re-read before every action anyway, so the saved flag is dropped. The
-   * windows are merged with anything this page already counted. */
+  /** Takes the saved budgets over (every start). The windows are merged
+   * with anything this page already counted — a save of its own that never
+   * reached storage must not be lost either — and the saved cooldown wins
+   * if it is later. The kill switch is re-read before every action anyway,
+   * so the saved flag is dropped. */
   private hydrateBudget(budget: BotBudgetState): void {
     const cutoff = this.now() - ONE_HOUR_MS;
+    const inWindow = (t: number) => t > cutoff && t <= this.now();
+    const saved = budget.governor;
+    const mine = this.governor?.serialize();
+    const coinFlow = mergeCounted(mine?.coinFlow ?? [], saved.coinFlow, (c) => `${c.at}:${c.coins}`)
+      .filter((c) => inWindow(c.at))
+      .sort((x, y) => x.at - y.at);
     const merge = (a: number[], b: number[]) =>
-      [...new Set([...a, ...b])].filter((t) => t > cutoff && t <= this.now()).sort((x, y) => x - y);
+      mergeCounted(a, b, String).filter(inWindow).sort((x, y) => x - y);
     this.governor = new Governor(botGovernorSettings(this.settings), {
       now: this.now,
       bounds: BOT_GOVERNOR_BOUNDS,
-      state: { ...budget.governor, killSwitchActive: false, killSwitchReason: undefined },
+      state: {
+        ...saved,
+        actionTimestamps: merge(mine?.actionTimestamps ?? [], saved.actionTimestamps),
+        coinFlow,
+        searchCount: Math.max(saved.searchCount, mine?.searchCount ?? 0),
+        buyCount: Math.max(saved.buyCount, mine?.buyCount ?? 0),
+        cooldownUntil: Math.max(saved.cooldownUntil, mine?.cooldownUntil ?? 0),
+        killSwitchActive: false,
+        killSwitchReason: undefined,
+      },
     });
     this.searchTimes = merge(this.searchTimes, budget.searchTimes);
     this.buyTimes = merge(this.buyTimes, budget.buyTimes);
@@ -863,5 +940,8 @@ const STOP_MESSAGES: Record<SniperStopReason, string> = {
   risk_unacknowledged:
     'these settings are above low risk: confirm the risk on the Sniping Bot page first, or reset to recommended',
   not_entitled: 'your plan no longer includes the Sniping Bot',
+  other_tab: 'Nova Trade is running in another EA tab: stop the bot there, or close that tab, first',
+  budget_unavailable:
+    'the saved hourly limits could not be read (the extension may be restarting) — try Start again in a moment',
   search_failing: 'searches keep failing',
 };
