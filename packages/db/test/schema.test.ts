@@ -28,7 +28,6 @@ const EXPECTED_TABLES = [
   'notifications',
   'payments',
   'payment_history',
-  'stripe_webhook_events',
   'coupons',
   'coupon_redemptions',
   'bans',

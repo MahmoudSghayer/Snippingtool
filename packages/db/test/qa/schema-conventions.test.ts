@@ -59,10 +59,6 @@ const EXCEPTIONS: Record<string, { missing: Column[]; reason: string }> = {
     missing: ['updated_at', 'deleted_at', 'row_version'],
     reason: 'append-only event trail per payment (§6.4)',
   },
-  stripe_webhook_events: {
-    missing: ['updated_at', 'deleted_at', 'row_version'],
-    reason: 'idempotency ledger, not a soft-deletable entity (§6.4)',
-  },
   // payments itself updates (status) but is never soft-deleted (financial record, RESTRICT-protected instead)
   payments: {
     missing: ['deleted_at'],
