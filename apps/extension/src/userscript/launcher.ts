@@ -29,6 +29,7 @@ const LAUNCHER_CSS = `
     background: #151d1a; cursor: pointer; box-shadow: 0 6px 18px rgba(0,0,0,.45);
   }
   .fab svg { display: block; width: 100%; height: 100%; transform: scale(1.18); }
+  .fab[hidden] { display: none; }
   .fab:hover { filter: brightness(1.12); }
   .fab:focus-visible { outline: 2px solid #fcfcfc; outline-offset: 2px; }
   .drawer {
@@ -110,6 +111,19 @@ export function installLauncher(): void {
       hide();
       fab.focus();
     }
+  });
+
+  // Hidden while the Nova AI page is open, so it never covers the page.
+  const syncWithBotPage = () => {
+    const botOpen = document.getElementById('ledger-bot-page')?.hasAttribute('data-open') ?? false;
+    fab.hidden = botOpen;
+    if (botOpen) hide();
+  };
+  new MutationObserver(syncWithBotPage).observe(document.body, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    attributeFilter: ['data-open'],
   });
 
   GM_registerMenuCommand('Open Nova Trade', () => show());

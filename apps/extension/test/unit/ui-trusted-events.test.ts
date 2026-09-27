@@ -72,3 +72,23 @@ describe('userscript launcher', () => {
     });
   });
 });
+
+describe('userscript launcher and the Nova AI page', () => {
+  it('hides while the Nova AI page is open', async () => {
+    (globalThis as Record<string, unknown>).GM_registerMenuCommand = vi.fn();
+    const { installLauncher } = await import('../../src/userscript/launcher.js');
+    const shadows = captureShadowRoots();
+    installLauncher();
+    shadows.restore();
+    const fab = shadows.rootOf(document.getElementById('ledger-launcher')!).querySelector<HTMLButtonElement>('.fab')!;
+    const botHost = document.createElement('div');
+    botHost.id = 'ledger-bot-page';
+    document.body.append(botHost);
+    botHost.dataset.open = '';
+    await new Promise((r) => setTimeout(r, 0));
+    expect(fab.hidden).toBe(true);
+    delete botHost.dataset.open;
+    await new Promise((r) => setTimeout(r, 0));
+    expect(fab.hidden).toBe(false);
+  });
+});

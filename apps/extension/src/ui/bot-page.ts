@@ -1685,6 +1685,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       pending = null;
       renderSettings();
       page.hidden = false;
+      // Lets the account button step aside while the page is open.
+      host.dataset.open = '';
       refreshLive();
       void deps.prepare().then(() => {
         if (!page.hidden) refreshLive();
@@ -1702,6 +1704,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     close() {
       if (page.hidden) return;
       page.hidden = true;
+      delete host.dataset.open;
       if (tick) clearInterval(tick);
       if (catalogPoll) clearInterval(catalogPoll);
       catalogPoll = null;
