@@ -1,4 +1,5 @@
-// Matches migrations/0005_plans.sql, 0006_subscriptions.sql, 0007_licenses.sql.
+// Matches migrations/0005_plans.sql, 0006_subscriptions.sql, 0007_licenses.sql,
+// plus 0035_subscriptions_trial_history_idx.sql.
 
 import { isNull, relations } from 'drizzle-orm';
 import {
@@ -109,6 +110,8 @@ export const subscriptions = pgTable(
     index('subscriptions_status_idx').on(t.status).where(isNull(t.deletedAt)),
     index('subscriptions_current_period_end_idx').on(t.currentPeriodEnd).where(isNull(t.deletedAt)),
     index('subscriptions_trial_ends_at_idx').on(t.trialEndsAt).where(isNull(t.deletedAt)),
+    // Not partial: the trial-history lookup must see soft-deleted rows too.
+    index('subscriptions_user_id_plan_id_idx').on(t.userId, t.planId),
   ],
 );
 
