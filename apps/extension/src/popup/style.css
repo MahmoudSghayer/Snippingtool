@@ -7,20 +7,23 @@
  * so a long device/filter list never gets clipped without a way to reach
  * the rest of it. */
 
-/* EA FC web app palette, the same values as the Nova AI page's `--ea-*`
- * tokens (ui/bot-page.ts). Not yet checked against the live web app. */
+/* EA FC web app styling, the same values as the Nova AI page's `--ea-*`
+ * tokens (ui/bot-page.ts), from EA's own stylesheet. */
 :root {
-  --sl-bg: #0d1522;
-  --sl-card: #152033;
-  --sl-card-2: #1c2a42;
-  --sl-border: #34425c;
-  --sl-fg: #ffffff;
-  --sl-fg-muted: #93a0b5;
-  --sl-accent: #25e6d0;
-  --sl-accent-ink: #062521;
-  --sl-positive: #3ddc84;
-  --sl-warning: #f5b83d;
-  --sl-negative: #ff5a64;
+  --sl-bg: #202c3d;
+  --sl-card: #233144;
+  --sl-card-2: #151d29;
+  --sl-border: #deded826;
+  --sl-fg: #fcfcfc;
+  --sl-fg-muted: #a6a6a1;
+  --sl-accent: #07f468;
+  --sl-accent-ink: #151616;
+  --sl-positive: #07f468;
+  --sl-warning: #f7b702;
+  --sl-negative: #fd4821;
+  --sl-radius-sm: 8px;
+  --sl-radius-md: 10px;
+  --ea-primary: linear-gradient(135deg, #b1ffff 0, #f2fcfc 17%, #f1f0ff 65%, #e2d6ff 100%);
 }
 
 * {
@@ -34,14 +37,8 @@ body {
   overflow-y: auto;
   background: var(--sl-bg);
   color: var(--sl-fg);
-  font-family:
-    'UltimateTeamCondensed',
-    'UltimateTeam',
-    'Segoe UI',
-    system-ui,
-    -apple-system,
-    sans-serif;
-  font-size: 14px;
+  font-family: UltimateTeam, sans-serif;
+  font-size: 16px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -50,8 +47,8 @@ body {
 }
 
 h1 {
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 20px;
+  font-weight: 500;
   margin: 0 0 10px;
   display: flex;
   align-items: center;
@@ -81,7 +78,6 @@ h1 {
 
 .card {
   background: var(--sl-card);
-  border: 1px solid var(--sl-border);
   border-radius: var(--sl-radius-md);
   padding: 10px 12px;
   margin-bottom: 10px;
@@ -121,28 +117,33 @@ label {
 
 input {
   width: 100%;
-  padding: 7px 9px;
+  height: 48px;
+  padding: 0 12px;
   margin-bottom: 8px;
   border-radius: var(--sl-radius-sm);
   border: 1px solid var(--sl-border);
-  background: var(--sl-bg);
+  background: #0e141b;
+  font-size: 18px;
   color: var(--sl-fg);
   font: inherit;
 }
 input:focus-visible {
-  outline: 2px solid var(--sl-accent);
+  outline: 2px solid var(--sl-fg);
   outline-offset: 1px;
 }
 
 button {
   width: 100%;
-  padding: 8px 10px;
+  min-height: 48px;
+  padding: 12px 24px;
   border-radius: var(--sl-radius-sm);
   border: none;
-  background: var(--sl-accent);
+  background: var(--ea-primary);
   color: var(--sl-accent-ink);
   font: inherit;
-  font-weight: 600;
+  font-size: 20px;
+  line-height: 20px;
+  font-weight: 400;
   cursor: pointer;
   transition:
     filter var(--sl-motion-fast) var(--sl-ease),
@@ -155,11 +156,11 @@ button:active {
   filter: brightness(0.95);
 }
 button:focus-visible {
-  outline: 2px solid var(--sl-accent);
+  outline: 2px solid var(--sl-fg);
   outline-offset: 2px;
 }
 button.secondary {
-  background: transparent;
+  background: var(--sl-bg);
   color: var(--sl-fg);
   border: 1px solid var(--sl-border);
 }
@@ -190,10 +191,13 @@ button:disabled {
   background: none;
   border: none;
   padding: 0;
+  width: auto;
+  min-height: 0;
   font: inherit;
+  font-size: 16px;
 }
 .link:focus-visible {
-  outline: 2px solid var(--sl-accent);
+  outline: 2px solid var(--sl-fg);
   outline-offset: 2px;
 }
 
@@ -209,26 +213,29 @@ button:disabled {
 button.switch {
   position: relative;
   flex: none;
-  width: 42px;
+  width: 48px;
+  min-height: 0;
   height: 24px;
   padding: 0;
-  border-radius: 999px;
-  background: var(--sl-border);
+  border-radius: 24px;
+  background: #575753;
+  transition: background-color 0.3s;
 }
 button.switch::after {
   content: '';
   position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 18px;
-  height: 18px;
+  top: 0;
+  left: 0;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
-  background: #fff;
-  transition: left var(--sl-motion-fast) var(--sl-ease);
+  background: #fcfcfc;
+  box-shadow: rgb(0 0 0 / 50%) 0 1px 4px;
+  transition: left 0.3s;
 }
 button.switch[aria-checked='true'] {
-  background: var(--sl-accent);
+  background: #07f468;
 }
 button.switch[aria-checked='true']::after {
-  left: 21px;
+  left: 24px;
 }

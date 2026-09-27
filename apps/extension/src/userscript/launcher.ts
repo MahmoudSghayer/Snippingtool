@@ -1,6 +1,7 @@
 /*
  * launcher.ts — the userscript build's stand-in for the toolbar popup. A
- * small Nova Trade button on the EA page (bottom-left) opens a drawer with
+ * small Nova Trade button on the EA page (bottom-right, clear of EA's
+ * navigation) opens a drawer with
  * the account view, the very same `popup/app.ts` the extension uses. Also
  * reachable from Tampermonkey's menu. The tool itself opens from the
  * "Nova AI" item in EA's left navigation (`ui/ea-nav.ts`).
@@ -23,19 +24,19 @@ import { onTrusted } from '../ui/trusted-events.js';
 const LAUNCHER_CSS = `
   :host { all: initial; }
   .fab {
-    position: fixed; left: 16px; bottom: 16px; z-index: 2147483000;
+    position: fixed; right: 16px; bottom: 16px; z-index: 2147483000;
     width: 44px; height: 44px; padding: 0; border: 0; border-radius: 50%; overflow: hidden;
     background: #151d1a; cursor: pointer; box-shadow: 0 6px 18px rgba(0,0,0,.45);
   }
   .fab svg { display: block; width: 100%; height: 100%; transform: scale(1.18); }
   .fab:hover { filter: brightness(1.12); }
-  .fab:focus-visible { outline: 2px solid var(--sl-gold); outline-offset: 2px; }
+  .fab:focus-visible { outline: 2px solid #fcfcfc; outline-offset: 2px; }
   .drawer {
-    position: fixed; left: 16px; bottom: 70px; z-index: 2147483000;
+    position: fixed; right: 16px; bottom: 70px; z-index: 2147483000;
     width: 360px; max-width: calc(100vw - 32px); max-height: calc(100vh - 90px);
     display: flex; flex-direction: column; overflow: hidden;
-    background: var(--sl-ground); border: 1px solid var(--sl-line); border-radius: 10px;
-    box-shadow: 0 16px 40px rgba(0,0,0,.55); font: 13px/1.4 system-ui, sans-serif;
+    background: #202c3d; border: 1px solid #deded826; border-radius: 10px;
+    box-shadow: 0 16px 40px rgba(0,0,0,.55); font: 16px/1.4 UltimateTeam, sans-serif;
   }
   .drawer[hidden] { display: none; }
   .view { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
