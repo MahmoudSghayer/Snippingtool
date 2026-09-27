@@ -1,5 +1,6 @@
 // /api/v1/trades — batch upsert from the extension, a cursor-paginated list
-// for the dashboard, and `POST /trades/:id/close` for recording a sale.
+// for the dashboard (with its totals and CSV export over the same filters),
+// and `POST /trades/:id/close` for recording a sale.
 //
 // The API owns the profit maths. Whatever a client sends for `eaTax` and
 // `netProfit`, a stored trade's tax and net are recomputed here from its
@@ -9,22 +10,29 @@
 // (lib/analytics/rollup.ts) so the dashboard reflects it on its next
 // request rather than after the hourly job.
 
-import { trades, type Database } from '@sl/db';
+import { cards, trades, type Database } from '@sl/db';
 import {
   closeTradeRequestSchema,
   computeTradeProfit,
   paginatedResponseSchema,
-  paginationQuerySchema,
   reportTradesRequestSchema,
   type ReportTradesRequest,
+  tradeFilterQuerySchema,
+  type TradeFilterQuery,
+  tradeListItemSchema,
+  type TradeListItem,
+  tradeListQuerySchema,
   tradeSchema,
+  tradeTotalsSchema,
   type Trade,
 } from '@sl/shared';
-import { and, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
 import fp from 'fastify-plugin';
 import { z } from 'zod';
 
+import { csvStream } from '../../lib/analytics/csv.js';
 import { rollupProfitsForUserDays, utcDay } from '../../lib/analytics/rollup.js';
+import { CURRENT_FC_TITLE } from '../../lib/collectors/resolver.js';
 import { AppErrors } from '../../lib/errors.js';
 import { newId } from '../../lib/ids.js';
 import { decodeCursor, encodeCursor } from '../../lib/pagination.js';
@@ -130,6 +138,47 @@ function batchValues(t: ReportTradesRequest['trades'][number], existing: TradeRo
   };
 }
 
+/** The instant a calendar day starts in `tz` (`'2026-09-10'` in
+ * `Asia/Tokyo` is 2026-09-09T15:00Z), as SQL. `tz` is an IANA name already
+ * checked by `timeZoneSchema`. */
+function startOfDayIn(day: string, tz: string, plusDays = 0): SQL {
+  return sql.join([
+    sql`((`,
+    sql.param(day),
+    sql`::date + `,
+    sql.param(plusDays),
+    sql`::int)::timestamp AT TIME ZONE `,
+    sql.param(tz),
+    sql`)`,
+  ]);
+}
+
+/** WHERE conditions for one user's live trades matching the dashboard's
+ * filters: status, and purchase day within [from, to] in `tz`. */
+function filterConditions(userId: string, filter: TradeFilterQuery): SQL[] {
+  if (filter.from && filter.to && filter.from > filter.to)
+    throw AppErrors.validation('`from` must be on or before `to`.');
+  const conditions: SQL[] = [eq(trades.userId, userId), isNull(trades.deletedAt)];
+  if (filter.status) conditions.push(eq(trades.status, filter.status));
+  if (filter.from) conditions.push(gte(trades.boughtAt, startOfDayIn(filter.from, filter.tz)));
+  if (filter.to) conditions.push(lt(trades.boughtAt, startOfDayIn(filter.to, filter.tz, 1)));
+  return conditions;
+}
+
+/** The card a trade is for, in the current FC title: EA reuses resource ids
+ * across titles (lib/collectors/resolver.ts), so an older title's card
+ * would put the wrong name on the row. */
+const cardJoin = and(eq(cards.resourceId, trades.resourceId), eq(cards.fcTitle, CURRENT_FC_TITLE));
+
+const listColumns = {
+  trade: trades,
+  // The name traders know a card by (`Messi`), else the full name.
+  cardName: sql
+    .join([sql`coalesce(`, cards.commonName, sql`, `, cards.name, sql`)`])
+    .mapWith((v: string | null) => v),
+  cardRating: cards.rating,
+};
+
 function toTradeDto(t: TradeRow): Trade {
   return {
     id: t.id,
@@ -147,6 +196,22 @@ function toTradeDto(t: TradeRow): Trade {
     boughtAt: t.boughtAt ? t.boughtAt.toISOString() : new Date(0).toISOString(),
     soldAt: t.soldAt ? t.soldAt.toISOString() : null,
   };
+}
+
+function toListItem(row: {
+  trade: TradeRow;
+  cardName: string | null;
+  cardRating: number | null;
+}): TradeListItem {
+  const dto = toTradeDto(row.trade);
+  return { ...dto, rating: dto.rating ?? row.cardRating, cardName: row.cardName };
+}
+
+/** A spreadsheet runs a cell starting with one of these as a formula. Card
+ * names come from scraped sources, so they're neutralised with a leading
+ * quote (OWASP "CSV injection"). */
+function csvText(value: string | null): string | null {
+  return value && /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
 }
 
 export default fp(
@@ -278,51 +343,175 @@ export default fp(
       },
     );
 
+    /** One keyset page of the caller's filtered trades, with card names.
+     * Keyset on (bought_at, id) in the requested direction. Comparing
+     * bought_at alone skipped every row that shared the last row's
+     * timestamp — the extension can report several buys in the same
+     * millisecond. */
+    async function listPage(
+      userId: string,
+      filter: TradeFilterQuery,
+      order: 'asc' | 'desc',
+      after: { at: Date; id: string } | null,
+      limit: number,
+    ) {
+      const conditions = filterConditions(userId, filter);
+      const past = order === 'asc' ? gt : lt;
+      if (after)
+        conditions.push(
+          or(
+            past(trades.boughtAt, after.at),
+            and(eq(trades.boughtAt, after.at), past(trades.id, after.id)),
+          )!,
+        );
+      const direction = order === 'asc' ? asc : desc;
+      return fastify.db
+        .select(listColumns)
+        .from(trades)
+        .leftJoin(cards, cardJoin)
+        .where(and(...conditions))
+        .orderBy(direction(trades.boughtAt), direction(trades.id))
+        .limit(limit);
+    }
+
     app.get(
       '/api/v1/trades',
       {
         onRequest: [fastify.authenticate],
         schema: {
           tags: ['trades'],
-          querystring: paginationQuerySchema,
-          response: { 200: paginatedResponseSchema(tradeSchema) },
+          querystring: tradeListQuerySchema,
+          response: { 200: paginatedResponseSchema(tradeListItemSchema) },
         },
       },
       async (request) => {
         const cursor = decodeCursor(request.query.cursor);
-        const limit = request.query.limit;
-        const userId = request.authUser!.id;
-
-        // Keyset on (bought_at, id), newest first. Comparing bought_at alone
-        // skipped every row that shared the last row's timestamp — the
-        // extension can report several buys in the same millisecond.
-        const conditions = [eq(trades.userId, userId), isNull(trades.deletedAt)];
+        const { limit, order } = request.query;
+        let after: { at: Date; id: string } | null = null;
         if (cursor) {
           const at = new Date(cursor.v);
           if (Number.isNaN(at.getTime()) || !UUID_RE.test(cursor.id))
             throw AppErrors.validation('Invalid cursor.');
-          conditions.push(
-            or(lt(trades.boughtAt, at), and(eq(trades.boughtAt, at), lt(trades.id, cursor.id)))!,
-          );
+          after = { at, id: cursor.id };
         }
 
-        const rows = await fastify.db.query.trades.findMany({
-          where: and(...conditions),
-          orderBy: [desc(trades.boughtAt), desc(trades.id)],
-          limit: limit + 1,
-        });
-
+        const rows = await listPage(request.authUser!.id, request.query, order, after, limit + 1);
         const hasMore = rows.length > limit;
         const items = hasMore ? rows.slice(0, limit) : rows;
-        const last = items.at(-1);
+        const last = items.at(-1)?.trade;
 
         return {
-          items: items.map(toTradeDto),
+          items: items.map(toListItem),
           nextCursor:
             hasMore && last?.boughtAt
               ? encodeCursor({ v: last.boughtAt.toISOString(), id: last.id })
               : null,
         };
+      },
+    );
+
+    // Totals for the same filters as the list, over every matching trade
+    // rather than the page on screen. Coins spent count every purchase;
+    // revenue and net count sales (a trade with a sale time), the same
+    // attribution as the `profits` rollup (lib/analytics/rollup.ts).
+    app.get(
+      '/api/v1/trades/totals',
+      {
+        onRequest: [fastify.authenticate],
+        schema: {
+          tags: ['trades'],
+          querystring: tradeFilterQuerySchema,
+          response: { 200: tradeTotalsSchema },
+        },
+      },
+      async (request) => {
+        const [row] = await fastify.db
+          .select({
+            count: sql`count(*)::int`.mapWith(Number),
+            sold: sql`(count(*) FILTER (WHERE sold_at IS NOT NULL))::int`.mapWith(Number),
+            spent: sql`coalesce(sum(buy_price), 0)::bigint`.mapWith(Number),
+            revenue:
+              sql`coalesce(sum(sell_price) FILTER (WHERE sold_at IS NOT NULL), 0)::bigint`.mapWith(
+                Number,
+              ),
+            netProfit:
+              sql`coalesce(sum(net_profit) FILTER (WHERE sold_at IS NOT NULL), 0)::bigint`.mapWith(
+                Number,
+              ),
+          })
+          .from(trades)
+          .where(and(...filterConditions(request.authUser!.id, request.query)));
+        return row!;
+      },
+    );
+
+    // Every trade matching the list's filters as CSV, newest first, streamed
+    // a page at a time (same pattern as /admin/audit/export.csv).
+    app.get(
+      '/api/v1/trades/export.csv',
+      {
+        onRequest: [fastify.authenticate],
+        schema: {
+          tags: ['trades'],
+          summary: "Stream the caller's trades matching the given filters as CSV.",
+          querystring: tradeFilterQuerySchema,
+        },
+      },
+      async (request, reply) => {
+        const userId = request.authUser!.id;
+        const filter = request.query;
+        // Throws a 400 for a bad range before any bytes are streamed.
+        filterConditions(userId, filter);
+
+        const PAGE_SIZE = 1000;
+        async function* rows() {
+          let after: { at: Date; id: string } | null = null;
+          for (;;) {
+            const page = await listPage(userId, filter, 'desc', after, PAGE_SIZE);
+            for (const row of page) {
+              const t = toListItem(row);
+              yield {
+                tradeId: t.tradeId,
+                card: csvText(t.cardName ?? `#${t.resourceId}`),
+                resourceId: t.resourceId,
+                rating: t.rating,
+                status: t.status,
+                buyPrice: t.buyPrice,
+                sellPrice: t.sellPrice,
+                eaTax: row.trade.eaTax,
+                netProfit: t.netProfit,
+                boughtAt: row.trade.boughtAt?.toISOString() ?? null,
+                soldAt: t.soldAt,
+              };
+            }
+            const last = page.at(-1)?.trade;
+            // A trade with no purchase time sorts first and can't be a keyset
+            // position; only the extension's very first builds wrote one.
+            if (page.length < PAGE_SIZE || !last?.boughtAt) return;
+            after = { at: last.boughtAt, id: last.id };
+          }
+        }
+
+        reply.header('content-type', 'text/csv; charset=utf-8');
+        reply.header('content-disposition', 'attachment; filename="trades.csv"');
+        return reply.send(
+          csvStream(
+            [
+              { key: 'tradeId', header: 'tradeId' },
+              { key: 'card', header: 'card' },
+              { key: 'resourceId', header: 'resourceId' },
+              { key: 'rating', header: 'rating' },
+              { key: 'status', header: 'status' },
+              { key: 'buyPrice', header: 'buyPrice' },
+              { key: 'sellPrice', header: 'sellPrice' },
+              { key: 'eaTax', header: 'eaTax' },
+              { key: 'netProfit', header: 'netProfit' },
+              { key: 'boughtAt', header: 'boughtAt' },
+              { key: 'soldAt', header: 'soldAt' },
+            ],
+            rows(),
+          ),
+        );
       },
     );
   },

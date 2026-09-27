@@ -7217,6 +7217,16 @@
             "in": "query",
             "name": "granularity",
             "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "in": "query",
+            "name": "tz",
+            "required": false
           }
         ],
         "responses": {
@@ -15420,6 +15430,63 @@
             "in": "query",
             "name": "limit",
             "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "bought",
+                "listed",
+                "sold",
+                "expired",
+                "unsold"
+              ]
+            },
+            "in": "query",
+            "name": "status",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "in": "query",
+            "name": "from",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "in": "query",
+            "name": "to",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "default": "UTC"
+            },
+            "in": "query",
+            "name": "tz",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "desc",
+                "asc"
+              ],
+              "default": "desc"
+            },
+            "in": "query",
+            "name": "order",
+            "required": false
           }
         ],
         "responses": {
@@ -15497,6 +15564,10 @@
                             "type": "string",
                             "format": "date-time",
                             "nullable": true
+                          },
+                          "cardName": {
+                            "type": "string",
+                            "nullable": true
                           }
                         },
                         "required": [
@@ -15511,7 +15582,8 @@
                           "netProfit",
                           "status",
                           "boughtAt",
-                          "soldAt"
+                          "soldAt",
+                          "cardName"
                         ],
                         "additionalProperties": false
                       }
@@ -15531,6 +15603,159 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/v1/trades/totals": {
+      "get": {
+        "tags": [
+          "trades"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "bought",
+                "listed",
+                "sold",
+                "expired",
+                "unsold"
+              ]
+            },
+            "in": "query",
+            "name": "status",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "in": "query",
+            "name": "from",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "in": "query",
+            "name": "to",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "default": "UTC"
+            },
+            "in": "query",
+            "name": "tz",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "count": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "sold": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "spent": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "revenue": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "netProfit": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "count",
+                    "sold",
+                    "spent",
+                    "revenue",
+                    "netProfit"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/trades/export.csv": {
+      "get": {
+        "summary": "Stream the caller's trades matching the given filters as CSV.",
+        "tags": [
+          "trades"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "bought",
+                "listed",
+                "sold",
+                "expired",
+                "unsold"
+              ]
+            },
+            "in": "query",
+            "name": "status",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "in": "query",
+            "name": "from",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "in": "query",
+            "name": "to",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "default": "UTC"
+            },
+            "in": "query",
+            "name": "tz",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
           }
         }
       }

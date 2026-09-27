@@ -4,17 +4,13 @@
 // zero-filling a sparse per-day aggregate into a complete, gap-free series
 // over [from, to] at the requested granularity.
 //
-// Timezone handling: `tz` is accepted by every analytics query schema for
-// forward compatibility, but all bucket-boundary math here is UTC-only —
-// the `profits`/`analytics_daily`/activity tables store calendar days (or
-// timestamps bucketed to UTC days by this module) with no per-row
-// timezone, so "the day" is always the UTC calendar day. This is a
-// documented limitation (see docs/08-analytics.md "Timezone handling"),
-// not an oversight: correct per-viewer DST-aware bucketing would require
-// re-deriving every stored day from raw timestamptz rows at query time in
-// the viewer's zone, which the `profits` daily-rollup table (computed once,
-// in UTC, by `profits.rollup`) does not support without a schema change
-// outside this agent's ownership.
+// Timezone handling: bucket-boundary math here is on calendar-day strings.
+// The `profits`/`analytics_daily`/activity tables store UTC calendar days
+// with no per-row timezone, so over those "the day" is the UTC day. The
+// trader's own profit series can be zoned: `getUserProfitSeriesInZone`
+// (profits.ts) derives local days from raw timestamps with `AT TIME ZONE`
+// and then buckets them here like any other day strings (see
+// docs/08-analytics.md "Timezone handling").
 
 export type Granularity = 'day' | 'week' | 'month' | 'lifetime';
 
