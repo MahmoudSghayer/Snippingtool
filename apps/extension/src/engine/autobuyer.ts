@@ -54,11 +54,14 @@ export class Autobuyer {
   private stopReason: StopReason | null = null;
   private stopDetail: string | null = null;
   private coinsSpent = 0;
+  /** `budgets.sessionCoinBudget`, replaced live when the setting changes. */
+  private sessionCoinBudget: number | null;
 
   private readonly unsubscribeProbe: () => void;
   private readonly unsubscribeShape: () => void;
 
   constructor(private readonly deps: AutobuyerDeps) {
+    this.sessionCoinBudget = deps.sessionCoinBudget ?? null;
     this.unsubscribeProbe = deps.adapter.onProbe((status) => {
       if (!status.ok) this.stop('probe_failure', status.reason ?? 'bundle probe failed');
     });
@@ -77,6 +80,11 @@ export class Autobuyer {
 
   getStopReason(): { reason: StopReason; detail: string } | null {
     return this.stopped && this.stopReason ? { reason: this.stopReason, detail: this.stopDetail ?? '' } : null;
+  }
+
+  /** A changed `budgets.sessionCoinBudget` (live settings). */
+  setSessionCoinBudget(budget: number | null): void {
+    this.sessionCoinBudget = budget;
   }
 
   stop(reason: StopReason, detail: string): void {
@@ -105,7 +113,7 @@ export class Autobuyer {
       // ranker drops these too): no governor charge, no failed attempt.
       if (candidate.buyable === false) continue;
 
-      if (this.deps.sessionCoinBudget != null && this.coinsSpent + candidate.price > this.deps.sessionCoinBudget) {
+      if (this.sessionCoinBudget != null && this.coinsSpent + candidate.price > this.sessionCoinBudget) {
         continue; // try a cheaper candidate rather than stopping the whole cycle
       }
 

@@ -34,10 +34,13 @@ src/
   content/
     index.ts              ISOLATED world orchestrator — the engine loop lives here.
     adapter-client.ts      ISOLATED-world caller into the MAIN-world act surface.
+    engine-lease.ts         This tab's side of the one-engine-per-profile lease (§7).
+    live-settings.ts         Applies settings changes from storage.onChanged, no reload.
+    assist-keys.ts            The assist chords' page listener + confirm-overlay text.
   engine/
-    ranker.ts              Opportunity scoring + filter rotation/retirement.
+    ranker.ts              Opportunity scoring (EV per listing of the current search).
     governor.ts             Safety budget — every act() call goes through allow().
-    assist.ts                M2: keyboard-driven filter cycling + human-confirmed buy.
+    assist.ts                M2: Alt-chord selection + confirm-overlay buy, filter cycling.
     autobuyer.ts              M3: automated attempt loop. ledger-auto build ONLY.
     autobuyer-loader.{ledger,auto}.ts   Build-time exclusion switch — see §3.
     types.ts                Lightweight attempt/trade shapes shared by assist/autobuyer.
@@ -238,7 +241,10 @@ Differences that follow from there being no extension process:
   is the conservative direction.
 - **Everything runs per tab.** Each EA tab has its own "background": its own
   alarms, heartbeat and kill-switch listener. Alarms only tick while an EA
-  tab is open.
+  tab is open. The engine lease (§7) lives in the shared GM store, so with
+  one tab it is always free; two userscript tabs share it too, up to a
+  near-simultaneous pair of acquires (each acquire reads back what it wrote).
+  `storage.onChanged` reports only this tab's own writes.
 - **IndexedDB is ea.com's.** The observation database lives in the EA
   origin, so clearing ea.com's site data clears it, and EA's page code could
   read it. It only ever holds trimmed market listings; tokens and settings
@@ -253,6 +259,22 @@ Differences that follow from there being no extension process:
   through `unsafeWindow`, so the userscript's adapter (only) accepts act
   requests by origin rather than by `event.source`; every request, result
   and catalog is still MAC-checked.
+
+### Assist hotkeys (P0 Task 13)
+
+Modifier chords only (`lib/hotkeys.ts`, fixed defaults
+`DEFAULT_ASSIST_HOTKEYS`): **Alt+Up/Down** move a selection through the
+ranked listings of the *current* search (never one from an earlier search),
+**Alt+B** shows a confirm overlay naming the card (name and rating from the
+item data, else `#resourceId`), its price and the expected profit after tax,
+and a second **Alt+B** or a click on Confirm buys exactly that listing;
+**Escape** cancels, and the overlay expires after 15 s. Alt+N / Alt+Shift+N
+cycle the active saved filters, Alt+P pauses. Chords match
+`KeyboardEvent.code`, so Option+B on a Mac works. EA's own keys (Enter,
+Space, the arrows, Escape) are never `preventDefault`ed and always reach
+EA; a key repeat never confirms; the listener and the overlay's buttons take
+trusted events only, and the overlay is a closed shadow root, so a page
+script can neither open nor confirm a buy.
 
 ### The Sniping Bot page (automation builds)
 
@@ -465,9 +487,12 @@ installed`; after the human's own search the log shows no `hook:`
    part of the item shape changed.
 6. Check that the card id lines up: the `resourceId` the panel shows for a
    listing must be the same number EA's UI uses for that exact card
-   version (not the base player's `assetId`).
+   version (not the base player's `assetId`). The name the assist confirm
+   overlay shows is assumed to be `itemData.name` (or the entity's `name`);
+   when it is absent the overlay shows `#resourceId` instead.
 7. Only once 1–6 pass: flip a test account to a `ledger-auto`-entitled plan
-   and watch one real, human-confirmed `assist.confirmBuy()` (M2, not M3) go
+   and watch one real, human-confirmed assist buy (Alt+B, then Alt+B again
+   or Confirm on the overlay; M2, not M3) go
    through (`buy ok (<shape>)` in the log) before trusting the automated
    loop at all. Confirm what a _failed_ buy looks like too (outbid or
    expired listing): it must show as `buy failed`, never `buy ok`. Note
@@ -537,9 +562,13 @@ falls back to the shipped default:
   browsing session rather than resetting it — resetting it on reload would
   be a governor bypass disguised as a convenience. Once it trips and its
   cooldown has elapsed, the next `allow()` starts a new session: the session
-  clock and the per-session buy/search counts reset, while the cooldown, the
-  one-hour windows and the kill switch do not. `resetSession()` does the
-  same on demand (for a future UI button).
+  clock and the per-session buy/search/spend counts reset, while the
+  cooldown, the one-hour windows and the kill switch do not. `resetSession()`
+  does the same on demand: background's `engine.resetSession` message passes
+  it to the EA tab holding the engine lease (a "New session" control, which
+  no UI shows yet). `snapshot()` already shows the new session once a
+  tripped one's cooldown is over, rather than the stale elapsed time until
+  the next `allow()`.
 - **`buyToSearchRatio`** — `(buys + 1) / max(searches, 1)` must stay under
   the ratio for a `buy` to be allowed. A human who only ever buys and never
   searches is about the single most suspicious shape there is. Searches are
@@ -550,11 +579,17 @@ falls back to the shipped default:
   ratio and `actionsPerHour`) without gating. The adapter reports one search
   response more than once, so observed reports within 1.5 s of the last
   counted search, or while an engine search is in flight, count as that
-  same search.
+  same search. A real human search in that window is dropped too: known and
+  accepted, since nothing in the reports tells the two apart and dropping
+  one only makes the ratio stricter.
 - **`maxCoinFlowPerHour`** — sliding one-hour window over coins spent on
   `buy` actions specifically (added to `GovernorSettings` for this file —
   see `packages/shared/src/schemas/settings.ts`, additive/backward-
   compatible).
+- **`budgets.maxCoinsPerSnipe`** (a budget, not a `GovernorSettings`
+  threshold) — `setMaxCoinsPerBuy()`: a buy above it is a soft deny
+  (`coin_flow`, "above your max coins per snipe"). The Sniping Bot's
+  governor has none; its price cap is `thresholds.maxBuyPrice`.
 
 An allowed buy the adapter then _refuses_ before calling EA (price
 mismatch, unknown listing, no entity, no act key), in a result whose MAC
@@ -615,12 +650,16 @@ tab halting is therefore one heartbeat period (10 min) plus one engine
 tick; the cross-app e2e journey (b) asserts the open EA tab reports the
 switch after the heartbeat with no reload.
 
-**Known limit — features in an open tab.** Features (`assist.ranker`,
-`automation.autobuyer`) are read once, from `license.bootstrap` at page
-load; there is no features push. So when the 24h offline grace runs out, an
-EA tab that is already open keeps its features until it reloads (every new
-`license.bootstrap` answer has them off). The kill switch is not affected:
-it still reaches that tab by push and pull as above.
+**Settings and features in an open tab** (P0 Task 13). Settings apply
+without a reload: background rewrites the settings cache
+(`sl.settings.cache.v1`) from every bootstrap, heartbeat and settings save,
+and an open EA tab applies each change from `storage.onChanged`
+(`content/live-settings.ts`, validated with `userSettingsSchema`): the
+governor's limits (clamped into `GOVERNOR_ABSOLUTE_LIMITS` as at
+construction), the per-snipe cap and the autobuyer's session budget. Saved
+filters arrive the same way. Features are re-read from background's cached
+entitlement every 30 s, so a plan that gains assist gets its engine, and one
+that loses it (or an expired offline grace) loses it, without a reload.
 
 `Governor.snapshot()` is the always-on "current utilization" read the risk
 meter (`ui/panel.ts`'s "Risk budget" section, and the popup) displays; it
@@ -639,8 +678,10 @@ word for word (`options/main.ts`'s `WHAT_IT_SENDS`), and the same list
   (including `blocked` — what proves the governor did its job), latency.
 - **Trades**: buy/sell price and net profit, computed entirely client-side
   by `model/prices.ts`.
-- **Filter stats**: realised coins/hour per saved filter, so the ranker's
-  rotation/retirement survives a reinstall.
+- **Filter stats**: none are sent today. Nothing in the extension produces
+  them (saved filters are local only), so the filter rotation/retirement
+  that would have used them was removed (P0 Task 13); the queue kind and
+  `/filters/stats` stay for when filters sync to the server.
 - **Risk-budget events**: what the governor allowed or blocked, and why.
 - **Version/install telemetry and error reports**: extension version, a
   device fingerprint hash, message + stack (never user input, never a
@@ -714,6 +755,29 @@ because it survives a page reload within the same browsing session but is
 cleared when the browser closes — exactly matching "the risk budget should
 survive an SPA reload" without also matching "the risk budget should
 survive forever," which would make `sessionLengthMinutes` meaningless.
+
+**One engine per browser profile** (P0 Task 13). Each EA tab ran its own
+engine, with its own copy of the hourly windows, so two tabs could spend
+twice the budgets (the assist/autobuyer governor's and the Sniping Bot's).
+Now only the tab holding the engine lease runs one: background keeps the
+lease in `storage.session` (`background/engine-lease.ts`, `engine.lockAcquire`
+/ `engine.lockRelease`), the holder renews it every 20 s (it lasts 3
+minutes, so a hidden tab whose timers Chrome throttles keeps it), and gives
+it back on `pagehide`. Every other tab still records, but its chords,
+autobuyer and bot do nothing (the bot stops with "running in another EA
+tab"). A tab gaining the lease first loads what the last holder saved
+(`engine.stateGet` into `Governor.loadState`; the bot re-reads `bot.budgetGet`
+on every start), and gives the lease back if background does not answer.
+Only the holder saves, after every decision and every 5 s, pushes the risk
+snapshot, and reports its `engine.state` for the 10-minute heartbeat (idle
+once no tab has for a lease's length). Rejected alternative: moving every
+`allow()` behind a round trip to the service worker, which MV3 may stop at
+any moment, would put an asynchronous dependency inside every loop step.
+
+The Sniping Bot's budget load fails closed (finding A): if `bot.budgetGet`
+gets no answer (a service worker restarting), the bot does not start and
+nothing is saved over the stored windows; before, the failed load counted
+as "nothing saved" and the next save refilled every hourly budget.
 
 M1 recording never depends on any of this: the engine bindings are declared
 before the adapter callbacks are registered, and a failed account-gated
@@ -790,7 +854,10 @@ control.
   when the browser closes, never written to disk). The refresh token is
   AES-GCM-encrypted (`lib/storage.ts`) under a per-install key generated
   with WebCrypto and itself stored in `storage.local` — the refresh token
-  is never written to any storage in plaintext.
+  is never written to any storage in plaintext. A browser restart clears
+  the access token but not the refresh token, so background tries one
+  refresh when it starts (`lib/auth.ts` `refreshOnStartup`) and
+  `isAuthenticated()` waits for it, instead of acting signed out.
 - **CSP.** `content_security_policy.extension_pages`:
   `script-src 'self'; object-src 'self'; base-uri 'none'; frame-ancestors 'none'`
   — no remote code, no plugins, no embedding.

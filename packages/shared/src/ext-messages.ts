@@ -49,6 +49,10 @@ export const trimmedAuctionSchema = z.object({
    * (apps/extension/src/lib/trade-lifecycle.ts) keys on it to link a buy to
    * its later sale. Absent when the listing did not carry one. */
   itemId: z.string().min(1).max(40).optional(),
+  /** The card's name as EA's item data carries it (an assumption until the
+   * market opens: docs/06-extension.md §4), for the panel and the assist
+   * confirm overlay. Absent when the item carried none. */
+  name: z.string().min(1).max(80).optional(),
 });
 export type TrimmedAuction = z.infer<typeof trimmedAuctionSchema>;
 
@@ -423,7 +427,20 @@ export const backgroundMessageTypeSchema = z.enum([
    * open (`governor.snapshotGet`). */
   'governor.snapshotPush',
   'governor.snapshotGet',
+  /** The live engine state (`idle`/`running`/`paused`/`halted`) of the EA
+   * tab that holds the engine lease, pushed on every lease renewal, so the
+   * 10-minute heartbeat alarm reports the real one instead of `idle`. */
   'engine.state',
+  /** The per-profile engine lease (P0 Task 13): only the EA tab holding it
+   * runs an engine (assist hotkeys, autobuyer, Sniping Bot), so two tabs can
+   * never spend the same hourly budgets twice. Kept by background in
+   * `storage.session`, renewed by the holder, released on `pagehide`. */
+  'engine.lockAcquire',
+  'engine.lockRelease',
+  /** The popup's "New session" button: background passes it to the EA tabs
+   * (`extContentResetSessionMessageSchema`), whose governor starts a new
+   * session (`Governor.resetSession`). */
+  'engine.resetSession',
   /** Added additively (docs/12-testing.md "Defects found" row #10): the
    * content script's crash-recovery state (`Governor.serialize()`) used to
    * be written straight to `browser.storage.session` from the content
@@ -462,6 +479,9 @@ export const backgroundMessageTypeSchema = z.enum([
   'lifecycle.pile',
   'lifecycle.sessionPnl',
   'lifecycle.stats',
+  /** Realised profit since local midnight: the popup's daily profit goal
+   * progress (`targets.dailyProfitGoal`). */
+  'lifecycle.todayPnl',
 ]);
 /** Every message type background handles in every build: the core types
  * above plus the automation builds' own (`AUTOMATION_BACKGROUND_MESSAGE_TYPES`,
@@ -514,7 +534,7 @@ export type BackgroundResponse = z.infer<typeof backgroundResponseSchema>;
 // carries a payload; a handler with no payload (`auth.refresh`,
 // `auth.status`, `license.bootstrap`, `settings.get`, `filters.list`,
 // `devices.list`, `logs.export`, `telemetry.flush`, `errors.report`,
-// `engine.state`, `counts`) has nothing here to validate and isn't listed —
+// `counts`) has nothing here to validate and isn't listed —
 // `backgroundMessageEnvelopeSchema.payload` is optional/`unknown` already,
 // and every handler ignores its argument in that case.
 //
@@ -724,6 +744,11 @@ export const extBackgroundGovernorSnapshotPushPayloadSchema = z
     inCooldown: z.boolean(),
     cooldownRemainingMs: z.number().min(0),
     killSwitchActive: z.boolean(),
+    // The session budget meter (P0 Task 13): coins spent this session, and
+    // the user's `budgets.sessionCoinBudget` (null = no cap). Optional, so a
+    // tab still running an older build keeps pushing.
+    sessionCoinsSpent: z.number().min(0).optional(),
+    sessionCoinBudget: z.number().min(0).nullable().optional(),
   })
   .strict();
 export type ExtGovernorSnapshotPushPayload = z.infer<
@@ -778,6 +803,8 @@ export const extBackgroundEngineStateSetPayloadSchema = z
     // Optional: state persisted by a build without the session-reset flag
     // still validates (engine/governor.ts's `GovernorState`).
     sessionExpired: z.boolean().optional(),
+    // Optional for the same reason: coins spent this session.
+    sessionCoinsSpent: z.number().min(0).optional(),
     killSwitchActive: z.boolean(),
     killSwitchReason: z.string().max(500).optional(),
   })
@@ -797,3 +824,83 @@ export const extBackgroundBotBudgetSetPayloadSchema = z
   })
   .strict();
 export type BotBudgetState = z.infer<typeof extBackgroundBotBudgetSetPayloadSchema>;
+
+// ---- the assist loop (P0 Task 13) --------------------------------------------
+
+/** `engine.lockAcquire` / `engine.lockRelease`: the content script's own id
+ * (a random UUID per page load). Acquire answers `{ held, expiresAt }`. */
+export const extBackgroundEngineLockPayloadSchema = z
+  .object({
+    ownerId: z.string().uuid(),
+  })
+  .strict();
+export type ExtEngineLockPayload = z.infer<typeof extBackgroundEngineLockPayloadSchema>;
+
+export const ENGINE_STATES = ['idle', 'running', 'paused', 'halted'] as const;
+export type EngineState = (typeof ENGINE_STATES)[number];
+
+/** `engine.state`: what the lease holder's engine is doing, for the
+ * heartbeat's `engineState` (`heartbeatRequestSchema`). */
+export const extBackgroundEngineStatePayloadSchema = z
+  .object({
+    engineState: z.enum(ENGINE_STATES),
+  })
+  .strict();
+
+/** Background -> EA tab: the popup's "New session". No payload. */
+export const extContentResetSessionMessageSchema = z
+  .object({
+    type: z.literal('engine.resetSession'),
+  })
+  .strict();
+
+/**
+ * One assist hotkey: a modifier chord written as modifiers then a
+ * `KeyboardEvent.code`, e.g. `Alt+KeyB` or `Ctrl+Alt+ArrowUp`. It must hold
+ * Alt, Ctrl or Meta, so no assist hotkey is ever a key EA's own UI uses on
+ * its own (Enter, Space, the arrows) or one that types a character (Shift
+ * alone). The code, not the key: Alt+B types `∫` on a Mac keyboard, and
+ * `KeyB` is the same physical key on every layout.
+ */
+export const HOTKEY_MODIFIERS = ['Ctrl', 'Alt', 'Shift', 'Meta'] as const;
+const hotkeyChordSchema = z
+  .string()
+  .max(40)
+  .regex(/^(?:(?:Ctrl|Alt|Shift|Meta)\+){1,4}[A-Za-z][A-Za-z0-9]{0,19}$/, 'not a key chord')
+  .refine(
+    (chord) => {
+      const mods = chord.split('+').slice(0, -1);
+      return new Set(mods).size === mods.length && mods.some((m) => m !== 'Shift');
+    },
+    { message: 'a hotkey needs Alt, Ctrl or Meta, each modifier once' },
+  );
+
+export const assistHotkeysSchema = z
+  .object({
+    /** Buy the selected listing (a second press, or a click, confirms). */
+    buy: hotkeyChordSchema,
+    /** Move the selection through the current search's listings. */
+    selectUp: hotkeyChordSchema,
+    selectDown: hotkeyChordSchema,
+    /** Cycle the saved filters (an engine-issued, governed search). */
+    nextFilter: hotkeyChordSchema,
+    prevFilter: hotkeyChordSchema,
+    /** Pause or resume the assist hotkeys. */
+    togglePause: hotkeyChordSchema,
+  })
+  .strict()
+  .refine((keys) => new Set(Object.values(keys)).size === Object.keys(keys).length, {
+    message: 'each hotkey must be a different chord',
+  });
+export type AssistHotkeys = z.infer<typeof assistHotkeysSchema>;
+
+/** The assist hotkeys the extension ships with, fixed for now (no settings
+ * surface edits them): Alt+B buys, Alt+Up/Down move the selection. */
+export const DEFAULT_ASSIST_HOTKEYS: AssistHotkeys = {
+  buy: 'Alt+KeyB',
+  selectUp: 'Alt+ArrowUp',
+  selectDown: 'Alt+ArrowDown',
+  nextFilter: 'Alt+KeyN',
+  prevFilter: 'Alt+Shift+KeyN',
+  togglePause: 'Alt+KeyP',
+};

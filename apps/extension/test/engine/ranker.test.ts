@@ -2,11 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   DEFAULT_SELL_PROBABILITY,
-  FLAT_SCORE_THRESHOLD_COINS_PER_HOUR,
-  MIN_WINDOWS_FOR_RETIREMENT,
   rankCandidates,
-  rotateFilters,
-  scoreFilterHistory,
   scoreOpportunity,
   type OpportunityCandidate,
 } from '../../src/engine/ranker.js';
@@ -84,104 +80,6 @@ describe('rankCandidates', () => {
     const ranked = rankCandidates([pricey, cheap], { minEv: -Infinity });
     expect(ranked[0]?.ev).toBe(ranked[1]?.ev);
     expect(ranked[0]?.tradeId).toBe('cheap');
-  });
-});
-
-describe('scoreFilterHistory', () => {
-  const HOUR = 3_600_000;
-  const now = 1_700_000_000_000;
-
-  it('returns a zero score for no history', () => {
-    const s = scoreFilterHistory([], { now });
-    expect(s.score).toBe(0);
-    expect(s.isFlat).toBe(false);
-    expect(s.windowCount).toBe(0);
-  });
-
-  it('weights recent windows more heavily than old ones', () => {
-    const oldWindow = {
-      filterId: 'f1',
-      windowStart: new Date(now - 240 * HOUR).toISOString(),
-      searches: 10,
-      attempts: 2,
-      successes: 1,
-      coinsSpent: 1000,
-      coinsEarned: 1000,
-      coinsPerHour: 10, // far in the past, barely paying
-    };
-    const recentWindow = {
-      ...oldWindow,
-      windowStart: new Date(now - HOUR).toISOString(),
-      coinsPerHour: 1000, // recent, paying well
-    };
-    const s = scoreFilterHistory([oldWindow, recentWindow], { now, halfLifeHours: 24 });
-    // Recent window dominates a 24h half-life average heavily.
-    expect(s.score).toBeGreaterThan(500);
-  });
-
-  it('is not flat below the minimum window count, even with a low score', () => {
-    const windows = Array.from({ length: MIN_WINDOWS_FOR_RETIREMENT - 1 }, (_, i) => ({
-      filterId: 'f1',
-      windowStart: new Date(now - i * HOUR).toISOString(),
-      searches: 5,
-      attempts: 0,
-      successes: 0,
-      coinsSpent: 0,
-      coinsEarned: 0,
-      coinsPerHour: 0,
-    }));
-    expect(scoreFilterHistory(windows, { now }).isFlat).toBe(false);
-  });
-
-  it('is flat once it has enough windows and a low realised return', () => {
-    const windows = Array.from({ length: MIN_WINDOWS_FOR_RETIREMENT }, (_, i) => ({
-      filterId: 'f1',
-      windowStart: new Date(now - i * HOUR).toISOString(),
-      searches: 5,
-      attempts: 0,
-      successes: 0,
-      coinsSpent: 0,
-      coinsEarned: 0,
-      coinsPerHour: FLAT_SCORE_THRESHOLD_COINS_PER_HOUR - 1,
-    }));
-    const s = scoreFilterHistory(windows, { now });
-    expect(s.isFlat).toBe(true);
-  });
-});
-
-describe('rotateFilters', () => {
-  const filters = [
-    { id: 'a', name: 'A', filter: {}, filterHash: 'ha', isActive: true, sortOrder: 0, createdAt: new Date().toISOString() },
-    { id: 'b', name: 'B', filter: {}, filterHash: 'hb', isActive: true, sortOrder: 1, createdAt: new Date().toISOString() },
-    { id: 'c', name: 'C', filter: {}, filterHash: 'hc', isActive: true, sortOrder: 2, createdAt: new Date().toISOString() },
-  ];
-
-  it('keeps a brand-new filter (no score yet) in the pool rather than retiring it', () => {
-    const scores = new Map();
-    const result = rotateFilters(filters, scores, { maxActive: 5 });
-    expect(result.retired).toEqual([]);
-    expect(result.active).toHaveLength(3);
-  });
-
-  it('retires flat filters and ranks the rest by score', () => {
-    const scores = new Map([
-      ['a', { filterId: 'a', score: 1000, windowCount: 5, isFlat: false }],
-      ['b', { filterId: 'b', score: 5, windowCount: 5, isFlat: true }],
-      ['c', { filterId: 'c', score: 500, windowCount: 5, isFlat: false }],
-    ]);
-    const result = rotateFilters(filters, scores);
-    expect(result.retired).toEqual(['b']);
-    expect(result.active).toEqual(['a', 'c']);
-  });
-
-  it('caps the active set at maxActive', () => {
-    const scores = new Map([
-      ['a', { filterId: 'a', score: 300, windowCount: 5, isFlat: false }],
-      ['b', { filterId: 'b', score: 200, windowCount: 5, isFlat: false }],
-      ['c', { filterId: 'c', score: 100, windowCount: 5, isFlat: false }],
-    ]);
-    const result = rotateFilters(filters, scores, { maxActive: 2 });
-    expect(result.active).toEqual(['a', 'b']);
   });
 });
 

@@ -22,9 +22,10 @@ import {
 
 import { apiJson } from './api.js';
 import { logger } from './logger.js';
+import { SETTINGS_CACHE_KEY } from './storage-keys.js';
 import { getLocal, setLocal } from './storage.js';
 
-const CACHE_KEY = 'sl.settings.cache.v1';
+const CACHE_KEY = SETTINGS_CACHE_KEY;
 
 export const DEFAULT_SETTINGS: UserSettings = {
   version: 0,

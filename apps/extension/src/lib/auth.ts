@@ -42,8 +42,34 @@ export async function clearTokens(): Promise<void> {
   await removeLocal(REFRESH_TOKEN_ENC_KEY);
 }
 
+/** The one startup refresh (`refreshOnStartup`), while or once it runs. */
+let startupRefresh: Promise<boolean> | null = null;
+
+/** Whether there is an access token this browser session. Waits for the
+ * startup refresh when one is in flight, so a tab asking right after a
+ * browser restart is not told "signed out" a moment before it is not. */
 export async function isAuthenticated(): Promise<boolean> {
+  if (startupRefresh) await startupRefresh;
   return (await getSession<string | null>(ACCESS_TOKEN_KEY, null)) != null;
+}
+
+/** Called once when background starts (P0 Task 13). The access token lives
+ * in `storage.session`, so a browser restart clears it while the refresh
+ * token (`storage.local`) survives: without this the extension acted signed
+ * out, with no entitlement, until the next sign-in. One refresh, once per
+ * service-worker start, and only when there is a refresh token and no
+ * access token. Never throws; resolves whether it is signed in. */
+export function refreshOnStartup(): Promise<boolean> {
+  startupRefresh ??= (async () => {
+    if ((await getSession<string | null>(ACCESS_TOKEN_KEY, null)) != null) return true;
+    if ((await getLocal<string | null>(REFRESH_TOKEN_ENC_KEY, null)) == null) return false;
+    try {
+      return await handleUnauthorized();
+    } catch {
+      return false; // offline: the API calls' own 401 path tries again later
+    }
+  })();
+  return startupRefresh;
 }
 
 /** Whether this install is signed in to an account at all: an access
