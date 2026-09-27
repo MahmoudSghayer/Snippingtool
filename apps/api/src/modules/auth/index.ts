@@ -234,6 +234,7 @@ export default fp(
         const result = await service.refresh(ctx(fastify), token, {
           userAgent: request.headers['user-agent'] ?? null,
           device: request.body.device ?? null,
+          ip: request.ip,
         });
         setSessionCookies(
           reply,

@@ -27,6 +27,7 @@ const USER: UserDto = {
   role: 'user',
   totpEnabled: false,
   timezone: 'UTC',
+  timezoneSetAt: null,
   referralCode: null,
   createdAt: '2026-01-01T00:00:00.000Z',
   lastLoginAt: null,
@@ -185,12 +186,13 @@ describe('describePass', () => {
 });
 
 describe('AccountPage', () => {
-  it('shows the five sections in order', async () => {
+  it('shows the getting-started checklist, then the five sections in order', async () => {
     mockApi(subscription({}));
     await renderAccount();
 
     const headings = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent);
     expect(headings).toEqual([
+      'Getting started',
       'Your pass',
       'Get the extension',
       'Buy or renew',

@@ -201,10 +201,10 @@ function schedulePersist(): void {
     .catch(() => undefined);
 }
 
-/** Only for tests: lets a test await the in-flight persist chain before
- * asserting on storage contents directly. Production code never needs
- * this — every read goes through the in-memory `queue`/`pendingCount()`,
- * which are always already up to date synchronously. */
+/** Awaits the in-flight persist chain. Tests use it before asserting on
+ * storage contents; the trade lifecycle (background/lifecycle.ts) uses it
+ * so a sale only counts as reported once its queue entry is on disk. Reads
+ * never need it: `queue`/`pendingCount()` are always up to date. */
 export async function whenPersisted(): Promise<void> {
   await persistChain;
 }

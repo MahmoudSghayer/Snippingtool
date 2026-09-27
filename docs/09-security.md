@@ -1,6 +1,6 @@
 # 09 — Security
 
-Controls inventory for The Sniper's Ledger, mapped to code and tests.
+Controls inventory for Nova Trade, mapped to code and tests.
 Companion documents: `docs/threat-model.md` (STRIDE decomposition, attack
 vectors, residual risks, non-goals — read that first for _why_; this
 document is _where and how_), `docs/01-architecture.md` §5 (trust-boundary
@@ -22,7 +22,7 @@ backups, CI security jobs).
 11. Secrets hygiene
 12. Audit coverage
 13. Extension security
-14. Stripe webhook review
+14. Payment claim review
 15. Dependency audit
 16. Logging and redaction
 17. Incident response basics
@@ -322,9 +322,10 @@ DENY`, `Referrer-Policy: strict-origin-when-cross-origin`.
   offending var; dev/test are asserted unaffected by any of it; a
   maximally-broken production env reports all five violations in one
   thrown error.
-- **Stripe/SMTP**: both are outbound HTTPS/TLS by the nature of their own
-  client libraries (Stripe SDK, nodemailer's SMTPS) — no additional app-
-  layer control needed beyond keeping those libraries current (§15).
+- **SMTP / Discord webhook**: both are outbound TLS by the nature of their
+  clients (nodemailer's SMTPS, HTTPS to the Discord webhook URL) — no
+  additional app-layer control needed beyond keeping those libraries
+  current (§15).
 - Caddy auto-TLS for the deployed origin, WAL-G/backup encryption notes:
   `docs/11-devops.md` (operational, not app-layer — not re-documented
   here).
@@ -462,48 +463,45 @@ rewrite history, only add to it.
   actions within a human-plausible envelope, not to evade EA's own
   anti-automation detection — see `docs/threat-model.md` §6.
 
-## 14. Stripe webhook signature/replay/idempotency review
+## 14. Payment claim review
 
-- **Signature**: `stripe.webhooks.constructEvent(rawBody, signature,
-webhookSecret)` — the real Stripe SDK's own HMAC verification, not a
-  hand-rolled check. A missing `stripe-signature` header, a forged one, or
-  a misconfigured server (Stripe env vars unset) are now **uniformly** a
-  400 with the standard `{code: 'VALIDATION_FAILED', message,
-requestId}` envelope (`apps/api/src/modules/payments/index.ts`) —
-  **fixed this pass**: the route previously declared its own bespoke
-  `400: {received: boolean}` response schema and `reply.status(400)
-.send({received: false})`-ed manually on a bad signature, while the
-  _missing-header_ check a few lines above it already `throw`s an
-  `AppError`. That mismatch meant the app-wide error envelope (rendered by
-  `plugins/error-handler.ts` for the thrown case) got validated against a
-  schema that only allows `{received: boolean}` and failed zod response
-  serialization — turning a clean, intended 400 into an actual 500. Both
-  paths now `throw AppErrors.validation(...)` uniformly, and the route
-  declares only its success (`200`) shape.
-- A closely related, independently-discovered bug was fixed alongside it:
-  `apps/api/src/lib/errors.ts`'s `isAppError()` relied on `instanceof
-AppError` alone, which returns `false` when a module-loading setup ends
-  up with two distinct `AppError` class objects for the same compiled file
+Payments are PayPal.me only, and this app never talks to PayPal: there is
+no payment webhook, no provider SDK and no provider secret. The trust
+boundary is **an admin manually verifying the PayPal transaction in the
+PayPal account before approving the claim** — nothing a buyer submits
+issues a pass on its own (`apps/api/src/modules/payment-claims`,
+`docs/05-subscriptions.md` §7).
+
+- **Submitting** (`POST /api/v1/payment-claims`): authenticated,
+  CSRF-checked and rate-limited; the body is Zod-validated; only a
+  purchasable plan is accepted and the amount is copied from the `plans`
+  row, never from the request. At most 3 pending claims per buyer, and a
+  PayPal transaction ID is unique across all claims (case-insensitive,
+  `payment_claims_paypal_transaction_id_unique`), so one payment can't be
+  claimed twice.
+- **Approving / rejecting** (`POST /api/v1/admin/payment-claims/:id/approve`
+  and `/reject`): `subscriptions.write` permission, CSRF, admin rate limit.
+  Approval marks the claim `approved` under a `status = 'pending'` guard
+  before issuing the pass, so two admins approving at once can't issue two
+  passes (and a failed issue puts the claim back to `pending`). Both
+  actions are written to `admin_actions` and `audit_logs`; approval also
+  records a `payments` row (`provider = 'manual'`,
+  `provider_payment_id = 'paypal:<transaction id>'`).
+- **Operator notice**: `payments.notify` posts each new claim to the
+  operator's Discord channel. `PAYMENTS_DISCORD_WEBHOOK_URL` is a secret
+  (anyone holding it can post to that channel) and is handled like the
+  other secrets in §11.
+- Still in place from the earlier security pass:
+  `apps/api/src/lib/errors.ts`'s `isAppError()` falls back to a structural
+  check (`name === 'AppError'` plus the exact `status`/`code` shape only
+  this class's constructor ever produces) when `instanceof AppError`
+  returns `false` — which happens when a module-loading setup ends up with
+  two distinct `AppError` class objects for the same compiled file
   (observed with `tests/security`, which loads the built `@sl/api/app`
-  through Vitest's own module runner) — silently routing an intended 4xx
-  through the generic 500 "Unhandled error" branch. `isAppError` now falls
-  back to a structural check (`name === 'AppError'` plus the exact
-  `status`/`code` shape only this class's constructor ever produces) when
-  `instanceof` doesn't already confirm it.
-- **Replay/idempotency**: `stripe_webhook_events` has a unique constraint
-  on `event_id` — `receiveWebhookEvent` checks it before processing and is
-  a no-op on a second delivery of the same event, covering Stripe's own
-  at-least-once delivery semantics.
-- **Raw body**: the webhook route overrides its content-type parser
-  (`parseAs: 'buffer'`) scoped to just that nested route registration, so
-  signature verification runs against the exact bytes Stripe signed — the
-  app-wide JSON parser (which would reformat/re-serialize the body) never
-  touches this route.
-- Test references: `apps/api/src/modules/payments/__tests__/payments.test.ts`
-  (signature rejection, idempotent double-delivery, and every webhook
-  event type's business-logic effect); `tests/security/src/webhook-signature.test.ts`
-  (missing header, forged signature, no partial DB write on rejection,
-  publicly reachable with no auth header required).
+  through Vitest's own module runner) and would otherwise route an
+  intended 4xx through the generic 500 branch.
+- Test references:
+  `apps/api/src/modules/payment-claims/__tests__/payment-claims.test.ts`.
 
 ## 15. Dependency audit
 
@@ -542,14 +540,14 @@ below). Two behaviour changes the bump surfaced, both fixed:
    `rejects.toMatchObject({ cause: { message: /duplicate key|unique
 constraint/i } })` instead of `rejects.toThrow(...)` on the wrapper's
    own message.
-2. **`apps/api`'s `payments/webhooks.ts#receiveWebhookEvent`**: its
-   idempotency check read `(err as { code?: string }).code === '23505'`
+2. **`apps/api`'s card-payment webhook idempotency check** (code since
+   removed along with that payment provider): it read `(err as { code?: string }).code === '23505'`
    directly off the caught insert error — the same wrapping as above means
    `err.code` is now `undefined`; the Postgres error code moved to
    `err.cause.code`. Fixed to check both (`err.code ?? err.cause?.code`),
    confirmed against `payments.test.ts`'s two idempotent-delivery tests
    (previously green under 0.38, both real regressions this bump would
-   otherwise have introduced silently — a redelivered Stripe webhook event
+   otherwise have introduced silently — a redelivered webhook event
    would have thrown instead of returning `{ alreadyProcessed: true }`,
    since the changed `.code` shape meant it fell through to `throw err`).
 
@@ -583,16 +581,20 @@ anything a request body supplies.
 - **Account lockout / ban**: `users.status` (suspended/banned) is checked
   at `authenticate`. `bans` apply to open sessions as well as new logins:
   an account ban bumps `row_version` (invalidating every issued access
-  token) and revokes every session; a device ban revokes the sessions
-  opened from that device; an IP ban is checked on every request
-  (`isRequestBanned`, Redis-cached per user and IP, invalidated by any ban
-  or lift). An hwid ban is only known at login, so it is enforced there.
+  token) and revokes every session and active licence; a device ban
+  revokes the sessions opened from that device; an IP ban is checked on
+  every request (`isRequestBanned`, Redis-cached per user and IP,
+  invalidated by any ban or lift). Refresh and licence validation carry no
+  access token, so they call `checkBans` themselves. An hwid ban is only
+  known at login, so it is enforced there.
 - **Audit trail**: every admin action (including all of the above) is in
   `audit_logs` with a before/after diff, for after-the-fact review.
-- **Webhook/Stripe incident**: `stripe_webhook_events` + `payment_history`
-  give a complete, append-only record of every event this app received
-  and how it was processed, for reconciling against Stripe's own
-  dashboard if state ever diverges.
+- **Payment dispute**: `payment_claims` (with the PayPal transaction ID,
+  reviewer and review time), the matching `payments` row and the
+  `audit_logs`/`admin_actions` entries give a full record of who approved
+  what, for reconciling against the PayPal account if they ever diverge.
+  An admin handles a PayPal dispute by hand (suspend or cancel the
+  subscription, §17's audit trail covers it).
 - Escalation/on-call/alerting process itself is operational, not app-code
   — `docs/11-devops.md` (monitoring/alerting stack).
 
@@ -626,8 +628,8 @@ number. #4–#5 remain open, as before.
 2. **Resolved — `drizzle-orm` dependency advisory.** Bumped `^0.38.3` →
    `^0.45.2` across all three packages that pin it; `pnpm audit --prod` is
    now clean (0 findings, was 1 high). Two behaviour changes the bump
-   surfaced were fixed (a test assertion, and a real bug in the Stripe
-   webhook idempotency check's error-code detection) — see §15 for full
+   surfaced were fixed (a test assertion, and a real bug in the since-removed
+   card-payment webhook idempotency check's error-code detection) — see §15 for full
    detail.
 
 3. **Resolved — extension runtime-message payload validation was not

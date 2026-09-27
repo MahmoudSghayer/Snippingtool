@@ -1805,7 +1805,6 @@ export interface paths {
                                 features: string[];
                                 isLifetime: boolean;
                                 isActive: boolean;
-                                stripePriceId: string | null;
                                 sortOrder: number;
                                 /** Format: date-time */
                                 createdAt: string;
@@ -1841,7 +1840,6 @@ export interface paths {
                         isLifetime?: boolean;
                         deviceLimit: number;
                         features: string[];
-                        stripePriceId?: string | null;
                         /** @default 0 */
                         sortOrder?: number;
                         reason: string;
@@ -1867,7 +1865,6 @@ export interface paths {
                             features: string[];
                             isLifetime: boolean;
                             isActive: boolean;
-                            stripePriceId: string | null;
                             sortOrder: number;
                             /** Format: date-time */
                             createdAt: string;
@@ -1915,7 +1912,6 @@ export interface paths {
                         priceCents?: number;
                         deviceLimit?: number;
                         features?: string[];
-                        stripePriceId?: string | null;
                         isActive?: boolean;
                         sortOrder?: number;
                         reason: string;
@@ -1941,7 +1937,6 @@ export interface paths {
                             features: string[];
                             isLifetime: boolean;
                             isActive: boolean;
-                            stripePriceId: string | null;
                             sortOrder: number;
                             /** Format: date-time */
                             createdAt: string;
@@ -1999,7 +1994,6 @@ export interface paths {
                             features: string[];
                             isLifetime: boolean;
                             isActive: boolean;
-                            stripePriceId: string | null;
                             sortOrder: number;
                             /** Format: date-time */
                             createdAt: string;
@@ -2856,6 +2850,8 @@ export interface paths {
                                 role: "user" | "admin";
                                 totpEnabled: boolean;
                                 timezone: string | null;
+                                /** Format: date-time */
+                                timezoneSetAt: string | null;
                                 referralCode: string | null;
                                 /** Format: date-time */
                                 createdAt: string;
@@ -2916,6 +2912,8 @@ export interface paths {
                             role: "user" | "admin";
                             totpEnabled: boolean;
                             timezone: string | null;
+                            /** Format: date-time */
+                            timezoneSetAt: string | null;
                             referralCode: string | null;
                             /** Format: date-time */
                             createdAt: string;
@@ -2970,6 +2968,8 @@ export interface paths {
                             role: "user" | "admin";
                             totpEnabled: boolean;
                             timezone: string | null;
+                            /** Format: date-time */
+                            timezoneSetAt: string | null;
                             referralCode: string | null;
                             /** Format: date-time */
                             createdAt: string;
@@ -3032,6 +3032,8 @@ export interface paths {
                             role: "user" | "admin";
                             totpEnabled: boolean;
                             timezone: string | null;
+                            /** Format: date-time */
+                            timezoneSetAt: string | null;
                             referralCode: string | null;
                             /** Format: date-time */
                             createdAt: string;
@@ -3096,6 +3098,8 @@ export interface paths {
                             role: "user" | "admin";
                             totpEnabled: boolean;
                             timezone: string | null;
+                            /** Format: date-time */
+                            timezoneSetAt: string | null;
                             referralCode: string | null;
                             /** Format: date-time */
                             createdAt: string;
@@ -3274,6 +3278,7 @@ export interface paths {
                     from: string;
                     to: string;
                     granularity?: "day" | "week" | "month" | "lifetime";
+                    tz?: string;
                 };
                 header?: never;
                 path?: never;
@@ -6134,103 +6139,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/payments/checkout": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Create a Stripe Checkout session for a plan (coupon code optional). */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        planCode: "trial" | "basic" | "pro" | "ultimate" | "lifetime";
-                        /** Format: uri */
-                        successUrl: string;
-                        /** Format: uri */
-                        cancelUrl: string;
-                        couponCode?: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Default Response */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** Format: uri */
-                            checkoutUrl: string;
-                        };
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/payments/portal": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Create a Stripe Customer Portal session. */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        /** Format: uri */
-                        returnUrl: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Default Response */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** Format: uri */
-                            portalUrl: string;
-                        };
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/payments/history": {
         parameters: {
             query?: never;
@@ -6280,44 +6188,6 @@ export interface paths {
         };
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/webhooks/stripe": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Stripe webhook receiver — signature-verified, idempotent. */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Default Response */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            received: boolean;
-                        };
-                    };
-                };
-            };
-        };
         delete?: never;
         options?: never;
         head?: never;
@@ -7041,7 +6911,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Start a 7-day trial. Denied with TRIAL_ABUSE_DETECTED on abuse signals. */
+        /** Start a 7-day trial, once per account. Denied with TRIAL_ALREADY_USED after a past trial, TRIAL_ABUSE_DETECTED on abuse signals. */
         post: {
             parameters: {
                 query?: never;
@@ -7361,6 +7231,11 @@ export interface paths {
                 query?: {
                     cursor?: string;
                     limit?: number;
+                    status?: "bought" | "listed" | "sold" | "expired" | "unsold";
+                    from?: string;
+                    to?: string;
+                    tz?: string;
+                    order?: "desc" | "asc";
                 };
                 header?: never;
                 path?: never;
@@ -7392,10 +7267,96 @@ export interface paths {
                                 boughtAt: string;
                                 /** Format: date-time */
                                 soldAt: string | null;
+                                cardName: string | null;
                             }[];
                             nextCursor: string | null;
                         };
                     };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/trades/totals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    status?: "bought" | "listed" | "sold" | "expired" | "unsold";
+                    from?: string;
+                    to?: string;
+                    tz?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            count: number;
+                            sold: number;
+                            spent: number;
+                            revenue: number;
+                            netProfit: number;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/trades/export.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Stream the caller's trades matching the given filters as CSV. */
+        get: {
+            parameters: {
+                query?: {
+                    status?: "bought" | "listed" | "sold" | "expired" | "unsold";
+                    from?: string;
+                    to?: string;
+                    tz?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
                 };
             };
         };
@@ -7442,6 +7403,8 @@ export interface paths {
                             role: "user" | "admin";
                             totpEnabled: boolean;
                             timezone: string | null;
+                            /** Format: date-time */
+                            timezoneSetAt: string | null;
                             referralCode: string | null;
                             /** Format: date-time */
                             createdAt: string;
@@ -7522,6 +7485,8 @@ export interface paths {
                             role: "user" | "admin";
                             totpEnabled: boolean;
                             timezone: string | null;
+                            /** Format: date-time */
+                            timezoneSetAt: string | null;
                             referralCode: string | null;
                             /** Format: date-time */
                             createdAt: string;

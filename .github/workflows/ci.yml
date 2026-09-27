@@ -415,7 +415,7 @@ jobs:
   # -------------------------------------------------------------------------
   # Cross-app e2e (@sl/tests, tests/e2e) — journeys that span more than one
   # app at once: extension <-> real API, admin action <-> another user's
-  # live WS connection, a signed Stripe webhook <-> the dashboard. Owned by
+  # live WS connection. Owned by
   # the Testing & QA agent; see docs/12-testing.md "tests/e2e" and each spec
   # file's own header. Builds its own extension target (pointed at this
   # job's API instance — see tests/e2e/build-extension.mjs) and drives it

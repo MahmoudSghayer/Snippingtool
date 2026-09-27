@@ -4,9 +4,10 @@
 // item entities — either becomes a list of normalised listings or an error.
 // Never an `ok` with nothing in it because the envelope was not understood.
 
+import { MAX_COIN_PRICE as SHARED_MAX_COIN_PRICE } from '@sl/shared';
 import { describe, expect, it, vi } from 'vitest';
 
-import { normaliseListing, normaliseListings } from '../../src/main/ea-listing.js';
+import { MAX_COIN_PRICE, normaliseListing, normaliseListings, normalisePileItem, normalisePileItems } from '../../src/main/ea-listing.js';
 import { ShapeError, TimeoutUnknownError, describeError, extractListingArray, settle } from '../../src/main/ea-response.js';
 import { itemEntity, observable, utasAuction } from '../fixtures/ea-shapes.js';
 
@@ -187,5 +188,78 @@ describe('describeError', () => {
     expect(describeError({ success: false, status: 470, credits: 7654321 })).toMatch(/success: false.*470|470.*success: false/);
     expect(describeError({ success: false, status: 470, credits: 7654321 })).not.toContain('7654321');
     expect(describeError('free text 7654321')).not.toContain('7654321');
+  });
+});
+
+// Trade pile (defect C13): the trader's own items, read passively. The
+// UTAS shape below is the assumed one (docs/06-extension.md, day-one
+// checklist): `auctionInfo` entries whose `itemData.id` is the item's own
+// id, `tradeState` null while the card sits on the pile unlisted.
+function pileEntry(fields: { tradeId?: number | null; itemId?: number; tradeState?: string | null; currentBid?: number; buyNowPrice?: number; rating?: number }) {
+  return {
+    tradeId: fields.tradeId === undefined ? 7001 : fields.tradeId,
+    buyNowPrice: fields.buyNowPrice ?? 14_000,
+    startingBid: 13_000,
+    currentBid: fields.currentBid ?? 0,
+    offers: 0,
+    expires: 3600,
+    tradeState: fields.tradeState === undefined ? 'active' : fields.tradeState,
+    itemData: { id: fields.itemId ?? 900_001, resourceId: 50_331_700, assetId: 231_747, rating: fields.rating ?? 88 },
+  };
+}
+
+describe('normaliseListing itemId', () => {
+  it('reads the item id from itemData.id, and from an entity id', () => {
+    expect(normaliseListing({ ...utasAuction({ tradeId: 1, buyNowPrice: 900 }), itemData: { id: 123456, resourceId: 7, assetId: 7, rating: 84 } })?.itemId).toBe('123456');
+    const entity = itemEntity({ tradeId: 2, buyNowPrice: 1200, resourceId: 8 }, { accessor: 'field' }) as Record<string, unknown>;
+    entity.id = 654321;
+    expect(normaliseListing(entity)?.itemId).toBe('654321');
+  });
+
+  it('leaves itemId unset when there is none', () => {
+    expect(normaliseListing(utasAuction({ tradeId: 1, buyNowPrice: 900 }))?.itemId).toBeUndefined();
+  });
+});
+
+describe('normalisePileItem', () => {
+  it('reads a listed, a sold and an expired item', () => {
+    expect(normalisePileItem(pileEntry({}))).toEqual({
+      itemId: '900001',
+      tradeId: '7001',
+      resourceId: 50_331_700,
+      rating: 88,
+      tradeState: 'active',
+      currentBid: 0,
+      buyNowPrice: 14_000,
+      expires: 3600,
+    });
+    expect(normalisePileItem(pileEntry({ tradeState: 'closed', currentBid: 13_500 }))).toMatchObject({ tradeState: 'closed', currentBid: 13_500 });
+    expect(normalisePileItem(pileEntry({ tradeState: 'expired' }))).toMatchObject({ tradeState: 'expired' });
+  });
+
+  it('reads an unlisted item (no trade, no state)', () => {
+    expect(normalisePileItem(pileEntry({ tradeId: 0, tradeState: null }))).toMatchObject({ tradeId: null, tradeState: null });
+  });
+
+  it('rejects an item with no item id, or a state it does not know', () => {
+    const noId = pileEntry({});
+    delete (noId.itemData as { id?: number }).id;
+    expect(normalisePileItem(noId)).toBeNull();
+    expect(normalisePileItem(pileEntry({ tradeState: 'pending' }))).toBeNull();
+  });
+
+  it('skips an entry whose prices are outside 0..MAX_COIN_PRICE (the same bound as @sl/shared)', () => {
+    expect(MAX_COIN_PRICE).toBe(SHARED_MAX_COIN_PRICE);
+    expect(normalisePileItem(pileEntry({ buyNowPrice: MAX_COIN_PRICE + 1 }))).toBeNull();
+    expect(normalisePileItem(pileEntry({ tradeState: 'closed', currentBid: MAX_COIN_PRICE + 1 }))).toBeNull();
+    expect(normalisePileItem(pileEntry({ buyNowPrice: MAX_COIN_PRICE }))).toMatchObject({ buyNowPrice: MAX_COIN_PRICE });
+  });
+
+  it('throws when not one entry of a non-empty pile can be read, and counts skipped ones', () => {
+    expect(() => normalisePileItems([{}, { itemData: {} }])).toThrow(ShapeError);
+    const onSkipped = vi.fn();
+    expect(normalisePileItems([pileEntry({}), {}], onSkipped)).toHaveLength(1);
+    expect(onSkipped).toHaveBeenCalledWith(1);
+    expect(normalisePileItems([])).toEqual([]);
   });
 });

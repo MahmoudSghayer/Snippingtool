@@ -3,19 +3,24 @@
 // (docs/05-subscriptions.md §8, "Cross-agent touchpoints").
 //
 // A ban takes effect immediately, without waiting for tokens to expire:
-//   - account: every session is revoked (with a `session.revoked` WS push)
-//     and `users.row_version` is bumped, which invalidates every access
-//     token already issued (plugins/auth.ts compares it on each request).
+//   - account: every session is revoked (with a `session.revoked` WS push),
+//     every active licence is revoked, and `users.row_version` is bumped,
+//     which invalidates every access token already issued (plugins/auth.ts
+//     compares it on each request). Lifting the ban does not restore the
+//     licences; the user regenerates one from the dashboard.
 //   - device: every session opened from a device with that fingerprint is
 //     revoked the same way.
 //   - ip: `isRequestBanned` rejects any request from that address, cached
 //     per (user, ip) in Redis under a generation counter that every ban and
 //     lift bumps, so a new ban is never hidden behind a cached "not banned".
 //   - hwid: only known at login, so it is enforced by `checkBans` there.
+// Refresh and licence validation carry no access token, so they call
+// `checkBans` themselves (auth/service.ts `refresh`, licenses/service.ts
+// `validateLicense`).
 // `users.status` is left alone: suspension is admin-users' concern, and a
 // lifted ban must not have to remember what status to restore.
 
-import { bans, devices, sessions, type Database } from '@sl/db';
+import { bans, devices, licenses, sessions, type Database } from '@sl/db';
 import { and, eq, inArray, isNull, or, type SQL } from 'drizzle-orm';
 
 import { AppErrors } from '../../lib/errors.js';
@@ -143,6 +148,10 @@ export async function createBan(
 
   if (input.type === 'account' && input.userId) {
     await revokeAllSessionsForBan(db, redis, input.userId);
+    await db
+      .update(licenses)
+      .set({ status: 'revoked', revokedAt: new Date(), revokedReason: 'account_banned' })
+      .where(and(eq(licenses.userId, input.userId), eq(licenses.status, 'active')));
     await bumpUserVersion(db, input.userId);
   } else if (input.type === 'device') {
     const bannedDevices = await db.query.devices.findMany({

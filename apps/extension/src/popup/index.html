@@ -13,9 +13,8 @@
          (confirmed by test/e2e/ui-pages.spec.ts in this repo's own
          sandbox: net::ERR_CERT_AUTHORITY_INVALID through the environment's
          TLS-intercepting proxy). style.css's font stack instead leads with
-         "Inter" (used if the OS happens to have it installed) and falls
-         back to the system UI font — see docs/10-design-system.md's
-         extension section. -->
+         EA's web app fonts (loaded by EA's page, so present in the
+         userscript's drawer there) and falls back to the system UI font. -->
     <link rel="stylesheet" href="../styles/tokens.css" />
     <link rel="stylesheet" href="./style.css" />
   </head>

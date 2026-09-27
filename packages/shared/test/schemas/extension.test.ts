@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { entitlementBlobClaimsSchema } from '../../src/schemas/extension.js';
+import {
+  bootstrapResponseSchema,
+  entitlementBlobClaimsSchema,
+  heartbeatResponseSchema,
+} from '../../src/schemas/extension.js';
 
 // The claims `apps/api`'s DefaultEntitlementProvider signs into the
 // entitlement blob (a compact EdDSA JWS) and the extension reads back,
@@ -49,5 +53,22 @@ describe('entitlementBlobClaimsSchema', () => {
 
   it('rejects a non-boolean kill switch', () => {
     expect(entitlementBlobClaimsSchema.safeParse({ ...claims, killSwitchActive: 'false' }).success).toBe(false);
+  });
+});
+
+// Bootstrap carries the signed-in user's own email (shown in the extension);
+// heartbeat is the cheap 10-minute refresh and never carries it.
+describe('bootstrap vs heartbeat response: email', () => {
+  it('bootstrap requires a valid email', () => {
+    const email = bootstrapResponseSchema.shape.email;
+    expect(email).toBeDefined();
+    expect(email.safeParse('user@example.com').success).toBe(true);
+    expect(email.safeParse('not-an-email').success).toBe(false);
+    expect(email.safeParse(undefined).success).toBe(false);
+  });
+
+  it('heartbeat has no email field (nor userId)', () => {
+    expect(Object.keys(heartbeatResponseSchema.shape)).not.toContain('email');
+    expect(Object.keys(heartbeatResponseSchema.shape)).not.toContain('userId');
   });
 });

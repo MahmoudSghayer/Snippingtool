@@ -1,7 +1,7 @@
 // Public POST /coupons/validate — a preview endpoint. No auth required, so
-// a checkout page can show "10% off" before the user commits; actual
-// redemption happens as part of `POST /payments/checkout` or
-// `POST /subscriptions/trial`-adjacent flows, never here.
+// a pricing page can show "10% off" before the user commits. Nothing
+// redeems coupons at the moment (redemption was part of the removed card
+// checkout), and never here.
 
 import { couponValidateRequestSchema, couponValidateResponseSchema } from '@sl/shared';
 import fp from 'fastify-plugin';
@@ -58,9 +58,8 @@ export default fp(
         // This route deliberately never runs `fastify.authenticate`, so
         // `request.authUser` is always unset here even if the caller sent a
         // token — the per-user "already redeemed" check is intentionally
-        // skipped for this anonymous preview and re-checked authoritatively
-        // at actual redemption time (checkout/trial), which always has a
-        // real `userId`.
+        // skipped for this anonymous preview; any future redemption path
+        // must re-check it with a real `userId`.
         const userId = request.authUser?.id;
         const result = await checkCouponEligibility(fastify.db, request.body.code, plan.id, userId);
 

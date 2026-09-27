@@ -146,7 +146,7 @@ export default fp(
     app.get(
       '/api/v1/market/activity',
       {
-        onRequest: [fastify.authenticate],
+        onRequest: [fastify.requireFeature('dashboard.analytics')],
         schema: {
           tags: ['market'],
           querystring: marketQuerySchema,
@@ -228,7 +228,7 @@ export default fp(
     app.get(
       '/api/v1/market/movers',
       {
-        onRequest: [fastify.authenticate],
+        onRequest: [fastify.requireFeature('dashboard.analytics')],
         schema: {
           tags: ['market'],
           querystring: marketQuerySchema,
@@ -308,7 +308,7 @@ export default fp(
     app.get(
       '/api/v1/market/cards/:resourceId',
       {
-        onRequest: [fastify.authenticate],
+        onRequest: [fastify.requireFeature('dashboard.analytics')],
         schema: {
           tags: ['market'],
           params: z.object({ resourceId: z.string().min(1).max(64) }),
@@ -398,7 +398,7 @@ export default fp(
     app.get(
       '/api/v1/market/events',
       {
-        onRequest: [fastify.authenticate],
+        onRequest: [fastify.requireFeature('dashboard.analytics')],
         schema: {
           tags: ['market'],
           querystring: marketEventsQuerySchema,

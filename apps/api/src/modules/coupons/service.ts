@@ -1,7 +1,6 @@
-// Coupon validation and redemption. `free_days`/`lifetime` coupons apply
-// entirely at this layer (no Stripe involvement — docs/05-subscriptions.md
-// §8); `percent`/`fixed` coupons are validated here too, but the actual
-// discount is applied by `modules/payments` at Stripe Checkout time.
+// Coupon validation (the public preview) and admin CRUD. Nothing redeems a
+// coupon at the moment: redemption only ever happened at card checkout,
+// which has been removed (docs/05-subscriptions.md §8).
 
 import { coupons, couponRedemptions, plans, type Database } from '@sl/db';
 import { and, eq, inArray, isNull } from 'drizzle-orm';
@@ -57,25 +56,6 @@ export async function checkCouponEligibility(
     if (existing) return { eligible: false, coupon, reason: 'ALREADY_REDEEMED' };
   }
   return { eligible: true, coupon };
-}
-
-/** Records a redemption and increments `redeemed_count`. Takes the already
- * -fetched `coupon` row (from `checkCouponEligibility`) rather than
- * re-reading it, both to save a query and so the increment is computed from
- * a value the caller already validated against `max_redemptions`. */
-export async function redeemCoupon(
-  db: Database,
-  coupon: CouponRow,
-  userId: string,
-  subscriptionId: string | null,
-): Promise<void> {
-  await db
-    .insert(couponRedemptions)
-    .values({ id: newId(), couponId: coupon.id, userId, subscriptionId, redeemedAt: new Date() });
-  await db
-    .update(coupons)
-    .set({ redeemedCount: coupon.redeemedCount + 1 })
-    .where(eq(coupons.id, coupon.id));
 }
 
 // ---------------------------------------------------------------------------

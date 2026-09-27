@@ -3,7 +3,12 @@
 // Pure data, no I/O; `scripts/build.mjs` writes it on top of the bundle and
 // alone into the `.meta.js` Tampermonkey polls for updates.
 
+import { readFileSync } from 'node:fs';
+
 import { EA_WEB_APP_MATCHES } from '../ea-origins.mjs';
+
+/** Tampermonkey's icon: the Nova Trade logo, inlined so it needs no host. */
+const ICON = `data:image/png;base64,${readFileSync(new URL('../src/icons/icon-48.png', import.meta.url)).toString('base64')}`;
 
 // Every GM_* function src/userscript/ calls (see src/userscript/gm.d.ts).
 // Tampermonkey leaves anything not granted here undefined.
@@ -31,6 +36,7 @@ export function buildUserscriptHeader(env) {
     ['name', 'Nova Trade'],
     ['namespace', 'https://snipersledger.app/'],
     ['version', env.version],
+    ['icon', ICON],
     [
       'description',
       "Records what the FC transfer market actually does, ranks opportunities, and runs a governed autobuyer. The Tampermonkey build of the Nova Trade extension.",

@@ -1,6 +1,6 @@
 # @sl/tests
 
-Cross-app end-to-end journeys and load tests for The Sniper's Ledger — the
+Cross-app end-to-end journeys and load tests for Nova Trade — the
 tests that exercise more than one app at once, or the running server's
 behaviour under concurrent traffic. Owned by the Testing & QA agent. See
 [`docs/12-testing.md`](../docs/12-testing.md) for the full test strategy
@@ -15,8 +15,7 @@ injection suite against the real built API).
 ## Contents
 
 - [`e2e/`](./e2e) — Playwright, cross-app journeys (extension ↔ real API,
-  admin action ↔ another user's live WS connection, a signed Stripe webhook
-  ↔ the dashboard). See [`e2e`'s own section of docs/12-testing.md](../docs/12-testing.md#8-testse2e--cross-app-journeys).
+  admin action ↔ another user's live WS connection). See [`e2e`'s own section of docs/12-testing.md](../docs/12-testing.md#8-testse2e--cross-app-journeys).
 
   ```bash
   cd tests
@@ -59,8 +58,8 @@ tests/
 │   │                          # PREFIX to the api webServer command (see its
 │   │                          # own header for why, not Playwright's globalSetup)
 │   ├── build-extension.mjs    # builds `ledger` pointed at this run's own API origin
-│   ├── helpers/                # auth.ts, db.ts, stripe.ts, extension-id.mjs
-│   └── specs/                  # a/b/c/d-*.spec.ts, one per journey
+│   ├── helpers/                # auth.ts, db.ts, extension-id.mjs
+│   └── specs/                  # a/b/c-*.spec.ts, one per journey
 ├── load/
 │   ├── lib/config.js           # shared k6 config (profiles/thresholds)
 │   ├── scenarios/               # one k6 script per scenario

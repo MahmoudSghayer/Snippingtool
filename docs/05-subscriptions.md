@@ -1,13 +1,12 @@
 # 05 — Subscriptions & Payments
 
 Status: implementation-ready for the modules it covers
-(`apps/api/src/modules/{subscriptions,licenses,payments,coupons,plans,bans,flags}`
+(`apps/api/src/modules/{subscriptions,licenses,payments,payment-claims,coupons,plans,bans,flags}`
 and their `admin-*` counterparts). Owned by the subscriptions & payments
 agent (`docs/01-architecture.md` PHASE 5 / wave 2). Builds directly on the
 schema in [`02-database.md`](./02-database.md) (`plans`, `subscriptions`,
-`licenses`, `devices`, `payments`, `payment_history`,
-`stripe_webhook_events`, `coupons`, `coupon_redemptions`, `bans`, `flags`,
-`ip_activity`) and the pure logic in `@sl/shared`
+`licenses`, `devices`, `payments`, `payment_history`, `payment_claims`,
+`coupons`, `coupon_redemptions`, `bans`, `flags`, `ip_activity`) and the pure logic in `@sl/shared`
 (`src/license-key.ts`, `src/email-normalise.ts`,
 `src/constants/plans.ts`, `src/schemas/subscriptions.ts`).
 
@@ -19,7 +18,7 @@ schema in [`02-database.md`](./02-database.md) (`plans`, `subscriptions`,
 4. [Entitlement blob format](#4-entitlement-blob-format)
 5. [Trial protection](#5-trial-protection)
 6. [Abuse heuristics](#6-abuse-heuristics)
-7. [Stripe webhook handling](#7-stripe-webhook-handling)
+7. [PayPal payment claims](#7-paypal-payment-claims)
 8. [Admin operations + audit fields](#8-admin-operations--audit-fields)
 9. [Jobs](#9-jobs)
 10. [Route summary](#10-route-summary)
@@ -35,13 +34,13 @@ and feature behaviour for (`@sl/shared`'s `PLAN_CODES`, `DEVICE_LIMITS`,
 `PLAN_FEATURES` — the single source of truth every module imports instead of
 re-declaring these numbers).
 
-| Plan       | Price          | Interval   | Device limit | `is_lifetime` | Feature keys (additive)                                                                                                       |
-| ---------- | -------------- | ---------- | ------------ | ------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `trial`    | 0¢             | 7 days¹    | 1            | false         | `ledger.recorder`, `ledger.price_model`, `assist.ranker`, `assist.filter_rotation`, `assist.session_pnl`, `assist.risk_meter` |
-| `basic`    | 499¢/mo        | month      | 1            | false         | `ledger.recorder`, `ledger.price_model`                                                                                       |
-| `pro`      | 999¢/mo        | month      | 2            | false         | `basic` + `assist.ranker`, `assist.filter_rotation`, `assist.session_pnl`, `assist.risk_meter`, `dashboard.analytics`         |
-| `ultimate` | 1999¢/mo       | month      | 3            | false         | `pro` + `automation.autobuyer`, `dashboard.multi_device`, `support.priority`                                                  |
-| `lifetime` | 9999¢ one-time | `one_time` | 3            | true          | same as `ultimate`                                                                                                            |
+| Plan       | Price          | Interval   | Device limit | `is_lifetime` | Feature keys (additive)                                                                                                                              |
+| ---------- | -------------- | ---------- | ------------ | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `trial`    | 0¢             | 7 days¹    | 1            | false         | `ledger.recorder`, `ledger.price_model`, `assist.ranker`, `assist.filter_rotation`, `assist.session_pnl`, `assist.risk_meter`, `dashboard.analytics` |
+| `basic`    | 499¢/mo        | month      | 1            | false         | `ledger.recorder`, `ledger.price_model`                                                                                                              |
+| `pro`      | 999¢/mo        | month      | 2            | false         | `basic` + `assist.ranker`, `assist.filter_rotation`, `assist.session_pnl`, `assist.risk_meter`, `dashboard.analytics`                                |
+| `ultimate` | 1999¢/mo       | month      | 3            | false         | `pro` + `automation.autobuyer`, `dashboard.multi_device`, `support.priority`                                                                         |
+| `lifetime` | 9999¢ one-time | `one_time` | 3            | true          | same as `ultimate`                                                                                                                                   |
 
 ¹ `trial` is priced at 0¢/mo in `plans` (so it fits the same billing shape as
 every other plan for the plans list/admin UI) but is never billed — its
@@ -58,7 +57,31 @@ fully supported by the plans/subscriptions/licenses modules — they read
 (`@sl/shared`'s plan constants are the fixed-plan fast path for the
 extension/dashboard UI and the seed; the database row is always the runtime
 source of truth). `GET /plans` returns only `is_active = true`, non-deleted
-plans, ordered by `sort_order`.
+plans, ordered by `sort_order`. An archived (`is_active = false`) plan is
+off sale: payment claims (submission and approval) and coupon grants refuse
+it with `409 CONFLICT`. Only an admin's manual activate / grant-lifetime may
+still hand one out, e.g. to a legacy customer.
+
+**Server-side gating.** The API enforces these keys too, not just the
+extension and dashboard: routes list `fastify.requireFeature('<key>')`
+(`apps/api/src/plugins/auth.ts`) in `onRequest`, which authenticates, then
+checks the caller's live `features` (the `EntitlementProvider` snapshot in
+§4, cached in Redis for 60 s per user and deleted wherever
+`subscription.changed` is published). A caller without the key gets
+`403 FEATURE_NOT_IN_PLAN` with `details.feature`.
+
+| Feature key              | Routes                                                                                |
+| ------------------------ | ------------------------------------------------------------------------------------- |
+| `ledger.recorder`        | `/trades*`, `/sniping/attempts`, `/profits`, `POST /extension/telemetry`              |
+| `assist.filter_rotation` | `/filters*`                                                                           |
+| `assist.risk_meter`      | `/risk-events` (the admin `/admin/users/:id/risk-events` is permission-gated instead) |
+| `dashboard.analytics`    | `/analytics/me/*`, `/market/*`                                                        |
+
+Every live plan has `ledger.recorder`, so that gate means "has a live
+subscription". Extension bootstrap, heartbeat, error reports, licence
+validation and every account, billing, settings, notification, device,
+session and auth route stay ungated, so an expired user can still sign in,
+see that they have expired, and buy a pass.
 
 ---
 
@@ -67,21 +90,17 @@ plans, ordered by `sort_order`.
 ```mermaid
 stateDiagram-v2
     [*] --> trialing: POST /subscriptions/trial
-    [*] --> active: checkout.session.completed (paid plan)\nor admin activate (manual/coupon)
-    [*] --> lifetime: admin grant lifetime\nor lifetime coupon\nor lifetime plan checkout
+    [*] --> active: admin activate (manual)\nor PayPal payment claim approved
+    [*] --> lifetime: admin grant lifetime
 
-    trialing --> active: checkout.session.completed\n(upgrade before trial ends)
-    trialing --> expired: subscriptions.expire job\n(trial_ends_at passed, no checkout)
+    trialing --> active: PayPal payment claim approved\n(trial ends, the pass replaces it)
+    trialing --> expired: subscriptions.expire job\n(trial_ends_at passed)
     trialing --> suspended: admin suspend / abuse.scan auto-suspend
 
-    active --> past_due: invoice.payment_failed
+    active --> active: PayPal payment claim approved on the same plan\n(current_period_end extended) / admin extend
     active --> canceled: POST /subscriptions/cancel\n(cancel_at_period_end=true, stays active until period end)
-    active --> suspended: admin suspend / abuse.scan auto-suspend / chargeback
+    active --> suspended: admin suspend / abuse.scan auto-suspend
     active --> expired: subscriptions.expire job\n(current_period_end passed, auto_renew=false)
-
-    past_due --> active: invoice.paid (retry succeeded)
-    past_due --> canceled: customer.subscription.deleted\n(Stripe gave up retrying)
-    past_due --> suspended: admin suspend / abuse.scan auto-suspend
 
     canceled --> active: POST /subscriptions/resume\n(only while still before current_period_end)
     canceled --> expired: subscriptions.expire job\n(current_period_end passed)
@@ -91,48 +110,50 @@ stateDiagram-v2
 
     expired --> [*]
     canceled --> [*]
-    lifetime --> suspended: admin suspend / abuse.scan auto-suspend\n(only non-Stripe-reversible state a lifetime can enter)
+    lifetime --> suspended: admin suspend / abuse.scan auto-suspend
     suspended --> lifetime: admin unsuspend (if it was lifetime before)
 ```
 
 Notes:
 
+- **Every subscription is created locally** — by an admin grant
+  (`activateManual`/`grantLifetime` in `admin-subscriptions`), by an admin
+  approving a PayPal payment claim (§7, which calls the same
+  `activateManual`), or by `POST /subscriptions/trial`. Nothing renews a
+  subscription automatically: a new pass comes from another approved claim
+  or an admin grant, and a period ends through `subscriptions.expire` (§9).
 - **One live subscription per user**, enforced by
   `subscriptions_one_live_per_user` (`02-database.md` §6.3): "live" =
   `status IN (trialing, active, past_due, suspended, lifetime)`. Every module
-  that creates a subscription (`POST /subscriptions/trial`, checkout webhook,
-  admin activate/grant-lifetime) first checks for an existing live row and
-  returns `CONFLICT` rather than relying solely on the DB constraint to
-  reject a bad request late.
+  that creates a subscription (`POST /subscriptions/trial`, payment-claim
+  approval, admin activate/grant-lifetime) first checks for an existing live
+  row and returns `CONFLICT` rather than relying solely on the DB constraint
+  to reject a bad request late.
+- **`past_due`** is still a value of the `subscription_status` enum (and
+  still counts as "live" above), but nothing moves a subscription into it
+  any more — there is no card billing and so no dunning path.
 - **`canceled` is soft** — `cancel_at_period_end = true` is set immediately
-  by `POST /subscriptions/cancel`, but `status` stays `active` (or
-  `past_due`) until the `subscriptions.expire` job (§9) flips it to
-  `canceled` at `current_period_end`, OR the Stripe webhook
-  `customer.subscription.deleted` arrives first (whichever happens first —
-  the webhook path is authoritative when both could apply, since it reflects
-  what actually happened on Stripe's side).
+  by `POST /subscriptions/cancel`, but `status` stays `active` until the
+  `subscriptions.expire` job (§9) flips it at `current_period_end`.
 - **`suspended`** is the only state abuse handling and admin moderation can
-  reach from _any_ other live state, and is deliberately not reachable by
-  any Stripe webhook directly — a chargeback (§7) suspends via the same
-  application-layer path admin suspend uses, not a bespoke state transition,
-  so "why is this account suspended" always has one code path
-  (`subscriptions/service.ts#suspend`) to read.
+  reach from _any_ other live state, and it has exactly one code path —
+  admin suspend and `abuse.scan`'s auto-suspend both go through
+  `subscriptions/service.ts#suspend` — so "why is this account suspended"
+  always has one place to read.
 - **`expired`** and **`canceled`** are terminal for that subscription row; a
-  user who wants back in starts a **new** subscription (new checkout, new
-  admin grant, etc.) rather than resurrecting the old row — this keeps
-  `subscriptions` a true history and matches `02-database.md`'s "historical
-  (canceled/expired) subscriptions" language for the partial-unique-index
-  rationale.
+  user who wants back in starts a **new** subscription (a new payment
+  claim, a new admin grant, etc.) rather than resurrecting the old row — this
+  keeps `subscriptions` a true history and matches `02-database.md`'s
+  "historical (canceled/expired) subscriptions" language for the
+  partial-unique-index rationale.
 - **`lifetime`** subscriptions have `current_period_end = NULL`,
   `auto_renew = false`, and are never touched by `subscriptions.expire`
   (its query is scoped to `current_period_end IS NOT NULL AND
 current_period_end < now()`, which a lifetime row never matches). The DB
-  constraint requires `source IN (manual, coupon)` for `status = lifetime` —
-  a lifetime plan bought via Stripe Checkout is recorded with
-  `source = 'stripe'` and `status = 'active'`, `current_period_end = NULL`,
-  `auto_renew = false` instead (§7, `checkout.session.completed` for an
-  `is_lifetime` plan); only an **admin grant** or a **lifetime coupon**
-  produces `status = lifetime` literally, per the DB constraint.
+  constraint requires `source IN (manual, coupon)` for `status = lifetime`;
+  today only an **admin grant** produces it. A lifetime pass can't be
+  approved from a PayPal claim yet — the `lifetime` plan has no fixed pass
+  length configured, so approval is refused with `CONFLICT`.
 
 ---
 
@@ -142,7 +163,7 @@ Implemented in `@sl/shared`'s `src/license-key.ts`
 (`generateLicenseKey`/`normaliseLicenseKey`/`validateLicenseKeyFormat`/
 `computeChecksum`), imported by `apps/api/src/modules/licenses`. Full
 rationale lives as doc comments in that file; summarised here for the
-webhook/admin/extension flows that depend on it.
+payment-claim/admin/extension flows that depend on it.
 
 **Shape:** `SL-XXXX-XXXX-XXXX-XXXX` — literal `SL-` prefix, then 16
 Crockford base32 characters (alphabet `0123456789ABCDEFGHJKMNPQRSTVWXYZ` —
@@ -195,6 +216,11 @@ looked up live), so a later plan edit doesn't retroactively change an
 already-issued license's device ceiling — an explicit device-limit override
 per license (Admin operations, §8) is the supported way to change one
 license's ceiling after the fact.
+
+**Validation** (`POST /licenses/validate`) finds the device the same way
+login does (docs/04-auth.md §5). A new device, or a revoked one coming
+back, must fit under `max_devices` counting _every_ active device of the
+user, not only those this license registered.
 
 ---
 
@@ -278,41 +304,51 @@ throughout, and a blob without the claim never counts as "off".
 
 ## 5. Trial protection
 
+**One trial per account, ever.** An account that has ever had a trial gets
+`403 TRIAL_ALREADY_USED` (no flag; a live subscription is still the `409
+CONFLICT` it always was). "Has had a trial" means any `subscriptions` row on
+the `trial` plan, whatever its status and even if soft-deleted: expiry,
+upgrade and suspension keep that row (an upgrade inserts a new one), while
+`trial_ends_at` is cleared as soon as a trial stops trialing, so it is not
+the history. The email, device and IP checks below use the same definition
+for the other accounts they match, looked up through
+`subscriptions_user_id_plan_id_idx` (migrations/0035), with all their
+filters in SQL.
+
 `POST /subscriptions/trial` denies a trial (`403 TRIAL_ABUSE_DETECTED`) and
 writes a `flags` row (`kind = 'trial_abuse'`, `severity` per table below,
 `evidence` = the exact match(es) that triggered the denial) whenever **any**
-of these four checks matches an existing trial within the lookback window.
-All four run on every trial request, not short-circuited at the first
+of these three checks matches an existing trial within the lookback window.
+All three run on every trial request, not short-circuited at the first
 match, so `evidence` can record every reason at once (useful for the
 abuse-review queue — a request that trips several heuristics at once is a
 stronger signal than one that trips one).
 
-| #   | Check                  | Key                                                                                                                                                                                                                                                                                                                                                      | Window                                                                                                             | Data source                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| --- | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | **Email**              | `normaliseEmailForAbuseCheck(email)` (`@sl/shared` — gmail dot/plus stripping + domain lowercasing)                                                                                                                                                                                                                                                      | unbounded (no lookback — a normalised email that has ever had a trial never gets a second one)                     | An indexed equality lookup against `users.email_normalised` (migrations/0025), a `GENERATED ALWAYS AS STORED` column Postgres computes and keeps in sync automatically from `email` via an IMMUTABLE SQL function (`normalise_email_for_abuse_check`) mirroring `normaliseEmailForAbuseCheck()` byte-for-byte — replacing the original scan-and-normalise-in-application-code approach (see the former "scaling note" this superseded). Joined to every subscription whose `trial_ends_at IS NOT NULL`. |
-| 2   | **Device fingerprint** | SHA-256 hash of the _authenticated request's own device_ fingerprint — `request.authUser.deviceId` (set by login/registration, not resubmitted by the trial call) looked up in `devices` for its `fingerprint_hash`                                                                                                                                      | 30 days                                                                                                            | Every other `devices` row (any user) sharing that `fingerprint_hash`, joined to that user's trial-having subscriptions, `devices.first_seen_at` within 30 days                                                                                                                                                                                                                                                                                                                                          |
-| 3   | **IP /24**             | The request IP's `/24` (first three octets for IPv4; `/48` for IPv6, same rationale — coarse enough to catch "same household/NAT/VPN exit" without flagging an entire ISP)                                                                                                                                                                               | 30 days                                                                                                            | `ip_activity` (rows written by this module on every trial attempt, successful or not — `recordTrialIpActivity()`), joined to trial-having subscriptions                                                                                                                                                                                                                                                                                                                                                 |
-| 4   | **Stripe customer**    | The requester's own `users.stripe_customer_id` (migrations/0025) — `null` for most trial requests, since a trial by definition never itself goes through Stripe Checkout; this check only runs when the requesting account already has one, e.g. from an earlier, now-non-live paid subscription or an earlier Customer Portal call on this same account | unbounded (same rationale as check 1: two accounts resolving to the same live Stripe customer is never legitimate) | Every user sharing that exact `stripe_customer_id`, joined to that user's trial-having subscriptions — same false-positive guard as checks 2/3 below (only counts a _prior trial_, never a prior paid subscription)                                                                                                                                                                                                                                                                                     |
+| #   | Check                  | Key                                                                                                                                                                                                                                                                                                                                                      | Window                                                                                                             | Data source                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| --- | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **Email**              | `normaliseEmailForAbuseCheck(email)` (`@sl/shared` — gmail dot/plus stripping + domain lowercasing)                                                                                                                                                                                                                                                      | unbounded (no lookback — a normalised email that has ever had a trial never gets a second one)                     | An indexed equality lookup against `users.email_normalised` (migrations/0025), a `GENERATED ALWAYS AS STORED` column Postgres computes and keeps in sync automatically from `email` via an IMMUTABLE SQL function (`normalise_email_for_abuse_check`) mirroring `normaliseEmailForAbuseCheck()` byte-for-byte — replacing the original scan-and-normalise-in-application-code approach (see the former "scaling note" this superseded). Restricted to users who have had a trial (any row on the `trial` plan). |
+| 2   | **Device fingerprint** | SHA-256 hash of the _authenticated request's own device_ fingerprint — `request.authUser.deviceId` (set by login/registration, not resubmitted by the trial call) looked up in `devices` for its `fingerprint_hash`                                                                                                                                      | 30 days                                                                                                            | Every other `devices` row (any user) sharing that `fingerprint_hash`, joined to that user's trial-having subscriptions, `devices.first_seen_at` within 30 days                                                                                                                                                                                                                                                                                                                                                  |
+| 3   | **IP /24**             | The request IP's `/24` (first three octets for IPv4; `/48` for IPv6, same rationale — coarse enough to catch "same household/NAT/VPN exit" without flagging an entire ISP)                                                                                                                                                                               | 30 days                                                                                                            | `ip_activity` (rows written by this module on every trial attempt, successful or not — `recordTrialIpActivity()`), joined to trial-having subscriptions                                                                                                                                                                                                                                                                                                                                                         |
+
+A former 4th check (Stripe customer) is gone along with Stripe.
 
 **Severity mapping** (written to `flags.severity`): 1 match → `low`; 2
-matches → `medium`; 3 or more → `critical` (skipping `high` — several
+matches → `medium`; all 3 → `critical` (skipping `high` — several
 independent signals agreeing is treated as certain, not merely likely).
 `abuse.scan` (§6) does not re-flag these — trial-time denial is synchronous
 and immediate, `abuse.scan` covers patterns that only emerge after the fact
-(velocity, cross-account fingerprint reuse, chargebacks).
+(velocity, cross-account fingerprint reuse).
 
-**False-positive guard:** checks 2, 3 and 4 only count a _prior trial_,
-never a prior _paid_ subscription — a shared office IP/device (or, for
-check 4, two accounts that happen to resolve to the same Stripe customer
-through an unrelated support flow) where one person is on `pro` and another
-starts a trial is not flagged by IP/device/Stripe-customer alone (only by
-check 1, email, which is a much stronger signal on its own). This is the
+**False-positive guard:** checks 2 and 3 only count a _prior trial_,
+never a prior _paid_ subscription — a shared office IP/device where one
+person is on `pro` and another starts a trial is not flagged by IP/device
+alone (only by check 1, email, which is a much stronger signal on its own). This is the
 "true positive vs. false-positive-avoidance" pairing the roadmap's Phase 5
 exit criteria calls for, and is covered by
 `apps/api/src/modules/subscriptions/__tests__/subscriptions.test.ts`.
 
 **Feature-toggle gate:** `trial.enabled` (`feature_toggles`, seeded `true`)
-is checked before any of the four heuristics — when off, every trial
+is checked before any of the three heuristics — when off, every trial
 request returns `403 SUBSCRIPTION_REQUIRED` regardless of history (a kill
 switch for the trial funnel entirely, independent of abuse detection).
 
@@ -320,26 +356,28 @@ switch for the trial funnel entirely, independent of abuse detection).
 
 ## 6. Abuse heuristics
 
-`abuse.scan` (hourly job, §9) runs four detectors, each writing a `flags`
+`abuse.scan` (hourly job, §9) runs three detectors, each writing a `flags`
 row (`kind` as listed) and auto-suspending the affected subscription(s) when
 `evidence.score` crosses `system_config`'s
 `abuse.auto_suspend_severity_threshold` (seeded `high` — i.e. `high` and
 `critical` auto-suspend, `low`/`medium` land in the review queue only).
 Every write is `actor_type = 'system'` in `audit_logs` (§8).
 
-| Detector                                | `flags.kind`     | Threshold (from `system_config`, overridable by admin)                                                                                               | What it queries                                                                                                                                                                                     |
-| --------------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Device-registration velocity**        | `velocity`       | `abuse.max_devices_per_ip_per_day` (seeded 5) — more than N distinct `devices` rows first-seen from the same IP in a rolling 24h window              | `devices` joined to `ip_activity`                                                                                                                                                                   |
-| **License shared across many networks** | `multi_account`¹ | `abuse.max_asns_per_license_24h` (seeded 3) — one `licenses` row validated (`POST /licenses/validate`, §3) from more than N distinct ASNs in 24h     | `licenses.last_validated_at` history (validation attempts logged to `user_activity` by the core auth/activity module; this module reads that table, never writes to it) joined to `ip_activity.asn` |
-| **Chargebacks**                         | `chargeback`     | Any `charge.dispute.created` webhook (§7) — zero-tolerance, always `severity = 'critical'`, always auto-suspends regardless of the general threshold | `stripe_webhook_events` / `payment_history`                                                                                                                                                         |
-| **Multi-account by fingerprint**        | `multi_account`¹ | `abuse.max_accounts_per_fingerprint` (seeded 3) — more than N distinct `user_id`s ever registered a `devices` row with the same `fingerprint_hash`   | `devices` grouped by `fingerprint_hash`                                                                                                                                                             |
+| Detector                                | `flags.kind`     | Threshold (from `system_config`, overridable by admin)                                                                                             | What it queries                                                                                                                                                                                     |
+| --------------------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Device-registration velocity**        | `velocity`       | `abuse.max_devices_per_ip_per_day` (seeded 5) — more than N distinct `devices` rows first-seen from the same IP in a rolling 24h window            | `devices` joined to `ip_activity`                                                                                                                                                                   |
+| **License shared across many networks** | `multi_account`¹ | `abuse.max_asns_per_license_24h` (seeded 3) — one `licenses` row validated (`POST /licenses/validate`, §3) from more than N distinct ASNs in 24h   | `licenses.last_validated_at` history (validation attempts logged to `user_activity` by the core auth/activity module; this module reads that table, never writes to it) joined to `ip_activity.asn` |
+| **Multi-account by fingerprint**        | `multi_account`¹ | `abuse.max_accounts_per_fingerprint` (seeded 3) — more than N distinct `user_id`s ever registered a `devices` row with the same `fingerprint_hash` | `devices` grouped by `fingerprint_hash`                                                                                                                                                             |
 
 ¹ Device-velocity-by-fingerprint and license-sharing-by-ASN both write
 `kind = 'multi_account'`; `evidence.detector` (a string field inside the
 JSONB, e.g. `"multi_account.fingerprint"` vs. `"multi_account.asn"`)
 disambiguates them for the admin review UI without needing a fifth enum
 value — `flag_kind` stays exactly the five values `02-database.md` §6.8
-documents.
+documents. The `chargeback` kind is still in that enum, but nothing creates
+it automatically: its only source was the card processor's dispute
+notification, which is gone. An admin who learns of a PayPal dispute
+suspends the subscription by hand (§8).
 
 `evidence` JSONB shape (consistent across detectors so the admin-flags list
 can render one generic table): `{ detector, score, threshold, matchedIds:
@@ -355,37 +393,54 @@ system`").
 
 ---
 
-## 7. Stripe webhook handling
+## 7. PayPal payment claims
 
-`POST /webhooks/stripe` — raw body (Fastify content-type parser configured
-to preserve it for this route specifically), `stripe.webhooks.constructEvent`
-signature verification against `STRIPE_WEBHOOK_SECRET`, then an
-**idempotency check** against `stripe_webhook_events.event_id` (unique
-index) before any side effect: the event row is inserted first
-(`processed_at = null`), and if the insert hits the unique constraint, the
-handler returns `200` immediately without reprocessing (a re-delivered
-Stripe event — Stripe retries on anything but a 2xx — is a guaranteed no-op,
-verified by `webhook idempotent double delivery` test, §deliverable 8 in the
-task brief). On successful processing `processed_at` is stamped; on a
-handler error `error` is set and the row is left with `processed_at = null`
-so `stripe.reconcile` (§9) can find and retry it.
+Payment is PayPal.me only, and it is not automated: this system never
+talks to PayPal. The buyer pays on PayPal.me, then tells us about it, and an
+admin checks the PayPal account by hand before anything is issued
+(`apps/api/src/modules/payment-claims`, table `payment_claims` from
+migrations/0031).
 
-| Stripe event                          | Handler action                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `checkout.session.completed`          | Look up the `plans` row by `stripe_price_id` from the session's line item. Idempotent guard: skip entirely if the user already has a live **non-trial** subscription (a duplicate/late delivery); a live **trial** is not treated as a conflict — it is the row this event upgrades (see "Atomic trial→paid" below). **Atomic trial→paid** (`apps/api/src/modules/payments/webhooks.ts#handleCheckoutCompleted`): when the user has a live `trialing` row, ending it (`status → canceled`, `ended_at = now()`, `trial_ends_at = NULL` — the CHECK constraint requires the latter) and revoking its license, creating the new `subscriptions` row (`status = active`, or `lifetime`'s special case below), issuing its license, redeeming any attached coupon, and recording the `payments` row all happen inside **one database transaction**, so a crash partway through can never leave a user with two live subscriptions, an un-ended trial, or a paid row with no license. **Lifetime plan exception:** if `plans.is_lifetime`, set `current_period_end = NULL`, `auto_renew = false`, `status = 'active'` (not `'lifetime'` — the DB constraint reserves that status for `source IN (manual, coupon)`, §2). If `session.customer` is present, persist it onto `users.stripe_customer_id` (migrations/0025, inside the same transaction) — this is what the Customer Portal lookup and the trial-abuse check 4 (§5) both read. If `couponCode` was attached to the session's metadata, record the `coupon_redemptions` row and increment `coupons.redeemed_count`. Publish `subscription.changed` (§below) and a `notifications` row ("Welcome to <plan>") after the transaction commits. |
-| `invoice.paid`                        | Renewal. Update the matching `subscriptions` row's `current_period_start/end` from the invoice's period, and `status`: `past_due → active` if it was in dunning, otherwise stays `active`. Insert `payments` (`succeeded`) + `payment_history`. If the subscription's license is `expired`/`revoked` from a prior lapse, re-issue (only case where a _second_ license is legitimately issued for one subscription — the old one stays `revoked`, never reactivated, so a leaked old key can't come back to life). Publish `subscription.changed`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `invoice.payment_failed`              | `status → past_due`. Insert `payments` (`failed`) + `payment_history`. Publish `subscription.changed` and a `notifications` row prompting the user to update their card (portal link, §10). Does **not** touch the license — a `past_due` subscription keeps its existing license valid until either `invoice.paid` recovers it or `subscriptions.expire`/`customer.subscription.deleted` ends it, matching Stripe's own dunning grace period.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `customer.subscription.updated`       | Generic sync for anything not covered by a more specific event above (e.g. a plan change made directly in the Stripe dashboard, proration adjustments): re-read the Stripe subscription object, map its `status`/`current_period_end`/`cancel_at_period_end` onto the local row via the same field mapping `stripe.reconcile` (§9) uses, so this handler and the nightly job share one `syncFromStripeSubscription()` function rather than two drifting implementations.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `customer.subscription.deleted`       | `status → canceled`, `ended_at = now()`. Revoke the license (`revoked_reason = 'subscription_ended'`). Publish `subscription.changed`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `charge.refunded`                     | Insert `payment_history` (`event = 'refunded'`, `raw_event` = the charge object). Does not by itself change subscription status (a partial refund/goodwill gesture is not necessarily a cancellation) — an admin or a subsequent `customer.subscription.deleted` handles the entitlement side if the refund does end the subscription.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `charge.dispute.created` (chargeback) | Insert `payment_history` (`event = 'disputed'`). Create a `flags` row (`kind = 'chargeback'`, `severity = 'critical'`, `evidence = { chargeId, amount, reason }`) and **suspend** the subscription immediately via the same `suspend()` path §6 describes (`actor = { type: 'system' }`, reason `"stripe chargeback: <chargeId>"`). This is the one webhook-driven route into `suspended` (§2's note that suspension is otherwise never a direct webhook target) — deliberately: a chargeback is evidence of fraud/payment reversal, not a normal lifecycle event, so it goes through the abuse path rather than the lifecycle path.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+1. **Submit** — `POST /payment-claims` (user, CSRF, rate-limited) with the
+   plan code, the PayPal transaction ID and an optional note. Only a
+   purchasable plan is accepted (`isPurchasablePlan()`, `@sl/shared`); the
+   claim stores the plan's price and currency at that moment. A buyer can
+   have at most 3 pending claims, and a PayPal transaction ID can only be
+   submitted once (unique, case-insensitive) — a second submission is
+   `CONFLICT`. The route enqueues `payments.notify` (§9), which posts the
+   claim to the operator's Discord channel (`PAYMENTS_DISCORD_WEBHOOK_URL`;
+   a no-op when unset). A queue failure is logged, never returned to the
+   buyer — the claim is already saved and listed in admin.
+2. **Review** — admins see the queue at `/admin/payments` in the dashboard
+   (`GET /admin/payment-claims`, `subscriptions.read`).
+3. **Approve** — `POST /admin/payment-claims/:id/approve`
+   (`subscriptions.write`). The claim is marked `approved` first, guarded on
+   `status = 'pending'`, so two admins approving at once can't issue two
+   passes; if issuing fails, the claim goes back to `pending`. Then the pass
+   is issued for the plan's fixed pass length:
+   - no live subscription → a new one via `activateManual`
+     (`source = 'manual'`);
+   - a live trial → the trial ends and a new pass replaces it;
+   - a live `active` pass on the same plan → `current_period_end` is
+     extended by the pass length;
+   - anything else (a pass on another plan, a suspended account) →
+     `CONFLICT`, for an admin to sort out in Subscriptions first.
 
-**Source of truth:** the local `subscriptions`/`licenses`/`payments` tables
-are authoritative for every entitlement decision the API makes
-(`GET /subscriptions/me`, `/extension/bootstrap`, `/licenses/validate`) —
-Stripe is never queried synchronously on the entitlement-check path. Webhooks
-keep local state fresh in near-real-time; `stripe.reconcile` (§9) is the
-correctness backstop for any missed/out-of-order webhook delivery.
+   A `payments` row is recorded with `provider = 'manual'`,
+   `provider_payment_id = 'paypal:<transaction id>'`, `status =
+'succeeded'`, and the approval is written to `admin_actions` and
+   `audit_logs`.
+
+4. **Reject** — `POST /admin/payment-claims/:id/reject` with a reason the
+   buyer sees (`reject_reason`), also recorded in `admin_actions` and
+   `audit_logs`.
+
+The buyer sees their own claims and their status via
+`GET /payment-claims`. **Source of truth:** the local
+`subscriptions`/`licenses`/`payments` tables are authoritative for every
+entitlement decision the API makes (`GET /subscriptions/me`,
+`/extension/bootstrap`, `/licenses/validate`); a pass only starts when an
+admin approves the claim.
 
 ---
 
@@ -452,20 +507,18 @@ the caller to already know a subscription id.
 | **Grant lifetime**             | `POST /admin/subscriptions/:userId/grant-lifetime` | Creates (or converts an existing live subscription into) a `status = 'lifetime'`, `source = 'manual'`, `current_period_end = NULL`, `auto_renew = false` row. Issues a license with `expires_at = NULL`.                                                                                                                      |
 | **Set device limit override**  | `POST /admin/licenses/:id/device-limit`            | Updates `licenses.max_devices` directly (bypasses the plan's `device_limit` for this one license only — the plan/subscription are untouched).                                                                                                                                                                                 |
 | **Create/update/archive plan** | `admin-plans` CRUD                                 | Archive = `is_active = false` (never a hard delete — existing subscriptions keep referencing the row, `plans.id` is `RESTRICT`).                                                                                                                                                                                              |
-| **Create/disable coupon**      | `admin-coupons` CRUD                               | Disable = `is_active = false`. `free_days`/`lifetime` coupons (§below) never touch Stripe.                                                                                                                                                                                                                                    |
+| **Create/disable coupon**      | `admin-coupons` CRUD                               | Disable = `is_active = false`. Nothing redeems a coupon at the moment (§below).                                                                                                                                                                                                                                               |
 | **Ban / lift ban**             | `admin-bans` create/lift                           | Inserts/updates `bans` (`type` account/ip/device/hwid). An `account` ban additionally calls `modules/bans/service.ts#applyAccountBan(userId)`, which the auth module's login path calls `checkBans()` against (cross-agent touchpoint, exported for auth to import — see the handoff report).                                 |
 | **Review / dismiss flag**      | `admin-flags` review/dismiss                       | `flags.status → reviewed` or `dismissed`, `reviewed_by`, `reviewed_at`.                                                                                                                                                                                                                                                       |
 
-**Coupons without Stripe:** `free_days` and `lifetime` coupon types apply
-entirely client-side-of-Stripe — `POST /coupons/validate` checks eligibility
-(active, not expired, under `max_redemptions`, `plan_ids` match if
-restricted, no existing redemption for this user), and redeeming one calls
-the same subscription-mutation functions admin activate/grant-lifetime use
-(`source = 'coupon'`), recording a `coupon_redemptions` row. `percent`/`fixed`
-coupons instead create a Stripe Coupon/PromotionCode reference (or reuse one
-created out-of-band and stored on the `coupons` row) and are applied by
-passing `discounts` into the Checkout Session — Stripe, not this module,
-computes the discounted charge.
+**Coupons:** the `coupons`/`coupon_redemptions` tables, the
+`admin-coupons` CRUD and the `POST /coupons/validate` preview (active, not
+expired, under `max_redemptions`, `plan_ids` match if restricted, no
+existing redemption for this user) all remain, but **nothing redeems a
+coupon at the moment** — redemption only ever happened in the old card
+checkout flow, which is gone. No code writes `coupon_redemptions` or
+increments `redeemed_count`, and `percent`/`fixed` discounts are not
+applied anywhere: a PayPal claim is always for the plan's full price.
 
 ---
 
@@ -475,8 +528,8 @@ computes the discounted charge.
 | ---------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `subscriptions.expire` | every 5 min | `UPDATE subscriptions SET status = 'expired' WHERE status IN ('trialing','active','past_due','canceled') AND current_period_end IS NOT NULL AND current_period_end < now() AND auto_renew = false` (trialing rows use `trial_ends_at` in place of `current_period_end`) — revokes the associated license (`revoked_reason = 'subscription_expired'`), publishes `subscription.changed`, writes a `notifications` row. Lifetime rows are never touched (§2). |
 | `licenses.revalidate`  | nightly     | Marks `licenses.status = 'expired'` for any `expires_at < now()` still `active`; revokes any license whose `subscription_id` now points at a `canceled`/`expired`/`suspended` subscription that somehow still has an `active` license (a consistency sweep — the synchronous paths above should already have revoked it, this job is the backstop).                                                                                                         |
-| `abuse.scan`           | hourly      | Runs the four detectors in §6.                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `stripe.reconcile`     | nightly     | For every local `subscriptions` row with `source = 'stripe'` and a live status, fetches the corresponding Stripe subscription and calls the shared `syncFromStripeSubscription()` (§7) — catches any webhook that was missed, delivered out of order, or failed to process (its `stripe_webhook_events` row still has `processed_at = null`, which this job also re-attempts before the reconciliation pass).                                               |
+| `abuse.scan`           | hourly      | Runs the three detectors in §6.                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `payments.notify`      | on demand   | Enqueued when a buyer submits a PayPal payment claim (§7). Posts the claim (plan, amount, PayPal transaction ID, note) to the operator's Discord channel via `PAYMENTS_DISCORD_WEBHOOK_URL`; a no-op when that is unset.                                                                                                                                                                                                                                    |
 
 ---
 
@@ -486,22 +539,20 @@ Full per-route auth/rate-limit table belongs in `docs/03-api.md` (core
 agent); listed here for this module's own reference and cross-check against
 the task brief's deliverables.
 
-| Method & path                                                                                                               | Auth                                                | Notes                                                                                                                                                                                                                           |
-| --------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /plans`                                                                                                                | public                                              | Active plans only                                                                                                                                                                                                               |
-| `GET /subscriptions/me`                                                                                                     | user                                                | Subscription + license (prefix/status only) + devices + resolved entitlements                                                                                                                                                   |
-| `POST /subscriptions/trial`                                                                                                 | user                                                | §5                                                                                                                                                                                                                              |
-| `POST /subscriptions/cancel`                                                                                                | user                                                | `cancel_at_period_end = true`                                                                                                                                                                                                   |
-| `POST /subscriptions/resume`                                                                                                | user                                                | Only while `status = canceled` and before `current_period_end`                                                                                                                                                                  |
-| `GET /licenses/me`                                                                                                          | user                                                | `key_prefix` + `status` only, never the full key                                                                                                                                                                                |
-| `POST /licenses/regenerate`                                                                                                 | user                                                | Revokes old, issues + returns a new key once                                                                                                                                                                                    |
-| `POST /licenses/validate`                                                                                                   | device (license key + fingerprint, no user session) | Used by the extension                                                                                                                                                                                                           |
-| `POST /payments/checkout`                                                                                                   | user                                                | Stripe Checkout Session                                                                                                                                                                                                         |
-| `POST /payments/portal`                                                                                                     | user                                                | Stripe Customer Portal Session. Looks up the Stripe customer by `users.stripe_customer_id` first, falling back to an email lookup (and persisting what it finds) only when null — §5's check 4 depends on this being populated. |
-| `GET /payments/history`                                                                                                     | user                                                | Paginated `payments`                                                                                                                                                                                                            |
-| `POST /webhooks/stripe`                                                                                                     | Stripe signature only                               | §7                                                                                                                                                                                                                              |
-| `POST /coupons/validate`                                                                                                    | user                                                | §8                                                                                                                                                                                                                              |
-| `POST /admin/subscriptions/*`, `/admin/licenses/*`, `/admin/plans/*`, `/admin/coupons/*`, `/admin/bans/*`, `/admin/flags/*` | admin + permission                                  | §8                                                                                                                                                                                                                              |
+| Method & path                                                                                                               | Auth                                                | Notes                                                                         |
+| --------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `GET /plans`                                                                                                                | public                                              | Active plans only                                                             |
+| `GET /subscriptions/me`                                                                                                     | user                                                | Subscription + license (prefix/status only) + devices + resolved entitlements |
+| `POST /subscriptions/trial`                                                                                                 | user                                                | §5                                                                            |
+| `POST /subscriptions/cancel`                                                                                                | user                                                | `cancel_at_period_end = true`                                                 |
+| `POST /subscriptions/resume`                                                                                                | user                                                | Only while `status = canceled` and before `current_period_end`                |
+| `GET /licenses/me`                                                                                                          | user                                                | `key_prefix` + `status` only, never the full key                              |
+| `POST /licenses/regenerate`                                                                                                 | user                                                | Revokes old, issues + returns a new key once                                  |
+| `POST /licenses/validate`                                                                                                   | device (license key + fingerprint, no user session) | Used by the extension                                                         |
+| `GET /payments/history`                                                                                                     | user                                                | Paginated `payments`                                                          |
+| `POST /payment-claims`, `GET /payment-claims`                                                                               | user                                                | §7                                                                            |
+| `POST /coupons/validate`                                                                                                    | user                                                | §8                                                                            |
+| `POST /admin/subscriptions/*`, `/admin/licenses/*`, `/admin/plans/*`, `/admin/coupons/*`, `/admin/bans/*`, `/admin/flags/*` | admin + permission                                  | §8                                                                            |
 
 ---
 
@@ -520,4 +571,4 @@ the task brief's deliverables.
 - **`recordAudit`** — used for every admin mutation's `audit_logs` write
   (§8).
 - **`checkBans`** — exported from `modules/bans/service.ts` for the auth
-  module's login path to call.
+  module's login and refresh paths, and licence validation, to call.

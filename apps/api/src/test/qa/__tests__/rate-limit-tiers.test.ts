@@ -16,6 +16,7 @@ import { resetDatabase } from '@sl/db/test-utils';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { ADMIN_RATE_LIMIT, INGEST_RATE_LIMIT } from '../../../lib/rate-limit-tiers.js';
+import { grantPlan } from '../../plan-fixtures.js';
 import {
   bearer,
   buildTestApp,
@@ -24,6 +25,14 @@ import {
   nextIp,
   type TestApp,
 } from '../helpers.js';
+
+/** A signed-up user with a Monthly pass: the routes here are plan-gated
+ * (requireFeature). */
+async function createSubscriber(app: TestApp, email: string, fp: string) {
+  const session = await createUserSession(app, email, fp);
+  await grantPlan(app, session.userId);
+  return session;
+}
 
 describe('rate-limit tiers per route class', () => {
   let app: TestApp;
@@ -42,7 +51,7 @@ describe('rate-limit tiers per route class', () => {
   });
 
   it(`INGEST_RATE_LIMIT (${INGEST_RATE_LIMIT.max}/${INGEST_RATE_LIMIT.timeWindow}ms): the (max+1)th risk-events batch in the window is rejected with 429`, async () => {
-    const user = await createUserSession(app, 'ingest-rl@example.com', 'fp-ingest-rl-000000000001');
+    const user = await createSubscriber(app, 'ingest-rl@example.com', 'fp-ingest-rl-000000000001');
     const ip = nextIp();
     const headers = { ...bearer(user.accessToken), 'x-forwarded-for': ip };
 

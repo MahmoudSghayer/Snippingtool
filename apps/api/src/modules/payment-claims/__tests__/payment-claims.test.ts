@@ -1,7 +1,7 @@
 // PayPal.me payments: the buyer submits a transaction ID, an admin approves
 // it, and approval issues (or extends) the pass and records the revenue.
 
-import { adminUsers, licenses, payments, subscriptions, users } from '@sl/db';
+import { adminUsers, licenses, paymentClaims, payments, plans, subscriptions, users } from '@sl/db';
 import { resetDatabase } from '@sl/db/test-utils';
 import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -134,7 +134,6 @@ describe('payment claims (PayPal.me)', () => {
       email: 'trialist@example.com',
       fingerprintHash: null,
       ip: null,
-      stripeCustomerId: null,
     });
 
     const claim = await submit(buyer.token, { planCode: 'pro', paypalTransactionId: txn() });
@@ -230,5 +229,33 @@ describe('payment claims (PayPal.me)', () => {
     });
     expect(list.statusCode).toBe(403);
     expect((await review(buyer.token, claim.json().id, 'approve')).statusCode).toBe(403);
+  });
+
+  // The plan was archived while the claim waited for review: approval must
+  // not start a new pass on it, and must not end the buyer's trial first.
+  it('approving a claim for a plan archived since refuses, and leaves the trial and the claim as they were', async () => {
+    const buyer = await createUser('archived-buyer@example.com');
+    const admin = await createUser('admin-archived@example.com', 'admin');
+    await startTrial(app.db, app.redis, {
+      userId: buyer.userId,
+      email: 'archived-buyer@example.com',
+      fingerprintHash: null,
+      ip: null,
+    });
+    const claim = await submit(buyer.token, { planCode: 'pro', paypalTransactionId: txn() });
+    expect(claim.statusCode).toBe(201);
+    await app.db.update(plans).set({ isActive: false }).where(eq(plans.code, 'pro'));
+
+    const approved = await review(admin.token, claim.json().id, 'approve');
+    expect(approved.statusCode).toBe(409);
+
+    const rows = await app.db.query.subscriptions.findMany({
+      where: eq(subscriptions.userId, buyer.userId),
+    });
+    expect(rows.map((r) => r.status)).toEqual(['trialing']);
+    const row = await app.db.query.paymentClaims.findFirst({
+      where: eq(paymentClaims.id, claim.json().id),
+    });
+    expect(row!.status).toBe('pending');
   });
 });

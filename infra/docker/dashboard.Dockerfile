@@ -42,8 +42,8 @@ ARG BUILD_DATE
 ARG VCS_REF
 ARG VERSION=0.0.0-dev
 LABEL org.opencontainers.image.title="sniper-ledger-dashboard" \
-      org.opencontainers.image.description="The Sniper's Ledger — dashboard static build, self-host nginx image (Vercel is the primary host)" \
-      org.opencontainers.image.vendor="The Sniper's Ledger" \
+      org.opencontainers.image.description="Nova Trade — dashboard static build, self-host nginx image (Vercel is the primary host)" \
+      org.opencontainers.image.vendor="Nova Trade" \
       org.opencontainers.image.licenses="UNLICENSED" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.revision="${VCS_REF}" \

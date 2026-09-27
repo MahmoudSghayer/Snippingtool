@@ -2,8 +2,7 @@
 // data and sends no webhook, so the buyer tells us they paid: they submit the
 // PayPal transaction ID for a plan, and an admin checks it against the PayPal
 // account. Approval is what issues the pass. It also records a `payments`
-// row, so the revenue KPIs (lib/analytics/kpi.ts) count PayPal income the
-// same way they counted Stripe income.
+// row, so the revenue KPIs (lib/analytics/kpi.ts) count PayPal income.
 
 import { paymentClaims, payments, type Database } from '@sl/db';
 import { isPurchasablePlan, PLAN_CATALOGUE, type PaymentClaimDto } from '@sl/shared';
@@ -112,6 +111,13 @@ export async function approveClaim(
   }
   const plan = await getPlanByCode(db, existing.planCode);
   if (!plan) throw AppErrors.notFound('plan');
+  // Archived while the claim waited. Checked before anything changes: a
+  // trial would otherwise be ended for a pass that is then refused.
+  if (!plan.isActive) {
+    throw AppErrors.conflict(
+      `${plan.name} is no longer offered. Reactivate the plan, or reject the payment or grant a pass by hand.`,
+    );
+  }
   const passDays =
     existing.planCode in PLAN_CATALOGUE
       ? PLAN_CATALOGUE[existing.planCode as keyof typeof PLAN_CATALOGUE].passDays

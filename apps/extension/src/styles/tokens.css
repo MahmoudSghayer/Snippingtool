@@ -1,5 +1,5 @@
 /**
- * The Sniper's Ledger — design tokens, synced from `packages/ui/src/tokens.css`
+ * Nova Trade — design tokens, synced from `packages/ui/src/tokens.css`
  * (PHASE 10, "shared tokens: copy packages/ui/src/tokens.css into the
  * extension build, no React"). This IS a copy, not an import — the
  * extension has no dependency on `@sl/ui` (a React component library) and
@@ -7,16 +7,16 @@
  * pulled in at build time. Keep this file's `:root` block byte-for-byte
  * identical to `packages/ui/src/tokens.css`'s (minus the chart-series ramp,
  * which nothing in the extension renders) whenever that file's palette
- * changes, so the dashboard, popup, options page and in-page panel read as
+ * changes, so the dashboard, popup and userscript drawer read as
  * one product (docs/10-design-system.md §1 "Color carries meaning,
  * consistently").
  *
  * Consumed two ways:
- *  - `popup/index.html` and `options/index.html` `<link>` this file
- *    directly — both run in the extension's own `chrome-extension://`
+ *  - `popup/index.html` `<link>`s this file
+ *    directly — it runs in the extension's own `chrome-extension://`
  *    origin, an ordinary document `<head>`, no different from any other
  *    page.
- *  - `ui/panel.ts` imports this file's text at build time
+ *  - `userscript/launcher.ts` imports this file's text at build time
  *    (`?raw`) and swaps `:root` for `:host`, because it renders inside a
  *    shadow root injected into EA's page — custom properties are inherited
  *    properties, but nothing on EA's own page defines `--sl-*`, so the

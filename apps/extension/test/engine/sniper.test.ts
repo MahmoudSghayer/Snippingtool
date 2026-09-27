@@ -72,6 +72,10 @@ function setup(opts: {
   budgetStore?: { value: BotBudgetState | null };
   /** Whether the plan includes the bot, asked before every action. */
   entitled?: () => boolean;
+  /** Replaces the budget store's load (a service worker that died). */
+  loadBudget?: () => Promise<BotBudgetState | null>;
+  /** Whether this tab holds the engine lease, asked before every action. */
+  exclusive?: () => boolean;
   /** The clock's start (to continue another harness's clock). */
   startAt?: number;
 }): Harness {
@@ -135,11 +139,12 @@ function setup(opts: {
     saveUsage: (u) => void savedUsage.push(u),
     ...(opts.budgetStore
       ? {
-          loadBudget: async () => opts.budgetStore!.value,
+          loadBudget: opts.loadBudget ?? (async () => structuredClone(opts.budgetStore!.value)),
           saveBudget: (b: BotBudgetState) => void (opts.budgetStore!.value = structuredClone(b)),
         }
       : {}),
     ...(opts.entitled ? { entitled: opts.entitled } : {}),
+    ...(opts.exclusive ? { exclusive: opts.exclusive } : {}),
     killSwitch: () => ({
       active: killSwitch.active,
       reason: killSwitch.active ? 'test kill switch' : undefined,
@@ -513,6 +518,9 @@ describe('Sniper — the user\'s limits', () => {
     risky.sniper.start();
     expect(risky.sniper.isRunning()).toBe(false);
     expect(risky.sniper.state.stopReason).toBe('risk_unacknowledged');
+    expect(risky.sniper.state.stopDetail).toBe(
+      'these settings are above low risk: confirm the risk on the Nova AI page first, or reset to recommended',
+    );
 
     // The recommended defaults are low: no acknowledgment needed.
     const safe = setup({ settings: { ...DEFAULT_BOT_SETTINGS, riskAcknowledgedAt: null } });
@@ -797,7 +805,7 @@ describe('Sniper — the plan must still include the bot', () => {
     h.sniper.start();
     await h.done();
     expect(h.sniper.state.stopReason).toBe('not_entitled');
-    expect(h.sniper.state.stopDetail).toBe('your plan no longer includes the Sniping Bot');
+    expect(h.sniper.state.stopDetail).toBe('your plan no longer includes Nova AI');
     // Checked before the buy the second search found, not only the next search.
     expect(h.searches).toHaveLength(2);
     expect(h.buys).toEqual([]);
@@ -820,5 +828,188 @@ describe('Sniper — binds each buy to the matched card', () => {
     h.sniper.start();
     await h.done();
     expect(h.buyCards).toEqual([{ resourceId: 50_331_748, assetId: 100 }]);
+  });
+});
+
+describe('Sniper — the saved budget could not be read (finding A)', () => {
+  const saved = (start: number): BotBudgetState => ({
+    governor: {
+      sessionStartedAt: start - 60_000,
+      actionTimestamps: [start - 60_000, start - 50_000],
+      searchCount: 1,
+      buyCount: 1,
+      coinFlow: [{ at: start - 50_000, coins: 9_000 }],
+      cooldownUntil: 0,
+      killSwitchActive: false,
+    },
+    searchTimes: [start - 60_000],
+    buyTimes: [start - 50_000],
+  });
+
+  it.each([
+    ['throws (the service worker is gone)', () => Promise.reject(new Error('no answer'))],
+    ['never answers usefully and rejects later', () => new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 0))],
+  ])('when loadBudget %s at start(), it does not run, and the stored windows survive', async (_label, load) => {
+    const start = 10_000_000;
+    const budgetStore = { value: saved(start) as BotBudgetState | null };
+    const before = structuredClone(budgetStore.value);
+    const h = setup({
+      maxSearches: 1,
+      budgetStore,
+      loadBudget: load as () => Promise<BotBudgetState | null>,
+      results: [[auction('t-a', 9_000)]],
+      startAt: start,
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.sniper.state.stopReason).toBe('budget_unavailable');
+    expect(h.searches).toHaveLength(0);
+    expect(h.buys).toHaveLength(0);
+    // Nothing was saved over the stored windows: no budget refilled.
+    expect(budgetStore.value).toEqual(before);
+  });
+
+  it('a later start whose load works picks the stored windows up', async () => {
+    const start = 10_000_000;
+    const budgetStore = { value: saved(start) as BotBudgetState | null };
+    let failing = true;
+    const h = setup({
+      settings: { safety: { ...DEFAULT_BOT_SETTINGS.safety, buyToSearchRatio: 1, cooldownSeconds: 0, maxBuysPerHour: 1 } },
+      maxSearches: 1,
+      budgetStore,
+      loadBudget: async () => {
+        if (failing) throw new Error('no answer');
+        return structuredClone(budgetStore.value);
+      },
+      results: [[auction('t-a', 9_000)]],
+      startAt: start,
+    });
+    h.sniper.start();
+    await h.done();
+    failing = false;
+    const done = new Promise<void>((resolve) => {
+      const check = setInterval(() => {
+        if (!h.sniper.isRunning()) {
+          clearInterval(check);
+          resolve();
+        }
+      }, 1);
+    });
+    h.sniper.start();
+    await done;
+    // The one buy the hour allows was already spent before this page.
+    expect(h.buys).toEqual([]);
+    expect(budgetStore.value!.buyTimes).toEqual([start - 50_000]);
+  });
+});
+
+describe('Sniper — two EA tabs, one set of hourly budgets (multi-tab)', () => {
+  const settings: Partial<BotSettings> = {
+    searchDelay: { min: 1, max: 1 },
+    breaks: { ...DEFAULT_BOT_SETTINGS.breaks, enabled: false },
+    rest: { ...DEFAULT_BOT_SETTINGS.rest, enabled: false },
+    safety: { ...DEFAULT_BOT_SETTINGS.safety, buyToSearchRatio: 1, cooldownSeconds: 0, maxBuysPerHour: 2 },
+  };
+
+  it('a tab started before the other ran re-reads the budgets on its next start', async () => {
+    const budgetStore = { value: null as BotBudgetState | null };
+    // Tab B loads, starts and stops before tab A buys anything.
+    // (Its second search, after tab A ran, finds two listings.)
+    const b = setup({
+      settings,
+      results: [[], [auction('t-b1', 1_000), auction('t-b2', 1_000)]],
+      maxSearches: 1,
+      budgetStore,
+    });
+    b.sniper.start();
+    await b.done();
+    // Tab A buys the hour's two.
+    const a = setup({
+      settings,
+      results: [[auction('t-a1', 1_000), auction('t-a2', 1_000)]],
+      maxSearches: 1,
+      budgetStore,
+      startAt: b.clock.t,
+    });
+    a.sniper.start();
+    await a.done();
+    expect(a.buys).toEqual(['t-a1', 't-a2']);
+
+    // Tab B starts again, in the same hour: it must not buy two more.
+    b.clock.t = a.clock.t;
+    const stopped = new Promise<void>((resolve) => {
+      const check = setInterval(() => {
+        if (!b.sniper.isRunning()) {
+          clearInterval(check);
+          resolve();
+        }
+      }, 1);
+    });
+    b.sniper.start();
+    await stopped;
+    expect(b.buys).toEqual([]);
+    expect(b.sniper.getLog().some((e) => e.message.includes('2 buys in the last hour'))).toBe(true);
+  });
+
+  it('will not start, or keep running, in a tab without the engine lease', async () => {
+    const lease = { held: false };
+    const h = setup({ exclusive: () => lease.held, results: [[]] });
+    h.sniper.start();
+    expect(h.sniper.isRunning()).toBe(false);
+    expect(h.sniper.state.stopReason).toBe('other_tab');
+
+    lease.held = true;
+    let searches = () => 0;
+    const running = setup({
+      exclusive: () => searches() < 1,
+      settings,
+      results: [[]],
+    });
+    searches = () => running.searches.length;
+    running.sniper.start();
+    await running.done();
+    expect(running.sniper.state.stopReason).toBe('other_tab');
+    expect(running.searches).toHaveLength(1);
+  });
+
+  it('a tab that lost the lease never saves its stale budget over the new holder’s (Q-I1)', async () => {
+    const budgetStore = { value: null as BotBudgetState | null };
+    const lease = { holder: 'A' as 'A' | 'B' };
+    // Tab A runs and buys once, then is frozen (its sleep never returns)
+    // while it still thinks it is running.
+    let freeze!: () => void;
+    const frozen = new Promise<void>((r) => (freeze = r));
+    const a = setup({
+      settings,
+      results: [[auction('t-a1', 1_000)]],
+      budgetStore,
+      exclusive: () => lease.holder === 'A',
+    });
+    (a.sniper as unknown as { sleep: () => Promise<void> }).sleep = () => frozen;
+    a.sniper.start();
+    await vi.waitFor(() => expect(a.buys).toEqual(['t-a1']));
+    expect(a.sniper.isRunning()).toBe(true);
+
+    // The lease passes to tab B, which loads A's windows, buys and saves.
+    lease.holder = 'B';
+    const b = setup({
+      settings,
+      results: [[auction('t-b1', 1_000)]],
+      maxSearches: 1,
+      budgetStore,
+      exclusive: () => lease.holder === 'B',
+      startAt: a.clock.t,
+    });
+    b.sniper.start();
+    await b.done();
+    expect(b.buys).toEqual(['t-b1']);
+    const bSaved = structuredClone(budgetStore.value);
+    expect(bSaved!.buyTimes).toHaveLength(2);
+
+    // Tab A wakes and is stopped (onLose, or its own exclusive check).
+    a.sniper.stop('other_tab');
+    freeze();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(budgetStore.value).toEqual(bSaved);
   });
 });

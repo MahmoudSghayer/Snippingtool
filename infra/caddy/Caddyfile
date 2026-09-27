@@ -77,12 +77,23 @@ dashboard.{$DOMAIN} {
 
 	encode zstd gzip
 
+	# The Tampermonkey build of the extension (`pnpm --filter @sl/extension
+	# build:userscript`). Tampermonkey installs from
+	# /userscript/sniper-ledger.user.js and polls sniper-ledger.meta.js for
+	# updates. The files sit in the caddy_data volume, so publishing a new
+	# version is a file copy (infra/scripts/publish-userscript.sh) with no
+	# restart. no-cache: an update must be visible on Tampermonkey's next poll.
+	handle_path /userscript/* {
+		root * /data/userscript
+		header Cache-Control "no-cache"
+		file_server
+	}
+
+	# The self-hosted dashboard is retired: everything except the userscript
+	# goes to the Vercel site. The dashboard container is kept running idle as
+	# the rollback path (restore the reverse_proxy block and reload).
 	handle {
-		reverse_proxy dashboard:8080 {
-			health_uri /healthz
-			health_interval 15s
-			health_timeout 5s
-		}
+		redir https://snippingtool-eta.vercel.app{uri} 301
 	}
 
 	log {

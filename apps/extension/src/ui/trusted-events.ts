@@ -1,8 +1,8 @@
 /*
  * trusted-events.ts — user-action listeners that only a real user can fire.
  *
- * The extension's UI on EA's page (the Sniping Bot page, the in-page panel,
- * the userscript's drawer) shares the page with EA's scripts and anything
+ * The extension's UI on EA's page (the bot page and the userscript's
+ * drawer) shares the page with EA's scripts and anything
  * else running there. A closed shadow root keeps them from reaching in, and
  * this is the second half: an event a script made (`el.click()`,
  * `dispatchEvent(new Event('change'))`) has `isTrusted === false`, so a page

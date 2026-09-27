@@ -1,6 +1,6 @@
 # tests/load
 
-k6 load tests for The Sniper's Ledger's API (`apps/api`). Canonical scripts
+k6 load tests for Nova Trade's API (`apps/api`). Canonical scripts
 live in [`scenarios/`](./scenarios); [`lib/config.js`](./lib/config.js) is
 the shared base URL/profile/threshold config every scenario imports.
 See [`docs/12-testing.md`](../../docs/12-testing.md) "Load" for how this

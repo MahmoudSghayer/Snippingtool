@@ -91,9 +91,28 @@ at any time.
 
 We store your account details, your devices, and the trading and activity data
 the extension reports, so we can run the Service and show you your statistics.
-The extension's options page lists exactly what it sends. We don't sell your
-data. You can ask us to delete your account through our Discord support
-channel.
+We don't sell your data. You can ask us to delete your account through our
+Discord support channel.
+
+The extension sends:
+
+- Sign-in and sign-out, search metadata (a hash of the search and the number of
+  results, never the listings), search and settings changes, errors and
+  periodic heartbeats.
+- Buy attempts: the card and trade id, the target and listed price, the
+  outcome and how long it took. Nothing beyond what the web app already showed
+  you.
+- Trades and profit or loss, worked out on your device.
+- How well each saved search performs (coins per hour), so your stats survive
+  a reinstall.
+- Risk events: what the safety limits allowed or blocked, and why.
+- The extension version, an install id and error reports (the message and
+  stack, never what you typed).
+
+Market listings never leave your browser. You can stop sending usage data with
+the "Share usage data" switch in the extension's Account screen. The license
+check still runs with it off, and sends only the install id, the version and
+a device fingerprint hash.
 
 ## 9. No warranty
 

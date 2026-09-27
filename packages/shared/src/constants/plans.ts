@@ -85,6 +85,8 @@ export const AUTOMATION_FEATURE_KEYS = ['automation.autobuyer'] as const satisfi
  * (see PLAN_CATALOGUE). `basic` is retired (it had no automation) and kept
  * only so its existing subscriptions keep resolving. */
 export const PLAN_FEATURES: Readonly<Record<PlanCode, readonly FeatureKey[]>> = {
+  // A trial includes the dashboard analytics: it is part of what is being
+  // evaluated, and the API gates those routes on this key.
   trial: [
     'ledger.recorder',
     'ledger.price_model',
@@ -92,6 +94,7 @@ export const PLAN_FEATURES: Readonly<Record<PlanCode, readonly FeatureKey[]>> = 
     'assist.filter_rotation',
     'assist.session_pnl',
     'assist.risk_meter',
+    'dashboard.analytics',
   ],
   basic: ['ledger.recorder', 'ledger.price_model'],
   pro: [

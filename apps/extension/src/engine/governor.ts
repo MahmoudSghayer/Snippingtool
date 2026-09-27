@@ -102,6 +102,9 @@ export interface RiskSnapshot {
   inCooldown: boolean;
   cooldownRemainingMs: number;
   killSwitchActive: boolean;
+  /** Coins spent on buys since the session started (the popup's and panel's
+   * session budget meter, against `budgets.sessionCoinBudget`). */
+  sessionCoinsSpent: number;
 }
 
 /** Everything needed to resume a governor's counters across a page reload
@@ -120,6 +123,9 @@ export interface GovernorState {
    * its cooldown starts a new session. Optional so state saved by an older
    * build still hydrates. */
   sessionExpired?: boolean;
+  /** Coins spent on buys this session. Optional so state saved by an older
+   * build still hydrates (it then reads as 0). */
+  sessionCoinsSpent?: number;
   killSwitchActive: boolean;
   killSwitchReason?: string;
 }
@@ -170,6 +176,7 @@ function freshState(now: number): GovernorState {
     coinFlow: [],
     cooldownUntil: 0,
     sessionExpired: false,
+    sessionCoinsSpent: 0,
     killSwitchActive: false,
   };
 }
@@ -188,6 +195,11 @@ export class Governor {
    * in flight, observed search responses belong to it (it was already
    * counted by `allow`) and are not counted again. */
   private engineSearchesInFlight = 0;
+  /** The most one buy may spend (`budgets.maxCoinsPerSnipe`, the assist and
+   * autobuyer setting), or null for no per-buy cap. Not part of
+   * `GovernorSettings`: it is a budget, not a threshold, and the Sniping Bot's
+   * governor has its own price cap (`thresholds.maxBuyPrice`). */
+  private maxCoinsPerBuy: number | null = null;
 
   constructor(
     settings: GovernorSettings,
@@ -207,6 +219,13 @@ export class Governor {
 
   getSettings(): GovernorSettings {
     return this.settings;
+  }
+
+  /** Sets (or, with null, removes) the per-buy coin cap. A non-finite or
+   * negative cap refuses every buy (fail closed) rather than silently
+   * removing the cap. */
+  setMaxCoinsPerBuy(cap: number | null): void {
+    this.maxCoinsPerBuy = cap == null ? null : Number.isFinite(cap) && cap >= 0 ? cap : 0;
   }
 
   /** Server kill switch (bootstrap/heartbeat/WS push) — unconditional and
@@ -235,6 +254,7 @@ export class Governor {
     this.state.sessionStartedAt = now;
     this.state.searchCount = 0;
     this.state.buyCount = 0;
+    this.state.sessionCoinsSpent = 0;
     this.state.sessionExpired = false;
   }
 
@@ -244,7 +264,13 @@ export class Governor {
    * or assist mode would have every buy after the first denied
    * `buy_search_ratio`. Returns whether it was counted: duplicate reports of
    * one search (`OBSERVED_SEARCH_DEDUPE_MS`) and the response of an
-   * engine-issued search already counted by `allow` are not. */
+   * engine-issued search already counted by `allow` are not.
+   *
+   * Known and accepted (Task 1 review): a search the human really does run
+   * while an engine search is in flight, or within the dedupe window after
+   * it, is dropped too. The adapter's reports carry nothing that tells the
+   * two apart, and dropping one can only under-count searches, which makes
+   * the buy:search ratio stricter, never looser. */
   recordObservedSearch(now: number = this.now()): boolean {
     if (this.engineSearchesInFlight > 0) return false;
     if (now - this.lastSearchAt < OBSERVED_SEARCH_DEDUPE_MS) return false;
@@ -310,6 +336,14 @@ export class Governor {
     }
 
     if (action.kind === 'buy') {
+      // The per-snipe cap: this one buy is too dear, whatever the budgets
+      // say. A soft deny like coin flow (a cheaper listing may still fit).
+      const coins = action.coins ?? 0;
+      if (this.maxCoinsPerBuy != null && coins > this.maxCoinsPerBuy) {
+        events.push({ kind: 'coin_flow', value: coins, threshold: this.maxCoinsPerBuy });
+        return { allowed: false, reason: 'coin_flow', detail: 'above your max coins per snipe', events };
+      }
+
       const projectedBuys = this.state.buyCount + 1;
       const ratio = projectedBuys / Math.max(this.state.searchCount, 1);
       if (ratio > this.settings.buyToSearchRatio) {
@@ -317,7 +351,6 @@ export class Governor {
         return { allowed: false, reason: 'buy_search_ratio', detail: 'too many buys relative to searches', events };
       }
 
-      const coins = action.coins ?? 0;
       const flowLastHour = this.state.coinFlow.reduce((sum, c) => sum + c.coins, 0);
       const projectedFlow = flowLastHour + coins;
       if (projectedFlow > this.settings.maxCoinFlowPerHour) {
@@ -333,7 +366,10 @@ export class Governor {
       this.lastSearchAt = now;
     } else {
       this.state.buyCount++;
-      if (action.coins) this.state.coinFlow.push({ at: now, coins: action.coins });
+      if (action.coins) {
+        this.state.coinFlow.push({ at: now, coins: action.coins });
+        this.state.sessionCoinsSpent = (this.state.sessionCoinsSpent ?? 0) + action.coins;
+      }
     }
 
     return { allowed: true, events, charge: { kind: action.kind, at: now, coins: action.coins } };
@@ -357,6 +393,7 @@ export class Governor {
     }
     this.state.buyCount = Math.max(0, this.state.buyCount - 1);
     if (charge.coins) {
+      this.state.sessionCoinsSpent = Math.max(0, (this.state.sessionCoinsSpent ?? 0) - charge.coins);
       for (let i = this.state.coinFlow.length - 1; i >= 0; i--) {
         const entry = this.state.coinFlow[i]!;
         if (entry.at === charge.at && entry.coins === charge.coins) {
@@ -372,9 +409,13 @@ export class Governor {
    * meter"). Never denies anything itself; `allow()` is the only gate. */
   snapshot(now: number = this.now()): RiskSnapshot {
     this.prune(now);
-    const sessionElapsedMinutes = (now - this.state.sessionStartedAt) / 60_000;
+    // A session the length stop ended, whose cooldown is over, is already
+    // gone: the next `allow()` starts a new one. Show that new session now,
+    // rather than the old one's ever-growing elapsed time until then.
+    const pendingReset = this.state.sessionExpired === true && now >= this.state.cooldownUntil;
+    const sessionElapsedMinutes = pendingReset ? 0 : (now - this.state.sessionStartedAt) / 60_000;
     const coinFlowLastHour = this.state.coinFlow.reduce((sum, c) => sum + c.coins, 0);
-    const ratio = this.state.buyCount / Math.max(this.state.searchCount, 1);
+    const ratio = pendingReset ? 0 : this.state.buyCount / Math.max(this.state.searchCount, 1);
     return {
       actionsLastHour: this.state.actionTimestamps.length,
       actionsPerHourLimit: this.settings.actionsPerHour,
@@ -387,6 +428,24 @@ export class Governor {
       inCooldown: now < this.state.cooldownUntil,
       cooldownRemainingMs: Math.max(0, this.state.cooldownUntil - now),
       killSwitchActive: this.state.killSwitchActive,
+      sessionCoinsSpent: pendingReset ? 0 : (this.state.sessionCoinsSpent ?? 0),
+    };
+  }
+
+  /** Replaces the counters with state another tab saved (the engine lease,
+   * content/engine-lease.ts: a tab that gains it loads what the last holder
+   * spent before acting). In place, so the assist engine and the autobuyer
+   * holding this governor see it. Settings, the per-buy cap and this tab's
+   * own kill switch stay: the kill switch is pushed and pulled live, never
+   * taken from saved state. */
+  loadState(state: GovernorState): void {
+    const { killSwitchActive, killSwitchReason } = this.state;
+    this.state = {
+      ...state,
+      actionTimestamps: [...state.actionTimestamps],
+      coinFlow: state.coinFlow.map((c) => ({ ...c })),
+      killSwitchActive,
+      killSwitchReason,
     };
   }
 

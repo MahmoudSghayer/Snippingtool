@@ -296,3 +296,137 @@ describe('the Sniping Bot catalog', () => {
     expect(results()).toHaveLength(0);
   });
 });
+
+// Defect C13: the trader's own trade pile, read passively like the market
+// (same https + *.ea.com check), and posted as its own `tradepile`
+// message, never as a search.
+describe('passive observation of the trade pile', () => {
+  const EA = 'https://utas.mob.v4.prd.futc-ext.gcp.ea.com/ut/game/fc25';
+  function pileEntry(itemId: number, tradeState: string | null, currentBid = 0) {
+    return {
+      tradeId: tradeState ? 7000 + itemId : 0,
+      buyNowPrice: 14_000,
+      startingBid: 13_000,
+      currentBid,
+      offers: 0,
+      expires: 0,
+      tradeState,
+      itemData: { id: itemId, resourceId: 42, assetId: 42, rating: 88 },
+    };
+  }
+
+  for (const path of ['/tradepile', '/auctionhouse/relist', '/item']) {
+    it(`posts the items of an EA ${path.split('?')[0]} response`, async () => {
+      const url = EA + path;
+      nativeFetch.mockResolvedValueOnce(networkResponse({ auctionInfo: [pileEntry(11, 'closed', 13_500), pileEntry(12, null)] }, url));
+      await window.fetch(url);
+      await vi.waitFor(() => expect(posted.filter((m) => m.kind === 'tradepile')).toHaveLength(1));
+      const message = posted.find((m) => m.kind === 'tradepile')!;
+      expect(message.data.items).toEqual([
+        expect.objectContaining({ itemId: '11', tradeState: 'closed', currentBid: 13_500 }),
+        expect.objectContaining({ itemId: '12', tradeState: null, tradeId: null }),
+      ]);
+      expect(posted.filter((m) => m.kind === 'auctions')).toHaveLength(0);
+    });
+  }
+
+  // Won and bought auctions show there as `closed` at the price paid: a
+  // purchase, never a sale (review finding C1).
+  for (const path of ['/watchlist', '/trade/status?tradeIds=5001']) {
+    it(`never reads ${path.split('?')[0]}: a bought auction there is not a sale`, async () => {
+      const url = EA + path;
+      nativeFetch.mockResolvedValueOnce(networkResponse({ auctionInfo: [pileEntry(15, 'closed', 10_000)] }, url));
+      await window.fetch(url);
+      await settle();
+      expect(posted.filter((m) => m.kind === 'tradepile')).toHaveLength(0);
+    });
+  }
+
+  it('marks a plain GET of the trade pile as the full pile, even when empty, and nothing else', async () => {
+    const url = EA + '/tradepile';
+    nativeFetch.mockResolvedValueOnce(networkResponse({ auctionInfo: [] }, url));
+    await window.fetch(url);
+    await vi.waitFor(() => expect(posted.filter((m) => m.kind === 'tradepile')).toHaveLength(1));
+    expect(posted.find((m) => m.kind === 'tradepile')!.data).toMatchObject({ items: [], full: true });
+
+    posted = [];
+    nativeFetch.mockResolvedValueOnce(networkResponse({ auctionInfo: [pileEntry(16, 'active')] }, url));
+    await window.fetch(url, { method: 'PUT' });
+    await vi.waitFor(() => expect(posted.filter((m) => m.kind === 'tradepile')).toHaveLength(1));
+    expect(posted.find((m) => m.kind === 'tradepile')!.data.full).toBe(false);
+
+    posted = [];
+    const relist = EA + '/auctionhouse/relist';
+    nativeFetch.mockResolvedValueOnce(networkResponse({ auctionInfo: [pileEntry(17, 'active')] }, relist));
+    await window.fetch(relist);
+    await vi.waitFor(() => expect(posted.filter((m) => m.kind === 'tradepile')).toHaveLength(1));
+    expect(posted.find((m) => m.kind === 'tradepile')!.data.full).toBe(false);
+  });
+
+  it('does not call a trade pile full when it skipped an unreadable entry, nor drop it for one bad price', async () => {
+    const url = EA + '/tradepile';
+    nativeFetch.mockResolvedValueOnce(networkResponse({ auctionInfo: [pileEntry(18, 'active'), { something: 'else' }, { ...pileEntry(19, 'active'), buyNowPrice: 99_000_000 }] }, url));
+    await window.fetch(url);
+    await vi.waitFor(() => expect(posted.filter((m) => m.kind === 'tradepile')).toHaveLength(1));
+    const data = posted.find((m) => m.kind === 'tradepile')!.data;
+    expect(data.full).toBe(false);
+    expect((data.items as { itemId: string }[]).map((i) => i.itemId)).toEqual(['18']);
+  });
+
+  it('ignores a trade-pile-shaped response from a non-EA host', async () => {
+    nativeFetch.mockResolvedValueOnce(networkResponse({ auctionInfo: [pileEntry(13, 'closed', 13_500)] }, 'https://evil.example/ut/game/fc25/tradepile'));
+    await window.fetch('https://evil.example/ut/game/fc25/tradepile');
+    await settle();
+    expect(posted.filter((m) => m.kind === 'tradepile')).toHaveLength(0);
+  });
+
+  it('reports a shape change for a trade pile none of whose entries it can read', async () => {
+    const url = EA + '/tradepile';
+    nativeFetch.mockResolvedValueOnce(networkResponse({ auctionInfo: [{ something: 'else' }] }, url));
+    await window.fetch(url);
+    await vi.waitFor(() => expect(posted.filter((m) => m.kind === 'shape')).toHaveLength(1));
+    expect(posted.filter((m) => m.kind === 'tradepile')).toHaveLength(0);
+  });
+
+  it('puts the last trade-pile response, keys and types only, in the diagnostics report', async () => {
+    const url = EA + '/tradepile';
+    nativeFetch.mockResolvedValueOnce(networkResponse({ auctionInfo: [pileEntry(14, 'active')], credits: 123456 }, url));
+    await window.fetch(url);
+    await vi.waitFor(() => expect(posted.filter((m) => m.kind === 'tradepile')).toHaveLength(1));
+    deliver(await signedRequest({ action: 'diagnostics', requestId: 'diag-pile' }));
+    const report = (await resultFor('diag-pile')).data.diagnostics as { lastTradePileResponse: { path: string; shape: Record<string, unknown> } };
+    expect(report.lastTradePileResponse.path).toBe('/ut/game/fc25/tradepile');
+    expect(report.lastTradePileResponse.shape).toMatchObject({ credits: 'number' });
+    expect(JSON.stringify(report)).not.toContain('123456');
+  });
+
+  it('carries the item id on a market listing', async () => {
+    const url = EA + '/transfermarket?num=21';
+    nativeFetch.mockResolvedValueOnce(networkResponse({ auctionInfo: [{ ...rawAuction(6100, 100), itemData: { id: 555, resourceId: 42, assetId: 42, rating: 85 } }] }, url));
+    await window.fetch(url);
+    await vi.waitFor(() => expect(posted.filter((m) => m.kind === 'auctions')).toHaveLength(1));
+    expect((posted.find((m) => m.kind === 'auctions')!.data.auctions as { itemId?: string }[])[0]!.itemId).toBe('555');
+  });
+
+  it('carries the card name from the item data, trimmed and bounded (the panel shows it)', async () => {
+    const url = EA + '/transfermarket?num=21';
+    nativeFetch.mockResolvedValueOnce(
+      networkResponse(
+        {
+          auctionInfo: [
+            { ...rawAuction(6101, 100), itemData: { id: 556, resourceId: 42, assetId: 42, rating: 85, name: '  Erling Haaland\u0000 ' } },
+            { ...rawAuction(6102, 100), itemData: { id: 557, resourceId: 43, assetId: 43, rating: 85, name: 'x'.repeat(200) } },
+            { ...rawAuction(6103, 100), itemData: { id: 558, resourceId: 44, assetId: 44, rating: 85 } },
+          ],
+        },
+        url,
+      ),
+    );
+    await window.fetch(url);
+    await vi.waitFor(() => expect(posted.filter((m) => m.kind === 'auctions')).toHaveLength(1));
+    const names = (posted.find((m) => m.kind === 'auctions')!.data.auctions as { name?: string }[]).map((a) => a.name);
+    expect(names[0]).toBe('Erling Haaland');
+    expect(names[1]).toHaveLength(80);
+    expect(names[2]).toBeUndefined();
+  });
+});

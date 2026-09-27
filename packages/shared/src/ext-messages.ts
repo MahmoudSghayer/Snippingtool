@@ -5,6 +5,7 @@ import { activityEventSchema } from './schemas/activity.js';
 import { emailSchema, passwordSchema } from './schemas/auth.js';
 import { botDailyUsageSchema, botSettingsSchema } from './schemas/bot.js';
 import { filterCriteriaSchema, filterStatsSchema, savedFilterSchema } from './schemas/filters.js';
+import { coinPriceSchema, MAX_COIN_PRICE } from './schemas/ingest-bounds.js';
 import { riskBudgetEventSchema } from './schemas/risk.js';
 import { snipingAttemptSchema } from './schemas/sniping.js';
 import { tradeIngestSchema } from './schemas/trades.js';
@@ -43,6 +44,15 @@ export const trimmedAuctionSchema = z.object({
    * (apps/extension/src/main/adapter.ts). Absent means unknown (older
    * records); the ranker only drops an explicit `false`. */
   buyable: z.boolean().optional(),
+  /** EA's id for the card itself (`itemData.id`), which, unlike the
+   * tradeId, survives a purchase and every relist. The trade lifecycle
+   * (apps/extension/src/lib/trade-lifecycle.ts) keys on it to link a buy to
+   * its later sale. Absent when the listing did not carry one. */
+  itemId: z.string().min(1).max(40).optional(),
+  /** The card's name as EA's item data carries it (an assumption until the
+   * market opens: docs/06-extension.md §4), for the panel and the assist
+   * confirm overlay. Absent when the item carried none. */
+  name: z.string().min(1).max(80).optional(),
 });
 export type TrimmedAuction = z.infer<typeof trimmedAuctionSchema>;
 
@@ -157,6 +167,48 @@ export const adapterCatalogSchema = z
     notes: z.array(z.string().max(500)).max(50).optional(),
   })
   .strict();
+/** One item on the trader's own trade pile (or watch list, or a
+ * relist/status response), as main/ea-listing.ts's `normalisePileItem`
+ * reads it. Every EA path and field behind it is an assumption
+ * (docs/06-extension.md, day-one checklist). `tradeState` is EA's word
+ * for the listing: `active` (listed), `closed` (sold), `expired`, or null
+ * (on the pile, not listed). Prices are what EA reports: for a `closed`
+ * listing, `currentBid` is the sale price. */
+export const TRADE_PILE_STATES = ['active', 'closed', 'expired'] as const;
+export const tradePileItemSchema = z.object({
+  itemId: z.string().min(1).max(40),
+  tradeId: z.string().max(40).nullable(),
+  resourceId: z.number().int().positive(),
+  rating: z.number().int().min(0).max(99).nullable(),
+  tradeState: z.enum(TRADE_PILE_STATES).nullable(),
+  // Bounded like every price the API takes: an out-of-range one would
+  // otherwise reach /trades/batch and 400 the whole chunk the sale is in.
+  currentBid: coinPriceSchema,
+  buyNowPrice: coinPriceSchema,
+  /** Seconds left on the listing when read, or null if unknown. */
+  expires: z.number().nullable(),
+});
+export type TradePileItem = z.infer<typeof tradePileItemSchema>;
+
+/** The trader's own items, read passively from an EA trade-pile response
+ * (main/adapter.ts). Not a search: content counts nothing for it, and
+ * forwards the items to background's trade lifecycle. Unsigned, like
+ * `auctions`: a forged one could at worst report a sale the server then
+ * records for a trade the extension itself bought (the lifecycle ignores
+ * any item it has no buy for). */
+export const adapterTradePileMessageSchema = z.object({
+  channel: z.literal(ADAPTER_CHANNEL),
+  kind: z.literal('tradepile'),
+  data: z.object({
+    url: z.string().max(500),
+    seenAt: z.number(),
+    items: z.array(tradePileItemSchema).max(500),
+    /** A plain GET of `/tradepile`: plausibly the whole transfer list, so
+     * a followed item missing from it has left the pile (sold while not
+     * watched, quick-sold or moved to the club). */
+    full: z.boolean().optional(),
+  }),
+});
 
 /** HMAC-SHA256 (hex) of an act-channel message under the per-page-load
  * nonce (apps/extension/src/lib/act-auth.ts). Optional in these schemas so
@@ -208,6 +260,13 @@ export const adapterDiagnosticsSchema = z.object({
   lastMarketResponse: z
     .object({ source: z.string().max(40), at: z.number(), shape: diagnosticsKeyTreeSchema })
     .nullable(),
+  /** The last trade-pile response (tradepile, watchlist, relist, trade
+   * status) the adapter saw, keys and types only: the trade-pile paths
+   * and fields are unverified assumptions (docs/06-extension.md). */
+  lastTradePileResponse: z
+    .object({ path: z.string().max(200), at: z.number(), shape: diagnosticsKeyTreeSchema })
+    .nullable()
+    .optional(),
   stats: z.object({ seen: z.number(), parsed: z.number(), failed: z.number() }),
   /** The adapter's last 50 log lines, already scrubbed. */
   log: z.array(z.string().max(1000)).max(50),
@@ -325,6 +384,7 @@ export const adapterMessageSchema = z.discriminatedUnion('kind', [
   adapterShapeMessageSchema,
   adapterAuctionsMessageSchema,
   adapterListingsBuyableMessageSchema,
+  adapterTradePileMessageSchema,
   adapterActionResultMessageSchema,
   adapterCatalogMessageSchema,
 ]);
@@ -367,7 +427,20 @@ export const backgroundMessageTypeSchema = z.enum([
    * open (`governor.snapshotGet`). */
   'governor.snapshotPush',
   'governor.snapshotGet',
+  /** The live engine state (`idle`/`running`/`paused`/`halted`) of the EA
+   * tab that holds the engine lease, pushed on every lease renewal, so the
+   * 10-minute heartbeat alarm reports the real one instead of `idle`. */
   'engine.state',
+  /** The per-profile engine lease (P0 Task 13): only the EA tab holding it
+   * runs an engine (assist hotkeys, autobuyer, Sniping Bot), so two tabs can
+   * never spend the same hourly budgets twice. Kept by background in
+   * `storage.session`, renewed by the holder, released on `pagehide`. */
+  'engine.lockAcquire',
+  'engine.lockRelease',
+  /** The popup's "New session" button: background passes it to the EA tabs
+   * (`extContentResetSessionMessageSchema`), whose governor starts a new
+   * session (`Governor.resetSession`). */
+  'engine.resetSession',
   /** Added additively (docs/12-testing.md "Defects found" row #10): the
    * content script's crash-recovery state (`Governor.serialize()`) used to
    * be written straight to `browser.storage.session` from the content
@@ -398,6 +471,17 @@ export const backgroundMessageTypeSchema = z.enum([
   /** Exports `lib/logger.ts`'s ring buffer for the options page's "Export
    * logs" button — local only, no network call. */
   'logs.export',
+  /** The trade lifecycle (apps/extension/src/lib/trade-lifecycle.ts, run
+   * in background so every tab shares one record per item): a buy the
+   * engine made, the trade-pile items content saw, and the session P&L the
+   * panel and popup show. */
+  'lifecycle.buy',
+  'lifecycle.pile',
+  'lifecycle.sessionPnl',
+  'lifecycle.stats',
+  /** Realised profit since local midnight: the popup's daily profit goal
+   * progress (`targets.dailyProfitGoal`). */
+  'lifecycle.todayPnl',
 ]);
 /** Every message type background handles in every build: the core types
  * above plus the automation builds' own (`AUTOMATION_BACKGROUND_MESSAGE_TYPES`,
@@ -450,7 +534,7 @@ export type BackgroundResponse = z.infer<typeof backgroundResponseSchema>;
 // carries a payload; a handler with no payload (`auth.refresh`,
 // `auth.status`, `license.bootstrap`, `settings.get`, `filters.list`,
 // `devices.list`, `logs.export`, `telemetry.flush`, `errors.report`,
-// `engine.state`, `counts`) has nothing here to validate and isn't listed —
+// `counts`) has nothing here to validate and isn't listed —
 // `backgroundMessageEnvelopeSchema.payload` is optional/`unknown` already,
 // and every handler ignores its argument in that case.
 //
@@ -476,6 +560,49 @@ export const extBackgroundRecordPayloadSchema = z
     auctions: z.array(trimmedAuctionSchema).max(500),
   })
   .strict();
+
+/** `lifecycle.buy` — a card the engine just bought, keyed by the item it
+ * bought (not the listing), with the purchase exactly as reported to
+ * `/trades/batch`, so the later sale report updates that same trade. */
+export const extBackgroundLifecycleBuyPayloadSchema = z
+  .object({
+    /** Null when the bought listing carried no item id: the buy cannot be
+     * followed, and is only counted (diagnostics). */
+    itemId: z.string().min(1).max(40).nullable(),
+    tradeId: z.string().min(1).max(64),
+    resourceId: z.number().int().positive(),
+    rating: z.number().int().min(0).max(99).nullable(),
+    buyPrice: z.number().int().min(1).max(MAX_COIN_PRICE),
+    boughtAt: z.string().datetime(),
+  })
+  .strict();
+export type LifecycleBuy = z.infer<typeof extBackgroundLifecycleBuyPayloadSchema>;
+
+/** `lifecycle.pile` — trade-pile items the adapter read. */
+export const extBackgroundLifecyclePilePayloadSchema = z
+  .object({ items: z.array(tradePileItemSchema).max(500), full: z.boolean().optional() })
+  .strict();
+
+/** `lifecycle.stats` reply, for the diagnostics report: buys that carried
+ * no item id (since background last started), items being followed, and
+ * sales reported (kept 30 days). */
+export interface LifecycleStats {
+  buysWithoutItemId: number;
+  followed: number;
+  salesReported: number;
+}
+
+/** `lifecycle.sessionPnl` reply. `realised` is net of EA's tax
+ * (`computeTradeProfit`); `unrealised` is what the items still listed are
+ * listed at. A display figure only: the server recomputes every stored
+ * trade's profit itself. */
+export interface LifecycleSessionPnl {
+  realised: number;
+  unrealised: number;
+  sales: number;
+  listed: number;
+  since: number;
+}
 
 /** `summary` — one resource's floor/median/sell-through/max-snipe card. */
 export const extBackgroundSummaryPayloadSchema = z
@@ -617,6 +744,11 @@ export const extBackgroundGovernorSnapshotPushPayloadSchema = z
     inCooldown: z.boolean(),
     cooldownRemainingMs: z.number().min(0),
     killSwitchActive: z.boolean(),
+    // The session budget meter (P0 Task 13): coins spent this session, and
+    // the user's `budgets.sessionCoinBudget` (null = no cap). Optional, so a
+    // tab still running an older build keeps pushing.
+    sessionCoinsSpent: z.number().min(0).optional(),
+    sessionCoinBudget: z.number().min(0).nullable().optional(),
   })
   .strict();
 export type ExtGovernorSnapshotPushPayload = z.infer<
@@ -671,6 +803,8 @@ export const extBackgroundEngineStateSetPayloadSchema = z
     // Optional: state persisted by a build without the session-reset flag
     // still validates (engine/governor.ts's `GovernorState`).
     sessionExpired: z.boolean().optional(),
+    // Optional for the same reason: coins spent this session.
+    sessionCoinsSpent: z.number().min(0).optional(),
     killSwitchActive: z.boolean(),
     killSwitchReason: z.string().max(500).optional(),
   })
@@ -690,3 +824,83 @@ export const extBackgroundBotBudgetSetPayloadSchema = z
   })
   .strict();
 export type BotBudgetState = z.infer<typeof extBackgroundBotBudgetSetPayloadSchema>;
+
+// ---- the assist loop (P0 Task 13) --------------------------------------------
+
+/** `engine.lockAcquire` / `engine.lockRelease`: the content script's own id
+ * (a random UUID per page load). Acquire answers `{ held, expiresAt }`. */
+export const extBackgroundEngineLockPayloadSchema = z
+  .object({
+    ownerId: z.string().uuid(),
+  })
+  .strict();
+export type ExtEngineLockPayload = z.infer<typeof extBackgroundEngineLockPayloadSchema>;
+
+export const ENGINE_STATES = ['idle', 'running', 'paused', 'halted'] as const;
+export type EngineState = (typeof ENGINE_STATES)[number];
+
+/** `engine.state`: what the lease holder's engine is doing, for the
+ * heartbeat's `engineState` (`heartbeatRequestSchema`). */
+export const extBackgroundEngineStatePayloadSchema = z
+  .object({
+    engineState: z.enum(ENGINE_STATES),
+  })
+  .strict();
+
+/** Background -> EA tab: the popup's "New session". No payload. */
+export const extContentResetSessionMessageSchema = z
+  .object({
+    type: z.literal('engine.resetSession'),
+  })
+  .strict();
+
+/**
+ * One assist hotkey: a modifier chord written as modifiers then a
+ * `KeyboardEvent.code`, e.g. `Alt+KeyB` or `Ctrl+Alt+ArrowUp`. It must hold
+ * Alt, Ctrl or Meta, so no assist hotkey is ever a key EA's own UI uses on
+ * its own (Enter, Space, the arrows) or one that types a character (Shift
+ * alone). The code, not the key: Alt+B types `∫` on a Mac keyboard, and
+ * `KeyB` is the same physical key on every layout.
+ */
+export const HOTKEY_MODIFIERS = ['Ctrl', 'Alt', 'Shift', 'Meta'] as const;
+const hotkeyChordSchema = z
+  .string()
+  .max(40)
+  .regex(/^(?:(?:Ctrl|Alt|Shift|Meta)\+){1,4}[A-Za-z][A-Za-z0-9]{0,19}$/, 'not a key chord')
+  .refine(
+    (chord) => {
+      const mods = chord.split('+').slice(0, -1);
+      return new Set(mods).size === mods.length && mods.some((m) => m !== 'Shift');
+    },
+    { message: 'a hotkey needs Alt, Ctrl or Meta, each modifier once' },
+  );
+
+export const assistHotkeysSchema = z
+  .object({
+    /** Buy the selected listing (a second press, or a click, confirms). */
+    buy: hotkeyChordSchema,
+    /** Move the selection through the current search's listings. */
+    selectUp: hotkeyChordSchema,
+    selectDown: hotkeyChordSchema,
+    /** Cycle the saved filters (an engine-issued, governed search). */
+    nextFilter: hotkeyChordSchema,
+    prevFilter: hotkeyChordSchema,
+    /** Pause or resume the assist hotkeys. */
+    togglePause: hotkeyChordSchema,
+  })
+  .strict()
+  .refine((keys) => new Set(Object.values(keys)).size === Object.keys(keys).length, {
+    message: 'each hotkey must be a different chord',
+  });
+export type AssistHotkeys = z.infer<typeof assistHotkeysSchema>;
+
+/** The assist hotkeys the extension ships with, fixed for now (no settings
+ * surface edits them): Alt+B buys, Alt+Up/Down move the selection. */
+export const DEFAULT_ASSIST_HOTKEYS: AssistHotkeys = {
+  buy: 'Alt+KeyB',
+  selectUp: 'Alt+ArrowUp',
+  selectDown: 'Alt+ArrowDown',
+  nextFilter: 'Alt+KeyN',
+  prevFilter: 'Alt+Shift+KeyN',
+  togglePause: 'Alt+KeyP',
+};

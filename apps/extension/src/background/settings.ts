@@ -14,9 +14,9 @@ import { apiJson } from '../lib/api.js';
 import { isAuthenticated } from '../lib/auth.js';
 import { exportLogs, type LogEntry } from '../lib/logger.js';
 import { getCachedSettings, refreshSettings, updateSettings } from '../lib/settings.js';
+import { FILTERS_KEY } from '../lib/storage-keys.js';
 import { getLocal, setLocal } from '../lib/storage.js';
 
-const FILTERS_KEY = 'sl.filters.v1';
 
 export async function handleSettingsGet(): Promise<UserSettings> {
   if (await isAuthenticated()) {

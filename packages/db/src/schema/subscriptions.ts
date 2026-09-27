@@ -1,4 +1,5 @@
-// Matches migrations/0005_plans.sql, 0006_subscriptions.sql, 0007_licenses.sql.
+// Matches migrations/0005_plans.sql, 0006_subscriptions.sql, 0007_licenses.sql,
+// plus 0035_subscriptions_trial_history_idx.sql.
 
 import { isNull, relations } from 'drizzle-orm';
 import {
@@ -44,7 +45,6 @@ export const plans = pgTable(
     deviceLimit: smallint('device_limit').notNull(),
     features: jsonb('features').notNull().default({}).$type<Record<string, unknown>>(),
 
-    stripePriceId: text('stripe_price_id'),
     isActive: boolean('is_active').notNull().default(true),
     sortOrder: smallint('sort_order').notNull().default(0),
 
@@ -57,7 +57,6 @@ export const plans = pgTable(
   },
   (t) => [
     uniqueIndex('plans_code_unique_live').on(t.code).where(isNull(t.deletedAt)),
-    uniqueIndex('plans_stripe_price_id_unique').on(t.stripePriceId).where(isNull(t.deletedAt)),
     index('plans_is_active_idx').on(t.isActive).where(isNull(t.deletedAt)),
   ],
 );
@@ -86,8 +85,7 @@ export const subscriptions = pgTable(
     cancelAtPeriodEnd: boolean('cancel_at_period_end').notNull().default(false),
     autoRenew: boolean('auto_renew').notNull().default(true),
 
-    stripeSubscriptionId: text('stripe_subscription_id'),
-    source: subscriptionSourceEnum('source').notNull().default('stripe'),
+    source: subscriptionSourceEnum('source').notNull().default('manual'),
     grantedByAdminId: uuid('granted_by_admin_id').references(() => adminUsers.id, {
       onDelete: 'set null',
     }),
@@ -103,12 +101,13 @@ export const subscriptions = pgTable(
     rowVersion: rowVersion(),
   },
   (t) => [
-    uniqueIndex('subscriptions_stripe_subscription_id_unique').on(t.stripeSubscriptionId),
     index('subscriptions_user_id_idx').on(t.userId).where(isNull(t.deletedAt)),
     index('subscriptions_plan_id_idx').on(t.planId).where(isNull(t.deletedAt)),
     index('subscriptions_status_idx').on(t.status).where(isNull(t.deletedAt)),
     index('subscriptions_current_period_end_idx').on(t.currentPeriodEnd).where(isNull(t.deletedAt)),
     index('subscriptions_trial_ends_at_idx').on(t.trialEndsAt).where(isNull(t.deletedAt)),
+    // Not partial: the trial-history lookup must see soft-deleted rows too.
+    index('subscriptions_user_id_plan_id_idx').on(t.userId, t.planId),
   ],
 );
 

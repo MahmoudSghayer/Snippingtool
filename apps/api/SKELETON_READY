@@ -9,7 +9,7 @@ line has been built and typechecks (`pnpm --filter @sl/api typecheck`).
 ## Boot & layout
 
 - `src/config/env.ts` — zod-validated env (`loadEnv()`), memoised. Includes
-  every var your module needs (STRIPE_*, ENTITLEMENT_SIGNING_KEY /
+  every var your module needs (ENTITLEMENT_SIGNING_KEY /
   ENTITLEMENT_PUBLIC_KEY) even though this agent doesn't consume them.
 - `src/app.ts` — `buildApp(options?)` builds (does not `.listen()`) the
   Fastify instance. Used by `server.ts`, every integration test (`.inject()`),
@@ -204,16 +204,16 @@ undefined`) for the same isolation.
 
 ## Env additions
 
-None yet beyond what's already in `config/env.ts` (all your `STRIPE_*` /
-`ENTITLEMENT_*` vars are already declared there, optional, so your module
-never has to touch this file either — just read `fastify.config.STRIPE_*`).
+None yet beyond what's already in `config/env.ts` (all your `ENTITLEMENT_*`
+vars are already declared there, optional, so your module never has to touch
+this file either — just read `fastify.config.ENTITLEMENT_*`).
 If you truly need a new one, add it there additively (new field, safe
 default or `.optional()`) and mention it in your final report.
 
 ## Package.json / deps
 
-This agent's `apps/api/package.json` is done; add your own deps (`stripe`,
-etc.) with `pnpm add --filter @sl/api <pkg>` — expect `package.json` and the
+This agent's `apps/api/package.json` is done; add your own deps
+with `pnpm add --filter @sl/api <pkg>` — expect `package.json` and the
 root `pnpm-lock.yaml` to change under you as a result of your own installs;
 that's expected and not a conflict to resolve against this agent's work.
 

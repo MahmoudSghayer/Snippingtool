@@ -1,6 +1,6 @@
 // Zod-validated environment for @sl/api. Read once at boot (see server.ts /
-// worker.ts); every field the "subscriptions" agent needs (STRIPE_*,
-// ENTITLEMENT_SIGNING_KEY) is declared here even though this agent does not
+// worker.ts); every field the "subscriptions" agent needs
+// (ENTITLEMENT_SIGNING_KEY) is declared here even though this agent does not
 // consume it, so their module never has to touch this file. If you extend
 // this schema, keep additions optional/backward compatible — see the
 // SKELETON_READY note on env.ts.
@@ -140,10 +140,8 @@ const envSchema = z.object({
   DASHBOARD_ORIGIN: z.string().url().default('http://localhost:5173'),
   EXTENSION_IDS: z.string().default(''),
   // Additional browser origins allowed to call this API, comma-separated.
-  // DASHBOARD_ORIGIN is deliberately NOT a list: it doubles as a security
-  // boundary in modules/payments (assertDashboardOrigin pins Stripe
-  // success/cancel redirect URLs to it), so widening it there would widen
-  // where a checkout session can send a user. This var only ever feeds the
+  // DASHBOARD_ORIGIN is deliberately NOT a list: it is the one origin links
+  // in emails and notifications point at. This var only ever feeds the
   // CORS allowlist. Needed when the same API serves more than one dashboard
   // deployment — e.g. the Vercel host alongside the self-hosted
   // docker-compose.prod.yml one (docs/11-devops.md 6).
@@ -208,14 +206,6 @@ const envSchema = z.object({
     (v) => (v === '' ? undefined : v),
     z.string().min(1).optional(),
   ),
-
-  // --- Stripe (owned by the subscriptions/payments module) ---
-  STRIPE_SECRET_KEY: z.string().optional(),
-  STRIPE_WEBHOOK_SECRET: z.string().optional(),
-  STRIPE_PRICE_BASIC: z.string().optional(),
-  STRIPE_PRICE_PRO: z.string().optional(),
-  STRIPE_PRICE_ULTIMATE: z.string().optional(),
-  STRIPE_PRICE_LIFETIME: z.string().optional(),
 
   // --- Email ---
   SMTP_HOST: z.string().optional(),

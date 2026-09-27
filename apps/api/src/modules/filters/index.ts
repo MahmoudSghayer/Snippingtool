@@ -47,7 +47,7 @@ export default fp(
     app.get(
       '/api/v1/filters',
       {
-        onRequest: [fastify.authenticate],
+        onRequest: [fastify.requireFeature('assist.filter_rotation')],
         schema: { tags: ['filters'], response: { 200: z.array(savedFilterSchema) } },
       },
       async (request) => {
@@ -61,7 +61,7 @@ export default fp(
     app.post(
       '/api/v1/filters',
       {
-        onRequest: [fastify.authenticate],
+        onRequest: [fastify.requireFeature('assist.filter_rotation')],
         preHandler: [fastify.verifyCsrf],
         schema: {
           tags: ['filters'],
@@ -90,7 +90,7 @@ export default fp(
     app.patch(
       '/api/v1/filters/:id',
       {
-        onRequest: [fastify.authenticate],
+        onRequest: [fastify.requireFeature('assist.filter_rotation')],
         preHandler: [fastify.verifyCsrf],
         schema: {
           tags: ['filters'],
@@ -128,7 +128,7 @@ export default fp(
     app.delete(
       '/api/v1/filters/:id',
       {
-        onRequest: [fastify.authenticate],
+        onRequest: [fastify.requireFeature('assist.filter_rotation')],
         preHandler: [fastify.verifyCsrf],
         schema: {
           tags: ['filters'],
@@ -160,7 +160,7 @@ export default fp(
     app.get(
       '/api/v1/filters/stats',
       {
-        onRequest: [fastify.authenticate],
+        onRequest: [fastify.requireFeature('assist.filter_rotation')],
         schema: {
           tags: ['filters'],
           querystring: filterStatsQuerySchema,
@@ -214,7 +214,7 @@ export default fp(
     app.post(
       '/api/v1/filters/stats',
       {
-        onRequest: [fastify.authenticate],
+        onRequest: [fastify.requireFeature('assist.filter_rotation')],
         preHandler: [fastify.verifyCsrf],
         config: { rateLimit: INGEST_RATE_LIMIT },
         schema: {

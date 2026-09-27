@@ -22,7 +22,9 @@ export const ERROR_CODES = [
   'LICENSE_REVOKED',
   'SUBSCRIPTION_REQUIRED',
   'FEATURE_NOT_ENTITLED',
+  'FEATURE_NOT_IN_PLAN',
   'TRIAL_ABUSE_DETECTED',
+  'TRIAL_ALREADY_USED',
   // Cross-cutting
   'RATE_LIMITED',
   'VALIDATION_FAILED',
@@ -62,7 +64,13 @@ export const ERROR_STATUS: Readonly<Record<ErrorCode, number>> = {
   LICENSE_REVOKED: 402,
   SUBSCRIPTION_REQUIRED: 402,
   FEATURE_NOT_ENTITLED: 403,
+  // The caller's plan lacks the feature a route is gated on
+  // (apps/api `requireFeature`); `details.feature` names it, so the
+  // dashboard can offer the upgrade.
+  FEATURE_NOT_IN_PLAN: 403,
   TRIAL_ABUSE_DETECTED: 403,
+  // This account has already had its one trial (any status, ever).
+  TRIAL_ALREADY_USED: 403,
   RATE_LIMITED: 429,
   VALIDATION_FAILED: 400,
   // An ingest timestamp outside its window (schemas/ingest-bounds.ts);

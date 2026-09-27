@@ -13,7 +13,7 @@
  * Tab access is passed in (`queryTabs`/`sendToTab`), so this stays testable
  * and free of chrome APIs.
  */
-import { extContentDiagnosticsResponseSchema, type AdapterDiagnostics } from '@sl/shared';
+import { extContentDiagnosticsResponseSchema, type AdapterDiagnostics, type LifecycleStats } from '@sl/shared';
 
 import { scrubText } from './redact.js';
 
@@ -28,6 +28,10 @@ export interface DiagnosticsReport {
   adapter: AdapterDiagnostics | null;
   /** Why `adapter` is null. */
   adapterError?: string;
+  /** The trade lifecycle's counters (background/lifecycle.ts): buys that
+   * carried no item id and so cannot be followed, items followed, sales
+   * reported. Null when background did not answer. */
+  lifecycle?: LifecycleStats | null;
 }
 
 export interface DiagnosticsDeps {
@@ -35,6 +39,7 @@ export interface DiagnosticsDeps {
   buildTarget: string;
   queryTabs: () => Promise<Array<{ id?: number; active?: boolean }>>;
   sendToTab: (tabId: number, message: unknown) => Promise<unknown>;
+  lifecycleStats?: () => Promise<LifecycleStats | null>;
   now?: () => number;
 }
 
@@ -58,6 +63,16 @@ export async function collectDiagnostics(deps: DiagnosticsDeps): Promise<Diagnos
     extension: { version: deps.version, buildTarget: deps.buildTarget },
     adapter: null,
   };
+  if (deps.lifecycleStats) {
+    try {
+      const stats = await deps.lifecycleStats();
+      report.lifecycle = stats
+        ? { buysWithoutItemId: Number(stats.buysWithoutItemId) || 0, followed: Number(stats.followed) || 0, salesReported: Number(stats.salesReported) || 0 }
+        : null;
+    } catch {
+      report.lifecycle = null;
+    }
+  }
 
   let tabs: Array<{ id?: number; active?: boolean }>;
   try {

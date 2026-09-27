@@ -1,6 +1,5 @@
 // Unit coverage for content/search-observer.ts: content's handler for one
-// `auctions` message (one search) — the panel counter, the tracked
-// listings, one telemetry `search` event and one batch of ledger rows.
+// `auctions` message (one search) — the tracked listings, one telemetry `search` event and one batch of ledger rows.
 
 import { describe, expect, it, vi } from 'vitest';
 
@@ -13,16 +12,15 @@ function auction(tradeId: string, resourceId: number, overrides: Partial<Trimmed
 }
 
 function observer() {
-  const deps = { tracked: new Map<string, TrimmedAuction>(), onSearch: vi.fn(), onDominant: vi.fn(), reportSearch: vi.fn(), record: vi.fn() };
+  const deps = { tracked: new Map<string, TrimmedAuction>(), onDominant: vi.fn(), reportSearch: vi.fn(), record: vi.fn() };
   return { deps, observe: createSearchObserver(deps) };
 }
 
 describe('createSearchObserver', () => {
-  it('turns one search into one count, one telemetry event and one ledger batch', () => {
+  it('turns one search into one telemetry event and one ledger batch', () => {
     const { deps, observe } = observer();
     const auctions = [auction('a', 7), auction('b', 7), auction('c', 8)];
     observe(auctions);
-    expect(deps.onSearch).toHaveBeenCalledWith(1);
     expect(deps.onDominant).toHaveBeenCalledWith(7, 85);
     expect(deps.reportSearch).toHaveBeenCalledTimes(1);
     expect(deps.reportSearch).toHaveBeenCalledWith('resource:7', auctions);
@@ -31,11 +29,10 @@ describe('createSearchObserver', () => {
     expect([...deps.tracked.keys()]).toEqual(['a', 'b', 'c']);
   });
 
-  it('counts an empty search, without reporting or recording anything', () => {
+  it('reports and records nothing for an empty search', () => {
     const { deps, observe } = observer();
     observe([]);
     observe([]);
-    expect(deps.onSearch).toHaveBeenLastCalledWith(2);
     expect(deps.reportSearch).not.toHaveBeenCalled();
     expect(deps.record).not.toHaveBeenCalled();
   });
@@ -53,5 +50,28 @@ describe('createSearchObserver', () => {
     observe([auction('new', 1)]);
     expect(deps.tracked.has('old')).toBe(false);
     expect(deps.tracked.has('new')).toBe(true);
+  });
+});
+
+describe('createSearchObserver: the current search (P0 Task 13)', () => {
+  it('hands each search’s own listings over once they are tracked, empty searches too', () => {
+    const current: string[][] = [];
+    const deps = {
+      tracked: new Map<string, TrimmedAuction>(),
+      onSearch: vi.fn(),
+      reportSearch: vi.fn(),
+      record: vi.fn(),
+      onCurrentSearch: (auctions: TrimmedAuction[]) => {
+        // Already tracked by the time the callback runs.
+        for (const a of auctions) expect(deps.tracked.has(a.tradeId)).toBe(true);
+        current.push(auctions.map((a) => a.tradeId));
+      },
+    };
+    const observe = createSearchObserver(deps);
+    observe([auction('a', 1), auction('b', 1)]);
+    observe([auction('c', 2)]);
+    observe([]);
+    expect(current).toEqual([['a', 'b'], ['c'], []]);
+    expect([...deps.tracked.keys()]).toEqual(['a', 'b', 'c']);
   });
 });

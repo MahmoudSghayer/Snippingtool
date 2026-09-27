@@ -14,6 +14,15 @@ const settings: GovernorSettings = {
 
 const START = 1_700_000_000_000;
 
+/** The absolute ceilings the governor clamps every setting to. A test that
+ * wants one threshold out of the way uses its ceiling (a larger value would
+ * be clamped down to it anyway, and would misstate what the test runs on). */
+const CEILING = {
+  actionsPerHour: GOVERNOR_ABSOLUTE_LIMITS.actionsPerHour.max,
+  sessionLengthMinutes: GOVERNOR_ABSOLUTE_LIMITS.sessionLengthMinutes.max,
+  buyToSearchRatio: GOVERNOR_ABSOLUTE_LIMITS.buyToSearchRatio.max,
+};
+
 function governorAt(t: number, overrides: Partial<GovernorSettings> = {}) {
   let clock = t;
   const gov = new Governor({ ...settings, ...overrides }, { now: () => clock });
@@ -58,7 +67,7 @@ describe('Governor — actionsPerHour', () => {
   it('is a sliding window: actions older than an hour drop out', () => {
     // sessionLengthMinutes is overridden well above the 1h+1ms jump below
     // so that threshold can't also fire and confound this test.
-    const { gov, setNow } = governorAt(START, { actionsPerHour: 2, sessionLengthMinutes: 999 });
+    const { gov, setNow } = governorAt(START, { actionsPerHour: 2, sessionLengthMinutes: CEILING.sessionLengthMinutes });
     expect(gov.allow({ kind: 'search' }, START).allowed).toBe(true);
     expect(gov.allow({ kind: 'search' }, START + 1000).allowed).toBe(true);
     setNow(START + 3_600_001);
@@ -67,7 +76,7 @@ describe('Governor — actionsPerHour', () => {
   });
 
   it('hard-stop triggers a cooldown that blocks further actions', () => {
-    const { gov, setNow } = governorAt(START, { actionsPerHour: 1, cooldownSeconds: 30, sessionLengthMinutes: 999 });
+    const { gov, setNow } = governorAt(START, { actionsPerHour: 1, cooldownSeconds: 30, sessionLengthMinutes: CEILING.sessionLengthMinutes });
     expect(gov.allow({ kind: 'search' }, START).allowed).toBe(true);
     const denied = gov.allow({ kind: 'search' }, START + 10);
     expect(denied.allowed).toBe(false);
@@ -92,7 +101,7 @@ describe('Governor — actionsPerHour', () => {
 
 describe('Governor — sessionLengthMinutes', () => {
   it('hard-stops once the session has run longer than the limit', () => {
-    const { gov, setNow } = governorAt(START, { sessionLengthMinutes: 10, actionsPerHour: 999 });
+    const { gov, setNow } = governorAt(START, { sessionLengthMinutes: 10, actionsPerHour: CEILING.actionsPerHour });
     setNow(START + 11 * 60_000);
     const decision = gov.allow({ kind: 'search' });
     expect(decision.allowed).toBe(false);
@@ -103,7 +112,7 @@ describe('Governor — sessionLengthMinutes', () => {
 
 describe('Governor — buyToSearchRatio', () => {
   it('allows a buy within the ratio and denies one that would exceed it', () => {
-    const { gov } = governorAt(START, { buyToSearchRatio: 0.5, actionsPerHour: 999 });
+    const { gov } = governorAt(START, { buyToSearchRatio: 0.5, actionsPerHour: CEILING.actionsPerHour });
     gov.allow({ kind: 'search' });
     gov.allow({ kind: 'search' });
     // 1 buy / 2 searches = 0.5, exactly at the limit — allowed.
@@ -115,14 +124,14 @@ describe('Governor — buyToSearchRatio', () => {
   });
 
   it('does not hard-stop on a ratio breach — only that one action is denied', () => {
-    const { gov } = governorAt(START, { buyToSearchRatio: 0.1, actionsPerHour: 999 });
+    const { gov } = governorAt(START, { buyToSearchRatio: 0.1, actionsPerHour: CEILING.actionsPerHour });
     const denied = gov.allow({ kind: 'buy', coins: 100 }); // 0 searches -> ratio = 1/1 = 1 > 0.1
     expect(denied.allowed).toBe(false);
     expect(gov.allow({ kind: 'search' }).allowed).toBe(true);
   });
 
   it('treats zero searches as a denominator of 1, not a divide-by-zero', () => {
-    const { gov } = governorAt(START, { buyToSearchRatio: 1, actionsPerHour: 999 });
+    const { gov } = governorAt(START, { buyToSearchRatio: 1, actionsPerHour: CEILING.actionsPerHour });
     // 1 buy / max(0,1) = 1, exactly at the limit — allowed.
     expect(gov.allow({ kind: 'buy', coins: 10 }).allowed).toBe(true);
   });
@@ -160,7 +169,7 @@ describe('Governor — maxCoinFlowPerHour', () => {
 
 describe('Governor — snapshot', () => {
   it('reports utilization without denying anything', () => {
-    const { gov } = governorAt(START, { actionsPerHour: 10, maxCoinFlowPerHour: 5000, buyToSearchRatio: 999 });
+    const { gov } = governorAt(START, { actionsPerHour: 10, maxCoinFlowPerHour: 5000, buyToSearchRatio: CEILING.buyToSearchRatio });
     gov.allow({ kind: 'search' });
     gov.allow({ kind: 'buy', coins: 1000 });
     const snap = gov.snapshot();
@@ -174,12 +183,12 @@ describe('Governor — snapshot', () => {
 
 describe('Governor — serialize/hydrate', () => {
   it('round-trips state across a simulated reload', () => {
-    const { gov } = governorAt(START, { actionsPerHour: 10, buyToSearchRatio: 999 });
+    const { gov } = governorAt(START, { actionsPerHour: 10, buyToSearchRatio: CEILING.buyToSearchRatio });
     gov.allow({ kind: 'search' });
     gov.allow({ kind: 'buy', coins: 500 });
     const state = gov.serialize();
 
-    const rehydrated = Governor.hydrate({ ...settings, buyToSearchRatio: 999 }, state, { now: () => START + 1 });
+    const rehydrated = Governor.hydrate({ ...settings, buyToSearchRatio: CEILING.buyToSearchRatio }, state, { now: () => START + 1 });
     const snap = rehydrated.snapshot();
     expect(snap.actionsLastHour).toBe(2);
     expect(snap.coinFlowLastHour).toBe(500);
@@ -371,5 +380,102 @@ describe('Governor.refund: an action that never reached EA', () => {
     const denied = gov.allow({ kind: 'buy', coins: 50 });
     gov.refund(denied);
     expect(gov.serialize().buyCount).toBe(1);
+  });
+});
+
+describe('Governor — max coins per snipe (budgets.maxCoinsPerSnipe)', () => {
+  it('refuses a buy above the per-snipe cap and allows one at it', () => {
+    const { gov } = governorAt(START, { buyToSearchRatio: 1, actionsPerHour: CEILING.actionsPerHour, maxCoinFlowPerHour: 1_000_000 });
+    gov.setMaxCoinsPerBuy(5_000);
+    gov.allow({ kind: 'search' });
+    gov.allow({ kind: 'search' });
+    const denied = gov.allow({ kind: 'buy', coins: 5_001 });
+    expect(denied.allowed).toBe(false);
+    expect(denied.reason).toBe('coin_flow');
+    expect(denied.detail).toMatch(/max coins per snipe/);
+    expect(denied.events[0]).toMatchObject({ kind: 'coin_flow', value: 5_001, threshold: 5_000 });
+    // A soft deny: nothing was charged, and a buy at the cap goes through.
+    expect(gov.snapshot().coinFlowLastHour).toBe(0);
+    expect(gov.allow({ kind: 'buy', coins: 5_000 }).allowed).toBe(true);
+  });
+
+  it('has no cap until one is set, and null removes it', () => {
+    const { gov } = governorAt(START, { buyToSearchRatio: 1, maxCoinFlowPerHour: 1_000_000 });
+    gov.allow({ kind: 'search' });
+    gov.allow({ kind: 'search' });
+    expect(gov.allow({ kind: 'buy', coins: 900_000 }).allowed).toBe(true);
+    gov.setMaxCoinsPerBuy(1_000);
+    expect(gov.allow({ kind: 'buy', coins: 2_000 }).allowed).toBe(false);
+    gov.setMaxCoinsPerBuy(null);
+    expect(gov.allow({ kind: 'buy', coins: 2_000 }).allowed).toBe(true);
+  });
+});
+
+describe('Governor — coins spent this session (the budget meter)', () => {
+  it('adds up buys, gives a refunded one back, and starts over with the session', () => {
+    const { gov } = governorAt(START, { buyToSearchRatio: 1, maxCoinFlowPerHour: 100_000 });
+    gov.allow({ kind: 'search' });
+    gov.allow({ kind: 'search' });
+    gov.allow({ kind: 'buy', coins: 1_000 });
+    const refunded = gov.allow({ kind: 'buy', coins: 2_000 });
+    expect(gov.snapshot().sessionCoinsSpent).toBe(3_000);
+    gov.refund(refunded);
+    expect(gov.snapshot().sessionCoinsSpent).toBe(1_000);
+    // Survives a reload…
+    const reloaded = Governor.hydrate(settings, gov.serialize(), { now: () => START });
+    expect(reloaded.snapshot().sessionCoinsSpent).toBe(1_000);
+    // …and a new session starts it over, while the hourly coin flow stays.
+    reloaded.resetSession();
+    expect(reloaded.snapshot()).toMatchObject({ sessionCoinsSpent: 0, coinFlowLastHour: 1_000 });
+  });
+
+  it('reads 0 for state saved before it was counted', () => {
+    const state = { ...new Governor(settings, { now: () => START }).serialize() };
+    delete (state as { sessionCoinsSpent?: number }).sessionCoinsSpent;
+    expect(Governor.hydrate(settings, state, { now: () => START }).snapshot().sessionCoinsSpent).toBe(0);
+  });
+});
+
+describe('Governor — snapshot of a session that has run out (Task 1 minor)', () => {
+  it('shows the new session once the session-length cooldown is over, before the next allow()', () => {
+    const { gov, setNow } = governorAt(START, { sessionLengthMinutes: 10, cooldownSeconds: 30, buyToSearchRatio: 1 });
+    gov.allow({ kind: 'search' }, START);
+    gov.allow({ kind: 'buy', coins: 500 }, START);
+    const sessionEnd = START + 11 * 60_000;
+    expect(gov.allow({ kind: 'search' }, sessionEnd).reason).toBe('hard_stop');
+    // Still cooling down: the tripped session is what the meter shows.
+    setNow(sessionEnd + 10_000);
+    expect(gov.snapshot().sessionElapsedMinutes).toBeGreaterThan(10);
+    // Cooldown over: the next allow() starts a new session, so the meter
+    // already reads a fresh one instead of a stale 11+ minutes.
+    setNow(sessionEnd + 31_000);
+    const snap = gov.snapshot();
+    expect(snap.sessionElapsedMinutes).toBe(0);
+    expect(snap.buyToSearchRatio).toBe(0);
+    expect(snap.sessionCoinsSpent).toBe(0);
+    // The hourly windows are not part of the session and still show.
+    expect(snap.actionsLastHour).toBe(2);
+  });
+});
+
+describe('Governor.loadState (a tab gaining the engine lease)', () => {
+  it('takes over the saved counters in place, keeping its settings and per-buy cap', () => {
+    const { gov: other } = governorAt(START, { buyToSearchRatio: 1 });
+    other.allow({ kind: 'search' });
+    other.allow({ kind: 'buy', coins: 700 });
+    const { gov } = governorAt(START, { buyToSearchRatio: 1 });
+    gov.setMaxCoinsPerBuy(5_000);
+    gov.loadState(other.serialize());
+    expect(gov.snapshot()).toMatchObject({ actionsLastHour: 2, coinFlowLastHour: 700, sessionCoinsSpent: 700 });
+    expect(gov.getSettings().buyToSearchRatio).toBe(1);
+    expect(gov.allow({ kind: 'buy', coins: 6_000 }).detail).toMatch(/max coins per snipe/);
+  });
+
+  it('keeps its own kill switch: the saved flag is not what decides it', () => {
+    const { gov: other } = governorAt(START);
+    const { gov } = governorAt(START);
+    gov.setKillSwitch(true, 'server kill switch');
+    gov.loadState(other.serialize());
+    expect(gov.isKillSwitchActive()).toBe(true);
   });
 });

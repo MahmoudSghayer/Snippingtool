@@ -1,8 +1,8 @@
 // EntitlementProvider: the interface `modules/extension`'s bootstrap/heartbeat
 // routes depend on to answer "what is this user entitled to". Defined here so
 // it is a stable seam — the subscriptions/payments agent may swap in a
-// richer implementation (e.g. one that also considers grace periods after a
-// failed Stripe charge) without `modules/extension` changing at all; it only
+// richer implementation (e.g. one that also considers grace periods)
+// without `modules/extension` changing at all; it only
 // ever imports this interface and calls `provider.getEntitlements(userId)`.
 //
 // The default implementation reads subscriptions/plans/licenses directly
@@ -21,6 +21,8 @@ import {
 } from '@sl/shared';
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import { SignJWT, importPKCS8 } from 'jose';
+
+import type { Redis } from 'ioredis';
 
 export interface EntitlementSnapshot {
   plan: PlanCode | null;
@@ -137,6 +139,41 @@ export class DefaultEntitlementProvider implements EntitlementProvider {
       .setExpirationTime('26h') // outlives the 24h offline-grace window with margin
       .sign(key);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Per-request feature cache (`fastify.requireFeature`, plugins/auth.ts)
+// ---------------------------------------------------------------------------
+
+/** How long a user's resolved features are reused before the gate asks the
+ * provider again. Every `subscription.changed` publish deletes the key, so
+ * the TTL only bounds changes that don't publish one. */
+export const ENTITLEMENT_CACHE_TTL_SECONDS = 60;
+
+export function entitlementCacheKey(userId: string): string {
+  return `entitlements:features:${userId}`;
+}
+
+/** The user's live feature list: from Redis when cached, otherwise from the
+ * provider (then cached). */
+export async function getCachedFeatures(
+  provider: EntitlementProvider,
+  redis: Redis,
+  userId: string,
+): Promise<FeatureKey[]> {
+  const key = entitlementCacheKey(userId);
+  const cached = await redis.get(key);
+  if (cached !== null) return JSON.parse(cached) as FeatureKey[];
+
+  const { features } = await provider.getEntitlements(userId);
+  await redis.set(key, JSON.stringify(features), 'EX', ENTITLEMENT_CACHE_TTL_SECONDS);
+  return features;
+}
+
+/** Call wherever `subscription.changed` is published, so the new plan (or
+ * the loss of one) applies on the user's very next request. */
+export async function invalidateEntitlementCache(redis: Redis, userId: string): Promise<void> {
+  await redis.del(entitlementCacheKey(userId));
 }
 
 /** Counts active (non-revoked) devices for a user — used both by

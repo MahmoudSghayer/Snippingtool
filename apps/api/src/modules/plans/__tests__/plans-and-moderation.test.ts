@@ -3,18 +3,19 @@
 // GET /plans, admin-plans create/archive, admin-bans create/lift (+
 // checkBans/session revocation), admin-flags list/review.
 
-import { adminUsers, flags, sessions, users } from '@sl/db';
+import { adminUsers, flags, licenses, sessions, users } from '@sl/db';
 import { resetDatabase } from '@sl/db/test-utils';
 import { and, eq, isNull } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { buildApp } from '../../../app.js';
-import { hashSecret } from '../../../lib/crypto.js';
+import { fastHash, hashSecret } from '../../../lib/crypto.js';
 import { newId } from '../../../lib/ids.js';
 import { signAccessToken } from '../../../lib/tokens.js';
 import { reseedPlans } from '../../../test/reseed-reference-data.js';
 import { checkBans } from '../../bans/service.js';
 import { createFlag } from '../../flags/service.js';
+import { activateManual } from '../../subscriptions/service.js';
 
 import type { FastifyInstance } from 'fastify';
 
@@ -230,6 +231,107 @@ describe('plans, admin-plans, admin-bans, admin-flags', () => {
     });
     expect(liftRes.statusCode).toBe(200);
     expect((await me('203.0.113.77')).statusCode).toBe(200);
+  });
+
+  // Refresh and licence validation take no bearer token, so the
+  // per-request ban check in plugins/auth.ts never runs for them.
+  it('admin-bans: an IP ban refuses a refresh from that address', async () => {
+    const { token: adminToken } = await createAdmin(app, 'bans-refresh-admin@example.com');
+    const targetId = await createVerifiedUser(app, 'ban-refresh-target@example.com');
+    const refreshToken = `rt_${newId()}`;
+    await app.db.insert(sessions).values({
+      id: newId(),
+      userId: targetId,
+      refreshTokenHash: fastHash(refreshToken),
+      familyId: newId(),
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    });
+
+    const banRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/admin/bans',
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { type: 'ip', value: '203.0.113.78', reason: 'proxy farm' },
+    });
+    expect(banRes.statusCode).toBe(201);
+
+    const refreshRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/refresh',
+      remoteAddress: '203.0.113.78',
+      payload: { refreshToken },
+    });
+    expect(refreshRes.statusCode).toBe(403);
+    expect(refreshRes.json().code).toBe('FORBIDDEN');
+  });
+
+  it('admin-bans: an IP ban refuses licence validation from that address', async () => {
+    const { token: adminToken } = await createAdmin(app, 'bans-license-admin@example.com');
+    const targetId = await createVerifiedUser(app, 'ban-license-target@example.com');
+    const { license } = await activateManual(app.db, app.redis, {
+      userId: targetId,
+      planCode: 'pro',
+      periodDays: 30,
+      grantedByAdminId: null,
+    });
+
+    const banRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/admin/bans',
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { type: 'ip', value: '203.0.113.79', reason: 'proxy farm' },
+    });
+    expect(banRes.statusCode).toBe(201);
+
+    const validate = (remoteAddress: string) =>
+      app.inject({
+        method: 'POST',
+        url: '/api/v1/licenses/validate',
+        remoteAddress,
+        payload: {
+          licenseKey: license.fullKey,
+          device: { fingerprint: 'fp-ban-license-000000001' },
+        },
+      });
+    const banned = await validate('203.0.113.79');
+    expect(banned.statusCode).toBe(403);
+    expect(banned.json().code).toBe('FORBIDDEN');
+    expect((await validate('198.51.100.9')).statusCode).toBe(200);
+  });
+
+  it("admin-bans: an account ban revokes the user's licences", async () => {
+    const { token: adminToken } = await createAdmin(app, 'bans-lic-revoke-admin@example.com');
+    const targetId = await createVerifiedUser(app, 'ban-lic-revoke-target@example.com');
+    const { license } = await activateManual(app.db, app.redis, {
+      userId: targetId,
+      planCode: 'pro',
+      periodDays: 30,
+      grantedByAdminId: null,
+    });
+
+    const banRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/admin/bans',
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { type: 'account', userId: targetId, reason: 'botting' },
+    });
+    expect(banRes.statusCode).toBe(201);
+
+    const row = await app.db.query.licenses.findFirst({ where: eq(licenses.id, license.row.id) });
+    expect(row!.status).toBe('revoked');
+    expect(row!.revokedReason).toBe('account_banned');
+
+    const validateRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/licenses/validate',
+      remoteAddress: '198.51.100.10',
+      payload: {
+        licenseKey: license.fullKey,
+        device: { fingerprint: 'fp-ban-lic-revoke-000001' },
+      },
+    });
+    expect(validateRes.statusCode).toBe(402);
+    expect(validateRes.json().code).toBe('LICENSE_REVOKED');
   });
 
   it('admin-flags: lists open flags and marks one reviewed', async () => {

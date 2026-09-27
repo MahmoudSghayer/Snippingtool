@@ -1,7 +1,6 @@
-// Admin coupon CRUD: create/update (disable), list. `free_days`/`lifetime`
-// coupons never touch Stripe (docs/05-subscriptions.md §8); redemption
-// itself happens through `modules/payments`/`modules/subscriptions`, not
-// here — this module only manages the coupon definitions.
+// Admin coupon CRUD: create/update (disable), list. This module only
+// manages the coupon definitions (docs/05-subscriptions.md §8); nothing
+// redeems them at the moment.
 
 import { couponDtoSchema, createCouponRequestSchema, updateCouponRequestSchema } from '@sl/shared';
 import fp from 'fastify-plugin';

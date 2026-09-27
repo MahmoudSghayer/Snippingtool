@@ -106,7 +106,8 @@ export default fp(
         preHandler: [fastify.verifyCsrf],
         schema: {
           tags: ['subscriptions'],
-          summary: 'Start a 7-day trial. Denied with TRIAL_ABUSE_DETECTED on abuse signals.',
+          summary:
+            'Start a 7-day trial, once per account. Denied with TRIAL_ALREADY_USED after a past trial, TRIAL_ABUSE_DETECTED on abuse signals.',
           response: { 201: trialResponseSchema },
         },
       },
@@ -137,7 +138,6 @@ export default fp(
           email: user.email,
           fingerprintHash,
           ip: request.ip,
-          stripeCustomerId: user.stripeCustomerId,
         });
 
         if (result.blocked) {

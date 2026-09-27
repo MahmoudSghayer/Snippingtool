@@ -1,7 +1,7 @@
 /*
  * browser-shim.ts — stands in for `webextension-polyfill` in the userscript
  * build (`scripts/build.mjs` aliases the import here), so background/*,
- * content/* and the popup/options UIs run unchanged inside one Tampermonkey
+ * content/* and the popup UI run unchanged inside one Tampermonkey
  * script on the EA page. Only the members the extension actually calls are
  * implemented; anything else is a type error at build time, not a silent
  * `undefined` at runtime.
@@ -25,6 +25,12 @@
  *     a stale token (401 -> refresh), and resuming governor counters is the
  *     conservative direction.
  *
+ *     `storage.onChanged` fires for changes this tab's own code makes (the
+ *     background half writing the settings cache, the options drawer saving
+ *     hotkeys), which is what content/live-settings.ts needs to apply them
+ *     without a reload. Another tab's writes are not reported: each tab has
+ *     its own background copy, which writes its own cache.
+ *
  *   alarms
  *     `setInterval`. There is no service worker to wake, so an alarm only
  *     fires while an EA tab is open — which is also the only time there is
@@ -45,14 +51,22 @@ type Sender = { id: string };
 type MessageListener = (message: unknown, sender: Sender) => Promise<unknown> | undefined | void;
 type AlarmListener = (alarm: { name: string }) => void;
 type InstalledListener = (details: { reason: 'install' | 'update' }) => void;
+type StorageChanges = Record<string, { newValue?: unknown; oldValue?: unknown }>;
+type StorageChangeListener = (changes: StorageChanges, areaName: string) => void;
 
 const messageListeners = new Set<MessageListener>();
 const alarmListeners = new Set<AlarmListener>();
+const storageListeners = new Set<StorageChangeListener>();
+
+function notifyStorage(changes: StorageChanges, areaName: string): void {
+  if (Object.keys(changes).length === 0) return;
+  // Cloned per listener, like messages: none can reach into the store.
+  for (const listener of [...storageListeners]) listener(structuredClone(changes), areaName);
+}
 const alarmTimers = new Map<
   string,
   { timeout?: ReturnType<typeof setTimeout>; interval?: ReturnType<typeof setInterval> }
 >();
-let optionsPageOpener: (() => void) | null = null;
 
 async function dispatch(message: unknown): Promise<unknown> {
   // Chrome never delivers a message synchronously; neither does this.
@@ -64,7 +78,7 @@ async function dispatch(message: unknown): Promise<unknown> {
   throw new Error('Could not establish connection. Receiving end does not exist.');
 }
 
-function storageArea(prefix: string) {
+function storageArea(prefix: string, areaName: string) {
   return {
     async get(keys: string | string[]): Promise<Record<string, unknown>> {
       const out: Record<string, unknown> = {};
@@ -75,13 +89,26 @@ function storageArea(prefix: string) {
       return out;
     },
     async set(items: Record<string, unknown>): Promise<void> {
+      const changes: StorageChanges = {};
       for (const [key, value] of Object.entries(items)) {
+        const oldValue = GM_getValue<unknown>(prefix + key, undefined);
         if (value === undefined) GM_deleteValue(prefix + key);
         else GM_setValue(prefix + key, value);
+        changes[key] = {
+          ...(value !== undefined ? { newValue: value } : {}),
+          ...(oldValue !== undefined ? { oldValue } : {}),
+        };
       }
+      notifyStorage(changes, areaName);
     },
     async remove(keys: string | string[]): Promise<void> {
-      for (const key of Array.isArray(keys) ? keys : [keys]) GM_deleteValue(prefix + key);
+      const changes: StorageChanges = {};
+      for (const key of Array.isArray(keys) ? keys : [keys]) {
+        const oldValue = GM_getValue<unknown>(prefix + key, undefined);
+        GM_deleteValue(prefix + key);
+        if (oldValue !== undefined) changes[key] = { oldValue };
+      }
+      notifyStorage(changes, areaName);
     },
   };
 }
@@ -106,9 +133,6 @@ const browser = {
       addListener: (listener: MessageListener): void => void messageListeners.add(listener),
       removeListener: (listener: MessageListener): void => void messageListeners.delete(listener),
     },
-    openOptionsPage: async (): Promise<void> => {
-      optionsPageOpener?.();
-    },
     onInstalled: {
       // Fires once per Tampermonkey install of the script, the first time
       // any EA page runs it — the closest a userscript has to "install".
@@ -127,8 +151,12 @@ const browser = {
   },
 
   storage: {
-    local: storageArea(''),
-    session: storageArea(SESSION_PREFIX),
+    local: storageArea('', 'local'),
+    session: storageArea(SESSION_PREFIX, 'session'),
+    onChanged: {
+      addListener: (listener: StorageChangeListener): void => void storageListeners.add(listener),
+      removeListener: (listener: StorageChangeListener): void => void storageListeners.delete(listener),
+    },
   },
 
   alarms: {
@@ -162,11 +190,5 @@ const browser = {
     },
   },
 };
-
-/** The userscript's settings drawer registers itself here so the popup's
- * "Settings" link (`browser.runtime.openOptionsPage()`) can open it. */
-export function setOptionsPageOpener(open: () => void): void {
-  optionsPageOpener = open;
-}
 
 export default browser;

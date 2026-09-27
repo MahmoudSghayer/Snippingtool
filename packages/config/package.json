@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Shared TypeScript / ESLint / Prettier configuration for The Sniper's Ledger monorepo.",
+  "description": "Shared TypeScript / ESLint / Prettier configuration for Nova Trade monorepo.",
   "exports": {
     "./tsconfig.base.json": "./tsconfig.base.json",
     "./tsconfig.node.json": "./tsconfig.node.json",

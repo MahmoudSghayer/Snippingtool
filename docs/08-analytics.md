@@ -270,15 +270,20 @@ it.
   underlying rows still appears in the output with every numeric field at
   `0` (and `snipeSuccessRate` at `0`, not `NaN`), never omitted.
 
-**Timezone handling**: every range-query schema accepts a `tz` field for
-forward compatibility, but bucket-boundary math in this deliverable is
-**UTC-only**. `profits` (the profit-series source of truth) is a `date`
-column with no per-row timezone — it is already "the UTC calendar day" by
-construction (populated by `profits.rollup`, which buckets by UTC day) — so
-correct per-viewer DST-aware bucketing would require re-deriving every
-stored day from raw `timestamptz` activity rows in the viewer's zone, which
-`profits` does not support without a schema change outside this agent's
-ownership. This is a documented limitation (§11), not silently ignored.
+**Timezone handling**: every range-query schema accepts a `tz` field, and
+bucket-boundary math over the rollup tables is **UTC-only**: `profits` is a
+`date` column with no per-row timezone, "the UTC calendar day" by
+construction (populated by `profits.rollup`, which buckets by UTC day).
+The one exception is the trader's own series, `GET
+/api/v1/analytics/me/profits`: given a `tz` other than `UTC` (an IANA name,
+validated by `@sl/shared`'s `timeZoneSchema`), it re-derives the series from
+`trades.bought_at`/`sold_at` and `sniping_activity.occurred_at` at query time
+with `AT TIME ZONE` (`getUserProfitSeriesInZone`, same day attribution as the
+rollup), so a sale at 23:30 in Tokyo counts on Tokyo's day. Because that
+scans raw rows, a zoned range is limited to `TZ_SERIES_MAX_DAYS` (90) days;
+a longer one is a 400. The dashboard's "Net profit today" uses it with the
+trader's chosen zone. Admin analytics and `/analytics/me/activity` still
+bucket by UTC day.
 
 ---
 
@@ -343,7 +348,7 @@ schemas from `@sl/shared`'s `schemas/analytics.ts`.
 | Method & path                       | Query                             | Notes                                                                                                            |
 | ----------------------------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | `GET /api/v1/analytics/me/overview` | —                                 | Lifetime profit/coins/snipes, last-7d/30d net profit & snipes, active device count, lifetime snipe success rate. |
-| `GET /api/v1/analytics/me/profits`  | `from`, `to`, `granularity`       | §3, scoped to the caller.                                                                                        |
+| `GET /api/v1/analytics/me/profits`  | `from`, `to`, `granularity`, `tz` | §3, scoped to the caller.                                                                                        |
 | `GET /api/v1/analytics/me/activity` | `from`, `to`, `granularity`, `tz` | §4, scoped to the caller.                                                                                        |
 
 ### Admin — `modules/admin-analytics` (auth: `fastify.requirePermission('analytics.read')`)
@@ -400,8 +405,9 @@ format }` — via the skeleton's `recordAudit()` helper
 
 ## 11. Known limitations
 
-- **Timezone**: bucket-boundary math is UTC-only (§7). `tz` is accepted by
-  every schema but not yet applied to boundaries.
+- **Timezone**: bucket-boundary math is UTC-only (§7) everywhere except the
+  trader's own `/analytics/me/profits`, which honours a non-UTC `tz` for
+  ranges of up to 90 days by reading raw trades at query time.
 - **`mrr_cents`/`arr_cents`/`plan_mix`/`past_due_count` are point-in-time
   snapshots**, not day-accurate historical reconstructions — `subscriptions`
   is a single mutable-state table with no history log, so a materialised

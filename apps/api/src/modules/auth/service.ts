@@ -422,7 +422,11 @@ async function tryConsumeRecoveryCode(
 export async function refresh(
   ctx: AuthContext,
   refreshToken: string,
-  presented?: { userAgent?: string | null; device?: DeviceFingerprint | null },
+  presented?: {
+    userAgent?: string | null;
+    device?: DeviceFingerprint | null;
+    ip?: string | null;
+  },
 ): Promise<{ accessToken: string; refreshToken: string; expiresIn: number }> {
   const hash = fastHash(refreshToken);
   const session = await repo.findSessionByRefreshHash(ctx.db, hash);
@@ -454,11 +458,11 @@ export async function refresh(
   // additive field — see `refreshRequestSchema`): if the caller sends one at
   // all, it must match the fingerprint the session's device was registered
   // under.
-  if (presented?.device && session.deviceId) {
-    const boundDevice = await ctx.db.query.devices.findFirst({
-      where: eq(devices.id, session.deviceId),
-    });
-    if (boundDevice && boundDevice.fingerprintHash !== presented.device.fingerprint) {
+  const boundDevice = session.deviceId
+    ? await ctx.db.query.devices.findFirst({ where: eq(devices.id, session.deviceId) })
+    : undefined;
+  if (presented?.device && boundDevice) {
+    if (boundDevice.fingerprintHash !== presented.device.fingerprint) {
       await repo.revokeSessionFamily(ctx.db, session.familyId, 'device_binding_mismatch');
       throw AppErrors.tokenReused();
     }
@@ -466,6 +470,17 @@ export async function refresh(
 
   const user = await repo.findUserById(ctx.db, session.userId);
   if (!user || user.status !== 'active') throw AppErrors.sessionRevoked();
+
+  // A refresh carries no access token, so plugins/auth.ts's per-request ban
+  // check never runs for it. Same identifiers login checks.
+  const { checkBans } = await import('../bans/service.js');
+  const banCheck = await checkBans(ctx.db, {
+    userId: user.id,
+    ip: presented?.ip ?? null,
+    deviceFingerprintHash: boundDevice?.fingerprintHash ?? null,
+  });
+  if (banCheck.banned)
+    throw AppErrors.forbidden('This account, device, or network has been banned.');
 
   const newRefresh = generateRefreshToken();
   const newSessionId = await repo.rotateSession(
@@ -481,6 +496,12 @@ export async function refresh(
     newRefresh.hash,
     new Date(Date.now() + REFRESH_TOKEN_TTL_MS),
   );
+  if (!newSessionId) {
+    // A concurrent refresh with the same token rotated it first: two
+    // holders of one refresh token is exactly what reuse detection is for.
+    await repo.revokeSessionFamily(ctx.db, session.familyId, 'token_reuse_detected');
+    throw AppErrors.tokenReused();
+  }
 
   const entitlements = await ctx.entitlements.getEntitlements(user.id);
   const accessToken = await signAccessToken(

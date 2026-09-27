@@ -1,0 +1,22 @@
+-- migrate:no-transaction
+-- 0035_subscriptions_trial_history_idx.sql
+--
+-- Permanent trial history (docs/05-subscriptions.md §5). "Has this user
+-- ever had a trial" is now "does any subscription row of theirs sit on the
+-- `trial` plan", whatever its status and even if soft-deleted. Every trial
+-- keeps its row: expiry, upgrade and suspension only change the status (an
+-- upgrade inserts a new row for the paid plan), and subscriptions are never
+-- hard-deleted (user_id is ON DELETE RESTRICT). trial_ends_at, the old
+-- signal, is cleared whenever a trial stops trialing, so it forgot every
+-- trial that had ended. Nothing to backfill: the rows are already there.
+--
+-- The existing user_id and plan_id indexes are partial (deleted_at IS
+-- NULL), so they cannot answer a lookup that must also see soft-deleted
+-- rows; this one covers every row. user_id leads because the lookup is
+-- always per user: the plan id comes from a join on plans.code, so the
+-- planner cannot start from plan_id.
+-- Built CONCURRENTLY so it does not block subscription writes (see the
+-- no-transaction rules in packages/db/src/migrate.ts). A failed build
+-- leaves an INVALID index behind; the DROP clears it on a re-run.
+DROP INDEX CONCURRENTLY IF EXISTS subscriptions_user_id_plan_id_idx;
+CREATE INDEX CONCURRENTLY IF NOT EXISTS subscriptions_user_id_plan_id_idx ON subscriptions (user_id, plan_id);

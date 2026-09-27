@@ -16,7 +16,16 @@ import { resetDatabase } from '@sl/db/test-utils';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { MIN_CONTRIBUTORS } from '../../../modules/market/index.js';
+import { grantPlan } from '../../plan-fixtures.js';
 import { bearer, buildTestApp, createUserSession, type TestApp } from '../helpers.js';
+
+/** A signed-up user with a Monthly pass: the routes here are plan-gated
+ * (requireFeature). */
+async function createSubscriber(app: TestApp, email: string, fp: string) {
+  const session = await createUserSession(app, email, fp);
+  await grantPlan(app, session.userId);
+  return session;
+}
 
 const RESOURCE = '50535432';
 const OTHER_RESOURCE = '90210111';
@@ -69,7 +78,7 @@ describe('market intelligence (Phase B)', () => {
 
   describe('activity', () => {
     it('aggregates the caller’s own observations with a median, not a mean', async () => {
-      const me = await createUserSession(app, 'market-a@test.dev', 'fp-market-a-000000000000');
+      const me = await createSubscriber(app, 'market-a@test.dev', 'fp-market-a-000000000000');
       // 100 / 200 / 9000: the mean would be ~3100, which no listing resembled.
       await observe(me.userId, [
         { resourceId: RESOURCE, listedPrice: 100, hoursAgo: 1 },
@@ -92,7 +101,7 @@ describe('market intelligence (Phase B)', () => {
     });
 
     it('excludes observations outside the window', async () => {
-      const me = await createUserSession(app, 'market-b@test.dev', 'fp-market-b-000000000000');
+      const me = await createSubscriber(app, 'market-b@test.dev', 'fp-market-b-000000000000');
       await observe(me.userId, [
         { resourceId: RESOURCE, listedPrice: 500, hoursAgo: 1 },
         { resourceId: RESOURCE, listedPrice: 500, hoursAgo: 100 }, // outside 24h
@@ -103,8 +112,8 @@ describe('market intelligence (Phase B)', () => {
     });
 
     it('scope=mine never shows another user’s observations', async () => {
-      const me = await createUserSession(app, 'market-c@test.dev', 'fp-market-c-000000000000');
-      const them = await createUserSession(app, 'market-d@test.dev', 'fp-market-d-000000000000');
+      const me = await createSubscriber(app, 'market-c@test.dev', 'fp-market-c-000000000000');
+      const them = await createSubscriber(app, 'market-d@test.dev', 'fp-market-d-000000000000');
 
       await observe(them.userId, [{ resourceId: OTHER_RESOURCE, listedPrice: 700, hoursAgo: 1 }]);
 
@@ -114,7 +123,7 @@ describe('market intelligence (Phase B)', () => {
     });
 
     it('explains an empty result rather than looking like a quiet market', async () => {
-      const me = await createUserSession(app, 'market-e@test.dev', 'fp-market-e-000000000000');
+      const me = await createSubscriber(app, 'market-e@test.dev', 'fp-market-e-000000000000');
       const body = await get('/api/v1/market/activity?window=24h&scope=market', me.accessToken);
 
       expect(body.rows).toHaveLength(0);
@@ -125,8 +134,8 @@ describe('market intelligence (Phase B)', () => {
 
   describe('pooled scope privacy threshold', () => {
     it(`withholds a card observed by fewer than ${MIN_CONTRIBUTORS} people`, async () => {
-      const me = await createUserSession(app, 'market-f@test.dev', 'fp-market-f-000000000000');
-      const second = await createUserSession(app, 'market-g@test.dev', 'fp-market-g-000000000000');
+      const me = await createSubscriber(app, 'market-f@test.dev', 'fp-market-f-000000000000');
+      const second = await createSubscriber(app, 'market-g@test.dev', 'fp-market-g-000000000000');
 
       // Two contributors — one short of the threshold.
       await observe(me.userId, [{ resourceId: RESOURCE, listedPrice: 1000, hoursAgo: 1 }]);
@@ -143,7 +152,7 @@ describe('market intelligence (Phase B)', () => {
       const sessions = [];
       for (let i = 0; i < MIN_CONTRIBUTORS; i += 1) {
         sessions.push(
-          await createUserSession(app, `market-h${i}@test.dev`, `fp-market-h${i}-000000000000`),
+          await createSubscriber(app, `market-h${i}@test.dev`, `fp-market-h${i}-000000000000`),
         );
       }
       for (const s of sessions) {
@@ -165,7 +174,7 @@ describe('market intelligence (Phase B)', () => {
       const sessions = [];
       for (let i = 0; i < MIN_CONTRIBUTORS; i += 1) {
         sessions.push(
-          await createUserSession(app, `market-i${i}@test.dev`, `fp-market-i${i}-000000000000`),
+          await createSubscriber(app, `market-i${i}@test.dev`, `fp-market-i${i}-000000000000`),
         );
       }
       // RESOURCE is well observed; OTHER_RESOURCE is seen by one person only.
@@ -190,7 +199,7 @@ describe('market intelligence (Phase B)', () => {
 
   describe('movers', () => {
     it('reports a percentage change between a window and the one before it', async () => {
-      const me = await createUserSession(app, 'market-j@test.dev', 'fp-market-j-000000000000');
+      const me = await createSubscriber(app, 'market-j@test.dev', 'fp-market-j-000000000000');
       // Previous 24h (24–48h ago): median 1000. Current 24h: median 1500.
       await observe(me.userId, [
         { resourceId: RESOURCE, listedPrice: 1000, hoursAgo: 30 },
@@ -208,7 +217,7 @@ describe('market intelligence (Phase B)', () => {
     });
 
     it('ignores a card with too few priced samples to call a move', async () => {
-      const me = await createUserSession(app, 'market-k@test.dev', 'fp-market-k-000000000000');
+      const me = await createSubscriber(app, 'market-k@test.dev', 'fp-market-k-000000000000');
       // One observation either side: a 50% "move" computed from noise.
       await observe(me.userId, [
         { resourceId: RESOURCE, listedPrice: 1000, hoursAgo: 30 },
@@ -222,7 +231,7 @@ describe('market intelligence (Phase B)', () => {
     });
 
     it('ignores a card with no observations in the previous window', async () => {
-      const me = await createUserSession(app, 'market-l@test.dev', 'fp-market-l-000000000000');
+      const me = await createSubscriber(app, 'market-l@test.dev', 'fp-market-l-000000000000');
       await observe(me.userId, [
         { resourceId: RESOURCE, listedPrice: 1500, hoursAgo: 2 },
         { resourceId: RESOURCE, listedPrice: 1500, hoursAgo: 3 },
@@ -235,7 +244,7 @@ describe('market intelligence (Phase B)', () => {
 
   describe('card history', () => {
     it('returns a bucketed median series for one card', async () => {
-      const me = await createUserSession(app, 'market-m@test.dev', 'fp-market-m-000000000000');
+      const me = await createSubscriber(app, 'market-m@test.dev', 'fp-market-m-000000000000');
       await observe(me.userId, [
         { resourceId: RESOURCE, listedPrice: 1000, hoursAgo: 5 },
         { resourceId: RESOURCE, listedPrice: 1200, hoursAgo: 5 },
@@ -256,7 +265,7 @@ describe('market intelligence (Phase B)', () => {
     });
 
     it('omits observations with no listed price from the series', async () => {
-      const me = await createUserSession(app, 'market-n@test.dev', 'fp-market-n-000000000000');
+      const me = await createSubscriber(app, 'market-n@test.dev', 'fp-market-n-000000000000');
       await observe(me.userId, [{ resourceId: RESOURCE, listedPrice: null, hoursAgo: 1 }]);
 
       const body = await get(
@@ -303,7 +312,7 @@ describe('market intelligence (Phase B)', () => {
     }
 
     it('returns the calendar newest first', async () => {
-      const me = await createUserSession(app, 'market-o@test.dev', 'fp-market-o-000000000000');
+      const me = await createSubscriber(app, 'market-o@test.dev', 'fp-market-o-000000000000');
       await announce({ slug: 'fc-26-older', title: 'Older promo', daysAgo: 10 });
       await announce({ slug: 'fc-26-newer', title: 'Newer promo', daysAgo: 1 });
 
@@ -315,7 +324,7 @@ describe('market intelligence (Phase B)', () => {
     });
 
     it('filters by kind', async () => {
-      const me = await createUserSession(app, 'market-p@test.dev', 'fp-market-p-000000000000');
+      const me = await createSubscriber(app, 'market-p@test.dev', 'fp-market-p-000000000000');
       await announce({ slug: 'fc-26-promo', title: 'A promo', kind: 'content' });
       await announce({
         slug: 'pitch-notes-fc26-tu5',
@@ -333,7 +342,7 @@ describe('market intelligence (Phase B)', () => {
       // The whole point of Phase C's date handling: EA rarely states when
       // content goes live, and a UI that renders both identically would be
       // asserting something nobody established.
-      const me = await createUserSession(app, 'market-q@test.dev', 'fp-market-q-000000000000');
+      const me = await createSubscriber(app, 'market-q@test.dev', 'fp-market-q-000000000000');
       await announce({ slug: 'fc-26-announced-only', title: 'Announced only' });
       await announce({
         slug: 'fc-26-with-window',
@@ -351,7 +360,7 @@ describe('market intelligence (Phase B)', () => {
     });
 
     it('carries the news summary alongside the event', async () => {
-      const me = await createUserSession(app, 'market-r@test.dev', 'fp-market-r-000000000000');
+      const me = await createSubscriber(app, 'market-r@test.dev', 'fp-market-r-000000000000');
       await announce({ slug: 'fc-26-summary', title: 'Has summary', summary: 'The blurb.' });
 
       const body = await get('/api/v1/market/events', me.accessToken);
@@ -360,7 +369,7 @@ describe('market intelligence (Phase B)', () => {
 
     it('distinguishes an empty calendar from a collector that never ran', async () => {
       // Both look like "no events" to a client, and only one is a problem.
-      const me = await createUserSession(app, 'market-s@test.dev', 'fp-market-s-000000000000');
+      const me = await createSubscriber(app, 'market-s@test.dev', 'fp-market-s-000000000000');
       const body = await get('/api/v1/market/events', me.accessToken);
 
       expect(body.events).toHaveLength(0);

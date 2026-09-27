@@ -41,54 +41,27 @@ describe('set_updated_at / bump_row_version triggers', () => {
     expect(afterTwo!.rowVersion).toBe(2);
   });
 
-  // --- Defect #8 (docs/12-testing.md "Defects found") — FIXED by
-  // migrations/0026_users_row_version_exclude_billing.sql ---
+  // --- Defect #8 (docs/12-testing.md "Defects found") ---
   //
-  // `users` no longer uses the generic bump_row_version() trigger every
-  // other row_version-bearing table still uses (asserted above via a
-  // non-users update pattern implicitly — see 0001_extensions_and_helpers's
-  // own coverage for the generic function); it uses
-  // bump_users_row_version(), which skips the bump when the only column
-  // that changed is stripe_customer_id (billing metadata a webhook writes,
-  // not something the account holder's own session did — see that
-  // migration's header comment for why this is an exclude-list, not an
-  // allow-list).
-  describe('users-specific trigger: stripe_customer_id is excluded from the row_version bump (defect #8)', () => {
-    it('writing ONLY stripe_customer_id does not bump row_version', async () => {
+  // `users` uses its own bump_users_row_version() trigger (0026, narrowed by
+  // 0034_drop_stripe.sql): it bumps on any change except to the generated
+  // email_normalised column, whose value in NEW is unspecified inside a
+  // BEFORE trigger. The billing column 0026 originally excluded was dropped
+  // with Stripe.
+  describe('users-specific trigger: bump_users_row_version (defect #8)', () => {
+    it('an UPDATE that changes nothing does not bump row_version (email_normalised is not compared)', async () => {
       const [inserted] = await db
         .insert(users)
-        .values({ email: 'trigger-stripe-only@example.com', passwordHash: 'x' })
+        .values({ email: 'trigger-noop@example.com', passwordHash: 'x' })
         .returning();
       expect(inserted!.rowVersion).toBe(0);
 
       await db
         .update(users)
-        .set({ stripeCustomerId: 'cus_test_only_billing' })
+        .set({ timezone: inserted!.timezone })
         .where(eq(users.id, inserted!.id));
 
       const [after] = await db.select().from(users).where(eq(users.id, inserted!.id));
-      expect(after!.stripeCustomerId).toBe('cus_test_only_billing');
-      expect(after!.rowVersion).toBe(0); // unchanged — the whole point of the fix
-    });
-
-    it('a second, later stripe_customer_id-only write still does not bump it', async () => {
-      const [inserted] = await db
-        .insert(users)
-        .values({
-          email: 'trigger-stripe-twice@example.com',
-          passwordHash: 'x',
-          stripeCustomerId: 'cus_test_first',
-        })
-        .returning();
-      expect(inserted!.rowVersion).toBe(0);
-
-      await db
-        .update(users)
-        .set({ stripeCustomerId: 'cus_test_second' })
-        .where(eq(users.id, inserted!.id));
-
-      const [after] = await db.select().from(users).where(eq(users.id, inserted!.id));
-      expect(after!.stripeCustomerId).toBe('cus_test_second');
       expect(after!.rowVersion).toBe(0);
     });
 
@@ -111,23 +84,6 @@ describe('set_updated_at / bump_row_version triggers', () => {
         const [after] = await db.select().from(users).where(eq(users.id, inserted!.id));
         expect(after!.rowVersion, `write=${JSON.stringify(write)}`).toBe(expectedVersion);
       }
-    });
-
-    it('changing stripe_customer_id together with a security-relevant column still bumps (excluding one column does not exempt the whole write)', async () => {
-      const [inserted] = await db
-        .insert(users)
-        .values({ email: 'trigger-stripe-plus-password@example.com', passwordHash: 'x' })
-        .returning();
-      expect(inserted!.rowVersion).toBe(0);
-
-      await db
-        .update(users)
-        .set({ stripeCustomerId: 'cus_test_combo', passwordHash: 'new-hash-combo' })
-        .where(eq(users.id, inserted!.id));
-
-      const [after] = await db.select().from(users).where(eq(users.id, inserted!.id));
-      expect(after!.stripeCustomerId).toBe('cus_test_combo');
-      expect(after!.rowVersion).toBe(1);
     });
 
     it('the force-logout "touch updated_at only" bump (modules/auth/repo.ts bumpUserVersion) still works — not silently broken by narrowing this trigger', async () => {
