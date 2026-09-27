@@ -1,5 +1,5 @@
 /**
- * The Sniper's Ledger — design tokens (dark gaming theme, the only theme for
+ * Nova Trade — design tokens (dark gaming theme, the only theme for
  * now). Consumed by apps/dashboard's Tailwind v4 entry (`@import
  * "@sl/ui/tokens.css";` before `@import "tailwindcss";`) and mapped into
  * Tailwind's `@theme` there. Values match docs/07-dashboard.md "Design

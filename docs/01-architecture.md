@@ -6,8 +6,8 @@ scaffolding, wave 0). Everything under `apps/api`, `apps/dashboard`,
 **built** in later waves — see [`13-roadmap.md`](./13-roadmap.md) for the
 phase-by-phase build order and exit criteria.
 
-This document is the single place that shows how every piece of The
-Sniper's Ledger fits together, what data is allowed to cross which boundary,
+This document is the single place that shows how every piece of Nova
+Trade fits together, what data is allowed to cross which boundary,
 and why. Every other `docs/*.md` file goes deeper on one slice of this
 picture; this one is the map.
 

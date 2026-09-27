@@ -38,7 +38,7 @@ const source = readFileSync(sourcePath, 'utf8');
 const withoutChartRamp = source.replace(/\n\s*\/\* Chart series[\s\S]*?(?=\n\s*\/\* Radii \*\/)/, '\n\n');
 
 const header = `/**
- * The Sniper's Ledger — design tokens, synced from \`packages/ui/src/tokens.css\`
+ * Nova Trade — design tokens, synced from \`packages/ui/src/tokens.css\`
  * by \`pnpm --filter @sl/extension tokens:sync\` (${new Date().toISOString().slice(0, 10)}).
  * DO NOT hand-edit the \`:root\` block below — run the sync script again
  * after changing the source file instead, so this copy never drifts from

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "The Sniper's Ledger — user + admin web dashboard (React 19 + Vite + TanStack Router/Query), deployed to Vercel as a static SPA.",
+  "description": "Nova Trade — user + admin web dashboard (React 19 + Vite + TanStack Router/Query), deployed to Vercel as a static SPA.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit -p tsconfig.json && vite build",

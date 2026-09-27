@@ -1,4 +1,4 @@
-# The Sniper's Ledger
+# Nova Trade
 
 A commercial-grade SaaS companion for EA FC Ultimate Team transfer-market
 sniping, built on a private, per-user record of what the market actually did

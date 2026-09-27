@@ -23,7 +23,7 @@ ARG VCS_REF
 ARG VERSION=0.0.0-dev
 LABEL org.opencontainers.image.title="sniper-ledger-caddy" \
       org.opencontainers.image.description="Caddy reverse proxy (+ caddy-ratelimit) fronting api/dashboard for the single-VM deployment" \
-      org.opencontainers.image.vendor="The Sniper's Ledger" \
+      org.opencontainers.image.vendor="Nova Trade" \
       org.opencontainers.image.licenses="UNLICENSED" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.revision="${VCS_REF}" \

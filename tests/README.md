@@ -1,6 +1,6 @@
 # @sl/tests
 
-Cross-app end-to-end journeys and load tests for The Sniper's Ledger — the
+Cross-app end-to-end journeys and load tests for Nova Trade — the
 tests that exercise more than one app at once, or the running server's
 behaviour under concurrent traffic. Owned by the Testing & QA agent. See
 [`docs/12-testing.md`](../docs/12-testing.md) for the full test strategy

@@ -38,7 +38,7 @@ fi
 echo "[certs] issuing CA"
 openssl req -x509 -newkey rsa:4096 -sha256 -days "$days" -nodes \
   -keyout ca.key -out ca.crt \
-  -subj "/CN=Sniper's Ledger datastore CA" \
+  -subj "/CN=Nova Trade datastore CA" \
   -addext "basicConstraints=critical,CA:TRUE" \
   -addext "keyUsage=critical,keyCertSign,cRLSign" 2>/dev/null
 

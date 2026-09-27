@@ -1,4 +1,4 @@
-// The Sniper's Ledger design system — public API. Every component the
+// Nova Trade design system — public API. Every component the
 // dashboard uses is re-exported from here; nothing reaches into
 // `@sl/ui/src/...` directly. Design tokens live in `./tokens.css`
 // (`@sl/ui/tokens.css`), imported once by the dashboard's global stylesheet.

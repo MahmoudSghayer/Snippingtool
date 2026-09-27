@@ -1,6 +1,6 @@
 // @ts-check
 /**
- * Shared ESLint flat-config preset for The Sniper's Ledger monorepo.
+ * Shared ESLint flat-config preset for Nova Trade monorepo.
  *
  * A consuming package's own `eslint.config.js` spreads this array in and can
  * append (or override) entries after it. Kept dependency-light: only

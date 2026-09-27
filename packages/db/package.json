@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "PostgreSQL schema (hand-written SQL migrations + Drizzle ORM query layer), seed data and test utilities for The Sniper's Ledger.",
+  "description": "PostgreSQL schema (hand-written SQL migrations + Drizzle ORM query layer), seed data and test utilities for Nova Trade.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

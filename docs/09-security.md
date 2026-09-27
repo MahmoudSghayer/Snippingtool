@@ -1,6 +1,6 @@
 # 09 — Security
 
-Controls inventory for The Sniper's Ledger, mapped to code and tests.
+Controls inventory for Nova Trade, mapped to code and tests.
 Companion documents: `docs/threat-model.md` (STRIDE decomposition, attack
 vectors, residual risks, non-goals — read that first for _why_; this
 document is _where and how_), `docs/01-architecture.md` §5 (trust-boundary

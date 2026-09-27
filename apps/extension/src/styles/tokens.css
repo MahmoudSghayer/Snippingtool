@@ -1,5 +1,5 @@
 /**
- * The Sniper's Ledger — design tokens, synced from `packages/ui/src/tokens.css`
+ * Nova Trade — design tokens, synced from `packages/ui/src/tokens.css`
  * (PHASE 10, "shared tokens: copy packages/ui/src/tokens.css into the
  * extension build, no React"). This IS a copy, not an import — the
  * extension has no dependency on `@sl/ui` (a React component library) and

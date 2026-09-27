@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Shared Zod schemas, DTO types, error codes, plan/permission constants and WS/extension message types for The Sniper's Ledger.",
+  "description": "Shared Zod schemas, DTO types, error codes, plan/permission constants and WS/extension message types for Nova Trade.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

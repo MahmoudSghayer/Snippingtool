@@ -33,7 +33,7 @@ they're built_.
 
 ## 1. Brand principles
 
-The Sniper's Ledger reads as a **companion app for a live trading loop**,
+Nova Trade reads as a **companion app for a live trading loop**,
 not a generic SaaS admin panel. Four principles drive every design
 decision:
 
