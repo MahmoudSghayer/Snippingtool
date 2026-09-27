@@ -212,6 +212,26 @@ describe('CSRF (docs/04-auth.md §10)', () => {
     expect(res.headers['x-csrf-token']).toBeUndefined();
   });
 
+  it('POST /api/v1/ws/ticket requires the CSRF token like any other cookie-session mutation', async () => {
+    const { cookies } = await loginAsDashboard('csrf-ws-ticket@example.com', 'csrf-fp-wsticket-00000000');
+    const noToken = await app.inject({
+      method: 'POST',
+      url: '/api/v1/ws/ticket',
+      cookies: { sl_at: cookies.sl_at!, sl_csrf: cookies.sl_csrf! },
+      payload: {},
+    });
+    expect(noToken.statusCode).toBe(403);
+
+    const withToken = await app.inject({
+      method: 'POST',
+      url: '/api/v1/ws/ticket',
+      cookies: { sl_at: cookies.sl_at!, sl_csrf: cookies.sl_csrf! },
+      headers: { 'x-csrf-token': cookies.sl_csrf! },
+      payload: {},
+    });
+    expect(withToken.statusCode).toBe(200);
+  });
+
   it('a bearer-authenticated mutation needs no CSRF token at all (exempt by construction)', async () => {
     const session = await createUserSession(
       app,

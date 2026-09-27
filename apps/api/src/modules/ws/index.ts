@@ -38,6 +38,7 @@ export default fp(
       '/api/v1/ws/ticket',
       {
         onRequest: [fastify.authenticate],
+        preHandler: [fastify.verifyCsrf],
         schema: {
           tags: ['ws'],
           summary: 'Issue a single-use WebSocket auth ticket (30s TTL).',
