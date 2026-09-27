@@ -205,6 +205,22 @@ Secure` and `DASHBOARD_ORIGIN` must equal the exact Vercel URL. **Resolved**
    remains the preferred production shape if available — `COOKIE_SAME_SITE`
    just means it's no longer the _only_ option.
 
+**In production (Vercel), shape 1 is what's deployed**: `vercel.json` rewrites
+`/api/:path*` to the API's own origin before the SPA catch-all, so the
+browser only ever talks to the dashboard's own origin for ordinary requests
+and `sl_at`/`sl_rt`/`sl_csrf` are first-party cookies — this is what makes
+login/CSRF work in browsers that block third-party cookies (Safari ITP,
+Firefox strict mode, Chrome with third-party cookies blocked), which shape 2
+does not. `VITE_API_ORIGIN` must be unset (or empty) on Vercel for this to
+take effect; if it's set to an absolute origin, the dashboard bypasses the
+proxy and shape 2 applies instead, silently. One exception: the WebSocket
+upgrade (`src/lib/ws.ts`) cannot go through Vercel's rewrite, so it always
+connects straight to `VITE_WS_ORIGIN` (falling back to `VITE_API_ORIGIN`
+when unset) — this is safe without SameSite/CSRF concerns because the WS
+handshake authenticates with a short-lived ticket, not a cookie.
+`COOKIE_SAME_SITE` can move from `none` to `lax` once the proxy is confirmed
+live (a separate, later config change — see the CSRF fix's rollout notes).
+
 ## 6. Design tokens reference
 
 `packages/ui/src/tokens.css` is the single source; `apps/dashboard/src/styles/global.css`

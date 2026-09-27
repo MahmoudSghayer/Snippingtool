@@ -32,6 +32,22 @@ function readCsrfCookie(): string | undefined {
   return match?.[1] ? decodeURIComponent(match[1]) : undefined;
 }
 
+/** The same token, as the API last returned it in its `x-csrf-token`
+ * response header (apps/api/src/plugins/csrf.ts). When the API is on
+ * another site than the dashboard (Vercel + the VM), `document.cookie` never
+ * holds the API host's `sl_csrf`, so this is the only copy the JS can see. */
+let csrfFromResponse: string | undefined;
+
+/** Forgets the remembered token (sign-out, `clearLocalSession`); the next
+ * API response brings one again. */
+export function forgetCsrfToken(): void {
+  csrfFromResponse = undefined;
+}
+
+function readCsrfToken(): string | undefined {
+  return readCsrfCookie() ?? csrfFromResponse;
+}
+
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 /** Set by the app root once the router exists, so this module (which has no
@@ -115,7 +131,7 @@ const pendingRequestClones = new Map<string, Request>();
 const csrfAndCredentialsMiddleware: Middleware = {
   async onRequest({ request, id }) {
     if (MUTATING_METHODS.has(request.method)) {
-      const token = readCsrfCookie();
+      const token = readCsrfToken();
       if (token) request.headers.set('x-csrf-token', token);
     }
     pendingRequestClones.set(id, request.clone());
@@ -124,6 +140,8 @@ const csrfAndCredentialsMiddleware: Middleware = {
   async onResponse({ request, response, id, options }) {
     const clonedRequest = pendingRequestClones.get(id);
     pendingRequestClones.delete(id);
+    const echoedCsrf = response.headers.get('x-csrf-token');
+    if (echoedCsrf) csrfFromResponse = echoedCsrf;
 
     if (response.status !== 401) return response;
 
@@ -146,7 +164,7 @@ const csrfAndCredentialsMiddleware: Middleware = {
           // with the original (missing/stale) header would needlessly fail
           // `verifyCsrf` on the retry.
           if (MUTATING_METHODS.has(clonedRequest.method)) {
-            const csrfToken = readCsrfCookie();
+            const csrfToken = readCsrfToken();
             if (csrfToken) clonedRequest.headers.set('x-csrf-token', csrfToken);
           }
           const retryResponse = await options.fetch(clonedRequest);

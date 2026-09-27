@@ -15,13 +15,22 @@ export type WsReconnectHandler = () => void;
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 30_000;
 
+/** The API's own origin for the WebSocket upgrade. Vercel's rewrite proxy
+ * (vercel.json) makes ordinary HTTP calls same-origin so cookies work in
+ * browsers that block third-party cookies, but Vercel cannot proxy a
+ * WebSocket upgrade — this connection always goes straight to the API, over
+ * a ticket (issued by an already-authenticated same-origin call), never a
+ * cookie, so going cross-site here needs no CSRF/cookie story of its own.
+ * Falls back to API_BASE_URL for local dev, where the two already coincide. */
+const WS_ORIGIN = import.meta.env.VITE_WS_ORIGIN?.replace(/\/$/, '') || API_BASE_URL;
+
 function wsUpgradeUrl(ticket: string): string {
-  // API_BASE_URL is the bare origin (or '' for the dev proxy / same-origin
+  // WS_ORIGIN is the bare origin (or '' for the dev proxy / same-origin
   // case) — the WS upgrade itself is unprefixed (docs/03-api.md §ws), so no
   // `/api/v1` stripping is needed here, just the http(s) -> ws(s) swap.
-  const absoluteBase = API_BASE_URL.startsWith('http')
-    ? API_BASE_URL
-    : `${window.location.origin}${API_BASE_URL}`;
+  const absoluteBase = WS_ORIGIN.startsWith('http')
+    ? WS_ORIGIN
+    : `${window.location.origin}${WS_ORIGIN}`;
   const wsBase = absoluteBase.replace(/^http/, 'ws');
   return `${wsBase}/ws?ticket=${encodeURIComponent(ticket)}`;
 }

@@ -10,7 +10,7 @@ const postMock = vi.hoisted(() => vi.fn());
 // is only "does logout clear local state before/regardless of what
 // the network call does", which doesn't need a real Request/Response
 // round-trip.
-vi.mock('@/api/client.js', () => ({ api: { POST: postMock } }));
+vi.mock('@/api/client.js', () => ({ api: { POST: postMock }, forgetCsrfToken: vi.fn() }));
 
 const { logout } = await import('@/lib/logout.js');
 const { queryClient } = await import('@/lib/queryClient.js');

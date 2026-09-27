@@ -10,6 +10,7 @@
 // could still see the previous user's cached dashboard/trades/admin queries
 // until each one happened to refetch — a real data leak between accounts,
 // not just a stale-UI glitch.
+import { forgetCsrfToken } from '@/api/client.js';
 import { useAuthStore } from '@/stores/auth.js';
 
 import { resetBootstrap } from './authBootstrap.js';
@@ -20,6 +21,7 @@ import { queryClient } from './queryClient.js';
  * a toast is owed first). */
 export function clearLocalSession(): void {
   queryClient.clear();
+  forgetCsrfToken();
   useAuthStore.getState().clearSession();
   resetBootstrap();
 }

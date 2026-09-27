@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { UserDto } from '@sl/shared';
 
-vi.mock('@/api/client.js', () => ({ api: { GET: vi.fn(), POST: vi.fn() } }));
+vi.mock('@/api/client.js', () => ({ api: { GET: vi.fn(), POST: vi.fn() }, forgetCsrfToken: vi.fn() }));
 
 const { handleUnauthorized } = await import('@/lib/unauthorized.js');
 const { queryClient } = await import('@/lib/queryClient.js');

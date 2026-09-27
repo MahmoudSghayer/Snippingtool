@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { api, setUnauthorizedHandler } from '@/api/client.js';
+import { api, forgetCsrfToken, setUnauthorizedHandler } from '@/api/client.js';
 
 /** Covers docs/04-auth.md §10's CSRF model as implemented by
  * src/api/client.ts: the `x-csrf-token` header is attached to mutating
@@ -23,6 +23,7 @@ describe('api client CSRF + 401 handling', () => {
 
   afterEach(() => {
     document.cookie = 'sl_csrf=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+    forgetCsrfToken();
     setUnauthorizedHandler(() => {});
   });
 
@@ -38,6 +39,23 @@ describe('api client CSRF + 401 handling', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
     const request = fetchMock.mock.calls[0]![0] as Request;
     expect(request.headers.get('x-csrf-token')).toBe('test-csrf-token');
+  });
+
+  it('uses the token from the x-csrf-token response header when the cookie is not readable (cross-site API)', async () => {
+    // Dashboard and API on different sites: `document.cookie` never holds
+    // the API host's `sl_csrf`, so the client takes it from a response.
+    document.cookie = 'sl_csrf=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+    const withHeader = vi.fn(
+      async () =>
+        new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', 'x-csrf-token': 'header-token.sig' },
+        }),
+    );
+    await api.GET('/api/v1/users/me', { fetch: withHeader });
+    await api.POST('/api/v1/auth/logout', { body: {}, fetch: fetchMock });
+    const request = fetchMock.mock.calls[0]![0] as Request;
+    expect(request.headers.get('x-csrf-token')).toBe('header-token.sig');
   });
 
   it('does not attach x-csrf-token on a GET request', async () => {
@@ -86,6 +104,7 @@ describe('api client CSRF + 401 handling', () => {
  * or missing triggers one single-flighted refresh, then a single retry of
  * the original request. */
 describe('api client silent token refresh', () => {
+  beforeEach(() => forgetCsrfToken());
   afterEach(() => {
     setUnauthorizedHandler(() => {});
     document.cookie = 'sl_csrf=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
@@ -174,6 +193,46 @@ describe('api client silent token refresh', () => {
     const retryRequest = fetchMock.mock.calls[2]![0] as Request;
     expect(originalRequest.headers.get('x-csrf-token')).toBeNull();
     expect(retryRequest.headers.get('x-csrf-token')).toBe('fresh-token');
+  });
+
+  it('replays with the token the refresh response carried (cross-site API, no readable cookie)', async () => {
+    document.cookie = 'sl_csrf=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+    let enrollCalls = 0;
+    const fetchMock = vi.fn(async (input: Request) => {
+      if (input.url.includes('/auth/refresh')) {
+        const res = jsonResponse({ accessToken: 'a', refreshToken: 'b', expiresIn: 900 }, 200);
+        res.headers.set('x-csrf-token', 'after-refresh.sig');
+        return res;
+      }
+      enrollCalls += 1;
+      if (enrollCalls === 1) {
+        const res = jsonResponse({ code: 'AUTH_TOKEN_EXPIRED', message: 'expired' }, 401);
+        res.headers.set('x-csrf-token', 'before-refresh.sig');
+        return res;
+      }
+      return jsonResponse({ secret: 's', otpauthUrl: 'o', recoveryCodes: [] }, 200);
+    });
+    setUnauthorizedHandler(vi.fn());
+
+    await api.POST('/api/v1/auth/totp/enroll', { body: {}, fetch: fetchMock });
+
+    const retryRequest = fetchMock.mock.calls[2]![0] as Request;
+    expect(retryRequest.headers.get('x-csrf-token')).toBe('after-refresh.sig');
+  });
+
+  it('clearLocalSession forgets the remembered token', async () => {
+    document.cookie = 'sl_csrf=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+    const withHeader = vi.fn(async () => {
+      const res = jsonResponse({}, 200);
+      res.headers.set('x-csrf-token', 'old-user.sig');
+      return res;
+    });
+    await api.GET('/api/v1/users/me', { fetch: withHeader });
+    const { clearLocalSession } = await import('@/lib/session.js');
+    clearLocalSession();
+    const plain = vi.fn(async () => jsonResponse({}, 200));
+    await api.POST('/api/v1/auth/logout', { body: {}, fetch: plain });
+    expect((plain.mock.calls[0]![0] as Request).headers.get('x-csrf-token')).toBeNull();
   });
 
   it('single-flights the refresh across two concurrent 401s and retries both', async () => {
