@@ -160,6 +160,17 @@ describe('signing in', () => {
     await expectPath(router, '/admin');
   });
 
+  it('has no device field, and still signs in as this device, named automatically', async () => {
+    sessionUser = CUSTOMER;
+    await signIn();
+    expect(screen.queryByLabelText('This device')).toBeNull();
+    expect(document.getElementById('deviceName')).toBeNull();
+    const call = vi.mocked(api.POST).mock.calls.find(([p]) => p === '/api/v1/auth/login')!;
+    const body = (call[1] as { body: { device: { name: string; fingerprint: string } } }).body;
+    expect(body.device.name).toMatch(/ on /);
+    expect(body.device.fingerprint.length).toBeGreaterThan(0);
+  });
+
   it('goes back to the returnTo page when there is one', async () => {
     sessionUser = CUSTOMER;
     const router = await signIn('/login?returnTo=%2Faccount%23buy');

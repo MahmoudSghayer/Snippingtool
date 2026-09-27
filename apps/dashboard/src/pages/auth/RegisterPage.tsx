@@ -18,7 +18,7 @@ import { toast } from 'sonner';
 import { z } from 'zod';
 
 import { api, apiErrorMessage } from '@/api/client.js';
-import { buildDevicePayload, defaultDeviceName } from '@/lib/device.js';
+import { buildDevicePayload } from '@/lib/device.js';
 
 export const ACCEPT_TERMS_ERROR =
   'Accept the Terms of Service and Refund Policy to create an account.';
@@ -30,7 +30,6 @@ export const ACCEPT_TERMS_ERROR =
 export const registerFormSchema = registerRequestSchema
   .omit({ device: true, acceptTerms: true })
   .extend({
-    deviceName: z.string().min(1).max(120),
     confirmPassword: z.string(),
     acceptTerms: z.boolean().refine((v) => v, { message: ACCEPT_TERMS_ERROR }),
   })
@@ -43,23 +42,17 @@ export type RegisterFormValues = z.infer<typeof registerFormSchema>;
 export interface RegisterFormProps {
   onSubmit: (values: RegisterFormValues) => void | Promise<void>;
   submitting?: boolean;
-  defaultDeviceName?: string;
 }
 
 /** The register form on its own (no router, no API), so the tests render
  * exactly what the page renders. */
-export function RegisterForm({
-  onSubmit,
-  submitting,
-  defaultDeviceName: device,
-}: RegisterFormProps) {
+export function RegisterForm({ onSubmit, submitting }: RegisterFormProps) {
   const form = useForm<RegisterFormValues>({
     resolver: zodResolver(registerFormSchema),
     defaultValues: {
       email: '',
       password: '',
       confirmPassword: '',
-      deviceName: device ?? '',
       acceptTerms: false,
     },
   });
@@ -88,13 +81,6 @@ export function RegisterForm({
           autoComplete="new-password"
           {...form.register('confirmPassword')}
         />
-      </FormField>
-      <FormField
-        label="This device"
-        htmlFor="deviceName"
-        error={form.formState.errors.deviceName?.message}
-      >
-        <Input id="deviceName" {...form.register('deviceName')} />
       </FormField>
 
       <div className="flex flex-col gap-1.5">
@@ -163,7 +149,7 @@ export function RegisterPage() {
         body: {
           email: values.email,
           password: values.password,
-          device: buildDevicePayload(values.deviceName),
+          device: buildDevicePayload(),
           acceptTerms: true,
         },
       });
@@ -184,11 +170,7 @@ export function RegisterPage() {
         <p className="text-xs text-ink-2">Start with a 7-day trial, no card required.</p>
       </CardHeader>
       <CardContent>
-        <RegisterForm
-          onSubmit={onSubmit}
-          submitting={submitting}
-          defaultDeviceName={defaultDeviceName()}
-        />
+        <RegisterForm onSubmit={onSubmit} submitting={submitting} />
         <p className="mt-5 text-center text-sm text-ink-2">
           Already have an account?{' '}
           <Link to="/login" className="text-gold underline underline-offset-2 hover:text-gold/80">

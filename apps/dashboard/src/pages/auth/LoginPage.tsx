@@ -20,14 +20,13 @@ import { z } from 'zod';
 
 import { api, apiErrorMessage } from '@/api/client.js';
 import { ensureBootstrapped, resetBootstrap } from '@/lib/authBootstrap.js';
-import { buildDevicePayload, defaultDeviceName } from '@/lib/device.js';
+import { buildDevicePayload } from '@/lib/device.js';
 import { postLoginPath } from '@/routes/access.js';
 import { useAuthStore } from '@/stores/auth.js';
 
 const credentialsSchema = z.object({
   email: emailSchema,
   password: z.string().min(1, 'Enter your password'),
-  deviceName: z.string().min(1, 'Give this device a name').max(120),
 });
 type CredentialsForm = z.infer<typeof credentialsSchema>;
 
@@ -63,7 +62,7 @@ export function LoginPage() {
 
   const credentialsForm = useForm<CredentialsForm>({
     resolver: zodResolver(credentialsSchema),
-    defaultValues: { email: '', password: '', deviceName: defaultDeviceName() },
+    defaultValues: { email: '', password: '' },
   });
 
   const mfaForm = useForm<MfaForm>({
@@ -95,7 +94,7 @@ export function LoginPage() {
         body: {
           email: values.email,
           password: values.password,
-          device: buildDevicePayload(values.deviceName),
+          device: buildDevicePayload(),
         },
       });
       if (error) {
@@ -324,14 +323,6 @@ export function LoginPage() {
               autoComplete="current-password"
               {...credentialsForm.register('password')}
             />
-          </FormField>
-          <FormField
-            label="This device"
-            htmlFor="deviceName"
-            hint="Listed under Devices in My account, so you can recognise and revoke it later."
-            error={credentialsForm.formState.errors.deviceName?.message}
-          >
-            <Input id="deviceName" {...credentialsForm.register('deviceName')} />
           </FormField>
           <div className="flex justify-end">
             <Link to="/forgot-password" className="text-xs text-ink-2 underline hover:text-ink">
