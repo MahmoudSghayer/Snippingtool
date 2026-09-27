@@ -51,6 +51,10 @@ export const users = pgTable(
     lastIp: inet('last_ip'),
 
     timezone: text('timezone').notNull().default('UTC'),
+    /** When `timezone` was last chosen explicitly (0036); NULL while it is
+     * still the signup default, which can't otherwise be told from a
+     * deliberate 'UTC'. */
+    timezoneSetAt: timestamptz('timezone_set_at'),
     referralCode: text('referral_code'),
 
     // Added by migrations/0025_users_stripe_customer_trial_abuse.sql.

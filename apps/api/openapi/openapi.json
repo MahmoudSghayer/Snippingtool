@@ -6254,6 +6254,11 @@
                             "maxLength": 64,
                             "nullable": true
                           },
+                          "timezoneSetAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "nullable": true
+                          },
                           "referralCode": {
                             "type": "string",
                             "minLength": 1,
@@ -6312,6 +6317,7 @@
                           "role",
                           "totpEnabled",
                           "timezone",
+                          "timezoneSetAt",
                           "referralCode",
                           "createdAt",
                           "lastLoginAt",
@@ -6403,6 +6409,11 @@
                       "maxLength": 64,
                       "nullable": true
                     },
+                    "timezoneSetAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "nullable": true
+                    },
                     "referralCode": {
                       "type": "string",
                       "minLength": 1,
@@ -6461,6 +6472,7 @@
                     "role",
                     "totpEnabled",
                     "timezone",
+                    "timezoneSetAt",
                     "referralCode",
                     "createdAt",
                     "lastLoginAt",
@@ -6554,6 +6566,11 @@
                       "maxLength": 64,
                       "nullable": true
                     },
+                    "timezoneSetAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "nullable": true
+                    },
                     "referralCode": {
                       "type": "string",
                       "minLength": 1,
@@ -6612,6 +6629,7 @@
                     "role",
                     "totpEnabled",
                     "timezone",
+                    "timezoneSetAt",
                     "referralCode",
                     "createdAt",
                     "lastLoginAt",
@@ -6715,6 +6733,11 @@
                       "maxLength": 64,
                       "nullable": true
                     },
+                    "timezoneSetAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "nullable": true
+                    },
                     "referralCode": {
                       "type": "string",
                       "minLength": 1,
@@ -6773,6 +6796,7 @@
                     "role",
                     "totpEnabled",
                     "timezone",
+                    "timezoneSetAt",
                     "referralCode",
                     "createdAt",
                     "lastLoginAt",
@@ -6871,6 +6895,11 @@
                       "maxLength": 64,
                       "nullable": true
                     },
+                    "timezoneSetAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "nullable": true
+                    },
                     "referralCode": {
                       "type": "string",
                       "minLength": 1,
@@ -6929,6 +6958,7 @@
                     "role",
                     "totpEnabled",
                     "timezone",
+                    "timezoneSetAt",
                     "referralCode",
                     "createdAt",
                     "lastLoginAt",
@@ -15812,6 +15842,11 @@
                       "maxLength": 64,
                       "nullable": true
                     },
+                    "timezoneSetAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "nullable": true
+                    },
                     "referralCode": {
                       "type": "string",
                       "minLength": 1,
@@ -15870,6 +15905,7 @@
                     "role",
                     "totpEnabled",
                     "timezone",
+                    "timezoneSetAt",
                     "referralCode",
                     "createdAt",
                     "lastLoginAt",
@@ -15952,6 +15988,11 @@
                       "maxLength": 64,
                       "nullable": true
                     },
+                    "timezoneSetAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "nullable": true
+                    },
                     "referralCode": {
                       "type": "string",
                       "minLength": 1,
@@ -16010,6 +16051,7 @@
                     "role",
                     "totpEnabled",
                     "timezone",
+                    "timezoneSetAt",
                     "referralCode",
                     "createdAt",
                     "lastLoginAt",

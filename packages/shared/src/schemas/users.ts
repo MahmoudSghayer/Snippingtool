@@ -19,6 +19,10 @@ export const userDtoSchema = z.object({
   role: z.enum(USER_ROLES),
   totpEnabled: z.boolean(),
   timezone: z.string().min(1).max(64).nullable(),
+  /** When `timezone` was last chosen explicitly (by the trader or an
+   * admin); `null` while it's still the signup default. `timezone` defaults
+   * to 'UTC', so this is what tells a deliberate UTC from "never set". */
+  timezoneSetAt: z.string().datetime().nullable(),
   referralCode: z.string().min(1).max(40).nullable(),
   createdAt: z.string().datetime(),
   lastLoginAt: z.string().datetime().nullable(),

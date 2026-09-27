@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { api } from '@/api/client.js';
-import { todayIn } from '@/components/account/timezone.js';
+import { initialTimeZone, todayIn } from '@/components/account/timezone.js';
 import { TradesSection } from '@/components/account/TradesSection.js';
 import { downloadServerCsv } from '@/lib/csv.js';
 import { useAuthStore } from '@/stores/auth.js';
@@ -22,6 +22,7 @@ const USER: UserDto = {
   role: 'user',
   totpEnabled: false,
   timezone: 'Asia/Tokyo',
+  timezoneSetAt: '2026-09-01T00:00:00.000Z',
   referralCode: null,
   createdAt: '2026-01-01T00:00:00.000Z',
   lastLoginAt: null,
@@ -101,10 +102,15 @@ function mockApi({ items = TRADES, totals = TOTALS, todayNet = 12_345 }: MockOpt
     .spyOn(api, 'POST')
     .mockImplementation((() =>
       ok({ ...TRADES[0], status: 'sold', sellPrice: 60_000, netProfit: 7_000 })) as never);
-  const patch = vi
-    .spyOn(api, 'PATCH')
-    .mockImplementation(((_path: string, init: { body: { timezone: string } }) =>
-      ok({ ...USER, timezone: init.body.timezone })) as never);
+  const patch = vi.spyOn(api, 'PATCH').mockImplementation(((
+    _path: string,
+    init: { body: { timezone: string } },
+  ) =>
+    ok({
+      ...USER,
+      timezone: init.body.timezone,
+      timezoneSetAt: '2026-09-27T00:00:00.000Z',
+    })) as never);
   return { get, post, patch };
 }
 
@@ -135,6 +141,35 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.mocked(downloadServerCsv).mockClear();
   useAuthStore.getState().clearSession();
+});
+
+/** Pretends the browser is in `zone`, so "defaults to the browser zone"
+ * can't pass just because the test container runs in UTC. */
+function browserIn(zone: string) {
+  const real = Intl.DateTimeFormat.prototype.resolvedOptions;
+  vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockImplementation(function (
+    this: Intl.DateTimeFormat,
+  ) {
+    return { ...real.call(this), timeZone: zone };
+  });
+}
+
+describe('initialTimeZone', () => {
+  it("uses the account's zone once it was chosen, even UTC", () => {
+    browserIn('Europe/London');
+    expect(initialTimeZone({ timezone: 'UTC', timezoneSetAt: '2026-09-01T00:00:00.000Z' })).toBe(
+      'UTC',
+    );
+    expect(
+      initialTimeZone({ timezone: 'Asia/Tokyo', timezoneSetAt: '2026-09-01T00:00:00.000Z' }),
+    ).toBe('Asia/Tokyo');
+  });
+
+  it("uses the browser's zone while the account's is still the signup default", () => {
+    browserIn('Europe/London');
+    expect(initialTimeZone({ timezone: 'UTC', timezoneSetAt: null })).toBe('Europe/London');
+    expect(initialTimeZone(null)).toBe('Europe/London');
+  });
 });
 
 describe('todayIn', () => {
@@ -234,13 +269,15 @@ describe('TradesSection', () => {
   });
 
   it('defaults the time zone to the browser zone and saves a new choice', async () => {
-    useAuthStore.getState().setSession({ ...USER, timezone: 'UTC' });
+    browserIn('Europe/London');
+    useAuthStore.getState().setSession({ ...USER, timezone: 'UTC', timezoneSetAt: null });
     const { patch, get } = mockApi();
     const { user } = renderSection();
     await screen.findByRole('table');
 
     const picker = screen.getByLabelText('Time zone') as HTMLSelectElement;
-    expect(picker.value).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
+    expect(picker.value).toBe('Europe/London');
+    expect(queriesTo(get, '/api/v1/trades').at(-1)).toMatchObject({ tz: 'Europe/London' });
     expect(within(picker).getByRole('option', { name: 'Europe/London' })).toBeInTheDocument();
 
     await user.selectOptions(picker, 'America/New_York');
@@ -255,6 +292,25 @@ describe('TradesSection', () => {
       }),
     );
     expect(useAuthStore.getState().user?.timezone).toBe('America/New_York');
+  });
+
+  it('keeps a deliberately saved UTC, in the picker and in every query', async () => {
+    browserIn('Europe/London');
+    useAuthStore
+      .getState()
+      .setSession({ ...USER, timezone: 'UTC', timezoneSetAt: '2026-09-01T00:00:00.000Z' });
+    const { get, patch } = mockApi();
+    renderSection();
+    await screen.findByRole('table');
+
+    expect((screen.getByLabelText('Time zone') as HTMLSelectElement).value).toBe('UTC');
+    await waitFor(() =>
+      expect(queriesTo(get, '/api/v1/analytics/me/profits').at(-1)).toMatchObject({ tz: 'UTC' }),
+    );
+    expect(queriesTo(get, '/api/v1/trades').at(-1)).toMatchObject({ tz: 'UTC' });
+    expect(queriesTo(get, '/api/v1/trades/totals').at(-1)).toMatchObject({ tz: 'UTC' });
+    // Nothing is overwritten just by opening the page.
+    expect(patch).not.toHaveBeenCalled();
   });
 
   it('offers the extension when there are no trades yet', async () => {

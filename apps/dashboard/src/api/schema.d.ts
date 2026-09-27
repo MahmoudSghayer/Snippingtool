@@ -2856,6 +2856,8 @@ export interface paths {
                                 role: "user" | "admin";
                                 totpEnabled: boolean;
                                 timezone: string | null;
+                                /** Format: date-time */
+                                timezoneSetAt: string | null;
                                 referralCode: string | null;
                                 /** Format: date-time */
                                 createdAt: string;
@@ -2916,6 +2918,8 @@ export interface paths {
                             role: "user" | "admin";
                             totpEnabled: boolean;
                             timezone: string | null;
+                            /** Format: date-time */
+                            timezoneSetAt: string | null;
                             referralCode: string | null;
                             /** Format: date-time */
                             createdAt: string;
@@ -2970,6 +2974,8 @@ export interface paths {
                             role: "user" | "admin";
                             totpEnabled: boolean;
                             timezone: string | null;
+                            /** Format: date-time */
+                            timezoneSetAt: string | null;
                             referralCode: string | null;
                             /** Format: date-time */
                             createdAt: string;
@@ -3032,6 +3038,8 @@ export interface paths {
                             role: "user" | "admin";
                             totpEnabled: boolean;
                             timezone: string | null;
+                            /** Format: date-time */
+                            timezoneSetAt: string | null;
                             referralCode: string | null;
                             /** Format: date-time */
                             createdAt: string;
@@ -3096,6 +3104,8 @@ export interface paths {
                             role: "user" | "admin";
                             totpEnabled: boolean;
                             timezone: string | null;
+                            /** Format: date-time */
+                            timezoneSetAt: string | null;
                             referralCode: string | null;
                             /** Format: date-time */
                             createdAt: string;
@@ -7534,6 +7544,8 @@ export interface paths {
                             role: "user" | "admin";
                             totpEnabled: boolean;
                             timezone: string | null;
+                            /** Format: date-time */
+                            timezoneSetAt: string | null;
                             referralCode: string | null;
                             /** Format: date-time */
                             createdAt: string;
@@ -7614,6 +7626,8 @@ export interface paths {
                             role: "user" | "admin";
                             totpEnabled: boolean;
                             timezone: string | null;
+                            /** Format: date-time */
+                            timezoneSetAt: string | null;
                             referralCode: string | null;
                             /** Format: date-time */
                             createdAt: string;

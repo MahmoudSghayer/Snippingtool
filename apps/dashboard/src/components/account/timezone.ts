@@ -1,16 +1,21 @@
 // Time zone helpers for the trades section: the list of IANA zones for the
 // picker, the browser's own zone, and "today" in a given zone.
 
+import type { UserDto } from '@sl/shared';
+
 /** The browser's IANA zone, e.g. `Europe/London`. */
 export function browserTimeZone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 }
 
-/** The zone the trades section starts in: the one saved on the account, or
- * the browser's while the account still has the `UTC` it was created with
- * (every account starts on `UTC`, so that is not a choice anyone made). */
-export function initialTimeZone(saved: string | null | undefined): string {
-  return saved && saved !== 'UTC' ? saved : browserTimeZone();
+/** The zone the trades section starts in: the account's once the trader
+ * (or an admin) chose one, even `UTC`, else the browser's. `timezone`
+ * alone can't say which: every account starts on `UTC`, and only
+ * `timezoneSetAt` (users.timezone_set_at) records an explicit choice. */
+export function initialTimeZone(
+  user: Pick<UserDto, 'timezone' | 'timezoneSetAt'> | null | undefined,
+): string {
+  return user?.timezoneSetAt && user.timezone ? user.timezone : browserTimeZone();
 }
 
 /** Every IANA zone the browser knows, sorted, always including `UTC` and

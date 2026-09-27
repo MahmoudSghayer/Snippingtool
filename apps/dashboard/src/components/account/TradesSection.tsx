@@ -121,8 +121,8 @@ function Kpi({
 }
 
 export function TradesSection() {
-  const savedTimeZone = useAuthStore((s) => s.user?.timezone);
-  const [tz, setTz] = useState(() => initialTimeZone(savedTimeZone));
+  const account = useAuthStore((s) => s.user);
+  const [tz, setTz] = useState(() => initialTimeZone(account));
   const [filters, setFilters] = useState<TradeFilters>({});
   const [order, setOrder] = useState<'asc' | 'desc'>('desc');
   // Cursors of the pages visited so far; the last one is on screen.
