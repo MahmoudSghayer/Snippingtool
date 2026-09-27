@@ -1,6 +1,6 @@
 /*
  * popup/app.ts — the Nova Trade account view: sign in (with 2FA), then the
- * plan and a Sign out button. The tool itself opens from the "Nova AI" item
+ * plan, the usage-data switch and a Sign out button. The tool itself opens from the "Nova AI" item
  * in the EA web app's left menu. Vanilla TS (no framework — the popup is
  * small enough that a dependency would cost more than it saves, see
  * docs/06-extension.md).
@@ -10,7 +10,7 @@ import browser from 'webextension-polyfill';
 import { BackgroundError, send } from '../lib/bg-client.js';
 import { onTrusted } from '../ui/trusted-events.js';
 
-import type { BootstrapResponse, LoginResponse, SubscriptionStatus } from '@sl/shared';
+import type { BootstrapResponse, LoginResponse, SubscriptionStatus, UserSettings } from '@sl/shared';
 
 let app: HTMLElement;
 
@@ -203,7 +203,11 @@ async function openDashboard(path: string): Promise<void> {
 }
 
 async function renderLoggedIn(): Promise<void> {
-  const bootstrap = await send<BootstrapResponse>('license.bootstrap');
+  const [bootstrap, settings] = await Promise.all([
+    send<BootstrapResponse>('license.bootstrap'),
+    send<UserSettings>('settings.get'),
+  ]);
+  const sharing = !(settings?.telemetryOptOut ?? false);
   const sub = bootstrap?.subscription ?? null;
   const killSwitch = bootstrap?.killSwitchActive ?? false;
   const usable = sub != null && ['trialing', 'active', 'lifetime'].includes(sub.status);
@@ -220,10 +224,22 @@ async function renderLoggedIn(): Promise<void> {
       }
       ${killSwitch ? '<div class="error">Nova AI is paused by Nova Trade. All actions are blocked.</div>' : ''}
     </div>
+    <div class="card switch-row">
+      <div>
+        <div id="share-label">Share usage data</div>
+        <p class="hint" id="share-help">Anonymous usage stats that help improve Nova Trade. No personal data.</p>
+      </div>
+      <button type="button" class="switch" id="share-usage" role="switch" aria-checked="${sharing}"
+        aria-labelledby="share-label" aria-describedby="share-help"></button>
+    </div>
     <p class="hint">Open Nova AI from the left menu in the EA web app.</p>
     <button class="secondary" id="logout">Sign out</button>
   `);
 
+  onTrustedById('share-usage', 'click', async () => {
+    await send('settings.set', { telemetryOptOut: sharing });
+    await renderLoggedIn();
+  });
   onTrustedById('plan-link', 'click', () => void openDashboard('/account'));
   onTrustedById('logout', 'click', async () => {
     await send('auth.logout', { allDevices: false });
