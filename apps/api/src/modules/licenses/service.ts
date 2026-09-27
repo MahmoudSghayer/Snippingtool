@@ -18,6 +18,7 @@ import { and, desc, eq, isNotNull, isNull, lt } from 'drizzle-orm';
 import { fastHash } from '../../lib/crypto.js';
 import { AppError, AppErrors } from '../../lib/errors.js';
 import { newId } from '../../lib/ids.js';
+import { checkBans } from '../bans/service.js';
 
 import type { EntitlementProvider } from '../../lib/entitlements.js';
 
@@ -192,6 +193,15 @@ export async function validateLicense(
     }
     throw new AppError('LICENSE_EXPIRED', 'This license has expired.');
   }
+
+  // No access token here, so the per-request ban check never ran.
+  const banCheck = await checkBans(db, {
+    userId: license.userId,
+    ip: input.ip ?? null,
+    deviceFingerprintHash: input.device.fingerprint,
+  });
+  if (banCheck.banned)
+    throw AppErrors.forbidden('This account, device, or network has been banned.');
 
   const fingerprintHash = fastHash(input.device.fingerprint);
   const existingDevice = await db.query.devices.findFirst({

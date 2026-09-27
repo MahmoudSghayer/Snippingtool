@@ -552,4 +552,4 @@ the task brief's deliverables.
 - **`recordAudit`** — used for every admin mutation's `audit_logs` write
   (§8).
 - **`checkBans`** — exported from `modules/bans/service.ts` for the auth
-  module's login path to call.
+  module's login and refresh paths, and licence validation, to call.
