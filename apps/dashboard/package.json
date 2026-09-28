@@ -20,8 +20,8 @@
     "@sl/shared": "workspace:*",
     "@sl/ui": "workspace:*",
     "@tanstack/react-query": "^5.62.11",
-    "@tanstack/react-router": "^1.92.7",
-    "lucide-react": "^1.47.0",
+    "@tanstack/react-router": "^1.170.39",
+    "lucide-react": "^1.48.0",
     "openapi-fetch": "^0.17.0",
     "qrcode": "^1.5.4",
     "react": "^19.0.0",
@@ -51,7 +51,7 @@
     "postgres": "^3.4.5",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.3",
-    "vite": "^8.3.0",
+    "vite": "^8.3.1",
     "vitest": "^5.0.1"
   }
 }
