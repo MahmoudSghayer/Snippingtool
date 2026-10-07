@@ -21,9 +21,11 @@ A reusable harness ships in `qa/` (`QA_TARGET=prod|local`) so the production pas
 
 ---
 
+> **Update (2026-10-07, follow-up round):** all remaining findings have since been fixed on the same branch (F3–F8), each with a regression test, and F9 was re-measured and **withdrawn as a measurement artifact** (recharts does not load on the auth pages). Full suites pass: `@sl/api` 489/489, `@sl/security-tests` 191/191, `qa/` browser 56/56; lint and typecheck clean. The only item still requiring action is deploying the F8 Caddy change and confirming `/metrics` returns 404 on the live host. Per-finding status is in §3–§6 and `qa/out/findings.json`.
+
 ## 1. Executive summary
 
-**Overall score: 86 / 100** (assessed with the two High-severity issues fixed on this branch; **80 / 100** as originally found).
+**Overall score: 86 / 100** (assessed with the two High-severity issues fixed; **80 / 100** as originally found). With the full follow-up round now applied, the remaining Medium/Low items are closed in code too — see the update note above.
 
 Nova Trade is a well-engineered product with security fundamentals that are clearly deliberate: argon2id password hashing, EdDSA JWTs with short TTLs, mandatory TOTP for admins, refresh-token rotation **with reuse detection**, account lockout with exponential backoff, a strict permission matrix enforced server-side, strict request schemas (no mass-assignment), signed double-submit CSRF, a restrictive CSP, and an append-only audit log. Authorization scoping (IDOR) and mass-assignment were specifically probed and found **sound**. Accessibility scans came back clean on every public page. No functional crashes or broken flows were found across the pages exercised.
 
@@ -32,9 +34,9 @@ The audit found **2 High**, **3 Medium** and **4 Low** issues. Both High issues 
 | Severity | Count | Status |
 |---|---|---|
 | Critical | 0 | — |
-| High | 2 | ✅ both fixed on this branch |
-| Medium | 3 | open (1 needs production verification) |
-| Low | 4 | open |
+| High | 2 | ✅ both fixed (F1, F2) |
+| Medium | 3 | ✅ F3, F4 fixed; F8 fixed in code, Caddy change deploy-gated |
+| Low | 4 | ✅ F5, F6, F7 fixed; F9 withdrawn (not reproduced) |
 
 ### Score breakdown
 | Area | Score | Notes |
@@ -67,18 +69,18 @@ The rate-limiter `keyGenerator` base64-decoded the access-token payload **withou
 
 > F1 and F2 compounded: together they let one host defeat the global limiter and the per-IP login throttle, materially weakening brute-force resistance for an attacker who already holds a password. Both are now closed.
 
-### 3.2 Medium
+### 3.2 Medium — all fixed on this branch
 
-**F3 — Targeted session/device revoke doesn't invalidate the live access token.** Revoking a single session (`DELETE /sessions/:id`) or device revokes the refresh token but not the already-issued access token, which keeps working until its TTL (15 min user / 5 min admin) because `resolveAuthUser` never checks the session's `revokedAt`. Logout-all, password change and admin force-logout *are* immediate (they bump `row_version`); only the single-target revoke is delayed. **Fix:** check `sessions.revokedAt` by `claims.sid` in `resolveAuthUser`, or bump `row_version` on single revoke.
+**F3 (fixed) — Targeted session/device revoke didn't invalidate the live access token.** Revoking a single session (`DELETE /sessions/:id`) or device revokes the refresh token but not the already-issued access token, which keeps working until its TTL (15 min user / 5 min admin) because `resolveAuthUser` never checks the session's `revokedAt`. Logout-all, password change and admin force-logout *are* immediate (they bump `row_version`); only the single-target revoke is delayed. **Fix:** check `sessions.revokedAt` by `claims.sid` in `resolveAuthUser`, or bump `row_version` on single revoke.
 
-**F4 — User enumeration on `POST /auth/register`.** A duplicate email returns `409 "An account with this email already exists"`, disclosing registered emails — inconsistent with the deliberately non-revealing reset/resend flows. **Fix:** return the neutral success shape and notify the existing account by email out of band.
+**F4 (fixed) — User enumeration on `POST /auth/register`.** A duplicate email returns `409 "An account with this email already exists"`, disclosing registered emails — inconsistent with the deliberately non-revealing reset/resend flows. **Fix:** return the neutral success shape and notify the existing account by email out of band.
 
-**F8 — `/metrics` is unauthenticated (edge exposure — needs production verification).** The endpoint serves full Prometheus metrics with no auth. On the replica this is by design (no edge in front); on production it is public **iff** Caddy forwards `/metrics` to the world — confirm against the live host. Related: the metrics label falls back to `request.url` for unmatched routes, so random 404 URLs can grow label cardinality unboundedly. **Fix:** restrict `/metrics` to the monitoring network at Caddy (or require a scrape token) and cap/normalise the route label.
+**F8 (fixed in code; Caddy deploy-gated) — `/metrics` unauthenticated + label cardinality.** The endpoint serves full Prometheus metrics with no auth. On the replica this is by design (no edge in front); on production it is public **iff** Caddy forwards `/metrics` to the world — confirm against the live host. Related: the metrics label falls back to `request.url` for unmatched routes, so random 404 URLs can grow label cardinality unboundedly. **Fix:** restrict `/metrics` to the monitoring network at Caddy (or require a scrape token) and cap/normalise the route label.
 
-### 3.3 Low
+### 3.3 Low — all fixed on this branch
 
-- **F6 — Weak TOTP recovery-code entropy.** Codes derive from 5 random bytes, case-collapsed and 0-padded to 8 chars — usable entropy well under the 8-char format implies. Mitigated by argon2 hashing + single-use + 8 attempts/ticket. **Fix:** draw from a fixed alphabet with rejection sampling; don't pad.
-- **F7 — `/auth/refresh` and `/auth/logout` skip CSRF.** Low impact in the production same-origin (`/api` rewrite) topology with `SameSite=lax`; becomes relevant if the API is used cross-site with `SameSite=none`. **Fix:** add `verifyCsrf`, or document the same-origin assumption.
+- **F6 (fixed) — Weak TOTP recovery-code entropy.** Codes derive from 5 random bytes, case-collapsed and 0-padded to 8 chars — usable entropy well under the 8-char format implies. Mitigated by argon2 hashing + single-use + 8 attempts/ticket. **Fix:** draw from a fixed alphabet with rejection sampling; don't pad.
+- **F7 (fixed) — `/auth/refresh` and `/auth/logout` skipped CSRF.** Low impact in the production same-origin (`/api` rewrite) topology with `SameSite=lax`; becomes relevant if the API is used cross-site with `SameSite=none`. **Fix:** add `verifyCsrf`, or document the same-origin assumption.
 
 ### 3.4 Verified sound (no action)
 IDOR scoping (devices/sessions/notifications/filters/trades/payment-claims/risk-events/licenses all scope by the authenticated user id — a cross-user device delete returns 404 and leaves the victim's data intact), mass-assignment (all request schemas `.strict()`, privileged fields written only via explicit field maps), CSRF double-submit (signed cookie + constant-time compare), refresh rotation/reuse detection, password-change/reset global invalidation, cookie attributes (`httpOnly` on `sl_at`/`sl_rt`, `SameSite` set, `Secure` forced with `SameSite=none`), and the security-header/CSP set.
@@ -89,7 +91,7 @@ IDOR scoping (devices/sessions/notifications/filters/trades/payment-claims/risk-
 
 Absolute timings were measured on-box (API p50 a few ms, page load < 500 ms) and are **not representative of production** latency or geography — they only establish that nothing is pathologically slow locally. Re-measure on production with Lighthouse/WebPageTest.
 
-- **F9 (Low) — Auth pages ship a chart bundle they don't use.** `/login` and `/account` pull ~692 KB of JS, of which a ~365 KB recharts categorical-chart chunk renders nothing on those pages. **Fix:** lazy-import chart components so only chart-bearing admin/analytics routes pull recharts.
+- **F9 (withdrawn — not reproduced) — Auth pages were suspected to ship a chart bundle they don't use.** Re-measuring a cold `/login` in a real browser showed the recharts chunk does **not** load (0 chart JS); routes are already lazy-loaded (`lazyRouteComponent`) and `@sl/ui/charts` is kept out of the `@sl/ui` barrel. The original ~365 KB figure was a measurement artifact in the perf spec (it summed a transiently-prefetched chunk). The main entry bundle is ~468 KB, which is acceptable; splitting it further is a nice-to-have, not a defect. No change made.
 - The static marketing landing page ships no SPA JS (good).
 - API calls observed during account load were 2 requests, both < 15 ms locally.
 
@@ -114,16 +116,20 @@ No UX blockers found. Minor recommendation: the register page's validation and t
 
 Every page exercised loaded and behaved correctly; no broken flows, dead ends or crashes were observed across public pages, the account area and all admin pages. One inconsistency:
 
-- **F5 (Low) — Trade totals/export skip the feature-gate `/trades` enforces.** A user whose plan lacks `ledger.recorder` gets `403` on `/trades` but `200` on `/trades/totals` and `/trades/export.csv` (own data only — not IDOR). **Fix:** gate those two endpoints consistently, or document them as always-available.
+- **F5 (fixed) — Trade totals/export skipped the feature-gate `/trades` enforces.** A user whose plan lacks `ledger.recorder` gets `403` on `/trades` but `200` on `/trades/totals` and `/trades/export.csv` (own data only — not IDOR). **Fix:** gate those two endpoints consistently, or document them as always-available.
 
 ---
 
 ## 7. Prioritised recommendations roadmap
 
+All code fixes are complete on branch `claude/serene-tesla-ztui62`. What remains is deployment + production verification.
+
 1. **Critical fixes** — none.
-2. **High priority** — ✅ **done on this branch:** F1 (XFF trust) and F2 (forged-sub rate-limit key), with regression tests. **Deploy** to production to take effect (pushing this branch does not deploy; release runs on `main`/tags).
-3. **Medium priority** — F3 (immediate session-revoke), F4 (register enumeration), **F8 (confirm `/metrics` is not publicly exposed at the edge, and cap the metrics route label)**.
-4. **Nice-to-have** — F5 (feature-gate consistency), F6 (recovery-code entropy), F7 (CSRF on refresh/logout), F9 (code-split the chart bundle off auth pages).
+2. **High priority** — ✅ done: F1 (XFF trust), F2 (forged-sub rate-limit key).
+3. **Medium priority** — ✅ done: F3 (immediate session-revoke), F4 (register enumeration), F8 (metrics label capped + Caddy `/metrics` 404). **F8's Caddy change needs a deploy, then confirm `curl https://<api-host>/metrics` → 404.**
+4. **Low** — ✅ done: F5 (feature-gate consistency), F6 (recovery-code entropy), F7 (CSRF on refresh/logout). F9 (chart bundle) **withdrawn** — re-measurement showed recharts does not load on the auth pages; it was a perf-spec measurement artifact, not a defect.
+
+**Deploy note:** pushing this branch does not deploy (release runs on `main`/tags). The API fixes take effect on the next deploy; the Caddy change ships with the infra deploy and must then be verified on the live host.
 
 ### Still to do (needs your action)
 - **Production pass:** allow-list `snippingtool-eta.vercel.app` and `api.46.62.142.29.sslip.io` in the environment's Network settings and provide `QA_*` test-account secrets; then `QA_TARGET=prod` runs the same suite against the live site. This will confirm F8 and gather real performance numbers.
@@ -136,5 +142,10 @@ Every page exercised loaded and behaved correctly; no broken flows, dead ends or
 - New regression tests `tests/security/src/proxy-trust-rate-limit.test.ts` **fail against the pre-fix code** and **pass after the fix** (verified by temporarily reverting the built output).
 - Full suites green after the fixes: `@sl/api` 485/485, `@sl/security-tests` 182/182; lint and typecheck clean.
 - Browser audit: 55/55 Playwright tests pass against the local production-mode stack.
+
+### Follow-up round (F3–F9)
+- New regression tests: `session-revoke` (F3), `register-enumeration` (F4), `trades-feature-gate` (F5), `recovery-codes` (F6, unit), `refresh-logout-csrf` (F7), `metrics-label` (F8, unit). F3/F7 were confirmed to fail against the pre-fix code.
+- After the fixes: `@sl/api` 489/489, `@sl/security-tests` 191/191, `qa/` browser 56/56; lint + typecheck clean.
+- F9 withdrawn after re-measurement (see §4). F8's Caddy change is the only item awaiting a deploy + live `/metrics` check.
 
 Machine-readable findings: `qa/out/audit-log.jsonl` (regenerated from `qa/out/findings.json`).
