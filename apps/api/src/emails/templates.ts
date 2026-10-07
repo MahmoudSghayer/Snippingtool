@@ -74,6 +74,30 @@ export function resetPasswordText(token: string): string {
   return `Reset your password for ${BRAND}: ${url}\n\nThis link expires in 1 hour and can only be used once. Using it will sign you out of every device.`;
 }
 
+/** Sent when someone tries to register with an email that already has an
+ * account. The register endpoint returns the same neutral response whether or
+ * not the email exists (so it can't be used to enumerate accounts), and this
+ * message is how a real owner learns a duplicate attempt happened and is
+ * pointed at sign-in / password reset instead. */
+export function accountExistsHtml(): string {
+  const loginUrl = `${siteOrigin()}/login`;
+  const resetUrl = `${siteOrigin()}/forgot-password`;
+  return wrapHtml(
+    'You already have an account',
+    `<p>Someone just tried to create a ${BRAND} account with this email address, but you already have one.</p>
+     <p>If that was you, simply sign in instead:</p>
+     <p><a href="${loginUrl}" style="display:inline-block;background:#DDB35C;color:#0D1311;padding:12px 20px;border-radius:6px;text-decoration:none;font-weight:600;">Sign in</a></p>
+     <p style="font-size:12px;color:#8a938f;">Forgot your password? Reset it here: ${resetUrl}</p>
+     <p style="font-size:12px;color:#8a938f;">If this wasn't you, you can safely ignore this email — no account was created or changed.</p>`,
+  );
+}
+
+export function accountExistsText(): string {
+  const loginUrl = `${siteOrigin()}/login`;
+  const resetUrl = `${siteOrigin()}/forgot-password`;
+  return `Someone just tried to create a ${BRAND} account with this email address, but you already have one. If that was you, sign in instead: ${loginUrl}\n\nForgot your password? Reset it here: ${resetUrl}\n\nIf this wasn't you, you can safely ignore this email — no account was created or changed.`;
+}
+
 export function deviceLimitWarningHtml(deviceName: string | null): string {
   return wrapHtml(
     'Device limit reached',

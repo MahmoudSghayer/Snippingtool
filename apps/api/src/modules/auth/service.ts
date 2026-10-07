@@ -120,12 +120,29 @@ export async function register(
   ctx: AuthContext,
   input: { email: string; password: string; timezone?: string; referralCode?: string },
 ): Promise<{ userId: string }> {
+  // Hash the password before branching on existence so the response time does
+  // not reveal whether the email is taken (argon2 dominates the request), and
+  // return the same neutral shape either way: a duplicate email must not be
+  // distinguishable from a new one (account enumeration). This mirrors
+  // `resendVerification` / `requestPasswordReset`, which are deliberately
+  // non-revealing.
+  const passwordHash = await hashSecret(input.password);
   const existing = await repo.findUserByEmail(ctx.db, input.email);
   if (existing) {
-    throw AppErrors.conflict('An account with this email already exists.');
+    // Tell the real owner out of band, pointing them at sign-in / reset —
+    // never signalled back to the caller.
+    const { accountExistsHtml, accountExistsText } = await import('../../emails/templates.js');
+    await ctx.mailer.send({
+      to: existing.email,
+      subject: 'You already have a Nova Trade account',
+      html: accountExistsHtml(),
+      text: accountExistsText(),
+    });
+    // A synthetic id: the response schema requires a uuid and the dashboard
+    // ignores it (register is never an implicit login), so this leaks nothing.
+    return { userId: newId() };
   }
 
-  const passwordHash = await hashSecret(input.password);
   const id = newId();
   await ctx.db.insert(users).values({
     id,
