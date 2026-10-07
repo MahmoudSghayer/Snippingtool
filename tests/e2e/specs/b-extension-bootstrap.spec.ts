@@ -165,11 +165,11 @@ test('extension: loads against the mock EA page, popup login against the real AP
       // license.bootstrap resolves against the real API. `getByText('Plan',
       // { exact: false })` alone is ambiguous — Playwright's substring text
       // match is case-insensitive, so it matches both the "Plan" row label
-      // *and* "No active plan" (reproduced while authoring this spec:
-      // "strict mode violation ... resolved to 2 elements"); asserting on
-      // the value text alone is unambiguous and is the thing that actually
-      // proves bootstrap resolved.
-      await expect(popup.getByText('No active plan')).toBeVisible({ timeout: 15_000 });
+      // *and* the value (reproduced while authoring this spec: "strict mode
+      // violation ... resolved to 2 elements"); asserting on the value text
+      // alone, exactly, is unambiguous and is the thing that actually proves
+      // bootstrap resolved. The popup says "No plan" since ce8bc75.
+      await expect(popup.getByText('No plan', { exact: true })).toBeVisible({ timeout: 15_000 });
     });
 
     await test.step('bootstrap registered the device server-side', async () => {
