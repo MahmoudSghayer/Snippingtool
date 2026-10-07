@@ -87,7 +87,9 @@ function PlanCard({ plan, current }: { plan: PlanDto; current: boolean }) {
   const price = formatCurrencyFromCents(plan.priceCents, plan.currency.toUpperCase());
 
   return (
-    <Card className={cn('bg-surface-2', current && 'border-gold', !available && 'opacity-80')}>
+    // A pass that isn't on sale yet gets a dashed border rather than reduced
+    // opacity, which took its small text below WCAG AA contrast.
+    <Card className={cn('bg-surface-2', current && 'border-gold', !available && 'border-dashed')}>
       <CardHeader>
         <CardTitle>{plan.name}</CardTitle>
         {current ? (
