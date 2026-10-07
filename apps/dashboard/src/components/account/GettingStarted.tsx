@@ -26,6 +26,10 @@ export const GETTING_STARTED_HIDDEN_KEY = 'sl.account.gettingStarted.hidden';
  * feature, so a customer without a pass may get it from GET /filters. */
 const FEATURE_NOT_IN_PLAN = 'FEATURE_NOT_IN_PLAN';
 
+/** The plan features behind GET /filters and GET /trades. */
+const FILTERS_FEATURE = 'assist.filter_rotation';
+const RECORDER_FEATURE = 'ledger.recorder';
+
 function readHidden(): boolean {
   try {
     return localStorage.getItem(GETTING_STARTED_HIDDEN_KEY) === '1';
@@ -161,13 +165,21 @@ export function GettingStarted() {
   const emailVerifiedAt = useAuthStore((s) => s.user?.emailVerifiedAt);
   const subscriptionQuery = useMySubscription();
   const devicesQuery = useDevices();
-  const filtersQuery = useSavedFilters();
-  const tradesQuery = useHasTrades();
+  // Filters and trades are plan features: ask for them only when the plan has
+  // them, so a customer without a pass doesn't get a 403 for each. Without the
+  // subscription to go by, ask anyway and read the 403.
+  const features = subscriptionQuery.data?.entitlements.features;
+  const inPlan = (feature: string) =>
+    features ? features.includes(feature) : subscriptionQuery.isError;
+  const filtersQuery = useSavedFilters({ enabled: inPlan(FILTERS_FEATURE) });
+  const tradesQuery = useHasTrades({ enabled: inPlan(RECORDER_FEATURE) });
 
   const filtersNotInPlan =
-    filtersQuery.isError &&
-    isApiErrorBody(filtersQuery.error) &&
-    filtersQuery.error.code === FEATURE_NOT_IN_PLAN;
+    (features !== undefined && !features.includes(FILTERS_FEATURE)) ||
+    (filtersQuery.isError &&
+      isApiErrorBody(filtersQuery.error) &&
+      filtersQuery.error.code === FEATURE_NOT_IN_PLAN);
+  const tradesNotInPlan = features !== undefined && !features.includes(RECORDER_FEATURE);
 
   const email: StepState = emailVerifiedAt ? { kind: 'done' } : { kind: 'todo' };
   const pass = stateFrom(subscriptionQuery, (d) => describePass(d.subscription ?? null).live);
@@ -175,7 +187,7 @@ export function GettingStarted() {
   const filters: StepState = filtersNotInPlan
     ? { kind: 'todo' }
     : stateFrom(filtersQuery, (d) => d.length > 0);
-  const trade = stateFrom(tradesQuery, (d) => d);
+  const trade: StepState = tradesNotInPlan ? { kind: 'todo' } : stateFrom(tradesQuery, (d) => d);
 
   const states = [email, pass, device, filters, trade];
   const doneCount = states.filter((s) => s.kind === 'done').length;

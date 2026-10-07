@@ -74,6 +74,10 @@ function savedFilter(name: string, filter: SavedFilter['filter']): SavedFilter {
 
 const TRADE = { id: '00000000-0000-0000-0000-0000000000c1' };
 
+/** `GET /subscriptions/me`'s resolved entitlements; the checklist only asks
+ * for filters and trades when these include their features. */
+const PAID_ENTITLEMENTS = { features: ['assist.filter_rotation', 'ledger.recorder'] };
+
 type Reply = { data?: unknown; error?: unknown; status?: number };
 
 function ok(data: unknown): Reply {
@@ -92,7 +96,8 @@ interface Scenario {
 
 function mockApi(s: Scenario = {}) {
   const replies: Record<string, Reply> = {
-    '/api/v1/subscriptions/me': s.subscription ?? ok({ subscription: null, license: null }),
+    '/api/v1/subscriptions/me':
+      s.subscription ?? ok({ subscription: null, license: null, entitlements: PAID_ENTITLEMENTS }),
     '/api/v1/devices': s.devices ?? ok([]),
     '/api/v1/filters': s.filters ?? ok([]),
     '/api/v1/trades': s.trades ?? ok({ items: [], nextCursor: null }),
@@ -109,7 +114,7 @@ function mockApi(s: Scenario = {}) {
 
 function allDone(): Scenario {
   return {
-    subscription: ok({ subscription: ACTIVE_SUB, license: null }),
+    subscription: ok({ subscription: ACTIVE_SUB, license: null, entitlements: PAID_ENTITLEMENTS }),
     devices: ok([DEVICE]),
     filters: ok([savedFilter('Mine', { maxPrice: 1000 })]),
     trades: ok({ items: [TRADE], nextCursor: null }),
@@ -253,6 +258,24 @@ describe('GettingStarted', () => {
       within(step(/Add a search filter/)).queryByText(/Couldn't check/),
     ).not.toBeInTheDocument();
     expect(within(step(/Add a search filter/)).queryByRole('button', { name: /^Add / })).toBeNull();
+  });
+
+  it("doesn't ask for filters or trades when the plan has neither", async () => {
+    const get = mockApi({
+      subscription: ok({ subscription: null, license: null, entitlements: { features: [] } }),
+    });
+    renderWithClient(<GettingStarted />);
+
+    await screen.findByRole('region', { name: 'Getting started' });
+    await waitFor(() =>
+      expect(within(step(/Add a search filter/)).getByText('Included with a pass')).toBeVisible(),
+    );
+    expect(step(/Record your first trade/)).toHaveAccessibleName(/not done/);
+    expect(
+      within(step(/Record your first trade/)).queryByText(/Couldn't check/),
+    ).not.toBeInTheDocument();
+    expect(get).not.toHaveBeenCalledWith('/api/v1/filters');
+    expect(get).not.toHaveBeenCalledWith('/api/v1/trades', expect.anything());
   });
 });
 

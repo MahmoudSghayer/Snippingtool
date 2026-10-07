@@ -39,10 +39,12 @@ export function useDevices() {
   });
 }
 
-/** The caller's saved search filters. */
-export function useSavedFilters() {
+/** The caller's saved search filters. `enabled: false` when the plan has no
+ * `assist.filter_rotation`, so the request isn't sent only to get a 403. */
+export function useSavedFilters({ enabled = true }: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: ['filters'],
+    enabled,
     queryFn: async () => {
       const { data, error } = await api.GET('/api/v1/filters');
       if (error) throw error;
@@ -52,10 +54,12 @@ export function useSavedFilters() {
 }
 
 /** Whether the caller has recorded at least one trade. Reads the smallest
- * page of the trades list, so it never pulls more than one row. */
-export function useHasTrades() {
+ * page of the trades list, so it never pulls more than one row. `enabled:
+ * false` when the plan has no `ledger.recorder`. */
+export function useHasTrades({ enabled = true }: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: ['trades', 'has-any'],
+    enabled,
     queryFn: async () => {
       const { data, error } = await api.GET('/api/v1/trades', { params: { query: { limit: 1 } } });
       if (error) throw error;
