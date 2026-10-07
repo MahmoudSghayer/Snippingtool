@@ -135,6 +135,21 @@ const envSchema = z.object({
   // configurable.
   REDIS_TEST_DB: z.coerce.number().int().min(0).max(15).default(15),
 
+  // Which upstream proxies Fastify may trust when deriving `request.ip` from
+  // `X-Forwarded-For` (app.ts's `trustProxy`). `request.ip` is a security
+  // input — it keys the login rate limiter, the global limiter and IP-ban
+  // checks (plugins/rate-limit.ts, modules/bans) — so trusting *every* proxy
+  // (the old `trustProxy: true`) let any direct client spoof it with a forged
+  // XFF and evade bans/limits. proxy-addr reads this: the preset names
+  // `loopback`/`linklocal`/`uniquelocal` (the default) cover a reverse proxy
+  // (Caddy) sitting on the same host or private Docker network, so the real
+  // client IP is still taken from XFF behind it, while a request arriving
+  // from a public peer has its XFF ignored. Set it to the proxy's CID(s) /
+  // preset list for other topologies (e.g. add a CDN's egress ranges when the
+  // dashboard is fronted by one); a single value may still be a bare `true`
+  // string to opt back into trusting all proxies, which is not recommended.
+  TRUSTED_PROXY: z.string().min(1).default('loopback, linklocal, uniquelocal'),
+
   // --- Origins / CORS ---
   APP_ORIGIN: z.string().url().default('http://localhost:3000'),
   DASHBOARD_ORIGIN: z.string().url().default('http://localhost:5173'),

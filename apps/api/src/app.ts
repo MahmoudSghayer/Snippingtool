@@ -76,7 +76,11 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       },
     },
     genReqId: (req) => (req.headers['x-request-id'] as string | undefined) ?? crypto.randomUUID(),
-    trustProxy: true,
+    // Trust only the configured upstream proxies when reading X-Forwarded-For
+    // (TRUSTED_PROXY, default loopback/link-local/unique-local). A bare `true`
+    // opts back into trusting every proxy. `request.ip` feeds rate limits and
+    // ban checks, so this stops a direct client spoofing it via a forged XFF.
+    trustProxy: env.TRUSTED_PROXY === 'true' ? true : env.TRUSTED_PROXY,
     ajv: { customOptions: { removeAdditional: false } },
   });
 
@@ -144,3 +148,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
 }
 
 export { createJsonSchemaTransform };
+// Re-exported on the one public entry so the security-tests package (which
+// only imports `@sl/api/app`) can reset the memoised env between files that
+// build the app with a different rate-limit configuration.
+export { resetEnvCacheForTests } from './config/env.js';

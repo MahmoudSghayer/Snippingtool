@@ -8,6 +8,7 @@ import rateLimit from '@fastify/rate-limit';
 import fp from 'fastify-plugin';
 
 import { AppErrors } from '../lib/errors.js';
+import { verifyAccessToken } from '../lib/tokens.js';
 
 import type { FastifyInstance } from 'fastify';
 
@@ -30,22 +31,27 @@ export default fp(
       // unauthenticated request falls back to `ip` alone (nothing else to
       // key by yet — that's what the auth module's own tighter per-route
       // tier + Redis sliding window + DB lockout are for, see
-      // `modules/auth/service.ts`). Never throws: a malformed/expired token
-      // here just means "unauthenticated for rate-limit purposes", the real
-      // 401 comes from `fastify.authenticate` on routes that require it.
-      keyGenerator: (request) => {
+      // `modules/auth/service.ts`). Never throws: a malformed/expired/forged
+      // token here just means "unauthenticated for rate-limit purposes", the
+      // real 401 comes from `fastify.authenticate` on routes that require it.
+      //
+      // The `sub` MUST come from a signature-verified token. Decoding the
+      // JWT payload without verifying (the earlier approach) let an attacker
+      // mint a fresh `ip:sub` bucket per request by sending an unsigned token
+      // with a rotating `sub`, so the global limit never tripped from one IP.
+      // `verifyAccessToken` rejects any token not signed by our key, so a
+      // forged `sub` falls through to the per-IP key — the attacker can no
+      // longer escape their own IP's bucket.
+      keyGenerator: async (request) => {
         const auth = request.headers.authorization;
         const bearer = auth?.startsWith('Bearer ') ? auth.slice('Bearer '.length) : undefined;
         const cookieToken = (request.cookies as Record<string, string | undefined> | undefined)
           ?.sl_at;
         const token = bearer ?? cookieToken;
-        if (!token) return request.ip;
+        const publicKey = fastify.config.JWT_PUBLIC_KEY;
+        if (!token || !publicKey) return request.ip;
         try {
-          const payload = token.split('.')[1];
-          if (!payload) return request.ip;
-          const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as {
-            sub?: unknown;
-          };
+          const claims = await verifyAccessToken(token, publicKey);
           return typeof claims.sub === 'string' && claims.sub.length > 0
             ? `${request.ip}:${claims.sub}`
             : request.ip;
