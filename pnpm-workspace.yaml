@@ -3,6 +3,7 @@ packages:
   - 'packages/*'
   - 'tests'
   - 'tests/security'
+  - 'qa'
 
 # All transitive build-time deps (esbuild via vitest, unrs-resolver via
 # eslint-import-resolver-typescript, msgpackr-extract via bullmq/ioredis);
