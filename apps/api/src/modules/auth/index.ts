@@ -119,6 +119,28 @@ export default fp(
       timeWindow: fastify.config.RATE_LIMIT_LOGIN_WINDOW_MS,
     };
 
+    // CSRF for the browser cookie flow only. /auth/refresh and the
+    // single-device /auth/logout are state-changing cookie-session mutations,
+    // so under COOKIE_SAME_SITE=none a cross-site POST could otherwise force a
+    // token rotation or a logout. Clients that pass the refresh token
+    // explicitly in the body (the extension / API callers) carry no ambient
+    // cookie and aren't CSRF-able — and `verifyCsrf` itself already skips when
+    // an Authorization header is present — so this only engages the double-
+    // submit check for the cookie-bearing browser flow. The dashboard client
+    // already sends `x-csrf-token` on every POST (api/client.ts), so it keeps
+    // working unchanged.
+    const csrfForCookieTokenFlow = (
+      request: FastifyRequest,
+      reply: FastifyReply,
+      done: (err?: Error) => void,
+    ): void => {
+      if ((request.body as { refreshToken?: string } | undefined)?.refreshToken) {
+        done();
+        return;
+      }
+      fastify.verifyCsrf(request, reply, done);
+    };
+
     app.post(
       '/api/v1/auth/register',
       {
@@ -222,6 +244,7 @@ export default fp(
     app.post(
       '/api/v1/auth/refresh',
       {
+        preHandler: [csrfForCookieTokenFlow],
         schema: {
           tags: ['auth'],
           body: refreshRequestSchema.partial(),
@@ -250,6 +273,7 @@ export default fp(
     app.post(
       '/api/v1/auth/logout',
       {
+        preHandler: [csrfForCookieTokenFlow],
         schema: {
           tags: ['auth'],
           body: logoutRequestSchema.partial(),

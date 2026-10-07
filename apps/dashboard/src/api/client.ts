@@ -91,9 +91,12 @@ let refreshPromise: Promise<boolean> | null = null;
 
 function silentRefresh(fetchFn: typeof fetch): Promise<boolean> {
   if (!refreshPromise) {
-    // No CSRF header needed: `/auth/refresh` has no `verifyCsrf` preHandler
-    // (apps/api/src/modules/auth/index.ts) — it authenticates via the
-    // `sl_rt` cookie alone, which `credentials: 'include'` already attaches.
+    // `/auth/refresh` now runs `verifyCsrf` for the cookie flow
+    // (apps/api/src/modules/auth/index.ts): it authenticates via the `sl_rt`
+    // cookie, which `credentials: 'include'` attaches, and the CSRF double-
+    // submit header is added by `csrfAndCredentialsMiddleware` on this POST
+    // like any other mutation (the `sl_csrf` cookie exists once the user has
+    // logged in, which is the only time a refresh is attempted).
     refreshPromise = api
       .POST('/api/v1/auth/refresh', { body: {}, fetch: fetchFn })
       .then(({ error }) => !error)

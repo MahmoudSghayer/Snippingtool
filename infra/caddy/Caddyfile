@@ -50,6 +50,14 @@ api.{$DOMAIN} {
 
 	encode zstd gzip
 
+	# /metrics is unauthenticated by design (apps/api/src/plugins/metrics.ts):
+	# Prometheus scrapes api:3000/metrics directly over the internal Docker
+	# network (infra/monitoring/prometheus/prometheus.yml), so the endpoint
+	# must not be reachable from the public edge. Return 404 before the
+	# catch-all reverse_proxy below; internal scraping is unaffected.
+	@metrics path /metrics /metrics/*
+	respond @metrics 404
+
 	# WebSocket upgrade and REST share the same origin/port in apps/api
 	# (docs/01-architecture.md's WS gateway is mounted at /ws on the same
 	# Fastify instance) — Caddy's reverse_proxy handles the Upgrade header

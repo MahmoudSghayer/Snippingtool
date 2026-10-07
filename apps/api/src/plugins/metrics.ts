@@ -44,7 +44,12 @@ export default fp(
 
     fastify.addHook('onResponse', async (request, reply) => {
       const start = (request as unknown as { _metricsStart?: number })._metricsStart;
-      const route = request.routeOptions?.url ?? request.url;
+      // Only matched routes contribute a label; unmatched requests (404s,
+      // probes, random paths) collapse to a single constant instead of
+      // `request.url`, which would otherwise grow the `route` label's
+      // cardinality without bound (one time series per distinct URL, query
+      // string included) and bloat the metrics store.
+      const route = request.routeOptions?.url ?? '__unmatched__';
       const labels = { method: request.method, route, status: String(reply.statusCode) };
       httpRequests.inc(labels);
       if (start) httpDuration.observe(labels, (performance.now() - start) / 1000);

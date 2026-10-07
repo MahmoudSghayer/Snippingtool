@@ -66,11 +66,15 @@ async function registerVerifyLogin(
  * it (modules/auth/index.ts `clearSessionCookies`). */
 async function logoutClears(app: FastifyInstance, loginRes: LightMyRequestResponse, ip: string) {
   const rt = loginRes.cookies.find((c) => c.name === 'sl_rt')!;
+  // The cookie (browser) flow now passes the CSRF double-submit (F7): the
+  // dashboard client sends `x-csrf-token` on every POST, including logout.
+  const csrf = loginRes.cookies.find((c) => c.name === 'sl_csrf')!;
   const logoutRes = await app.inject({
     method: 'POST',
     url: '/api/v1/auth/logout',
     remoteAddress: ip,
-    cookies: { sl_rt: rt.value },
+    cookies: { sl_rt: rt.value, sl_csrf: csrf.value },
+    headers: { 'x-csrf-token': csrf.value },
     payload: {},
   });
   expect(logoutRes.statusCode).toBe(200);
