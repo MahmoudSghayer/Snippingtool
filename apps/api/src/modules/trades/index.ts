@@ -417,7 +417,12 @@ export default fp(
     app.get(
       '/api/v1/trades/totals',
       {
-        onRequest: [fastify.authenticate],
+        // Same plan gate as GET /trades and POST /trades/batch: the ledger is
+        // one feature, so its aggregate totals must not be reachable without
+        // it (previously only `authenticate`, so a plan without
+        // `ledger.recorder` was blocked from listing trades yet could still
+        // read their totals).
+        onRequest: [fastify.requireFeature('ledger.recorder')],
         schema: {
           tags: ['trades'],
           querystring: tradeFilterQuerySchema,
@@ -450,7 +455,8 @@ export default fp(
     app.get(
       '/api/v1/trades/export.csv',
       {
-        onRequest: [fastify.authenticate],
+        // Plan-gated like the rest of the ledger (see /trades/totals above).
+        onRequest: [fastify.requireFeature('ledger.recorder')],
         schema: {
           tags: ['trades'],
           summary: "Stream the caller's trades matching the given filters as CSV.",
