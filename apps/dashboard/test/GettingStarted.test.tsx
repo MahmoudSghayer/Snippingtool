@@ -158,9 +158,9 @@ describe('GettingStarted', () => {
       '#extension',
     );
     await waitFor(() =>
-      expect(within(step(/Add a search filter/)).getAllByRole('button', { name: /^Add / })).toHaveLength(
-        STARTER_FILTERS.length,
-      ),
+      expect(
+        within(step(/Add a search filter/)).getAllByRole('button', { name: /^Add / }),
+      ).toHaveLength(STARTER_FILTERS.length),
     );
     expect(within(step(/Record your first trade/)).getByRole('link')).toHaveAttribute(
       'href',
@@ -249,7 +249,9 @@ describe('GettingStarted', () => {
       expect(within(step(/Add a search filter/)).getByText('Included with a pass')).toBeVisible(),
     );
     expect(step(/Add a search filter/)).toHaveAccessibleName(/not done/);
-    expect(within(step(/Add a search filter/)).queryByText(/Couldn't check/)).not.toBeInTheDocument();
+    expect(
+      within(step(/Add a search filter/)).queryByText(/Couldn't check/),
+    ).not.toBeInTheDocument();
     expect(within(step(/Add a search filter/)).queryByRole('button', { name: /^Add / })).toBeNull();
   });
 });

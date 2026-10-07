@@ -203,6 +203,14 @@ describe('risk level telemetry', () => {
   const at = '2026-09-24T08:00:00.000Z';
   const fast: BotSettings = { ...DEFAULT_BOT_SETTINGS, searchDelay: { min: 1, max: 2 } };
 
+  // activityEventSchema only accepts timestamps from the last 7 days, so pin
+  // the clock to `at` or this test starts failing a week after it was written.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(at));
+  });
+  afterEach(() => vi.useRealTimers());
+
   it('reports a change of level as a valid settings_change event', () => {
     const up = riskLevelChangeEvent(DEFAULT_BOT_SETTINGS, fast, at, '11111111-1111-4111-8111-111111111111');
     expect(up).toMatchObject({

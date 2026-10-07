@@ -296,11 +296,20 @@ describe('ingest correctness', () => {
       await post('/api/v1/trades/batch', token, { trades: [trade({ tradeId: 'x', boughtAt })] });
       const row = await app.db.query.trades.findFirst({ where: eq(trades.userId, userId) });
       const soldAt = new Date(Date.now() - 2 * DAY).toISOString();
-      const close = await post(`/api/v1/trades/${row!.id}/close`, token, { sellPrice: 30000, soldAt });
+      const close = await post(`/api/v1/trades/${row!.id}/close`, token, {
+        sellPrice: 30000,
+        soldAt,
+      });
       expect(close.statusCode, close.body).toBe(200);
 
       const stale = await post('/api/v1/trades/batch', token, {
-        trades: [trade({ tradeId: 'x', status: 'bought', boughtAt: new Date(Date.now() - MINUTE).toISOString() })],
+        trades: [
+          trade({
+            tradeId: 'x',
+            status: 'bought',
+            boughtAt: new Date(Date.now() - MINUTE).toISOString(),
+          }),
+        ],
       });
       expect(stale.statusCode, stale.body).toBe(200);
       const after = await app.db.query.trades.findFirst({ where: eq(trades.userId, userId) });
@@ -329,7 +338,13 @@ describe('ingest correctness', () => {
         soldAt,
       });
       const res = await post('/api/v1/trades/batch', token, {
-        trades: [trade({ tradeId: 'nb', buyPrice: 1000, boughtAt: new Date(Date.now() - MINUTE).toISOString() })],
+        trades: [
+          trade({
+            tradeId: 'nb',
+            buyPrice: 1000,
+            boughtAt: new Date(Date.now() - MINUTE).toISOString(),
+          }),
+        ],
       });
       expect(res.statusCode, res.body).toBe(200);
       const row = await app.db.query.trades.findFirst({ where: eq(trades.userId, userId) });

@@ -27,6 +27,7 @@ of the system.
    - [Moderation](#68-moderation)
    - [Audit](#69-audit)
    - [System / feature flags / analytics](#610-system--feature-flags--analytics)
+   - [Market intelligence](#611-market-intelligence)
 7. [Views and the materialized KPI store](#7-views-and-the-materialized-kpi-store)
 8. [Partition maintenance runbook](#8-partition-maintenance-runbook)
 9. [Backup / restore](#9-backup--restore)
@@ -238,24 +239,24 @@ The account root. Case-insensitive email uniqueness (via `citext`) is
 enforced only among live (`deleted_at IS NULL`) rows, so a deleted account's
 email can be reused by a new signup.
 
-| Column                                                  | Type                                | Notes                                                                                                                   |
-| ------------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `id`                                                    | uuid PK                             |                                                                                                                          |
-| `email`                                                 | citext                              | unique among live rows                                                                                                   |
-| `password_hash`                                         | text                                | argon2id                                                                                                                 |
-| `email_verified_at`                                     | timestamptz                         | null until verified                                                                                                      |
-| `status`                                                | `user_status`                       | active / suspended / banned / deleted                                                                                    |
-| `role`                                                  | `user_role`                         | user / admin (coarse; fine-grained admin permissions live in `admin_users`)                                              |
-| `totp_secret_enc`                                       | bytea                               | `pgp_sym_encrypt`-ed TOTP secret                                                                                         |
-| `totp_enabled_at`                                       | timestamptz                         | null = 2FA off even if a secret exists                                                                                   |
-| `failed_login_count`                                    | smallint                            | drives lockout                                                                                                           |
-| `locked_until`                                          | timestamptz                         | login rejected while `now() < locked_until`                                                                              |
-| `last_login_at`, `last_ip`                              | timestamptz, inet                   |                                                                                                                          |
-| `timezone`                                              | text                                | default `UTC`                                                                                                            |
-| `timezone_set_at`                                       | timestamptz                         | null until the trader or an admin chooses a timezone (0036); tells a deliberate `UTC` from the default                   |
-| `referral_code`                                         | text                                | unique among live rows, format-checked                                                                                   |
+| Column                                                  | Type                                | Notes                                                                                                                          |
+| ------------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `id`                                                    | uuid PK                             |                                                                                                                                |
+| `email`                                                 | citext                              | unique among live rows                                                                                                         |
+| `password_hash`                                         | text                                | argon2id                                                                                                                       |
+| `email_verified_at`                                     | timestamptz                         | null until verified                                                                                                            |
+| `status`                                                | `user_status`                       | active / suspended / banned / deleted                                                                                          |
+| `role`                                                  | `user_role`                         | user / admin (coarse; fine-grained admin permissions live in `admin_users`)                                                    |
+| `totp_secret_enc`                                       | bytea                               | `pgp_sym_encrypt`-ed TOTP secret                                                                                               |
+| `totp_enabled_at`                                       | timestamptz                         | null = 2FA off even if a secret exists                                                                                         |
+| `failed_login_count`                                    | smallint                            | drives lockout                                                                                                                 |
+| `locked_until`                                          | timestamptz                         | login rejected while `now() < locked_until`                                                                                    |
+| `last_login_at`, `last_ip`                              | timestamptz, inet                   |                                                                                                                                |
+| `timezone`                                              | text                                | default `UTC`                                                                                                                  |
+| `timezone_set_at`                                       | timestamptz                         | null until the trader or an admin chooses a timezone (0036); tells a deliberate `UTC` from the default                         |
+| `referral_code`                                         | text                                | unique among live rows, format-checked                                                                                         |
 | `email_normalised`                                      | text, `GENERATED ALWAYS ... STORED` | (0025) SQL mirror of `normaliseEmailForAbuseCheck()`, indexed for the trial-abuse email check; never used for login/uniqueness |
-| `deleted_at`, `created_at`, `updated_at`, `row_version` | —                                   | standard, but see `row_version`'s own note below                                                                         |
+| `deleted_at`, `created_at`, `updated_at`, `row_version` | —                                   | standard, but see `row_version`'s own note below                                                                               |
 
 **Indexes:** partial unique on `email`; partial unique on `referral_code`;
 btree on `email_normalised`
@@ -742,6 +743,24 @@ entity_id, occurred_at desc)`, `(action, occurred_at desc)`, `request_id`,
 | `ip_activity`        | `ip`, `user_id` **SET NULL**, `device_id` **SET NULL**, `country`, `asn`, `first_seen`, `last_seen`, `request_count`, `flagged`                | rolling per-(ip,user) counters for impossible-travel/velocity flagging; unique `(ip, user_id)` with `NULLS NOT DISTINCT`                                                                                                            |
 | `extension_installs` | `install_id` unique, `user_id` **SET NULL** (nullable — pre-login installs), `version`, `browser`, `first_seen`, `last_seen`, `uninstalled_at` | install counts, version distribution                                                                                                                                                                                                |
 | `analytics_daily`    | `day`, `metric`, `dimension` (default `''`), `value numeric(18,4)`                                                                             | generic KPI store, unique `(day, metric, dimension)`, populated by the `analytics.daily` nightly job; every metric's formula is defined in `docs/08-analytics.md`                                                                   |
+
+### 6.11 Market intelligence
+
+Created by `0027_market_intelligence`, `0028_market_events` and
+`0029_news_signals` for `docs/14-ml-suggestions.md`. These hold collector
+output and the review queue built on it, not user-owned records, so none of
+them is soft-deleted. The standard columns each one omits, and why:
+
+| Table                | Omits                                     | Why                                                                                                      |
+| -------------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `cards`              | `deleted_at`                              | canonical card identity that every series references; a card is never removed                            |
+| `card_source_ids`    | `deleted_at`, `row_version`               | alias rows the resolver writes once (insert, nothing on conflict); `confidence`/`resolved_by` record how |
+| `price_observations` | `updated_at`, `deleted_at`, `row_version` | partitioned append-mostly time series on `observed_at`, aged out a month at a time (see §8)              |
+| `raw_documents`      | `updated_at`, `deleted_at`, `row_version` | the fetched document exactly as received, kept so a parser bug can be replayed; never edited             |
+| `collector_runs`     | `updated_at`, `deleted_at`, `row_version` | one health record per collector run                                                                      |
+| `news_items`         | `deleted_at`, `row_version`               | the fetched article; only filled in (`body`) by a later pass, never removed                              |
+| `market_events`      | `deleted_at`, `row_version`               | classification derived from `news_items`; corrected by re-running it, not by deleting                    |
+| `news_signals`       | `deleted_at`, `row_version`               | review queue; `reviewed_at` and the accept/reject decision are the terminal state, kept for precision    |
 
 ---
 

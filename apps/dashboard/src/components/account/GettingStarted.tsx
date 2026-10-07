@@ -43,10 +43,7 @@ function writeHidden(): void {
 }
 
 type StepState =
-  | { kind: 'loading' }
-  | { kind: 'error'; retry: () => void }
-  | { kind: 'done' }
-  | { kind: 'todo' };
+  { kind: 'loading' } | { kind: 'error'; retry: () => void } | { kind: 'done' } | { kind: 'todo' };
 
 interface StepQuery<T> {
   isPending: boolean;

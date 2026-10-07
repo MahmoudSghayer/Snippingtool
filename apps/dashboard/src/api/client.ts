@@ -145,9 +145,7 @@ const csrfAndCredentialsMiddleware: Middleware = {
 
     if (response.status !== 401) return response;
 
-    const isExempt = AUTH_EXEMPT_PATH_FRAGMENTS.some((fragment) =>
-      request.url.includes(fragment),
-    );
+    const isExempt = AUTH_EXEMPT_PATH_FRAGMENTS.some((fragment) => request.url.includes(fragment));
 
     if (!isExempt && clonedRequest) {
       const body = await readErrorBody(response);
