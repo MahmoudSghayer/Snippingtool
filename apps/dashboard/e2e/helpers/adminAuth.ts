@@ -37,10 +37,7 @@ const FIXED_DEVICE_FINGERPRINT = 'e2e00000'.repeat(6); // 48 hex-ish chars, well
  * enrollment (first spec of the run) or step-up verification (every spec
  * after), and waits for the admin dashboard (`/admin`), where an admin
  * lands after signing in. */
-export async function loginAsAdmin(
-  page: Page,
-  deviceName = 'Playwright e2e runner',
-): Promise<void> {
+export async function loginAsAdmin(page: Page): Promise<void> {
   await page.addInitScript((fingerprint) => {
     try {
       window.localStorage.setItem('sl_dashboard_device_fingerprint', fingerprint);
@@ -55,7 +52,8 @@ export async function loginAsAdmin(
   await page.goto('/login');
   await page.getByLabel('Email').fill(SEEDED_ADMIN_EMAIL);
   await page.getByLabel('Password', { exact: true }).fill(SEEDED_ADMIN_PASSWORD);
-  await page.getByLabel('This device').fill(deviceName);
+  // No device-name field any more (d3f2dfe): the device is named from the
+  // browser's user agent (src/lib/device.ts).
   await page.getByRole('button', { name: 'Sign in' }).click();
 
   // Branch on the enrolment *secret*, not on the heading above it. The
