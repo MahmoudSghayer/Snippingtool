@@ -22,7 +22,7 @@
 // the subscription, not the access token's `plan` claim, which is only as
 // fresh as the token.
 
-import { adminUsers, users } from '@sl/db';
+import { adminUsers, sessions, users } from '@sl/db';
 import { hasPermission, isAdminRole, type FeatureKey, type Permission } from '@sl/shared';
 import { eq } from 'drizzle-orm';
 import fp from 'fastify-plugin';
@@ -97,6 +97,25 @@ async function resolveAuthUser(fastify: FastifyInstance, request: FastifyRequest
   if (user.status === 'banned' || user.status === 'suspended')
     throw AppErrors.forbidden('Account is not active.');
   if (user.rowVersion !== claims.ver) throw AppErrors.sessionRevoked();
+  // Revoking a single session/device (DELETE /sessions/:id, /devices/:id)
+  // sets sessions.revoked_at but does not bump row_version, so without this
+  // check the access token bound to that session would keep working until
+  // its TTL. Looking the session up by `claims.sid` (its primary key) makes
+  // a targeted revoke take effect on the very next request. Logout-all,
+  // password change and admin force-logout bump row_version instead and are
+  // already caught above.
+  //
+  // Reject only when the row EXISTS and is revoked. A session row is never
+  // hard-deleted in production (rotation and revoke both soft-set
+  // revoked_at), and every issued token's sid came from a createSession
+  // insert, so a missing row cannot occur for a genuine token — treating
+  // "missing" as a hard reject would add no security but would risk locking
+  // out a token during any transient read gap.
+  const session = await fastify.db.query.sessions.findFirst({
+    where: eq(sessions.id, claims.sid),
+    columns: { revokedAt: true },
+  });
+  if (session?.revokedAt) throw AppErrors.sessionRevoked();
   if (await isRequestBanned(fastify.db, fastify.redis, { userId: user.id, ip: request.ip }))
     throw AppErrors.forbidden('This account, device, or network has been banned.');
 
