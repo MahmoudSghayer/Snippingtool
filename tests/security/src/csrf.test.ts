@@ -149,7 +149,11 @@ describe('CSRF (docs/04-auth.md §10)', () => {
     expect(minted).toBeTruthy();
     expect(fresh.headers['x-csrf-token']).toBe(decodeURIComponent(minted));
 
-    const again = await app.inject({ method: 'GET', url: '/api/v1/plans', cookies: { sl_csrf: minted } });
+    const again = await app.inject({
+      method: 'GET',
+      url: '/api/v1/plans',
+      cookies: { sl_csrf: minted },
+    });
     expect(parseSetCookies(again).sl_csrf).toBeUndefined();
     expect(again.headers['x-csrf-token']).toBe(decodeURIComponent(minted));
   });
@@ -175,7 +179,7 @@ describe('CSRF (docs/04-auth.md §10)', () => {
     expect(res.statusCode, res.body).toBe(200);
   });
 
-  it("lets only the dashboard origin read the token header (CORS exposes it)", async () => {
+  it('lets only the dashboard origin read the token header (CORS exposes it)', async () => {
     const dashboardOrigin = String((app.config as { DASHBOARD_ORIGIN: string }).DASHBOARD_ORIGIN);
     const allowed = await app.inject({
       method: 'GET',
@@ -193,11 +197,14 @@ describe('CSRF (docs/04-auth.md §10)', () => {
     expect(evil.headers['access-control-allow-origin']).toBeUndefined();
   });
 
-  it('sends Cache-Control: private, no-store on every cookie-session response, so no shared cache can store one user\'s sl_csrf/x-csrf-token', async () => {
+  it("sends Cache-Control: private, no-store on every cookie-session response, so no shared cache can store one user's sl_csrf/x-csrf-token", async () => {
     const fresh = await app.inject({ method: 'GET', url: '/api/v1/plans' });
     expect(fresh.headers['cache-control']).toBe('private, no-store');
 
-    const { cookies } = await loginAsDashboard('csrf-cache@example.com', 'csrf-fp-cache-000000000000');
+    const { cookies } = await loginAsDashboard(
+      'csrf-cache@example.com',
+      'csrf-fp-cache-000000000000',
+    );
     const withCookie = await app.inject({
       method: 'GET',
       url: '/api/v1/users/me',
@@ -207,13 +214,24 @@ describe('CSRF (docs/04-auth.md §10)', () => {
   });
 
   it('never sends the token header to bearer clients', async () => {
-    const session = await createUserSession(app, 'csrf-bearer-hdr@example.com', 'csrf-fp-bearerhdr-000000');
-    const res = await app.inject({ method: 'GET', url: '/api/v1/users/me', headers: bearer(session.accessToken) });
+    const session = await createUserSession(
+      app,
+      'csrf-bearer-hdr@example.com',
+      'csrf-fp-bearerhdr-000000',
+    );
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/v1/users/me',
+      headers: bearer(session.accessToken),
+    });
     expect(res.headers['x-csrf-token']).toBeUndefined();
   });
 
   it('POST /api/v1/ws/ticket requires the CSRF token like any other cookie-session mutation', async () => {
-    const { cookies } = await loginAsDashboard('csrf-ws-ticket@example.com', 'csrf-fp-wsticket-00000000');
+    const { cookies } = await loginAsDashboard(
+      'csrf-ws-ticket@example.com',
+      'csrf-fp-wsticket-00000000',
+    );
     const noToken = await app.inject({
       method: 'POST',
       url: '/api/v1/ws/ticket',

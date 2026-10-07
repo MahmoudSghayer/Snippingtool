@@ -52,7 +52,9 @@ describe('entitlementBlobClaimsSchema', () => {
   });
 
   it('rejects a non-boolean kill switch', () => {
-    expect(entitlementBlobClaimsSchema.safeParse({ ...claims, killSwitchActive: 'false' }).success).toBe(false);
+    expect(
+      entitlementBlobClaimsSchema.safeParse({ ...claims, killSwitchActive: 'false' }).success,
+    ).toBe(false);
   });
 });
 

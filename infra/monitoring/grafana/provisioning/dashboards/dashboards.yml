@@ -3,7 +3,7 @@ apiVersion: 1
 providers:
   - name: sniper-ledger
     orgId: 1
-    folder: "Nova Trade"
+    folder: 'Nova Trade'
     type: file
     disableDeletion: false
     updateIntervalSeconds: 30

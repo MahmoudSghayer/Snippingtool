@@ -130,8 +130,12 @@ describe('ingest bounds', () => {
     ).toBe(true);
     expect(tradeIngestSchema.safeParse(trade({ boughtAt: iso(-399 * DAY) })).success).toBe(true);
     expect(tradeIngestSchema.safeParse(trade({ boughtAt: iso(-401 * DAY) })).success).toBe(false);
-    expect(closeTradeRequestSchema.safeParse({ sellPrice: 30000, soldAt: iso(-30 * DAY) }).success).toBe(true);
-    expect(closeTradeRequestSchema.safeParse({ sellPrice: 30000, soldAt: iso(6 * MINUTE) }).success).toBe(false);
+    expect(
+      closeTradeRequestSchema.safeParse({ sellPrice: 30000, soldAt: iso(-30 * DAY) }).success,
+    ).toBe(true);
+    expect(
+      closeTradeRequestSchema.safeParse({ sellPrice: 30000, soldAt: iso(6 * MINUTE) }).success,
+    ).toBe(false);
     expect(isWithinTradeWindow(iso(-30 * DAY))).toBe(true);
     expect(isWithinTradeWindow(iso(6 * MINUTE))).toBe(false);
   });

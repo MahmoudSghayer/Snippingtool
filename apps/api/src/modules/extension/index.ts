@@ -3,7 +3,15 @@
 // points (docs/01-architecture.md, "license bootstrap + heartbeat + offline
 // grace").
 
-import { devices, featureToggles, licenses, plans, subscriptions, userActivity, users } from '@sl/db';
+import {
+  devices,
+  featureToggles,
+  licenses,
+  plans,
+  subscriptions,
+  userActivity,
+  users,
+} from '@sl/db';
 import {
   bootstrapRequestSchema,
   bootstrapResponseSchema,
@@ -151,13 +159,14 @@ export default fp(
           .set({ extensionVersion: request.body.extensionVersion })
           .where(eq(devices.id, deviceId));
 
-        const [entitlementSnapshot, { settings }, killSwitchActive, dtos, email] = await Promise.all([
-          fastify.entitlements.getEntitlements(userId),
-          getOrCreateUserSettings(fastify.db, userId),
-          isKillSwitchActive(fastify),
-          loadSubscriptionAndLicenseDto(fastify, userId),
-          loadOwnEmail(fastify, userId),
-        ]);
+        const [entitlementSnapshot, { settings }, killSwitchActive, dtos, email] =
+          await Promise.all([
+            fastify.entitlements.getEntitlements(userId),
+            getOrCreateUserSettings(fastify.db, userId),
+            isKillSwitchActive(fastify),
+            loadSubscriptionAndLicenseDto(fastify, userId),
+            loadOwnEmail(fastify, userId),
+          ]);
 
         const entitlementBlob = await fastify.entitlements.signEntitlementBlob(
           entitlementSnapshot,

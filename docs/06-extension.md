@@ -264,7 +264,7 @@ Differences that follow from there being no extension process:
 
 Modifier chords only (`lib/hotkeys.ts`, fixed defaults
 `DEFAULT_ASSIST_HOTKEYS`): **Alt+Up/Down** move a selection through the
-ranked listings of the *current* search (never one from an earlier search),
+ranked listings of the _current_ search (never one from an earlier search),
 **Alt+B** shows a confirm overlay naming the card (name and rating from the
 item data, else `#resourceId`), its price and the expected profit after tax,
 and a second **Alt+B** or a click on Confirm buys exactly that listing;
@@ -519,7 +519,7 @@ installed`; after the human's own search the log shows no `hook:`
      whole transfer list: a listed or expired card missing from it is
      marked gone (no longer listed value). An entry with a price outside
      0–15,000,000 is skipped, so that response is not treated as full.
-   - `soldAt` is when the sale was *seen* on the pile, not when it
+   - `soldAt` is when the sale was _seen_ on the pile, not when it
      happened (EA gives no sale time), clamped to be no earlier than the
      purchase.
 
