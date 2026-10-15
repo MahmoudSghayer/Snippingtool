@@ -34,6 +34,10 @@ export const BOT_LIMITS = {
   /** Cooldown after a buy. */
   cooldownSeconds: { min: 0, max: 3_600 },
   maxCoinFlowPerHour: { min: 1_000, max: 1_000_000_000 },
+  /** Auto-sell: EA price steps above (+) or below (-) the market price. */
+  autoSellSteps: { min: -20, max: 20 },
+  /** Auto-sell: a fixed buy-now price (EA's buy-now limits). */
+  autoSellPrice: { min: 200, max: 15_000_000 },
 } as const;
 
 type Bound = { min: number; max: number };
@@ -72,6 +76,16 @@ export const RECOMMENDED_BOT_SETTINGS = {
 } as const;
 
 const R = RECOMMENDED_BOT_SETTINGS;
+
+/** Auto-sell starts off: listing what the bot buys is the user's choice. */
+const DEFAULT_AUTO_SELL = {
+  enabled: false,
+  mode: 'market' as const,
+  steps: 0,
+  fixedPrice: 10_000,
+  platform: 'console' as const,
+  noLoss: true,
+};
 const rangeDefault = (r: { min: number; max: number }) => ({ min: r.min, max: r.max });
 
 /** Fields older builds stored that this one no longer uses: accepted so old
@@ -130,6 +144,23 @@ export const botSettingsSchema = z
       })
       .strict()
       .default({ maxBuyPrice: 0, minProfit: 1_000, stopAfterPurchases: 0, sessionCoinBudget: 0 }),
+    /** After every buy, list the card on the transfer market. */
+    autoSell: z
+      .object({
+        enabled: z.boolean(),
+        /** `market`: FUTBIN's price for the card (Nova's own market data
+         * when FUTBIN has none), moved `steps` EA price steps. `fixed`:
+         * `fixedPrice`. */
+        mode: z.enum(['market', 'fixed']),
+        steps: int(BOT_LIMITS.autoSellSteps),
+        fixedPrice: int(BOT_LIMITS.autoSellPrice),
+        /** Whose FUTBIN prices: console (PlayStation and Xbox) or PC. */
+        platform: z.enum(['console', 'pc']),
+        /** Never list for less than the card cost, after EA's 5% tax. */
+        noLoss: z.boolean(),
+      })
+      .strict()
+      .default(DEFAULT_AUTO_SELL),
     safety: z
       .object({
         maxSearchesPerHour: int(BOT_LIMITS.maxSearchesPerHour).default(R.safety.maxSearchesPerHour),
@@ -207,6 +238,7 @@ export function clampBotSettings(s: BotSettings): BotSettings {
   const L = BOT_LIMITS;
   const safety = (s.safety ?? {}) as Partial<BotSettings['safety']>;
   const th = (s.thresholds ?? {}) as Partial<BotSettings['thresholds']>;
+  const as = (s.autoSell ?? {}) as Partial<BotSettings['autoSell']>;
   return {
     riskAcknowledgedAt: s.riskAcknowledgedAt ?? null,
     searchDelay: clampRange(L.searchDelaySeconds, s.searchDelay, d.searchDelay, false),
@@ -233,6 +265,15 @@ export function clampBotSettings(s: BotSettings): BotSettings {
         th.sessionCoinBudget,
         d.thresholds.sessionCoinBudget,
       ),
+    },
+    autoSell: {
+      enabled: as.enabled ?? d.autoSell.enabled,
+      mode: as.mode === 'fixed' || as.mode === 'market' ? as.mode : d.autoSell.mode,
+      steps: Math.round(clampTo(L.autoSellSteps, as.steps, d.autoSell.steps)),
+      fixedPrice: Math.round(clampTo(L.autoSellPrice, as.fixedPrice, d.autoSell.fixedPrice)),
+      platform:
+        as.platform === 'pc' || as.platform === 'console' ? as.platform : d.autoSell.platform,
+      noLoss: as.noLoss ?? d.autoSell.noLoss,
     },
     safety: {
       maxSearchesPerHour: Math.round(

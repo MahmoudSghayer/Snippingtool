@@ -32,7 +32,9 @@ describe('the new background message types', () => {
 describe('engine lease payload', () => {
   it('carries one owner id and nothing else', () => {
     expect(extBackgroundEngineLockPayloadSchema.safeParse({ ownerId: OWNER }).success).toBe(true);
-    expect(extBackgroundEngineLockPayloadSchema.safeParse({ ownerId: 'tab-1' }).success).toBe(false);
+    expect(extBackgroundEngineLockPayloadSchema.safeParse({ ownerId: 'tab-1' }).success).toBe(
+      false,
+    );
     expect(
       extBackgroundEngineLockPayloadSchema.safeParse({ ownerId: OWNER, expiresAt: 1 }).success,
     ).toBe(false);
@@ -43,7 +45,9 @@ describe('engine.state payload (the heartbeat engine state)', () => {
   it('accepts the four states and nothing else', () => {
     for (const engineState of ['idle', 'running', 'paused', 'halted'])
       expect(extBackgroundEngineStatePayloadSchema.safeParse({ engineState }).success).toBe(true);
-    expect(extBackgroundEngineStatePayloadSchema.safeParse({ engineState: 'on' }).success).toBe(false);
+    expect(extBackgroundEngineStatePayloadSchema.safeParse({ engineState: 'on' }).success).toBe(
+      false,
+    );
     expect(
       extBackgroundEngineStatePayloadSchema.safeParse({ engineState: 'idle', x: 1 }).success,
     ).toBe(false);
@@ -52,11 +56,16 @@ describe('engine.state payload (the heartbeat engine state)', () => {
 
 describe('engine.resetSession (background -> EA tab)', () => {
   it('is a bare, strict message', () => {
-    expect(extContentResetSessionMessageSchema.safeParse({ type: 'engine.resetSession' }).success).toBe(true);
     expect(
-      extContentResetSessionMessageSchema.safeParse({ type: 'engine.resetSession', payload: {} }).success,
+      extContentResetSessionMessageSchema.safeParse({ type: 'engine.resetSession' }).success,
+    ).toBe(true);
+    expect(
+      extContentResetSessionMessageSchema.safeParse({ type: 'engine.resetSession', payload: {} })
+        .success,
     ).toBe(false);
-    expect(extContentResetSessionMessageSchema.safeParse({ type: 'engine.killSwitch' }).success).toBe(false);
+    expect(
+      extContentResetSessionMessageSchema.safeParse({ type: 'engine.killSwitch' }).success,
+    ).toBe(false);
   });
 });
 
@@ -84,12 +93,16 @@ describe('session meter numbers', () => {
       }).success,
     ).toBe(true);
     expect(
-      extBackgroundGovernorSnapshotPushPayloadSchema.safeParse({ ...snapshot, sessionCoinBudget: null })
-        .success,
+      extBackgroundGovernorSnapshotPushPayloadSchema.safeParse({
+        ...snapshot,
+        sessionCoinBudget: null,
+      }).success,
     ).toBe(true);
     expect(
-      extBackgroundGovernorSnapshotPushPayloadSchema.safeParse({ ...snapshot, sessionCoinsSpent: -1 })
-        .success,
+      extBackgroundGovernorSnapshotPushPayloadSchema.safeParse({
+        ...snapshot,
+        sessionCoinsSpent: -1,
+      }).success,
     ).toBe(false);
   });
 
@@ -104,7 +117,8 @@ describe('session meter numbers', () => {
       killSwitchActive: false,
     };
     expect(
-      extBackgroundEngineStateSetPayloadSchema.safeParse({ ...state, sessionCoinsSpent: 10 }).success,
+      extBackgroundEngineStateSetPayloadSchema.safeParse({ ...state, sessionCoinsSpent: 10 })
+        .success,
     ).toBe(true);
   });
 });
@@ -117,23 +131,39 @@ describe('assist hotkeys', () => {
     expect(assistHotkeysSchema.safeParse(DEFAULT_ASSIST_HOTKEYS).success).toBe(true);
   });
 
-  it.each(['Enter', 'Space', 'ArrowUp', 'KeyB', 'Shift+KeyB', 'Shift+Enter', 'Alt+', 'Alt+Key B', 'Alt+Alt+KeyB'])(
-    'refuses %s: EA’s own keys, and chords that type or repeat a modifier',
-    (chord) => {
-      expect(assistHotkeysSchema.safeParse({ ...DEFAULT_ASSIST_HOTKEYS, buy: chord }).success).toBe(false);
-    },
-  );
+  it.each([
+    'Enter',
+    'Space',
+    'ArrowUp',
+    'KeyB',
+    'Shift+KeyB',
+    'Shift+Enter',
+    'Alt+',
+    'Alt+Key B',
+    'Alt+Alt+KeyB',
+  ])('refuses %s: EA’s own keys, and chords that type or repeat a modifier', (chord) => {
+    expect(assistHotkeysSchema.safeParse({ ...DEFAULT_ASSIST_HOTKEYS, buy: chord }).success).toBe(
+      false,
+    );
+  });
 
   it('accepts other Alt, Ctrl or Meta chords', () => {
     for (const chord of ['Ctrl+Alt+KeyK', 'Meta+Digit1', 'Alt+Shift+KeyB'])
-      expect(assistHotkeysSchema.safeParse({ ...DEFAULT_ASSIST_HOTKEYS, buy: chord }).success).toBe(true);
+      expect(assistHotkeysSchema.safeParse({ ...DEFAULT_ASSIST_HOTKEYS, buy: chord }).success).toBe(
+        true,
+      );
   });
 
   it('refuses one chord bound to two actions, and unknown keys', () => {
     expect(
-      assistHotkeysSchema.safeParse({ ...DEFAULT_ASSIST_HOTKEYS, selectUp: DEFAULT_ASSIST_HOTKEYS.buy }).success,
+      assistHotkeysSchema.safeParse({
+        ...DEFAULT_ASSIST_HOTKEYS,
+        selectUp: DEFAULT_ASSIST_HOTKEYS.buy,
+      }).success,
     ).toBe(false);
-    expect(assistHotkeysSchema.safeParse({ ...DEFAULT_ASSIST_HOTKEYS, extra: 'Alt+KeyX' }).success).toBe(false);
+    expect(
+      assistHotkeysSchema.safeParse({ ...DEFAULT_ASSIST_HOTKEYS, extra: 'Alt+KeyX' }).success,
+    ).toBe(false);
   });
 });
 
@@ -151,7 +181,11 @@ describe('a listing may carry the card name from its item data', () => {
     seenAt: 0,
   };
   it('bounded to 80 characters', () => {
-    expect(trimmedAuctionSchema.parse({ ...listing, name: 'Kylian Mbappé' }).name).toBe('Kylian Mbappé');
-    expect(trimmedAuctionSchema.safeParse({ ...listing, name: 'x'.repeat(81) }).success).toBe(false);
+    expect(trimmedAuctionSchema.parse({ ...listing, name: 'Kylian Mbappé' }).name).toBe(
+      'Kylian Mbappé',
+    );
+    expect(trimmedAuctionSchema.safeParse({ ...listing, name: 'x'.repeat(81) }).success).toBe(
+      false,
+    );
   });
 });

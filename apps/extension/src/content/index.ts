@@ -35,7 +35,8 @@ import { AssistEngine, activeFilterHandles } from '../engine/assist.js';
 import { Governor, type GovernorState } from '../engine/governor.js';
 import { rankCandidates, type ScoredOpportunity } from '../engine/ranker.js';
 import { countObservedSearches, governedSearch } from '../engine/search.js';
-import { readHandedOffNonce } from '../lib/act-auth.js';
+import { handOffWasLate, readHandedOffNonce } from '../lib/act-auth.js';
+import { createBackgroundTimer } from '../lib/background-timer.js';
 import { riskLevelChangeEvent } from '../lib/bot-safety.js';
 import { logger } from '../lib/logger.js';
 import { singleFlight } from '../lib/single-flight.js';
@@ -118,6 +119,8 @@ async function main(): Promise<void> {
   // closed (assist/automation cannot buy); M1 recording does not need it.
   const actNonce = readHandedOffNonce();
   if (!actNonce) logger.warn('no act-channel nonce was handed off — assist/automation buys are disabled on this page', 'adapter');
+  else if (handOffWasLate())
+    logger.warn('the act-channel nonce was handed off after page scripts may have run (late userscript injection)', 'adapter');
   const adapter = createAdapterClient(pageWindow(), actNonce);
   // The options page's "Copy diagnostics" (content/diagnostics.ts). Wired
   // here, before any bootstrap, so it answers even when M2/M3 never boots —
@@ -579,6 +582,27 @@ async function main(): Promise<void> {
 
     // Called at load and whenever the page opens: a user who signs in from
     // the account view after the page loaded gets the bot without a reload.
+    // While the bot runs, this page holds a Web Lock: Chrome does not freeze
+    // a page that holds one, so a background tab keeps searching. Shared,
+    // so another EA tab is never kept waiting on it.
+    let tabLock: { done: boolean; release?: () => void } | null = null;
+    const holdTabWhileRunning = (): void => {
+      const running = sniper?.isRunning() ?? false;
+      if (running && !tabLock && typeof navigator.locks?.request === 'function') {
+        const held: { done: boolean; release?: () => void } = { done: false };
+        tabLock = held;
+        void navigator.locks
+          .request('nova-ai-running', { mode: 'shared' }, () =>
+            new Promise<void>((resolve) => (held.done ? resolve() : (held.release = resolve))),
+          )
+          .catch(() => undefined);
+      } else if (!running && tabLock) {
+        tabLock.done = true;
+        tabLock.release?.();
+        tabLock = null;
+      }
+    };
+
     const prepareSniper = async (fresh: boolean): Promise<void> => {
       if (sniper) {
         // A plan lost mid-session (the check below) empties `features`, and
@@ -607,8 +631,7 @@ async function main(): Promise<void> {
       }
       botSettings = botSettings ?? (await send<BotSettings>('bot.settingsGet'));
       // No act-channel nonce: the adapter cannot authenticate a single
-      // search or buy. In the userscript that means page scripts had already
-      // run when it installed (userscript/setup.ts refuses the handoff then).
+      // search or buy (handoff.js never ran on this page load).
       if (!actNonce) unavailableReason = NO_ACT_CHANNEL_REASON;
       else if (!signedIn) unavailableReason = 'Sign in to Nova Trade to use Nova AI.';
       else if (!allowed) unavailableReason = 'Your plan does not include Nova AI.';
@@ -622,13 +645,27 @@ async function main(): Promise<void> {
         unavailableReason = 'Nova AI is not available in this build.';
         return;
       }
+      // Timed off the main thread, so the bot keeps its pace while the tab
+      // is minimised or in the background (lib/background-timer.ts).
+      const timer = createBackgroundTimer();
       sniper = new mod.Sniper(
         {
           adapter,
+          sleep: timer.sleep,
+          timingMode: timer.mode,
           getFilters: () => (liveSearch ? [liveSearch] : []),
           estimateSellPrice: async (resourceId) => {
             const r = await send<{ summary: PriceSummary }>('summary', { resourceId, minProfit: settingsCache.targets.minProfitPerSnipe });
             return r?.summary.median ?? null;
+          },
+          // Auto-sell's market price: FUTBIN's, else the median Nova has
+          // recorded for the card (background/futbin.ts, model/prices.ts).
+          marketPrice: async (resourceId, platform) => {
+            const futbin = await send<{ price: number | null }>('price.futbin', { resourceId, platform });
+            if (futbin?.price) return { price: futbin.price, source: 'futbin' as const };
+            const r = await send<{ summary: PriceSummary }>('summary', { resourceId, minProfit: settingsCache.targets.minProfitPerSnipe });
+            const median = r?.summary.median;
+            return median ? { price: median, source: 'nova' as const } : null;
           },
           // The hours-per-day limit survives a page reload.
           loadUsage: () => send<BotDailyUsage | null>('bot.usageGet'),
@@ -642,7 +679,10 @@ async function main(): Promise<void> {
           // One EA tab runs the bot: the one holding the engine lease.
           exclusive: () => !!lease?.isHeld(),
           killSwitch: () => ({ active: killSwitchActive || !!governor?.isKillSwitchActive() }),
-          onChange: () => botPage.refresh(),
+          onChange: () => {
+            holdTabWhileRunning();
+            botPage.refresh();
+          },
           onAttempt: recordAttempt,
           onTrade: recordTrade,
         },
