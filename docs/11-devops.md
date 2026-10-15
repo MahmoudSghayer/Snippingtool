@@ -207,6 +207,18 @@ migration and deploy with a workflow notice instead of failing; set the
 four secrets and the next push to `main` deploys staging with no workflow
 change.
 
+`.github/workflows/publish-userscript.yml`: on every push to `main` that
+touches `apps/extension/`, `packages/shared/` or the lockfile (and by hand
+from the Actions tab), builds the Tampermonkey userscript for production
+and runs `infra/scripts/publish-userscript.sh` on the VM over SSH, so
+`dashboard.{$DOMAIN}/userscript/nova-trade.user.js` always matches `main`
+and installs update themselves. It reads `PRODUCTION_SSH_HOST`,
+`PRODUCTION_SSH_USER`, `PRODUCTION_SSH_PRIVATE_KEY` (and optionally
+`PRODUCTION_SSH_KNOWN_HOSTS`) as **repository** secrets, and skips with a
+notice until they exist. The domain, dashboard origin and licence public
+key default to the live deployment's; repository variables override them
+(see the workflow's header).
+
 `.github/actions/setup-pnpm` pins pnpm/Node once (from root
 `package.json`'s `packageManager`) for every job in every workflow.
 `.github/actions/setup-playwright-chromium` installs `xvfb` + a Chromium
