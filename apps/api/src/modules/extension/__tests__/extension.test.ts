@@ -1,6 +1,6 @@
 import { Writable } from 'node:stream';
 
-import { devices, featureToggles, userActivity } from '@sl/db';
+import { devices, featureToggles, userActivity, users } from '@sl/db';
 import { resetDatabase } from '@sl/db/test-utils';
 import { entitlementBlobClaimsSchema } from '@sl/shared';
 import { and, eq } from 'drizzle-orm';
@@ -84,6 +84,25 @@ describe('extension module: bootstrap/heartbeat + activity batch idempotency', (
     expect(body.settings.governor).toBeTruthy();
     expect(Array.isArray(body.features)).toBe(true);
     expect(body.email).toBe('bootstrap@example.com');
+  });
+
+  it('an admin with no pass is entitled to every feature, Nova AI included', async () => {
+    const accessToken = await registerLoginVerified(app, 'staff@example.com', '198.51.100.11');
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/extension/bootstrap',
+      headers: { authorization: `Bearer ${accessToken}` },
+      payload: { device, extensionVersion: '0.1.0', buildTarget: 'ledger' },
+    });
+    // No subscription: a customer gets no features.
+    expect(res.json().features).not.toContain('automation.autobuyer');
+
+    // (A role change revokes the session, so read what bootstrap reads.)
+    const { userId } = res.json();
+    await app.db.update(users).set({ role: 'admin' }).where(eq(users.id, userId));
+    const { features } = await app.entitlements.getEntitlements(userId);
+    expect(features).toContain('automation.autobuyer');
+    expect(features).toContain('dashboard.analytics');
   });
 
   it("bootstrap returns only the caller's own email, never another user's", async () => {

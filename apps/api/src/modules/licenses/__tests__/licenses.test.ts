@@ -180,7 +180,7 @@ describe('licenses module', () => {
     expect(res.json().code).toBe('LICENSE_INVALID');
   });
 
-  it('POST /licenses/validate: enforces the plan device limit (trial = 1 device)', async () => {
+  it('POST /licenses/validate: has no device limit (a second device validates too)', async () => {
     const ip = nextIp();
     const accessToken = await registerVerifyLogin(
       'devicelimit-license@example.com',
@@ -199,20 +199,17 @@ describe('licenses module', () => {
     });
     expect(first.statusCode).toBe(200);
 
-    // A genuinely new device fingerprint exceeds the trial's 1-device limit.
+    // A new device fingerprint: this used to exceed the trial's 1 device.
     const second = await app.inject({
       method: 'POST',
       url: '/api/v1/licenses/validate',
       remoteAddress: ip,
       payload: { licenseKey: license.key, device: { fingerprint: 'fp-devlimit-second-0001' } },
     });
-    expect(second.statusCode).toBe(409);
-    expect(second.json().code).toBe('DEVICE_LIMIT_REACHED');
+    expect(second.statusCode).toBe(200);
   });
 
-  // The device-limit bypass: a revoked device used to come back without a
-  // limit check, and only devices tied to this licence were counted.
-  it('POST /licenses/validate: re-activating a revoked device respects the device limit', async () => {
+  it('POST /licenses/validate: a revoked device comes back active', async () => {
     const ip = nextIp();
     const fpA = 'fp-bypass-a-0000000001';
     const accessToken = await registerVerifyLogin('bypass@example.com', ip, fpA);
@@ -233,29 +230,11 @@ describe('licenses module', () => {
     await app.db.update(devices).set({ status: 'revoked' }).where(eq(devices.userId, user!.id));
     expect((await validate('fp-bypass-b-0000000001')).statusCode).toBe(200);
 
-    const again = await validate(fpA);
-    expect(again.statusCode).toBe(409);
-    expect(again.json().code).toBe('DEVICE_LIMIT_REACHED');
-  });
-
-  it("POST /licenses/validate: counts every active device of the user, not only this licence's", async () => {
-    const ip = nextIp();
-    const accessToken = await registerVerifyLogin(
-      'count-all@example.com',
-      ip,
-      'fp-countall-login-00001',
-    );
-    const { license } = await startTrial(ip, accessToken);
-
-    // The login already registered one device; the trial allows one.
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/v1/licenses/validate',
-      remoteAddress: ip,
-      payload: { licenseKey: license.key, device: { fingerprint: 'fp-countall-other-00001' } },
+    expect((await validate(fpA)).statusCode).toBe(200);
+    const deviceA = await app.db.query.devices.findFirst({
+      where: and(eq(devices.userId, user!.id), eq(devices.fingerprintHash, fpA)),
     });
-    expect(res.statusCode).toBe(409);
-    expect(res.json().code).toBe('DEVICE_LIMIT_REACHED');
+    expect(deviceA?.status).toBe('active');
   });
 
   it('POST /licenses/validate: recognises the device the user logged in from (one row, not two)', async () => {

@@ -461,7 +461,6 @@ export default fp(
         const { findOrRegisterDevice } = await import('../../lib/devices.js');
         const { id } = await findOrRegisterDevice(
           fastify.db,
-          fastify.entitlements,
           request.authUser!.id,
           request.body,
           clientIp(request),

@@ -148,7 +148,6 @@ export default fp(
         const userId = request.authUser!.id;
         const { id: deviceId } = await findOrRegisterDevice(
           fastify.db,
-          fastify.entitlements,
           userId,
           request.body.device,
           request.ip,

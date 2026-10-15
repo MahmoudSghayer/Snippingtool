@@ -16,7 +16,7 @@ import { generateLicenseKey, LICENSE_KEY_RANDOM_BYTES, validateLicenseKeyFormat 
 import { and, desc, eq, isNotNull, isNull, lt } from 'drizzle-orm';
 
 import { fastHash } from '../../lib/crypto.js';
-import { findDeviceByFingerprint, isDeviceLimitExempt } from '../../lib/devices.js';
+import { findDeviceByFingerprint } from '../../lib/devices.js';
 import { AppError, AppErrors } from '../../lib/errors.js';
 import { newId } from '../../lib/ids.js';
 import { checkBans } from '../bans/service.js';
@@ -129,17 +129,6 @@ export async function regenerateForUser(
   });
 }
 
-/** Every active device of the user, whichever path registered it (login,
- * bootstrap or this one), so a licence can't add devices on top of the
- * ones the plan's limit already counts. */
-async function countActiveDevicesForUser(db: Database, userId: string): Promise<number> {
-  const rows = await db.query.devices.findMany({
-    columns: { id: true },
-    where: and(eq(devices.userId, userId), eq(devices.status, 'active'), isNull(devices.deletedAt)),
-  });
-  return rows.length;
-}
-
 export interface ValidateLicenseInput {
   licenseKey: string;
   device: {
@@ -164,8 +153,9 @@ export interface ValidateLicenseResult {
 }
 
 /** `POST /licenses/validate` — the extension's entry point. Enforces format
- * + checksum, revoked/expired status, and `max_devices`, then returns a
- * freshly-signed entitlement blob via the shared `EntitlementProvider`. */
+ * + checksum and revoked/expired status (there is no device limit), then
+ * returns a freshly-signed entitlement blob via the shared
+ * `EntitlementProvider`. */
 export async function validateLicense(
   db: Database,
   entitlementProvider: EntitlementProvider,
@@ -208,17 +198,6 @@ export async function validateLicense(
   // extension's login and its licence validation land on one row.
   const { fingerprint } = input.device;
   const existingDevice = await findDeviceByFingerprint(db, license.userId, fingerprint);
-
-  // Only an already-active device is free: a new one, or a revoked one
-  // coming back, must fit under the limit (admins have none).
-  if (!existingDevice || existingDevice.status !== 'active') {
-    const activeCount = await countActiveDevicesForUser(db, license.userId);
-    if (activeCount >= license.maxDevices && !(await isDeviceLimitExempt(db, license.userId))) {
-      throw new AppError('DEVICE_LIMIT_REACHED', 'Device limit reached for this license.', {
-        maxDevices: license.maxDevices,
-      });
-    }
-  }
 
   let deviceId: string;
   if (existingDevice) {
