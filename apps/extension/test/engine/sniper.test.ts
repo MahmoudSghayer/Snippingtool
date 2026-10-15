@@ -249,6 +249,18 @@ describe('Sniper — search and buy', () => {
     expect(h.sniper.getSearchResults()[0]!.matches.map((m) => m.tradeId)).toEqual(['t-a', 't-b']);
   });
 
+  it("records what EA's answer held, so a search without a match says whether anything was listed", async () => {
+    const h = setup({
+      results: [[], [auction('t-other', 5_000, { resourceId: 999, assetId: 999 }), auction('t-dear', 12_000)]],
+      maxSearches: 2,
+    });
+    h.sniper.start();
+    await h.done();
+    const [second, first] = h.sniper.getSearchResults();
+    expect(first).toMatchObject({ matches: [], listings: 0, cheapest: null });
+    expect(second).toMatchObject({ matches: [], listings: 2, cheapest: 5_000 });
+  });
+
   it('buys a special version of the target player (same base id, different resourceId)', async () => {
     const h = setup({
       results: [[auction('t-special', 9_000, { resourceId: 50_331_748, assetId: 100 })]],

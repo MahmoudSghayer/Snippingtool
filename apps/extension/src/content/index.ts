@@ -95,6 +95,8 @@ const LIVE_TICK_MS = 30000;
 /** How often the engine lease is renewed (background/engine-lease.ts's
  * `ENGINE_LEASE_RENEW_MS`; a lease lasts three minutes). */
 const LEASE_RENEW_MS = 20000;
+/** The Nova AI page's recent-searches log (`RecentSearch[]`, ui/bot-page.ts). */
+const RECENT_SEARCHES_KEY = 'sl.bot.recentSearches.v1';
 
 // ---- background messaging ---------------------------------------------------
 
@@ -735,6 +737,12 @@ async function main(): Promise<void> {
       },
       resolveNames: async (resourceIds) => (await send<Record<string, string | null>>('cards.names', { resourceIds })) ?? {},
       getCatalog: () => send<Catalog | null>('catalog.get'),
+      // Extension storage (Tampermonkey's in the userscript build), which
+      // EA's page cannot read.
+      recentSearches: {
+        load: async () => (await browser.storage.local.get(RECENT_SEARCHES_KEY))[RECENT_SEARCHES_KEY],
+        save: (list) => browser.storage.local.set({ [RECENT_SEARCHES_KEY]: list }),
+      },
     });
     const nav = installNavItem({
       onToggle: () => botPage.toggle(),

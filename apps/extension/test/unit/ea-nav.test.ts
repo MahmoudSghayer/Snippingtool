@@ -119,6 +119,21 @@ describe('Nova AI nav item', () => {
     expect([...document.querySelectorAll('.ut-tab-bar-item.selected')]).toEqual([item('Squads')]);
   });
 
+  it('keeps the page below the visible top bar when a hidden one comes first', () => {
+    const { nav } = fakeEaNav();
+    const visible = document.createElement('header');
+    visible.className = 'ut-navigation-bar-view';
+    document.body.append(visible);
+    const box = (r: ReturnType<typeof rect>) => () => r as DOMRect;
+    // The first `.ut-navigation-bar-view` in the page is laid out empty.
+    document.querySelector<HTMLElement>('.ut-navigation-bar-view')!.getBoundingClientRect = box(rect(0, 0, 0, 0));
+    visible.getBoundingClientRect = box(rect(96, 0, 1344, 72));
+    nav.getBoundingClientRect = box(rect(0, 0, 96, 900));
+    const onBounds = vi.fn();
+    installNavItem({ onToggle: vi.fn(), onEaNavigate: vi.fn(), onBounds });
+    expect(onBounds).toHaveBeenLastCalledWith(expect.objectContaining({ left: 96, top: 72 }));
+  });
+
   it('ignores clicks a page script makes', () => {
     fakeEaNav();
     const onToggle = vi.fn();

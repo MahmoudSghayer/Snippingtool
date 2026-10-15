@@ -59,6 +59,7 @@ import {
 } from '../model/catalog.js';
 
 import { NOVA_LOGO_SVG } from './brand.js';
+import { readWallet } from './ea-wallet.js';
 import { onTrusted } from './trusted-events.js';
 
 import type { Sniper, SniperLogEntry, SniperPhase, SniperSearchResult } from '../engine/sniper.js';
@@ -89,6 +90,12 @@ export interface BotPageDeps {
   /** EA's player/club/league/nation lists, if the web app has loaded them
    * since the extension was installed (model/catalog.ts). */
   getCatalog: () => Promise<Catalog | null>;
+  /** Where the recent-searches log is kept between page loads. Without it
+   * the log lasts until the page reloads. */
+  recentSearches?: {
+    load: () => Promise<unknown>;
+    save: (list: RecentSearch[]) => Promise<void>;
+  };
 }
 
 /** Where EA's content area is, in px from each window edge. */
@@ -181,7 +188,75 @@ export function buildFilterFromForm(form: TargetForm): { filter: FilterCriteria 
   return { filter };
 }
 
-const COIN = `<svg class="coin" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7" fill="#f5c542"/><circle cx="8" cy="8" r="4.6" fill="none" stroke="#b8860b" stroke-width="1.4"/></svg>`;
+// ---- recent searches -------------------------------------------------------
+// Every search the user starts the bot on, newest first, so an earlier one
+// is a click away. A log, not saved filters: nothing to name or manage.
+
+export const MAX_RECENT_SEARCHES = 10;
+
+export interface RecentSearch {
+  /** When the bot was started on it. */
+  at: number;
+  /** How the page described it then (EA's labels may not be loaded later). */
+  name: string;
+  form: TargetForm;
+}
+
+/** The same search, whatever order or time it was run at. */
+function recentKey(form: TargetForm): string {
+  const built = buildFilterFromForm(form);
+  return 'filter' in built ? JSON.stringify(built.filter) : '';
+}
+
+/** `entry` at the top of `list`; an earlier run of the same search moves up
+ * rather than appearing twice. */
+export function addRecentSearch(list: readonly RecentSearch[], entry: RecentSearch): RecentSearch[] {
+  const key = recentKey(entry.form);
+  return [entry, ...list.filter((r) => recentKey(r.form) !== key)].slice(0, MAX_RECENT_SEARCHES);
+}
+
+const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+
+/** The form a stored entry describes, field by field: anything of the wrong
+ * type is left blank, so a damaged entry can never break the page. */
+function formFrom(raw: Record<string, unknown>): TargetForm {
+  const form = blankForm();
+  const num = (v: unknown) => (isNum(v) ? v : null);
+  const str = (v: unknown) => (typeof v === 'string' ? v.slice(0, 100) : null);
+  if (isNum(raw.minOvr)) form.minOvr = Math.min(OVR_MAX, Math.max(OVR_MIN, raw.minOvr));
+  if (isNum(raw.maxOvr)) form.maxOvr = Math.min(OVR_MAX, Math.max(OVR_MIN, raw.maxOvr));
+  const p = raw.player as Record<string, unknown> | null | undefined;
+  if (p && typeof p === 'object' && isNum(p.id) && typeof p.name === 'string')
+    form.player = { id: p.id, name: p.name.slice(0, 100), rating: num(p.rating) };
+  form.playerQuery = str(raw.playerQuery) ?? '';
+  form.quality = str(raw.quality);
+  form.position = str(raw.position);
+  form.rarity = num(raw.rarity);
+  form.chem = num(raw.chem);
+  form.nation = num(raw.nation);
+  form.league = num(raw.league);
+  form.club = num(raw.club);
+  form.minBuy = num(raw.minBuy);
+  form.maxBuy = num(raw.maxBuy);
+  return form;
+}
+
+/** What storage held, as recent searches: entries that are not one, or no
+ * longer describe a search, are dropped. */
+export function parseRecentSearches(raw: unknown): RecentSearch[] {
+  if (!Array.isArray(raw)) return [];
+  const out: RecentSearch[] = [];
+  for (const r of raw.slice(0, MAX_RECENT_SEARCHES) as unknown[]) {
+    if (!r || typeof r !== 'object') continue;
+    const e = r as Record<string, unknown>;
+    if (!isNum(e.at) || typeof e.name !== 'string' || !e.form || typeof e.form !== 'object') continue;
+    const form = formFrom(e.form as Record<string, unknown>);
+    if (recentKey(form)) out.push({ at: e.at, name: e.name.slice(0, 200), form });
+  }
+  return out;
+}
+
+const COIN =`<svg class="coin" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7" fill="#f5c542"/><circle cx="8" cy="8" r="4.6" fill="none" stroke="#b8860b" stroke-width="1.4"/></svg>`;
 const PLAY = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9.5-5.5z" fill="currentColor"/></svg>`;
 const STOP = `<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="10" height="10" rx="1.5" fill="currentColor"/></svg>`;
 
@@ -301,6 +376,11 @@ const CSS = `
   .risk.high, .lvl.high { background: color-mix(in srgb, var(--ea-danger) 18%, transparent); color: var(--ea-danger); }
   .risk.very_high, .lvl.very_high { background: var(--ea-danger); color: var(--ea-danger-ink); }
   .saved { color: var(--ea-success); font-size: 13px; min-width: 60px; text-align: right; }
+  .wallet { display: flex; align-items: center; gap: 8px; }
+  .wallet[hidden], .wallet .bal[hidden] { display: none; }
+  .wallet .bal { display: flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 999px; background: var(--ea-control); font-size: 15px; font-weight: 500; white-space: nowrap; }
+  .wallet .bal .coin { margin-left: 0; }
+  .wallet .fp { padding: 1px 5px; border-radius: 4px; background: var(--ea-accent); color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .3px; }
   .close { border: 0; background: none; font-size: 22px; line-height: 1; color: var(--ea-muted); padding: 4px 8px; border-radius: var(--ea-radius); }
   .close:hover { color: var(--ea-text); background: var(--ea-control); }
   .notice { margin: 12px 20px 0; padding: 10px 14px; border-radius: var(--ea-radius); background: color-mix(in srgb, var(--ea-warning) 14%, transparent); color: var(--ea-warning); }
@@ -441,6 +521,13 @@ const CSS = `
   .price .step:hover { background: var(--ea-control-hover); }
   .search-actions { display: flex; justify-content: flex-end; margin-top: 8px; }
   .search-hint { color: var(--ea-muted); font-size: 12px; margin-top: 10px; }
+  .recent { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; margin-bottom: 6px; border: 1px solid var(--ea-line);
+    border-radius: var(--ea-radius); background: var(--ea-control); color: var(--ea-text); text-align: left; }
+  .recent:hover { background: var(--ea-control-hover); }
+  .recent .rc-main { flex: 1; min-width: 0; }
+  .recent .rc-name { display: block; font-size: 14px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .recent .rc-when { display: block; color: var(--ea-muted); font-size: 12px; }
+  .recent .rc-use { color: var(--ea-accent); font-size: 13px; font-weight: 500; }
 
   /* Start bar: pinned to the bottom of the settings column */
   .runbar { position: sticky; bottom: 0; z-index: 6; padding: 16px; background: var(--ea-panel); border-top: 1px solid var(--ea-line); }
@@ -474,7 +561,7 @@ const CSS = `
   .counter .n { font-size: 15px; font-weight: 500; }
   .c-green { border-left-color: var(--ea-success); } .c-red { border-left-color: var(--ea-danger); } .c-blue { border-left-color: var(--ea-accent); }
   .c-yellow { border-left-color: var(--ea-coin); } .c-orange { border-left-color: var(--ea-warning); }
-  .ring-box { grid-column: span 2; display: flex; align-items: center; justify-content: center; position: relative; min-height: 150px; }
+  .ring-box { grid-column: span 2; display: flex; align-items: center; justify-content: center; position: relative; min-height: 150px; contain: layout paint; }
   .ring-wrap { display: contents; }
   .ring { width: 130px; height: 130px; }
   .ring-label { position: absolute; text-align: center; }
@@ -540,6 +627,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   let refreshQueued = false;
   let catalog: Catalog | null = null;
   let catalogPoll: ReturnType<typeof setInterval> | null = null;
+  let walletPoll: ReturnType<typeof setInterval> | null = null;
 
   /** Takes the latest catalog; re-renders only when it changed, and never
    * while a list is open (the user may be scrolling it). */
@@ -560,12 +648,16 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       <span class="risk" id="risk"></span>
       <span class="spacer"></span>
       <span class="saved" id="saved" aria-live="polite"></span>
+      <span class="wallet" id="wallet" hidden>
+        <span class="bal" id="w-coins" title="Your coins"><span class="amt"></span>${COIN}</span>
+        <span class="bal" id="w-points" title="Your FC Points"><span class="amt"></span><span class="fp" aria-hidden="true">FP</span></span>
+      </span>
       <button class="close" id="close" type="button" aria-label="Close Nova AI">✕</button>
     </div>
     <div class="notice" id="notice" hidden></div>
     <div class="body">
       <div class="settings" id="settings">
-        <div class="settings-scroll"><div id="targets"></div><div id="knobs"></div></div>
+        <div class="settings-scroll"><div id="targets"></div><div id="recent"></div><div id="knobs"></div></div>
         <div class="runbar">
           <button class="start" id="start" type="button">${PLAY}<span>Start</span></button>
           <div class="run-status" id="run-status" aria-live="polite"></div>
@@ -608,8 +700,68 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
 
   function renderSettings(): void {
     renderTargets();
+    renderRecent();
     renderKnobs();
   }
+
+  // ---- recent searches ----------------------------------------------------
+
+  let recent: RecentSearch[] = [];
+  let recentLoaded = false;
+
+  function renderRecent(): void {
+    const wasOpen = root.querySelector('#recent details')?.hasAttribute('open') ?? true;
+    const body = recent.length
+      ? recent
+          .map(
+            (r, i) => `<button type="button" class="recent" data-recent="${i}" title="Search with this again">
+              <span class="rc-main"><span class="rc-name">${esc(r.name)}</span><span class="rc-when">${esc(timeOfDay(r.at))}${
+                new Date(r.at).toDateString() === new Date().toDateString() ? '' : `, ${esc(new Date(r.at).toLocaleDateString())}`
+              }</span></span>
+              <span class="rc-use">Use</span></button>`,
+          )
+          .join('')
+      : '<div class="hint">Every search you start the bot on shows up here. Click one to fill the search with it again.</div>';
+    $('recent').innerHTML = section('Recent searches', body, '', wasOpen);
+  }
+
+  /** Picks up the log kept from earlier page loads, once. */
+  function loadRecent(): void {
+    if (recentLoaded || !deps.recentSearches) return;
+    recentLoaded = true;
+    void deps.recentSearches
+      .load()
+      .catch(() => null)
+      .then((raw) => {
+        // Oldest first, so each search keeps its latest run, and one
+        // started while this loaded stays on top.
+        let merged: RecentSearch[] = [];
+        for (const r of [...parseRecentSearches(raw), ...recent].sort((a, b) => a.at - b.at))
+          merged = addRecentSearch(merged, r);
+        recent = merged;
+        renderRecent();
+      });
+  }
+
+  const copyForm = (f: TargetForm): TargetForm => ({ ...f, player: f.player ? { ...f.player } : null });
+
+  function rememberSearch(name: string): void {
+    recent = addRecentSearch(recent, { at: Date.now(), name, form: copyForm(form) });
+    renderRecent();
+    void deps.recentSearches?.save(recent).catch(() => undefined);
+  }
+
+  onTrusted($('recent'), 'click', (e) => {
+    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-recent]');
+    if (!el) return;
+    const r = recent[Number(el.dataset.recent)];
+    if (!r) return;
+    form = copyForm(r.form);
+    openDd = null;
+    suggestions = [];
+    renderTargets();
+    say('Search filled in', false);
+  });
 
   /** Auto-sell: what happens to a card right after the bot buys it. */
   function autoSellSection(s: BotSettings): string {
@@ -1568,28 +1720,27 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     });
   }
 
-  function renderDash(): void {
-    const sniper = deps.getSniper();
-    const stats = sniper?.getStats();
-    const top = stats?.topSnipes ?? [];
-    wantNames(top.map((t) => t.assetId ?? t.resourceId));
+  /** Replaces an element's markup only when it changed: a refresh comes
+   * several times a search, and rebuilding what did not change is work done
+   * on the same thread that draws the countdown. */
+  const shownHtml = new WeakMap<HTMLElement, string>();
+  function setHtml(el: HTMLElement | null, html: string): void {
+    if (el && shownHtml.get(el) !== html) {
+      shownHtml.set(el, html);
+      el.innerHTML = html;
+    }
+  }
+
+  /** The dash is built once, with the ring in it, and updated in place. */
+  function buildDash(): void {
     $('dash').innerHTML = `
-      <div class="tile profit"><div class="v">${fmt(stats?.profit ?? 0)}${COIN}</div><div class="k">Profit</div></div>
-      <div class="tile searches"><div class="v">${fmt(stats?.searches ?? 0)}</div><div class="k">Searches</div></div>
-      <div class="panelbox top-snipes"><h3>Top snipes</h3>${
-        top.length === 0
-          ? '<div class="empty" style="padding:6px">No snipes yet</div>'
-          : top
-              .map(
-                (t) =>
-                  `<div class="ts-row"><span>${esc(nameOf(t.assetId ?? t.resourceId))}</span><span>${fmt(t.profit ?? 0)}${COIN}</span></div>`,
-              )
-              .join('')
-      }</div>
+      <div class="tile profit"><div class="v" id="d-profit"></div><div class="k">Profit</div></div>
+      <div class="tile searches"><div class="v" id="d-searches"></div><div class="k">Searches</div></div>
+      <div class="panelbox top-snipes"><h3>Top snipes</h3><div id="d-top"></div></div>
       <div class="counters">
-        <div class="counter c-green"><span>Bought</span><span class="n">${fmt(stats?.purchases ?? 0)}</span></div>
-        <div class="counter c-red"><span>Missed</span><span class="n">${fmt(stats?.failures ?? 0)}</span></div>
-        <div class="counter c-blue"><span>Coins spent</span><span class="n">${fmt(stats?.coinsSpent ?? 0)}</span></div>
+        <div class="counter c-green"><span>Bought</span><span class="n" id="d-bought"></span></div>
+        <div class="counter c-red"><span>Missed</span><span class="n" id="d-missed"></span></div>
+        <div class="counter c-blue"><span>Coins spent</span><span class="n" id="d-spent"></span></div>
         <div class="counter c-yellow" title="Transfer list tracking is not available yet"><span>Sold</span><span class="n na">—</span></div>
         <div class="counter c-orange" title="Transfer list tracking is not available yet"><span>Unsold</span><span class="n na">—</span></div>
       </div>
@@ -1600,17 +1751,41 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         <div class="bar"><i style="width:0%"></i></div>
       </div>
     `;
-    // The ring survives the dash being rebuilt: moved, not recreated, so its
-    // countdown never restarts mid-wait.
-    root.getElementById('ringbox')?.append(ring.el);
+    $('ringbox').append(ring.el);
+  }
+
+  function renderDash(): void {
+    if (!root.getElementById('ringbox')) buildDash();
+    const sniper = deps.getSniper();
+    const stats = sniper?.getStats();
+    const top = stats?.topSnipes ?? [];
+    wantNames(top.map((t) => t.assetId ?? t.resourceId));
+    setHtml($('d-profit'), `${fmt(stats?.profit ?? 0)}${COIN}`);
+    setText($('d-searches'), fmt(stats?.searches ?? 0));
+    setHtml(
+      $('d-top'),
+      top.length === 0
+        ? '<div class="empty" style="padding:6px">No snipes yet</div>'
+        : top
+            .map(
+              (t) =>
+                `<div class="ts-row"><span>${esc(nameOf(t.assetId ?? t.resourceId))}</span><span>${fmt(t.profit ?? 0)}${COIN}</span></div>`,
+            )
+            .join(''),
+    );
+    setText($('d-bought'), fmt(stats?.purchases ?? 0));
+    setText($('d-missed'), fmt(stats?.failures ?? 0));
+    setText($('d-spent'), fmt(stats?.coinsSpent ?? 0));
     renderRing();
   }
 
   // ---- the countdown ring -------------------------------------------------
   //
-  // Built once and updated in place every animation frame while the page is
-  // open (`animate`): the arc moves continuously instead of in steps, and
-  // text is written only when it changes.
+  // Built once. Each wait's arc is one animation the browser runs itself
+  // (the Web Animations API), started when the wait starts: smooth at the
+  // display's frame rate, and nothing per frame for a busy page to delay.
+  // Without that API (tests), the arc is set every frame instead. The text
+  // is updated every frame, written only when it changes.
   const RING_R = 56;
   const RING_C = 2 * Math.PI * RING_R;
   const ring = (() => {
@@ -1634,8 +1809,30 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       endsAt: null as number | null,
       total: 0,
       offset: '',
+      anim: null as Animation | null,
     };
   })();
+
+  function setArc(offset: string): void {
+    if (offset !== ring.offset) {
+      ring.offset = offset;
+      ring.arc.setAttribute('stroke-dashoffset', offset);
+    }
+  }
+
+  /** A new wait (or none): the arc starts full and empties as it runs out. */
+  function startArc(remaining: number): void {
+    ring.anim?.cancel();
+    ring.anim = null;
+    if (remaining <= 0) return setArc(RING_C.toFixed(2));
+    setArc('0.00');
+    if (typeof ring.arc.animate !== 'function') return;
+    ring.anim = ring.arc.animate([{ strokeDashoffset: '0px' }, { strokeDashoffset: `${RING_C.toFixed(2)}px` }], {
+      duration: remaining,
+      easing: 'linear',
+      fill: 'forwards',
+    });
+  }
 
   function setText(el: HTMLElement, text: string): void {
     if (el.textContent !== text) el.textContent = text;
@@ -1650,12 +1847,11 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     if (endsAt !== ring.endsAt) {
       ring.endsAt = endsAt;
       ring.total = remaining;
+      startArc(remaining);
     }
-    const fraction = remaining > 0 && ring.total > 0 ? remaining / ring.total : 0;
-    const offset = (RING_C * (1 - fraction)).toFixed(2);
-    if (offset !== ring.offset) {
-      ring.offset = offset;
-      ring.arc.setAttribute('stroke-dashoffset', offset);
+    if (!ring.anim) {
+      const fraction = remaining > 0 && ring.total > 0 ? remaining / ring.total : 0;
+      setArc((RING_C * (1 - fraction)).toFixed(2));
     }
     const secs = remaining / 1000;
     setText(ring.time, remaining > 0 ? (secs >= 60 ? clock(remaining) : `${Math.ceil(secs)}s`) : '0s');
@@ -1704,8 +1900,15 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
 
   function resultHtml(r: SniperSearchResult): string {
     const when = timeOfDay(r.at);
-    if (r.matches.length === 0)
-      return `<div class="res"><span class="when">${when}</span>No matches</div>`;
+    if (r.matches.length === 0) {
+      const seen =
+        r.listings == null
+          ? ''
+          : r.listings === 0
+            ? ', nothing listed at your price'
+            : `, ${r.listings} listed${r.cheapest != null ? `, cheapest ${fmt(r.cheapest)}` : ''}`;
+      return `<div class="res"><span class="when">${when}</span>No matches${esc(seen)}</div>`;
+    }
     const rows = r.matches
       .map(
         (m) =>
@@ -1725,14 +1928,16 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       ...log.map((e) => e.assetId ?? e.resourceId),
       ...results.flatMap((r) => r.matches.map((m) => m.assetId)),
     ]);
-    $('log').innerHTML =
+    setHtml(
+      $('log'),
       log.length === 0
         ? '<div class="empty">Purchases and events appear here once Nova AI is running.</div>'
-        : log.map(logHtml).join('');
-    $('results').innerHTML =
-      results.length === 0
-        ? '<div class="empty">Each search appears here.</div>'
-        : results.map(resultHtml).join('');
+        : log.map(logHtml).join(''),
+    );
+    setHtml(
+      $('results'),
+      results.length === 0 ? '<div class="empty">Each search appears here.</div>' : results.map(resultHtml).join(''),
+    );
   }
 
   function renderTop(): void {
@@ -1752,8 +1957,27 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     notice.textContent = deps.getUnavailableReason() ?? '';
   }
 
+  /** The trader's coins and FC Points, as EA's top bar shows them
+   * (ui/ea-wallet.ts): the page covers that bar. Each shows once it can be
+   * read. */
+  function renderWallet(): void {
+    const w = readWallet(doc);
+    for (const [id, value] of [
+      ['w-coins', w.coins],
+      ['w-points', w.points],
+    ] as const) {
+      const el = $(id);
+      el.hidden = value == null;
+      const text = value == null ? '' : fmt(value);
+      const amt = el.querySelector('.amt')!;
+      if (amt.textContent !== text) amt.textContent = text;
+    }
+    $('wallet').hidden = w.coins == null && w.points == null;
+  }
+
   function refreshLive(): void {
     renderTop();
+    renderWallet();
     renderDash();
     renderFeeds();
   }
@@ -1784,6 +2008,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       deps.setLiveSearch(r.search);
       sniper.setSettings(settings);
       sniper.start();
+      if (sniper.isRunning()) rememberSearch(r.search.name);
     }
     refreshLive();
   });
@@ -1813,9 +2038,12 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         if (!page.hidden) refreshLive();
       });
       loadCatalog();
+      loadRecent();
       // EA's lists arrive in two steps (files, then the web app's own lists
       // once it has started); pick each one up while the page is open.
       catalogPoll = setInterval(loadCatalog, 3_000);
+      // EA updates its top bar after every buy, sale and pack: follow it.
+      walletPoll = setInterval(renderWallet, 1_000);
       ringFrame = requestAnimationFrame(animate);
       openListeners.forEach((cb) => cb(true));
     },
@@ -1826,6 +2054,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       if (ringFrame != null) cancelAnimationFrame(ringFrame);
       if (catalogPoll) clearInterval(catalogPoll);
       catalogPoll = null;
+      if (walletPoll) clearInterval(walletPoll);
+      walletPoll = null;
       ringFrame = null;
       openListeners.forEach((cb) => cb(false));
     },

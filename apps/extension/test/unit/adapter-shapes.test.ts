@@ -153,6 +153,30 @@ describe('observable shape: search', () => {
     expect(posted.filter((m) => m.kind === 'auctions')).toHaveLength(1);
   });
 
+  it("clears the web app's page cache before every search, as the app does, so a repeat is a fresh search", async () => {
+    const svc = observableServices();
+    install(svc.services);
+    for (const n of [1, 2]) {
+      expect((await act({ action: 'search', filter: { resourceId: 7, maxPrice: 10_000 } })).data.ok).toBe(true);
+      expect(svc.clearTransferMarketCache).toHaveBeenCalledTimes(n);
+      expect(svc.clearTransferMarketCache.mock.invocationCallOrder[n - 1]!).toBeLessThan(
+        svc.searchTransferMarket.mock.invocationCallOrder[n - 1]!,
+      );
+    }
+  });
+
+  it('still searches when the cache clear is missing or throws', async () => {
+    const svc = observableServices();
+    svc.clearTransferMarketCache.mockImplementation(() => {
+      throw new Error('boom');
+    });
+    install(svc.services);
+    expect((await act({ action: 'search', filter: { maxPrice: 10_000 } })).data.ok).toBe(true);
+    delete (svc.services.Item as Record<string, unknown>).clearTransferMarketCache;
+    expect((await act({ action: 'search', filter: { maxPrice: 10_000 } })).data.ok).toBe(true);
+    expect(svc.searchTransferMarket).toHaveBeenCalledTimes(2);
+  });
+
   it('refuses a filter field its criteria builder does not map, instead of searching wider', async () => {
     const svc = observableServices();
     install(svc.services);
