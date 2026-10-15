@@ -1,15 +1,12 @@
-// Device registration + plan device-limit enforcement, shared by
-// modules/auth (login/mfa-verify) and modules/devices (list/rename/revoke).
+// Device registration, shared by modules/auth (login/mfa-verify),
+// modules/extension (bootstrap) and modules/licenses (validate).
 
-import { devices, users, type Database } from '@sl/db';
+import { devices, type Database } from '@sl/db';
 import { deviceFingerprintSchema, type DeviceFingerprint } from '@sl/shared';
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 
 import { fastHash } from './crypto.js';
-import { AppErrors } from './errors.js';
 import { newId } from './ids.js';
-
-import type { EntitlementProvider } from './entitlements.js';
 
 export interface RegisteredDevice {
   id: string;
@@ -56,30 +53,12 @@ export async function findDeviceByFingerprint(
 }
 
 /**
- * Admin (staff) accounts sign in from any number of devices: the plan's
- * device limit guards customers' passes against sharing. Shared with
- * licenses/service.ts's licence-key check.
- */
-export async function isDeviceLimitExempt(db: Database, userId: string): Promise<boolean> {
-  const row = await db.query.users.findFirst({
-    where: eq(users.id, userId),
-    columns: { role: true },
-  });
-  return row?.role === 'admin';
-}
-
-/**
  * Finds the device matching (userId, fingerprintHash), reactivating a
- * revoked one or creating a new row as needed, enforcing the plan's device
- * limit (`DEVICE_LIMIT_REACHED`, with the current active-device list so the
- * client can offer "revoke one of these") whenever a *new* device would be
- * added on top of an already-full set. Logging back in from an
- * already-active device never counts against the limit, and admins have
- * none (`isDeviceLimitExempt`).
+ * revoked one or creating a new row as needed. There is no device limit:
+ * an account signs in from as many devices as it likes.
  */
 export async function findOrRegisterDevice(
   db: Database,
-  entitlements: EntitlementProvider,
   userId: string,
   device: DeviceFingerprint,
   ip: string | null,
@@ -101,23 +80,6 @@ export async function findOrRegisterDevice(
       })
       .where(eq(devices.id, existing.id));
     return { id: existing.id, isNew: false };
-  }
-
-  const { deviceLimit } = await entitlements.getEntitlements(userId);
-  const activeDevices = await db.query.devices.findMany({
-    where: and(eq(devices.userId, userId), isNull(devices.deletedAt), eq(devices.status, 'active')),
-  });
-
-  if (activeDevices.length >= deviceLimit && !(await isDeviceLimitExempt(db, userId))) {
-    throw AppErrors.deviceLimitReached(
-      activeDevices.map((d) => ({
-        id: d.id,
-        name: d.name,
-        browser: d.browser,
-        os: d.os,
-        lastSeenAt: d.lastSeenAt.toISOString(),
-      })),
-    );
   }
 
   if (existing) {

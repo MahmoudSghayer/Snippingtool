@@ -434,29 +434,6 @@ describe('auth module', () => {
       expect(decodeJwt(body.accessToken as string).role).toBe('admin');
     });
 
-    it('has no device limit for an admin', async () => {
-      const ip = nextIp();
-      const email = 'many-devices-admin@example.com';
-      const adminUserId = await registerAndVerify(email, ip);
-      await app.db.update(users).set({ role: 'admin' }).where(eq(users.id, adminUserId));
-
-      // No subscription: a customer would be held to the trial's 1 device.
-      for (const n of [1, 2, 3]) {
-        const res = await offApp.inject({
-          method: 'POST',
-          url: '/api/v1/auth/login',
-          remoteAddress: ip,
-          payload: {
-            email,
-            password: 'correcthorsebattery12',
-            device: { ...device, fingerprint: `admin-device-fingerprint-00000000${n}` },
-          },
-        });
-        expect(res.statusCode).toBe(200);
-        expect(res.json().status).toBe('ok');
-      }
-    });
-
     it('does not ask a code of someone who had turned 2FA on', async () => {
       const ip = nextIp();
       const email = 'had-2fa@example.com';
@@ -474,33 +451,26 @@ describe('auth module', () => {
     });
   });
 
-  it('enforces the device limit and reports the device list', async () => {
+  it('has no device limit: one account signs in from any number of devices', async () => {
     const ip = nextIp();
     const email = 'devicelimit@example.com';
     await registerAndVerify(email, ip);
 
-    // trial (no subscription) device limit is 1 — a second distinct device
-    // should be rejected with DEVICE_LIMIT_REACHED.
-    const first = await app.inject({
-      method: 'POST',
-      url: '/api/v1/auth/login',
-      remoteAddress: ip,
-      payload: { email, password: 'correcthorsebattery12', device },
-    });
-    expect(first.statusCode).toBe(200);
-
-    const secondDevice = { ...device, fingerprint: 'different-fingerprint-000000002' };
-    const second = await app.inject({
-      method: 'POST',
-      url: '/api/v1/auth/login',
-      remoteAddress: ip,
-      payload: { email, password: 'correcthorsebattery12', device: secondDevice },
-    });
-    expect(second.statusCode).toBe(409);
-    const body = second.json();
-    expect(body.code).toBe('DEVICE_LIMIT_REACHED');
-    expect(Array.isArray(body.details.devices)).toBe(true);
-    expect(body.details.devices.length).toBeGreaterThan(0);
+    // No subscription: this used to be the trial's 1-device limit.
+    for (const n of [1, 2, 3]) {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/login',
+        remoteAddress: ip,
+        payload: {
+          email,
+          password: 'correcthorsebattery12',
+          device: { ...device, fingerprint: `any-device-fingerprint-00000000${n}` },
+        },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().status).toBe('ok');
+    }
   });
 
   it('password reset revokes all sessions', async () => {

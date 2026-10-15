@@ -11,7 +11,7 @@
 // verify it offline during the grace window (docs/04-auth.md, "offline
 // grace").
 
-import { devices, licenses, subscriptions, plans, type Database } from '@sl/db';
+import { devices, licenses, subscriptions, plans, users, type Database } from '@sl/db';
 import {
   type FeatureKey,
   PLAN_FEATURES,
@@ -68,6 +68,17 @@ export class DefaultEntitlementProvider implements EntitlementProvider {
   ) {}
 
   async getEntitlements(userId: string): Promise<EntitlementSnapshot> {
+    const snapshot = await this.fromSubscription(userId);
+    const user = await this.db.query.users.findFirst({
+      where: eq(users.id, userId),
+      columns: { role: true },
+    });
+    // Admins (staff) get every feature, Nova AI included, pass or no pass.
+    if (user?.role === 'admin') return { ...snapshot, features: [...PLAN_FEATURES.lifetime] };
+    return snapshot;
+  }
+
+  private async fromSubscription(userId: string): Promise<EntitlementSnapshot> {
     const sub = await this.db.query.subscriptions.findFirst({
       where: and(eq(subscriptions.userId, userId), isNull(subscriptions.deletedAt)),
       orderBy: [desc(subscriptions.createdAt)],

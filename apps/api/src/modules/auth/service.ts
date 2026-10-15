@@ -201,13 +201,7 @@ export async function completeLogin(
   ip: string | null,
   userAgent: string | null,
 ): Promise<Extract<LoginResponse, { status: 'ok' }>> {
-  const { id: deviceId } = await findOrRegisterDevice(
-    ctx.db,
-    ctx.entitlements,
-    user.id,
-    device,
-    ip,
-  );
+  const { id: deviceId } = await findOrRegisterDevice(ctx.db, user.id, device, ip);
   const entitlements = await ctx.entitlements.getEntitlements(user.id);
 
   const familyId = generateFamilyId();
