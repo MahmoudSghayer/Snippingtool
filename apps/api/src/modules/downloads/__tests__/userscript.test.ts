@@ -39,7 +39,7 @@ const API="${P.apiOrigin}";const SITE="${P.dashboardOrigin}";const KEY="${P.lice
 
 describe('userscript token', () => {
   it('round-trips, and rejects a tampered token or another secret', () => {
-    const secret = 'a-test-cookie-secret-of-32-bytes!!';
+    const secret = 'a-test-cookie-secret-of-32-bytes!!'; // nosemgrep: no-hardcoded-secret-const
     const userId = newId();
     const token = signUserscriptToken(userId, secret);
     expect(verifyUserscriptToken(token, secret)).toBe(userId);

@@ -22,9 +22,23 @@ import { useAuthStore } from '@/stores/auth.js';
 
 export const GETTING_STARTED_HIDDEN_KEY = 'sl.account.gettingStarted.hidden';
 
-/** The API's "your plan doesn't include this" code; filters are a paid
- * feature, so a customer without a pass may get it from GET /filters. */
+/** The API's "your plan doesn't include this" code; filters and the trade
+ * ledger are paid features, so a customer without a pass gets it from
+ * GET /filters and GET /trades. */
 const FEATURE_NOT_IN_PLAN = 'FEATURE_NOT_IN_PLAN';
+
+function notInPlan(query: { isError: boolean; error: unknown }): boolean {
+  return query.isError && isApiErrorBody(query.error) && query.error.code === FEATURE_NOT_IN_PLAN;
+}
+
+function IncludedWithAPass() {
+  return (
+    <span className="flex flex-wrap items-center gap-3 text-sm text-ink-2">
+      Included with a pass
+      <AnchorAction href="#buy">See passes</AnchorAction>
+    </span>
+  );
+}
 
 function readHidden(): boolean {
   try {
@@ -43,10 +57,7 @@ function writeHidden(): void {
 }
 
 type StepState =
-  | { kind: 'loading' }
-  | { kind: 'error'; retry: () => void }
-  | { kind: 'done' }
-  | { kind: 'todo' };
+  { kind: 'loading' } | { kind: 'error'; retry: () => void } | { kind: 'done' } | { kind: 'todo' };
 
 interface StepQuery<T> {
   isPending: boolean;
@@ -167,10 +178,8 @@ export function GettingStarted() {
   const filtersQuery = useSavedFilters();
   const tradesQuery = useHasTrades();
 
-  const filtersNotInPlan =
-    filtersQuery.isError &&
-    isApiErrorBody(filtersQuery.error) &&
-    filtersQuery.error.code === FEATURE_NOT_IN_PLAN;
+  const filtersNotInPlan = notInPlan(filtersQuery);
+  const tradesNotInPlan = notInPlan(tradesQuery);
 
   const email: StepState = emailVerifiedAt ? { kind: 'done' } : { kind: 'todo' };
   const pass = stateFrom(subscriptionQuery, (d) => describePass(d.subscription ?? null).live);
@@ -178,7 +187,7 @@ export function GettingStarted() {
   const filters: StepState = filtersNotInPlan
     ? { kind: 'todo' }
     : stateFrom(filtersQuery, (d) => d.length > 0);
-  const trade = stateFrom(tradesQuery, (d) => d);
+  const trade: StepState = tradesNotInPlan ? { kind: 'todo' } : stateFrom(tradesQuery, (d) => d);
 
   const states = [email, pass, device, filters, trade];
   const doneCount = states.filter((s) => s.kind === 'done').length;
@@ -237,14 +246,7 @@ export function GettingStarted() {
               title="Add a search filter"
               state={filters}
               action={<StarterFilters />}
-              note={
-                filtersNotInPlan ? (
-                  <span className="flex flex-wrap items-center gap-3 text-sm text-ink-2">
-                    Included with a pass
-                    <AnchorAction href="#buy">See passes</AnchorAction>
-                  </span>
-                ) : undefined
-              }
+              note={filtersNotInPlan ? <IncludedWithAPass /> : undefined}
             />
             <Step
               title="Record your first trade"
@@ -255,6 +257,7 @@ export function GettingStarted() {
                   <AnchorAction href="#extension">Open the extension guide</AnchorAction>
                 </span>
               }
+              note={tradesNotInPlan ? <IncludedWithAPass /> : undefined}
             />
           </ol>
         </CardContent>
