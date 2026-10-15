@@ -31,7 +31,9 @@ test('admin: login, TOTP bootstrap-or-verify, overview, user search, edit, audit
     await expect(page.getByText('Online users')).toBeVisible();
   });
 
-  const newTimezone = `Etc/e2e-${Date.now()}`.slice(0, 30);
+  // A real IANA zone (the API validates it), and never the one already set:
+  // the audit diff only shows fields that changed.
+  let newTimezone = '';
 
   await test.step('search users and edit a profile', async () => {
     await page.goto('/admin/users');
@@ -44,6 +46,10 @@ test('admin: login, TOTP bootstrap-or-verify, overview, user search, edit, audit
 
     const timezoneInput = page.getByLabel('Timezone');
     await expect(timezoneInput).toBeVisible();
+    newTimezone =
+      (await timezoneInput.inputValue()) === 'Pacific/Chatham'
+        ? 'Pacific/Kiritimati'
+        : 'Pacific/Chatham';
     await timezoneInput.fill(newTimezone);
     await page.getByRole('button', { name: 'Save' }).click();
     await expect(page.getByText('Profile updated')).toBeVisible({ timeout: 10_000 });
