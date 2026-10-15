@@ -67,6 +67,8 @@ function setup(opts: {
   /** The adapter's whole answer to a buy, when a test needs more than ok. */
   buyResult?: (tradeId: string) => ActionOutcome;
   sellPrice?: number | null;
+  /** Replaces the fixed `sellPrice` lookup. */
+  estimateSellPrice?: (resourceId: number) => Promise<number | null>;
   /** Stop the bot after this many searches (at the wait that follows). */
   maxSearches?: number;
   /** Today's active time as an earlier page saved it. */
@@ -146,7 +148,8 @@ function setup(opts: {
     },
     getFilters: () =>
       opts.filters ?? [{ id: 'f1', name: 'Target', filter: { resourceId: 100, maxPrice: 10_000 } }],
-    estimateSellPrice: async () => (opts.sellPrice === undefined ? 20_000 : opts.sellPrice),
+    estimateSellPrice:
+      opts.estimateSellPrice ?? (async () => (opts.sellPrice === undefined ? 20_000 : opts.sellPrice)),
     loadUsage: async () => opts.usage ?? null,
     saveUsage: (u) => void savedUsage.push(u),
     ...(opts.budgetStore
@@ -269,6 +272,55 @@ describe('Sniper — search and buy', () => {
     unknown.sniper.start();
     await unknown.done();
     expect(unknown.buys).toEqual(['t-a']);
+  });
+
+  it('says why it skipped a listing, once however many searches find it', async () => {
+    const h = setup({
+      settings: { thresholds: { ...DEFAULT_BOT_SETTINGS.thresholds, minProfit: 15_000 } },
+      results: [[auction('t-a', 8_000)]],
+      maxSearches: 3,
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.buys).toEqual([]);
+    const skips = h.sniper.getLog().filter((e) => e.message.startsWith('skipped'));
+    expect(skips).toHaveLength(1);
+    // 20,000 * 0.95 - 8,000 = 11,000, under the 15,000 minimum.
+    expect(skips[0]!.message).toBe(
+      'skipped at 8,000 coins: estimated profit 11,000 coins is under your minimum profit (15,000 coins)',
+    );
+  });
+
+  it('with no minimum profit, buys before the price estimate comes back', async () => {
+    let release!: (v: number | null) => void;
+    const lookup = new Promise<number | null>((r) => (release = r));
+    const h = setup({
+      settings: { thresholds: { ...DEFAULT_BOT_SETTINGS.thresholds, minProfit: 0 } },
+      results: [[auction('t-a', 8_000)]],
+      estimateSellPrice: () => lookup,
+      maxSearches: 1,
+    });
+    h.sniper.start();
+    await vi.waitFor(() => expect(h.buys).toEqual(['t-a']));
+    release(20_000);
+    await h.done();
+    expect(h.sniper.getLog().find((e) => e.kind === 'bought')?.sellPrice).toBe(20_000);
+  });
+
+  it('looks a card\'s price up once for the searches that keep finding it', async () => {
+    const lookups: number[] = [];
+    const h = setup({
+      results: [[auction('t-a', 8_000)], [auction('t-b', 8_500)], [auction('t-c', 9_000)]],
+      estimateSellPrice: async (id) => {
+        lookups.push(id);
+        return 20_000;
+      },
+      maxSearches: 3,
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.buys).toEqual(['t-a', 't-b', 't-c']);
+    expect(lookups).toEqual([100]);
   });
 
   it('counts failed buys and keeps going', async () => {

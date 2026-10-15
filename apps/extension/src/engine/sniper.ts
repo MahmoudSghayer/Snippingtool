@@ -73,6 +73,20 @@ const TOP_SNIPES = 5;
 const MAX_SEARCH_FAILURES_IN_A_ROW = 5;
 /** Shortest wait when the governor refuses a search, so a denied loop never spins. */
 const MIN_BLOCKED_WAIT_MS = 5_000;
+/** How long a card's sell-price estimate is reused (`Sniper.sellPrice`). */
+const PRICE_TTL_MS = 120_000;
+const MAX_CACHED_PRICES = 500;
+const MAX_SKIPS_REMEMBERED = 500;
+
+/** A listing's estimated sell price and profit after EA's tax (null: unknown). */
+interface Estimate {
+  sellPrice: number | null;
+  profit: number | null;
+}
+
+function coins(n: number): string {
+  return `${n.toLocaleString('en-US')} coins`;
+}
 const ONE_HOUR_MS = 3_600_000;
 /** How often the day's active time is written back while running. */
 const USAGE_SAVE_EVERY_MS = 30_000;
@@ -260,6 +274,10 @@ export class Sniper {
   /** Sliding one-hour windows of search and buy times. */
   private searchTimes: number[] = [];
   private buyTimes: number[] = [];
+  /** Sell-price estimates by resourceId (`sellPrice`). */
+  private prices = new Map<number, { at: number; value: Promise<number | null> }>();
+  /** Listings already logged as skipped (`logSkip`). */
+  private skipped = new Set<string>();
   /** Today's active (non-rest) time, and when the current active stretch
    * began (null while resting or stopped). */
   private usage: BotDailyUsage = { day: '', activeMs: 0 };
@@ -532,6 +550,10 @@ export class Sniper {
       });
       const searchFilter: FilterCriteria =
         cap == null ? target.filter : { ...target.filter, maxPrice: cap };
+      // Warm the estimate for the card this filter targets while EA
+      // searches, so a match does not wait for it.
+      if (s().thresholds.minProfit > 0 && target.filter.resourceId != null)
+        void this.sellPrice(target.filter.resourceId);
       this.searchTimes.push(this.now());
       this.persistBudget();
       const outcome = await this.deps.adapter.search(searchFilter);
@@ -577,6 +599,10 @@ export class Sniper {
   /** Returns true when the bot stopped while buying. */
   private async buyMatches(matches: SniperMatch[], signal: AbortSignal): Promise<boolean> {
     const t = this.settings.thresholds;
+    // Every listing's estimate starts now, side by side, before any buy: a
+    // buy then waits for one lookup at most, and none waits for the last
+    // buy's.
+    for (const m of matches) void this.sellPrice(m.resourceId);
     for (const m of matches) {
       if (signal.aborted) return true;
 
@@ -585,14 +611,26 @@ export class Sniper {
           this.stop('coin_budget');
           return true;
         }
+        this.logSkip(m, 'it would go over your session coin budget');
         continue; // a cheaper listing may still fit
       }
 
-      const sellPrice = await this.deps.estimateSellPrice(m.resourceId);
-      const profit = sellPrice == null ? null : Math.floor(sellPrice * (1 - EA_TAX)) - m.buyNow;
-      // Unknown profit is allowed: the user capped the price, and the ledger
-      // may simply not have seen this card sell yet.
-      if (t.minProfit > 0 && profit != null && profit < t.minProfit) continue;
+      // Only the minimum-profit check needs the estimate before buying.
+      // Without one the buy goes first (a listing this cheap is gone in
+      // moments) and the estimate is looked up afterwards, for the log.
+      let estimate: Estimate | null = null;
+      if (t.minProfit > 0) {
+        estimate = await this.estimate(m);
+        // Unknown profit is allowed: the user capped the price, and the
+        // ledger may simply not have seen this card sell yet.
+        if (estimate.profit != null && estimate.profit < t.minProfit) {
+          this.logSkip(
+            m,
+            `estimated profit ${coins(estimate.profit)} is under your minimum profit (${coins(t.minProfit)})`,
+          );
+          continue;
+        }
+      }
 
       if (this.applyKillSwitch() || this.applyEntitlement() || this.applyExclusive()) return true;
       if (this.windowWait(this.buyTimes, this.settings.safety.maxBuysPerHour) > 0) {
@@ -659,8 +697,10 @@ export class Sniper {
           latencyMs: result.latencyMs,
           errorCode: ACT_ERROR.timeoutUnknown,
         });
-        void result.late?.then((late) => {
-          if (late.ok) this.recordBought(m, sellPrice, profit, late.latencyMs);
+        void result.late?.then(async (late) => {
+          if (!late.ok) return;
+          const { sellPrice, profit } = estimate ?? (await this.estimate(m));
+          this.recordBought(m, sellPrice, profit, late.latencyMs);
         });
         if (signal.aborted) return true;
         this.deps.onChange();
@@ -668,6 +708,7 @@ export class Sniper {
       }
       if (signal.aborted && !result.ok) return true;
       if (result.ok) {
+        const { sellPrice, profit } = estimate ?? (await this.estimate(m));
         this.recordBought(m, sellPrice, profit, result.latencyMs);
         if (t.stopAfterPurchases > 0 && this.stats.purchases >= t.stopAfterPurchases) {
           this.stop('purchase_limit');
@@ -710,6 +751,40 @@ export class Sniper {
   }
 
   // ---- helpers --------------------------------------------------------------
+
+  /** The sell-price estimate for a card, shared by every listing of it for
+   * PRICE_TTL_MS: a filter keeps finding the same card, and each lookup is a
+   * round trip to the service worker that a buy would otherwise wait on. */
+  private sellPrice(resourceId: number): Promise<number | null> {
+    const now = this.now();
+    const hit = this.prices.get(resourceId);
+    if (hit && now - hit.at < PRICE_TTL_MS) return hit.value;
+    const value = this.deps.estimateSellPrice(resourceId).catch(() => null);
+    this.prices.set(resourceId, { at: now, value });
+    if (this.prices.size > MAX_CACHED_PRICES) this.prices.delete(this.prices.keys().next().value!);
+    return value;
+  }
+
+  private async estimate(m: SniperMatch): Promise<Estimate> {
+    const sellPrice = await this.sellPrice(m.resourceId);
+    return { sellPrice, profit: sellPrice == null ? null : Math.floor(sellPrice * (1 - EA_TAX)) - m.buyNow };
+  }
+
+  /** Why a match was not bought, once per listing: the same one comes back
+   * on every search until it sells or expires. */
+  private logSkip(m: SniperMatch, why: string): void {
+    if (this.skipped.has(m.tradeId)) return;
+    this.skipped.add(m.tradeId);
+    if (this.skipped.size > MAX_SKIPS_REMEMBERED) this.skipped.delete(this.skipped.values().next().value!);
+    this.addLog({
+      kind: 'blocked',
+      resourceId: m.resourceId,
+      assetId: m.assetId,
+      rating: m.rating,
+      price: m.buyNow,
+      message: `skipped at ${coins(m.buyNow)}: ${why}`,
+    });
+  }
 
   private recordBought(m: SniperMatch, sellPrice: number | null, profit: number | null, latencyMs: number): void {
     this.stats.purchases++;
