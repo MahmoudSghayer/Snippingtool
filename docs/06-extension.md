@@ -356,6 +356,10 @@ keep these sites active" list.
 **Auto-sell** (off by default; `BotSettings.autoSell`). After each buy the
 bot lists the card on the transfer market for an hour: at the market price
 moved by the user's EA price steps (−20 to +20), or at a fixed price. The
+fixed price is typed in the Search card, right under the max buy price
+(empty means the market price), with a live line under it: what the sale
+leaves after EA's 5% tax and the profit per card at the max buy price
+(`saleProfit`, i.e. `computeTradeProfit` from `@sl/shared`). The
 market price is FUTBIN's lowest buy-now for the card on the chosen platform
 (`price.futbin`, `background/futbin.ts`; `www.futbin.com` is in the
 `ledger-auto` host permissions and the userscript's `@connect`), else the
