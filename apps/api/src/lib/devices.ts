@@ -1,7 +1,7 @@
 // Device registration + plan device-limit enforcement, shared by
 // modules/auth (login/mfa-verify) and modules/devices (list/rename/revoke).
 
-import { devices, type Database } from '@sl/db';
+import { devices, users, type Database } from '@sl/db';
 import { deviceFingerprintSchema, type DeviceFingerprint } from '@sl/shared';
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 
@@ -56,12 +56,26 @@ export async function findDeviceByFingerprint(
 }
 
 /**
+ * Admin (staff) accounts sign in from any number of devices: the plan's
+ * device limit guards customers' passes against sharing. Shared with
+ * licenses/service.ts's licence-key check.
+ */
+export async function isDeviceLimitExempt(db: Database, userId: string): Promise<boolean> {
+  const row = await db.query.users.findFirst({
+    where: eq(users.id, userId),
+    columns: { role: true },
+  });
+  return row?.role === 'admin';
+}
+
+/**
  * Finds the device matching (userId, fingerprintHash), reactivating a
  * revoked one or creating a new row as needed, enforcing the plan's device
  * limit (`DEVICE_LIMIT_REACHED`, with the current active-device list so the
  * client can offer "revoke one of these") whenever a *new* device would be
  * added on top of an already-full set. Logging back in from an
- * already-active device never counts against the limit.
+ * already-active device never counts against the limit, and admins have
+ * none (`isDeviceLimitExempt`).
  */
 export async function findOrRegisterDevice(
   db: Database,
@@ -94,7 +108,7 @@ export async function findOrRegisterDevice(
     where: and(eq(devices.userId, userId), isNull(devices.deletedAt), eq(devices.status, 'active')),
   });
 
-  if (activeDevices.length >= deviceLimit) {
+  if (activeDevices.length >= deviceLimit && !(await isDeviceLimitExempt(db, userId))) {
     throw AppErrors.deviceLimitReached(
       activeDevices.map((d) => ({
         id: d.id,
