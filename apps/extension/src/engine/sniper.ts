@@ -76,6 +76,39 @@ const MAX_SEARCH_RESULTS = 50;
 const TOP_SNIPES = 5;
 /** Consecutive failed searches before the bot gives up. */
 const MAX_SEARCH_FAILURES_IN_A_ROW = 5;
+/** How far up a search's price range its min buy-now price may step to
+ * keep the search fresh (`searchMinBuy`), as a share of the range. */
+const FRESH_SEARCH_SHARE = 0.4;
+/** The same, in coins, for a search with no max price. */
+const FRESH_SEARCH_SPAN_UNCAPPED = 1_000;
+
+/**
+ * The min buy-now price for a target's `round`th search (0 first).
+ *
+ * EA answers a search it was just asked, word for word, from its cache
+ * (traders sniping by hand and community autobuyers both work around
+ * this): a bot sending the same search every few seconds kept getting the
+ * same results back, and saw a new listing only after other buyers had
+ * had it. So each search steps the min buy-now price one notch up EA's
+ * price grid from the bottom of the search's range (the filter's own min,
+ * or none), starting over once it would pass 40% of the way to the max
+ * price: every search in a cycle asks EA something it was not just asked.
+ * Only listings far under the max price are left out, and only by some of
+ * the searches in each cycle.
+ */
+export function searchMinBuy(round: number, minPrice: number | undefined, cap: number | null): number | undefined {
+  const floor = minPrice ?? 0;
+  const top = cap != null ? floor + (cap - floor) * FRESH_SEARCH_SHARE : floor + FRESH_SEARCH_SPAN_UNCAPPED;
+  const prices: (number | undefined)[] = [minPrice];
+  let p = minPrice != null ? stepPrice(minPrice, 1) : MIN_START_PRICE;
+  while (p <= top) {
+    prices.push(p);
+    const next = stepPrice(p, 1);
+    if (next <= p) break;
+    p = next;
+  }
+  return prices[round % prices.length];
+}
 /** Shortest wait when the governor refuses a search, so a denied loop never spins. */
 const MIN_BLOCKED_WAIT_MS = 5_000;
 /** How long a card's sell-price estimate is reused (`Sniper.sellPrice`). */
@@ -320,6 +353,9 @@ export class Sniper {
   private readonly results: SniperSearchResult[] = [];
   private nextId = 1;
   private filterIndex = 0;
+  /** Searches sent for each filter (by id) since the bot started, for
+   * `searchMinBuy`. */
+  private readonly searchRounds = new Map<string, number>();
 
   private readonly now: () => number;
   private readonly random: () => number;
@@ -446,6 +482,7 @@ export class Sniper {
     this.freshRatioIfIdle();
     this.stats = { ...emptyStats(), startedAt: this.now() };
     this.filterIndex = 0;
+    this.searchRounds.clear();
     this.addLog({ kind: 'info', message: 'Bot started' });
     const timing = this.deps.timingMode?.();
     if (timing === 'worker') this.addLog({ kind: 'info', message: 'Background searching is on: the bot keeps its pace in another tab' });
@@ -620,11 +657,15 @@ export class Sniper {
     // searches, so a match does not wait for it.
     if (this.settings.thresholds.minProfit > 0 && target.filter.resourceId != null)
       void this.sellPrice(target.filter.resourceId);
+    const round = this.searchRounds.get(target.id) ?? 0;
+    this.searchRounds.set(target.id, round + 1);
+    const criteria: FilterCriteria = { ...target.filter };
+    if (cap != null) criteria.maxPrice = cap;
+    const minBuy = searchMinBuy(round, target.filter.minPrice, cap);
+    if (minBuy != null) criteria.minPrice = minBuy;
     this.searchTimes.push(this.now());
     this.persistBudget();
-    const outcome = await this.deps.adapter.search(
-      cap == null ? target.filter : { ...target.filter, maxPrice: cap },
-    );
+    const outcome = await this.deps.adapter.search(criteria);
     const at = this.now();
     off();
     offBuyable();

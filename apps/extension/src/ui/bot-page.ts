@@ -39,6 +39,8 @@ import {
   SEARCH_DELAY_PRESETS,
   botRiskLevel,
   botSettingsSchema,
+  computeTradeProfit,
+  roundToPriceStep,
   stepPrice,
   withRecommendedLimits,
   type BotRiskLevel,
@@ -186,6 +188,14 @@ export function buildFilterFromForm(form: TargetForm): { filter: FilterCriteria 
     return { error: 'Min price is above max price' };
   }
   return { filter };
+}
+
+/** A card sold at `sell`: EA's 5% tax, what the trader keeps, and the profit
+ * over `buy` (null without a buy price). The same formula as every other
+ * profit in the app (`computeTradeProfit`). */
+export function saleProfit(sell: number, buy: number | null): { tax: number; net: number; profit: number | null } {
+  const { eaTaxCoins, netProfit } = computeTradeProfit(buy ?? 0, sell);
+  return { tax: eaTaxCoins, net: sell - eaTaxCoins, profit: buy == null ? null : netProfit };
 }
 
 // ---- recent searches -------------------------------------------------------
@@ -519,6 +529,10 @@ const CSS = `
   .price input { text-align: center; }
   .price .step { height: 48px; border: 1px solid var(--ea-line); border-radius: var(--ea-radius); background: var(--ea-control); color: var(--ea-text); font-size: 20px; font-weight: 500; }
   .price .step:hover { background: var(--ea-control-hover); }
+  .profit { color: var(--ea-text-2); font-size: 13px; line-height: 1.5; margin: 0 4px 8px; }
+  .profit b { color: var(--ea-text); font-weight: 500; }
+  .profit b.pos { color: var(--ea-success); } .profit b.neg { color: var(--ea-danger); }
+  .profit .muted { color: var(--ea-muted); }
   .search-actions { display: flex; justify-content: flex-end; margin-top: 8px; }
   .search-hint { color: var(--ea-muted); font-size: 12px; margin-top: 10px; }
   .recent { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; margin-bottom: 6px; border: 1px solid var(--ea-line);
@@ -563,7 +577,12 @@ const CSS = `
   .c-yellow { border-left-color: var(--ea-coin); } .c-orange { border-left-color: var(--ea-warning); }
   .ring-box { grid-column: span 2; display: flex; align-items: center; justify-content: center; position: relative; min-height: 150px; contain: layout paint; }
   .ring-wrap { display: contents; }
-  .ring { width: 130px; height: 130px; }
+  .ring { position: relative; width: 130px; height: 130px; }
+  .ring-track, .ring-fill { position: absolute; inset: 0; box-sizing: border-box; border-radius: 50%; border: 7px solid var(--ea-line); }
+  .ring-fill { border-color: var(--ea-accent); will-change: transform; }
+  .ring-half { position: absolute; inset: 0; }
+  .ring-r, .ring-r .ring-fill { clip-path: inset(0 0 0 50%); }
+  .ring-l, .ring-l .ring-fill { clip-path: inset(0 50% 0 0); }
   .ring-label { position: absolute; text-align: center; }
   .ring-label .t { font-size: 30px; font-weight: 500; }
   .ring-label .p { font-size: 12px; color: var(--ea-muted); }
@@ -788,8 +807,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
           )
         : field(
             'Fixed price',
-            'Buy-now price. The starting bid is one step lower',
-            stepper('as-price', String(a.fixedPrice), 'coins', 'Fixed price', true),
+            'Set under your max buy price in Search, with the profit it makes. The starting bid is one step lower',
+            `<span class="amt">${fmt(a.fixedPrice)}${COIN}</span>`,
           )) +
       field(
         'Never sell at a loss',
@@ -1196,6 +1215,68 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       <button type="button" class="step" data-price="${key}" data-dir="1" aria-label="Raise ${label.toLowerCase()} price">+</button></div>`;
   }
 
+  /** The auto-sell price, right under the max buy price so the two (and
+   * the profit between them) read together. Empty: the FUTBIN price. */
+  function sellHtml(): string {
+    const a = shown().autoSell;
+    return `<div class="price"><span class="price-k">Sell</span>
+      <button type="button" class="step" data-sell-step="-1" aria-label="Lower sell price">−</button>
+      <input id="nf-sell" inputmode="numeric" placeholder="FUTBIN" value="${a.mode === 'fixed' ? fmt(a.fixedPrice) : ''}" aria-label="Sell price (auto-sell)" />
+      <button type="button" class="step" data-sell-step="1" aria-label="Raise sell price">+</button></div>
+      <div class="profit" id="nf-profit" aria-live="polite"></div>`;
+  }
+
+  /** What selling at the Sell price leaves after EA's tax, and the profit
+   * per card bought at the max buy price, from what is typed right now. */
+  function renderProfit(): void {
+    const out = root.getElementById('nf-profit');
+    if (!out) return;
+    const s = shown();
+    const a = s.autoSell;
+    const typed = (id: string) => {
+      const el = root.getElementById(id) as HTMLInputElement | null;
+      return el && el.value.trim() !== '' ? parsePrice(el.value) : null;
+    };
+    const sell = typed('nf-sell');
+    const buy = typed('nf-maxBuy') ?? form.maxBuy ?? (s.thresholds.maxBuyPrice > 0 ? s.thresholds.maxBuyPrice : null);
+    let html: string;
+    if (sell == null || sell <= 0) {
+      html = `Sells at the FUTBIN price${a.steps ? ` ${esc(signedSteps(a.steps))} steps` : ''}. Type a price to sell at it instead.`;
+    } else {
+      const p = saleProfit(sell, buy);
+      html = `You get <b>${fmt(p.net)}</b>${COIN} after EA's 5% tax (${fmt(p.tax)}${COIN}).`;
+      html +=
+        p.profit == null || buy == null
+          ? ' Set a max buy price to see your profit.'
+          : ` Profit <b class="${p.profit < 0 ? 'neg' : 'pos'}">${p.profit < 0 ? '−' : '+'}${fmt(Math.abs(p.profit))}</b>${COIN} per card at your max buy (${fmt(buy)}), more when it buys cheaper.`;
+    }
+    if (!a.enabled) html += ' <span class="muted">Auto-sell is off: turn it on below to list cards at this price.</span>';
+    out.innerHTML = html;
+  }
+
+  /** The Sell price as the user set it: on EA's price grid, within EA's
+   * limits; empty switches back to the FUTBIN price. */
+  function setSellPrice(value: number | null): void {
+    const s = shown();
+    if (value == null) {
+      commit({ ...s, autoSell: { ...s.autoSell, mode: 'market' } }, true);
+      return;
+    }
+    const price = Math.min(BOT_LIMITS.autoSellPrice.max, Math.max(MIN_SALE_PRICE, roundToPriceStep(value)));
+    commit({ ...s, autoSell: { ...s.autoSell, mode: 'fixed', fixedPrice: price } }, true);
+  }
+
+  /** Brings the Sell field and the profit line in line with the settings
+   * (after an edit in the Auto-sell card, say), unless the user is typing. */
+  function syncSell(): void {
+    const input = root.getElementById('nf-sell') as HTMLInputElement | null;
+    if (input && root.activeElement !== input) {
+      const a = shown().autoSell;
+      input.value = a.mode === 'fixed' ? fmt(a.fixedPrice) : '';
+    }
+    renderProfit();
+  }
+
   function renderTargets(): void {
     const wasOpen = root.querySelector('#targets details')?.hasAttribute('open') ?? true;
     const players = catalog?.players.length ?? 0;
@@ -1230,9 +1311,10 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
                <div class="suggest" id="nf-suggest" role="listbox" hidden></div>`
         }</div>
         ${DDS.map(ddHtml).join('')}
-        <div class="lbl" style="margin-top:16px">Buy now price</div>
+        <div class="lbl" style="margin-top:16px">Buy now price, and the price to sell at</div>
         ${priceHtml('minBuy', 'Min')}
         ${priceHtml('maxBuy', 'Max')}
+        ${sellHtml()}
         <div class="search-actions"><button type="button" class="ghost" id="nf-reset">Clear search</button></div>
         <div class="search-hint">${esc(hint)}</div>
       </div>`,
@@ -1265,6 +1347,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     if ('search' in r) deps.setLiveSearch(r.search);
     else if (!running) deps.setLiveSearch(null);
     renderRunbar();
+    renderProfit();
   }
 
   function showSuggestions(query: string): void {
@@ -1343,6 +1426,12 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       const input = root.getElementById(`nf-${key}`) as HTMLInputElement | null;
       if (input) input.value = form[key] == null ? '' : fmt(form[key]!);
       syncSearch();
+    } else if (el.dataset.sellStep) {
+      // Along EA's price grid, like the web app's own price arrows.
+      const input = root.getElementById('nf-sell') as HTMLInputElement | null;
+      const a = shown().autoSell;
+      const base = (input ? parsePrice(input.value) : null) ?? a.fixedPrice;
+      setSellPrice(stepPrice(base, Number(el.dataset.sellStep)));
     } else if (el.id === 'nf-reset') {
       form = blankForm();
       openDd = null;
@@ -1373,7 +1462,11 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     } else if (t.id === 'nf-ovr-lo')
       setOvr(Number(t.value), Math.max(Number(t.value), form.maxOvr));
     else if (t.id === 'nf-ovr-hi') setOvr(Math.min(Number(t.value), form.minOvr), Number(t.value));
-    else return;
+    else if (t.id === 'nf-sell' || t.id === 'nf-maxBuy') {
+      // The profit follows the typing; the price itself saves on change.
+      renderProfit();
+      return;
+    } else return;
     syncSearch();
   });
 
@@ -1388,6 +1481,13 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       const key = t.id === 'nf-minBuy' ? 'minBuy' : 'maxBuy';
       form[key] = parsePrice(t.value);
       t.value = form[key] == null ? '' : fmt(form[key]!);
+    } else if (t.id === 'nf-sell') {
+      setSellPrice(parsePrice(t.value));
+      // Show it as saved: on EA's grid, or empty for the FUTBIN price.
+      const a = shown().autoSell;
+      t.value = a.mode === 'fixed' ? fmt(a.fixedPrice) : '';
+      renderProfit();
+      return;
     } else return;
     syncSearch();
   });
@@ -1561,6 +1661,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     deps.getSniper()?.setSettings(next);
     if (rerender) renderKnobs();
     else renderRisk();
+    syncSell();
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
       void deps.saveSettings(settings).then(() => {
@@ -1781,57 +1882,66 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
 
   // ---- the countdown ring -------------------------------------------------
   //
-  // Built once. Each wait's arc is one animation the browser runs itself
-  // (the Web Animations API), started when the wait starts: smooth at the
-  // display's frame rate, and nothing per frame for a busy page to delay.
-  // Without that API (tests), the arc is set every frame instead. The text
-  // is updated every frame, written only when it changes.
-  const RING_R = 56;
-  const RING_C = 2 * Math.PI * RING_R;
+  // Built once. The arc is two half rings, each rotated out of its half of
+  // the circle: the left one during the first half of the wait, the right
+  // one during the second. Both rotations are handed to the browser (the
+  // Web Animations API) when the wait starts, and only `transform` animates,
+  // which the browser runs on its compositor thread: the arc keeps moving
+  // smoothly even while EA's page keeps the main thread busy (an animated
+  // SVG stroke runs on the main thread, and stuttered with it). Without that
+  // API (tests), the arc is set every frame instead. The text is updated
+  // every frame, written only when it changes.
   const ring = (() => {
     const el = document.createElement('div');
     el.className = 'ring-wrap';
     el.innerHTML = `
-      <svg class="ring" viewBox="0 0 130 130" aria-hidden="true">
-        <circle cx="65" cy="65" r="${RING_R}" fill="none" stroke="var(--ea-line)" stroke-width="7"/>
-        <circle class="arc" cx="65" cy="65" r="${RING_R}" fill="none" stroke="var(--ea-accent)" stroke-width="7" stroke-linecap="round"
-          stroke-dasharray="${RING_C}" stroke-dashoffset="${RING_C}" transform="rotate(-90 65 65)"/>
-      </svg>
+      <div class="ring" aria-hidden="true">
+        <div class="ring-track"></div>
+        <div class="ring-half ring-r"><div class="ring-fill"></div></div>
+        <div class="ring-half ring-l"><div class="ring-fill"></div></div>
+      </div>
       <div class="ring-label"><div class="t">0s</div><div class="p"></div></div>
       <div class="elapsed">Running for<b>0:00</b></div>`;
     return {
       el,
-      arc: el.querySelector('.arc') as SVGCircleElement,
+      left: el.querySelector('.ring-l .ring-fill') as HTMLElement,
+      right: el.querySelector('.ring-r .ring-fill') as HTMLElement,
       time: el.querySelector('.ring-label .t') as HTMLElement,
       phase: el.querySelector('.ring-label .p') as HTMLElement,
       elapsed: el.querySelector('.elapsed b') as HTMLElement,
       /** The wait the arc is counting down, and how long it was. */
       endsAt: null as number | null,
       total: 0,
-      offset: '',
-      anim: null as Animation | null,
+      shown: '',
+      anims: [] as Animation[],
     };
   })();
 
-  function setArc(offset: string): void {
-    if (offset !== ring.offset) {
-      ring.offset = offset;
-      ring.arc.setAttribute('stroke-dashoffset', offset);
-    }
+  /** The arc at `fraction` of the wait left (1 full, 0 empty), set directly:
+   * between waits, and where the page has no Web Animations API. */
+  function setArc(fraction: number): void {
+    const spent = 1 - Math.min(1, Math.max(0, fraction));
+    const left = -180 * Math.min(1, spent * 2);
+    const right = -180 * Math.max(0, spent * 2 - 1);
+    const key = `${left.toFixed(2)}/${right.toFixed(2)}`;
+    if (key === ring.shown) return;
+    ring.shown = key;
+    ring.left.style.transform = `rotate(${left.toFixed(2)}deg)`;
+    ring.right.style.transform = `rotate(${right.toFixed(2)}deg)`;
   }
 
   /** A new wait (or none): the arc starts full and empties as it runs out. */
   function startArc(remaining: number): void {
-    ring.anim?.cancel();
-    ring.anim = null;
-    if (remaining <= 0) return setArc(RING_C.toFixed(2));
-    setArc('0.00');
-    if (typeof ring.arc.animate !== 'function') return;
-    ring.anim = ring.arc.animate([{ strokeDashoffset: '0px' }, { strokeDashoffset: `${RING_C.toFixed(2)}px` }], {
-      duration: remaining,
-      easing: 'linear',
-      fill: 'forwards',
-    });
+    for (const a of ring.anims) a.cancel();
+    ring.anims = [];
+    setArc(remaining > 0 ? 1 : 0);
+    if (remaining <= 0 || typeof ring.left.animate !== 'function') return;
+    const half = remaining / 2;
+    const turn = [{ transform: 'rotate(0deg)' }, { transform: 'rotate(-180deg)' }];
+    ring.anims = [
+      ring.left.animate(turn, { duration: half, easing: 'linear', fill: 'forwards' }),
+      ring.right.animate(turn, { duration: half, delay: half, easing: 'linear', fill: 'both' }),
+    ];
   }
 
   function setText(el: HTMLElement, text: string): void {
@@ -1849,10 +1959,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       ring.total = remaining;
       startArc(remaining);
     }
-    if (!ring.anim) {
-      const fraction = remaining > 0 && ring.total > 0 ? remaining / ring.total : 0;
-      setArc((RING_C * (1 - fraction)).toFixed(2));
-    }
+    if (ring.anims.length === 0) setArc(remaining > 0 && ring.total > 0 ? remaining / ring.total : 0);
     const secs = remaining / 1000;
     setText(ring.time, remaining > 0 ? (secs >= 60 ? clock(remaining) : `${Math.ceil(secs)}s`) : '0s');
     setText(ring.phase, PHASE_LABEL[state?.phase ?? 'idle']);
