@@ -106,3 +106,25 @@ describe('observable shape: a bid answered after the timeout', () => {
     expect(onLate).toHaveBeenCalledWith(false);
   });
 });
+
+describe('refreshPile (Nova AI transfer list counts)', () => {
+  it("calls the web app's own transfer list load and resolves on success: true", async () => {
+    const svc = observableServices();
+    await expect(createObservableShape(1000).refreshPile!(svc.services)).resolves.toBeUndefined();
+    expect(svc.requestTransferItems).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects anything but an explicit success: true', async () => {
+    const svc = observableServices();
+    svc.requestTransferItems.mockReturnValueOnce(observable({ success: false, status: 512 }));
+    await expect(createObservableShape(1000).refreshPile!(svc.services)).rejects.toThrow(/success: false/);
+    svc.requestTransferItems.mockReturnValueOnce(observable({ data: { items: [] } }));
+    await expect(createObservableShape(1000).refreshPile!(svc.services)).rejects.toThrow(/success/);
+  });
+
+  it('says so when the web app has no such call', async () => {
+    const svc = observableServices();
+    delete (svc.services.Item as Record<string, unknown>).requestTransferItems;
+    await expect(createObservableShape(1000).refreshPile!(svc.services)).rejects.toThrow(/requestTransferItems is not a function/);
+  });
+});

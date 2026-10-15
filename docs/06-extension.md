@@ -299,12 +299,19 @@ The dash's **Sold** and **Unsold** counters and its **Transfer list** panel
 listed) are counted from the trade-pile responses EA's own page already
 fetched, the same ones the trade lifecycle reads (section 4, item 8).
 Content keeps the last full `/tradepile` GET and applies each partial
-response (relist, item move) on top of it (`lib/transfer-list.ts`). It is
-passive: nothing is fetched for these figures. Until EA has loaded the
-whole Transfer List once on this page load they show "—" and ask the user
-to open it in EA. The page checks for new figures on every refresh and on
-its one-second wallet tick, writing only when they changed. Kept in memory
-only, never stored or sent.
+response (relist, item move) on top of it (`lib/transfer-list.ts`). EA's
+page only loads that list when its Transfer List opens, which it does not
+while Nova AI's page covers it, so the web app is asked to reload it
+(`lib/pile-refresh.ts`, the adapter's `pile` act): about 2 s after each card
+the bot lists, and every 3 minutes while the bot runs or the page is open
+(at once on a start or an open when the last reload is older), never more
+than once in 30 s; the adapter itself refuses one within 15 s
+(`pile_too_soon`). The reload's answer only says EA answered: the list
+reaches the counts through passive observation like any other load (and the
+trade lifecycle sees each sale the same way). Until a whole list has been
+seen they show "—" and ask the user to open it in EA. The page checks for
+new figures on every refresh and on its one-second wallet tick, writing only
+when they changed. Kept in memory only, never stored or sent.
 
 The Profit, Searches, Bought, Missed and Coins spent figures and Top snipes
 count everything since the page loaded, across Stop and Start, like the
@@ -401,7 +408,11 @@ cost. Every outcome is in the log. The listing itself is the adapter's
 `list` act (`services.Item.list(item, start, buyNow, 3600)` in the
 observable shape, UNVERIFIED like the rest of it; the promise shape has
 none and answers `list_unsupported`), and the adapter only lists an item
-it bought itself on that page load (`list_not_bought` otherwise).
+it bought itself on that page load (`list_not_bought` otherwise). The
+transfer list reload is the adapter's `pile` act
+(`services.Item.requestTransferItems()` in the observable shape, what the
+web app is said to call when its Transfer List opens, UNVERIFIED; the
+promise shape answers `pile_unsupported`).
 
 **The page is laid out like EA's "Search the Transfer Market" screen**: a
 back arrow and title on EA's navy bar, the pitch artwork behind two floating

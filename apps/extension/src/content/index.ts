@@ -39,6 +39,7 @@ import { handOffWasLate, readHandedOffNonce } from '../lib/act-auth.js';
 import { createBackgroundTimer } from '../lib/background-timer.js';
 import { riskLevelChangeEvent } from '../lib/bot-safety.js';
 import { logger } from '../lib/logger.js';
+import { PILE_MIN_GAP_MS, createPileRefresher } from '../lib/pile-refresh.js';
 import { singleFlight } from '../lib/single-flight.js';
 import { buildBoughtTrade } from '../lib/trade-report.js';
 import { createTransferListTracker } from '../lib/transfer-list.js';
@@ -611,6 +612,12 @@ async function main(): Promise<void> {
       }
     };
 
+    // Keeps the page's Sold / Unsold / Transfer list counts following the
+    // bot: the web app reloads the transfer list soon after each card the
+    // bot lists, and every few minutes while it runs or the page is open
+    // (lib/pile-refresh.ts). The list arrives through `onTradePile` above.
+    const pileRefresher = createPileRefresher({ refresh: () => adapter.refreshPile() });
+
     const prepareSniper = async (fresh: boolean): Promise<void> => {
       if (sniper) {
         // A plan lost mid-session (the check below) empties `features`, and
@@ -668,7 +675,19 @@ async function main(): Promise<void> {
       };
       sniper = new mod.Sniper(
         {
-          adapter,
+          adapter: {
+            search: adapter.search,
+            buy: adapter.buy,
+            list: async (tradeId, startPrice, buyNowPrice) => {
+              const listed = await adapter.list(tradeId, startPrice, buyNowPrice);
+              if (listed.ok) pileRefresher.listed();
+              return listed;
+            },
+            onAuctions: adapter.onAuctions,
+            onBuyable: adapter.onBuyable,
+            onProbe: adapter.onProbe,
+            onShape: adapter.onShape,
+          },
           sleep: timer.sleep,
           timingMode: timer.mode,
           getFilters: () => (liveSearch ? [liveSearch] : []),
@@ -691,6 +710,8 @@ async function main(): Promise<void> {
           killSwitch: () => ({ active: killSwitchActive || !!governor?.isKillSwitchActive() }),
           onChange: () => {
             holdTabWhileRunning();
+            // A start reloads the list at once (when the last is old).
+            pileRefresher.tick(sniper?.isRunning() ?? false);
             botPage.refresh();
           },
           onAttempt: recordAttempt,
@@ -760,7 +781,13 @@ async function main(): Promise<void> {
       onEaNavigate: () => botPage.close(),
       onBounds: (bounds) => botPage.setBounds(bounds),
     });
-    botPage.onOpenChange((open) => nav.setActive(open));
+    botPage.onOpenChange((open) => {
+      nav.setActive(open);
+      if (open) pileRefresher.tick(true);
+    });
+    // The every-few-minutes reloads: checked twice per minimum gap, cheap
+    // when nothing is due.
+    setInterval(() => pileRefresher.tick((sniper?.isRunning() ?? false) || botPage.isOpen()), PILE_MIN_GAP_MS / 2);
   }
 
   async function refreshSummaries(listings: readonly TrimmedAuction[]): Promise<void> {
