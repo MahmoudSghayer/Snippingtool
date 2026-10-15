@@ -60,6 +60,9 @@ function setup(opts: {
   filters?: SniperFilter[];
   /** Auctions each successive search returns (last one repeats). */
   results?: TrimmedAuction[][];
+  /** TradeIds the adapter upgrades to buyable during each successive
+   * search, after its auctions (last one repeats). */
+  upgrades?: string[][];
   buyOk?: (tradeId: string) => boolean;
   /** The adapter's whole answer to a buy, when a test needs more than ok. */
   buyResult?: (tradeId: string) => ActionOutcome;
@@ -92,6 +95,7 @@ function setup(opts: {
   };
   const clock = { t: opts.startAt ?? 1_000_000 };
   const auctionsListeners = new Set<(a: TrimmedAuction[]) => void>();
+  const buyableListeners = new Set<(tradeIds: string[]) => void>();
   const probeListeners = new Set<
     (s: { ok: boolean; checkedAt: number; reason?: string }) => void
   >();
@@ -113,6 +117,10 @@ function setup(opts: {
         searchTimes.push(clock.t);
         const batch = results[Math.min(searches.length - 1, results.length - 1)]!;
         for (const cb of auctionsListeners) cb(batch);
+        if (opts.upgrades) {
+          const ids = opts.upgrades[Math.min(searches.length - 1, opts.upgrades.length - 1)]!;
+          for (const cb of buyableListeners) cb(ids);
+        }
         return { ok: true, latencyMs: 5 };
       },
       buy: async (tradeId, _price, card) => {
@@ -125,6 +133,10 @@ function setup(opts: {
       onAuctions: (cb) => {
         auctionsListeners.add(cb);
         return () => auctionsListeners.delete(cb);
+      },
+      onBuyable: (cb) => {
+        buyableListeners.add(cb);
+        return () => buyableListeners.delete(cb);
       },
       onProbe: (cb) => {
         probeListeners.add(cb);
@@ -603,6 +615,20 @@ describe('Sniper — the adapter\'s answers (lib/act-auth.ts)', () => {
     h.sniper.start();
     await h.done();
     expect(h.buys).toEqual(['t-yes']);
+  });
+
+  it('buys a listing the adapter upgrades to buyable during the search', async () => {
+    // The search's network response reached the adapter first (no item
+    // entity yet, so unbuyable); its own search call then returned the same
+    // listings and only sent the upgrade (main/adapter.ts isSecondSighting).
+    const h = setup({
+      results: [[auction('t-late', 8_000, { buyable: false }), auction('t-never', 9_000, { buyable: false })]],
+      upgrades: [['t-late']],
+      maxSearches: 1,
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.buys).toEqual(['t-late']);
   });
 
   it('records a buy EA confirmed only after the adapter stopped waiting', async () => {
