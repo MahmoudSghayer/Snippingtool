@@ -21,6 +21,13 @@ export function setFetchImpl(impl: FetchImpl): void {
   fetchImpl = impl;
 }
 
+/** A request to a site other than the API (FUTBIN, for auto-sell), through
+ * the same transport: the extension's host_permissions, or the userscript's
+ * `GM_xmlhttpRequest` (which needs the host in its `@connect` list). */
+export function externalFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  return fetchImpl(url, init);
+}
+
 export function backoffMs(attempt: number): number {
   return Math.min(30_000, 500 * 2 ** attempt) + Math.random() * 250;
 }

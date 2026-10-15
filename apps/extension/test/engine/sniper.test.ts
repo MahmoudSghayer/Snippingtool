@@ -49,6 +49,8 @@ interface Harness {
   buys: string[];
   /** The card each buy named (`adapter.buy`'s third argument). */
   buyCards: unknown[];
+  /** Each auto-sell listing: [tradeId, startPrice, buyNowPrice]. */
+  lists: [string, number, number][];
   waits: { phase: string; ms: number }[];
   killSwitch: { active: boolean };
   probe: (ok: boolean) => void;
@@ -60,10 +62,23 @@ function setup(opts: {
   filters?: SniperFilter[];
   /** Auctions each successive search returns (last one repeats). */
   results?: TrimmedAuction[][];
+  /** TradeIds the adapter upgrades to buyable during each successive
+   * search, after its auctions (last one repeats). */
+  upgrades?: string[][];
   buyOk?: (tradeId: string) => boolean;
   /** The adapter's whole answer to a buy, when a test needs more than ok. */
   buyResult?: (tradeId: string) => ActionOutcome;
   sellPrice?: number | null;
+  /** What the bot's sleep says it is timed with. */
+  timingMode?: () => 'worker' | 'page';
+  /** How long each search takes EA to answer, on the test clock. */
+  searchTakesMs?: number;
+  /** Replaces the fixed `sellPrice` lookup. */
+  estimateSellPrice?: (resourceId: number) => Promise<number | null>;
+  /** Auto-sell's market price (FUTBIN, else Nova). Omitted = none. */
+  marketPrice?: SniperDeps['marketPrice'];
+  /** The adapter's answer to a listing. Default: ok. */
+  listResult?: (tradeId: string) => ActionOutcome;
   /** Stop the bot after this many searches (at the wait that follows). */
   maxSearches?: number;
   /** Today's active time as an earlier page saved it. */
@@ -92,6 +107,7 @@ function setup(opts: {
   };
   const clock = { t: opts.startAt ?? 1_000_000 };
   const auctionsListeners = new Set<(a: TrimmedAuction[]) => void>();
+  const buyableListeners = new Set<(tradeIds: string[]) => void>();
   const probeListeners = new Set<
     (s: { ok: boolean; checkedAt: number; reason?: string }) => void
   >();
@@ -100,6 +116,7 @@ function setup(opts: {
   const savedUsage: BotDailyUsage[] = [];
   const buys: string[] = [];
   const buyCards: unknown[] = [];
+  const lists: [string, number, number][] = [];
   const waits: { phase: string; ms: number }[] = [];
   const killSwitch = { active: false };
   const results = opts.results ?? [[]];
@@ -111,8 +128,13 @@ function setup(opts: {
       search: async (filter) => {
         searches.push(filter);
         searchTimes.push(clock.t);
+        clock.t += opts.searchTakesMs ?? 0;
         const batch = results[Math.min(searches.length - 1, results.length - 1)]!;
         for (const cb of auctionsListeners) cb(batch);
+        if (opts.upgrades) {
+          const ids = opts.upgrades[Math.min(searches.length - 1, opts.upgrades.length - 1)]!;
+          for (const cb of buyableListeners) cb(ids);
+        }
         return { ok: true, latencyMs: 5 };
       },
       buy: async (tradeId, _price, card) => {
@@ -122,9 +144,17 @@ function setup(opts: {
         const ok = opts.buyOk ? opts.buyOk(tradeId) : true;
         return ok ? { ok: true, latencyMs: 5 } : { ok: false, error: 'item sold', latencyMs: 5 };
       },
+      list: async (tradeId, start, bin) => {
+        lists.push([tradeId, start, bin]);
+        return opts.listResult ? opts.listResult(tradeId) : { ok: true, latencyMs: 5 };
+      },
       onAuctions: (cb) => {
         auctionsListeners.add(cb);
         return () => auctionsListeners.delete(cb);
+      },
+      onBuyable: (cb) => {
+        buyableListeners.add(cb);
+        return () => buyableListeners.delete(cb);
       },
       onProbe: (cb) => {
         probeListeners.add(cb);
@@ -134,7 +164,8 @@ function setup(opts: {
     },
     getFilters: () =>
       opts.filters ?? [{ id: 'f1', name: 'Target', filter: { resourceId: 100, maxPrice: 10_000 } }],
-    estimateSellPrice: async () => (opts.sellPrice === undefined ? 20_000 : opts.sellPrice),
+    estimateSellPrice:
+      opts.estimateSellPrice ?? (async () => (opts.sellPrice === undefined ? 20_000 : opts.sellPrice)),
     loadUsage: async () => opts.usage ?? null,
     saveUsage: (u) => void savedUsage.push(u),
     ...(opts.budgetStore
@@ -143,6 +174,8 @@ function setup(opts: {
           saveBudget: (b: BotBudgetState) => void (opts.budgetStore!.value = structuredClone(b)),
         }
       : {}),
+    ...(opts.marketPrice ? { marketPrice: opts.marketPrice } : {}),
+    ...(opts.timingMode ? { timingMode: opts.timingMode } : {}),
     ...(opts.entitled ? { entitled: opts.entitled } : {}),
     ...(opts.exclusive ? { exclusive: opts.exclusive } : {}),
     killSwitch: () => ({
@@ -177,6 +210,7 @@ function setup(opts: {
     savedUsage,
     buys,
     buyCards,
+    lists,
     waits,
     killSwitch,
     probe: (ok) =>
@@ -257,6 +291,55 @@ describe('Sniper — search and buy', () => {
     unknown.sniper.start();
     await unknown.done();
     expect(unknown.buys).toEqual(['t-a']);
+  });
+
+  it('says why it skipped a listing, once however many searches find it', async () => {
+    const h = setup({
+      settings: { thresholds: { ...DEFAULT_BOT_SETTINGS.thresholds, minProfit: 15_000 } },
+      results: [[auction('t-a', 8_000)]],
+      maxSearches: 3,
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.buys).toEqual([]);
+    const skips = h.sniper.getLog().filter((e) => e.message.startsWith('skipped'));
+    expect(skips).toHaveLength(1);
+    // 20,000 * 0.95 - 8,000 = 11,000, under the 15,000 minimum.
+    expect(skips[0]!.message).toBe(
+      'skipped at 8,000 coins: estimated profit 11,000 coins is under your minimum profit (15,000 coins)',
+    );
+  });
+
+  it('with no minimum profit, buys before the price estimate comes back', async () => {
+    let release!: (v: number | null) => void;
+    const lookup = new Promise<number | null>((r) => (release = r));
+    const h = setup({
+      settings: { thresholds: { ...DEFAULT_BOT_SETTINGS.thresholds, minProfit: 0 } },
+      results: [[auction('t-a', 8_000)]],
+      estimateSellPrice: () => lookup,
+      maxSearches: 1,
+    });
+    h.sniper.start();
+    await vi.waitFor(() => expect(h.buys).toEqual(['t-a']));
+    release(20_000);
+    await h.done();
+    expect(h.sniper.getLog().find((e) => e.kind === 'bought')?.sellPrice).toBe(20_000);
+  });
+
+  it('looks a card\'s price up once for the searches that keep finding it', async () => {
+    const lookups: number[] = [];
+    const h = setup({
+      results: [[auction('t-a', 8_000)], [auction('t-b', 8_500)], [auction('t-c', 9_000)]],
+      estimateSellPrice: async (id) => {
+        lookups.push(id);
+        return 20_000;
+      },
+      maxSearches: 3,
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.buys).toEqual(['t-a', 't-b', 't-c']);
+    expect(lookups).toEqual([100]);
   });
 
   it('counts failed buys and keeps going', async () => {
@@ -603,6 +686,20 @@ describe('Sniper — the adapter\'s answers (lib/act-auth.ts)', () => {
     h.sniper.start();
     await h.done();
     expect(h.buys).toEqual(['t-yes']);
+  });
+
+  it('buys a listing the adapter upgrades to buyable during the search', async () => {
+    // The search's network response reached the adapter first (no item
+    // entity yet, so unbuyable); its own search call then returned the same
+    // listings and only sent the upgrade (main/adapter.ts isSecondSighting).
+    const h = setup({
+      results: [[auction('t-late', 8_000, { buyable: false }), auction('t-never', 9_000, { buyable: false })]],
+      upgrades: [['t-late']],
+      maxSearches: 1,
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.buys).toEqual(['t-late']);
   });
 
   it('records a buy EA confirmed only after the adapter stopped waiting', async () => {
@@ -1011,5 +1108,167 @@ describe('Sniper — two EA tabs, one set of hourly budgets (multi-tab)', () => 
     freeze();
     await new Promise((r) => setTimeout(r, 0));
     expect(budgetStore.value).toEqual(bSaved);
+  });
+});
+
+describe('Sniper — auto-sell after a buy', () => {
+  const autoSell = (over: Partial<BotSettings['autoSell']>): Partial<BotSettings> => ({
+    autoSell: { ...DEFAULT_BOT_SETTINGS.autoSell, enabled: true, ...over },
+  });
+  const listedLog = (h: Harness) => h.sniper.getLog().find((e) => e.kind === 'listed');
+  const notListed = (h: Harness) => h.sniper.getLog().find((e) => e.message.startsWith('not listed'));
+
+  it('lists at the FUTBIN price moved by the chosen steps, starting bid one step lower', async () => {
+    const h = setup({
+      settings: autoSell({ steps: -2 }),
+      results: [[auction('t-a', 8_000)]],
+      marketPrice: async () => ({ price: 20_000, source: 'futbin' }),
+      maxSearches: 1,
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.buys).toEqual(['t-a']);
+    // 20,000 -> 19,750 -> 19,500 (250-coin steps), bid one step under.
+    expect(h.lists).toEqual([['t-a', 19_250, 19_500]]);
+    expect(listedLog(h)).toMatchObject({ price: 19_500, message: 'FUTBIN price 20,000 coins, -2 steps' });
+  });
+
+  it('says when the price came from Nova\'s own market data', async () => {
+    const h = setup({
+      settings: autoSell({ steps: 1 }),
+      results: [[auction('t-a', 8_000)]],
+      marketPrice: async () => ({ price: 12_000, source: 'nova' }),
+      maxSearches: 1,
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.lists).toEqual([['t-a', 12_000, 12_250]]);
+    expect(listedLog(h)?.message).toBe('Nova market price 12,000 coins, +1 step');
+  });
+
+  it('lists at the fixed price, put on EA\'s grid', async () => {
+    const h = setup({
+      settings: autoSell({ mode: 'fixed', fixedPrice: 15_100 }),
+      results: [[auction('t-a', 8_000)]],
+      maxSearches: 1,
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.lists).toEqual([['t-a', 14_750, 15_000]]);
+    expect(listedLog(h)?.message).toBe('your fixed price');
+  });
+
+  it('keeps the card when there is no market price for it', async () => {
+    const h = setup({
+      settings: autoSell({}),
+      results: [[auction('t-a', 8_000)]],
+      marketPrice: async () => null,
+      maxSearches: 1,
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.lists).toEqual([]);
+    expect(notListed(h)?.message).toBe('not listed: no market price for this card (FUTBIN and Nova have none)');
+  });
+
+  it('never lists at a loss after EA\'s tax, unless told to', async () => {
+    const run = async (noLoss: boolean) => {
+      const h = setup({
+        settings: autoSell({ noLoss }),
+        results: [[auction('t-a', 8_000)]],
+        // 8,000 after 5% tax is 7,600: under the 8,000 paid.
+        marketPrice: async () => ({ price: 8_000, source: 'futbin' }),
+        maxSearches: 1,
+      });
+      h.sniper.start();
+      await h.done();
+      return h;
+    };
+    const guarded = await run(true);
+    expect(guarded.lists).toEqual([]);
+    expect(notListed(guarded)?.message).toBe(
+      "not listed: 8,000 coins would lose money after EA's 5% tax (bought for 8,000 coins)",
+    );
+    expect((await run(false)).lists).toEqual([['t-a', 7_900, 8_000]]);
+  });
+
+  it('does nothing when auto-sell is off', async () => {
+    const h = setup({
+      results: [[auction('t-a', 8_000)]],
+      marketPrice: async () => ({ price: 20_000, source: 'futbin' }),
+      maxSearches: 1,
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.buys).toEqual(['t-a']);
+    expect(h.lists).toEqual([]);
+  });
+
+  it('logs EA refusing the listing', async () => {
+    const h = setup({
+      settings: autoSell({ mode: 'fixed', fixedPrice: 15_000 }),
+      results: [[auction('t-a', 8_000)]],
+      listResult: () => ({ ok: false, error: 'list reported success: false', latencyMs: 5 }),
+      maxSearches: 1,
+    });
+    h.sniper.start();
+    await h.done();
+    expect(notListed(h)?.message).toBe('not listed: list reported success: false');
+  });
+});
+
+describe('Sniper — where a missed buy\'s time went', () => {
+  it('logs how long after the search the buy went out, and how long EA took to answer', async () => {
+    const h = setup({
+      results: [[auction('t-a', 8_000)]],
+      buyResult: () => ({ ok: false, error: 'item sold', latencyMs: 182 }),
+      maxSearches: 1,
+    });
+    h.sniper.start();
+    await h.done();
+    const missed = h.sniper.getLog().find((e) => e.kind === 'failed');
+    expect(missed?.message).toBe('item sold (sent 0 ms after the search came back; EA answered in 182 ms)');
+  });
+});
+
+describe('Sniper — searches start one delay apart, start to start', () => {
+  const fixedDelay = { searchDelay: { min: 8, max: 8 }, breaks: { ...DEFAULT_BOT_SETTINGS.breaks, enabled: false } };
+
+  it("takes EA's answer time out of the delay instead of adding it", async () => {
+    const h = setup({ settings: fixedDelay, results: [[]], searchTakesMs: 2_000, maxSearches: 3 });
+    h.sniper.start();
+    await h.done();
+    expect(h.waits.filter((w) => w.phase === 'waiting').map((w) => w.ms)).toEqual([6_000, 6_000, 6_000]);
+    // So searches go out exactly 8 s apart.
+    expect(h.searchTimes[1]! - h.searchTimes[0]!).toBe(8_000);
+    expect(h.searchTimes[2]! - h.searchTimes[1]!).toBe(8_000);
+  });
+
+  it('after a buy and its pause, searches again without waiting a second time', async () => {
+    const h = setup({
+      settings: { ...fixedDelay, safety: { ...DEFAULT_BOT_SETTINGS.safety, buyToSearchRatio: 1, cooldownSeconds: 10 } },
+      results: [[auction('t-a', 8_000)], []],
+      maxSearches: 2,
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.buys).toEqual(['t-a']);
+    // 10 s pause after the buy already covers the 8 s delay.
+    expect(h.searchTimes[1]! - h.searchTimes[0]!).toBe(10_000);
+  });
+});
+
+describe('Sniper — says at Start whether it keeps searching in a background tab', () => {
+  it.each([
+    ['worker' as const, 'Background searching is on: the bot keeps its pace in another tab'],
+    [
+      'page' as const,
+      "Background searching is limited: this page blocked the bot's background timer, so searching slows down while the tab is hidden",
+    ],
+  ])('%s', async (mode, message) => {
+    const h = setup({ results: [[]], timingMode: () => mode, maxSearches: 1 });
+    h.sniper.start();
+    await h.done();
+    expect(h.sniper.getLog().some((e) => e.message === message)).toBe(true);
   });
 });

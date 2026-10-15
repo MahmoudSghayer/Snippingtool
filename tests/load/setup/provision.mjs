@@ -66,6 +66,7 @@ async function main() {
         email,
         password: PASSWORD,
         device: device(`u${i}`),
+        acceptTerms: true,
       });
       await db`update users set email_verified_at = now() where id = ${userId}`;
       const login = await postJson('/api/v1/auth/login', {
@@ -110,6 +111,7 @@ async function main() {
       email: adminEmail,
       password: PASSWORD,
       device: adminDevice,
+      acceptTerms: true,
     });
     await db`update users set email_verified_at = now(), role = 'admin' where id = ${adminUserId}`;
     await db`insert into admin_users (id, user_id, admin_role, permissions) values (${randomUUID()}, ${adminUserId}, 'super_admin', '{}'::jsonb)
@@ -158,6 +160,7 @@ async function main() {
         email,
         password: PASSWORD,
         device: device(`a${i}`),
+        acceptTerms: true,
       });
       await db`update users set email_verified_at = now() where id = ${userId}`;
       authUsers.push({ email, userId });

@@ -21,6 +21,8 @@ export const ICONS = { 16: 'icons/icon-16.png', 32: 'icons/icon-32.png', 48: 'ic
 export function buildManifest(target, env) {
   const isAuto = target === 'ledger-auto';
   const hostPermissions = [...EA_WEB_APP_MATCHES, `${env.apiOrigin}/*`];
+  // Auto-sell reads a card's price from FUTBIN (background/futbin.ts).
+  if (isAuto) hostPermissions.push('https://www.futbin.com/*');
 
   /** @type {Record<string, unknown>} */
   const manifest = {
