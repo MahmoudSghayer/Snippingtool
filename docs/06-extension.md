@@ -294,6 +294,18 @@ in again. It is a log, not saved filters: kept in extension storage
 (`sl.bot.recentSearches.v1`, Tampermonkey's storage in the userscript
 build), never sent anywhere.
 
+The dash's **Sold** and **Unsold** counters and its **Transfer list** panel
+(cards on the list out of EA's 100, then how many are listed and not
+listed) are counted from the trade-pile responses EA's own page already
+fetched, the same ones the trade lifecycle reads (section 4, item 8).
+Content keeps the last full `/tradepile` GET and applies each partial
+response (relist, item move) on top of it (`lib/transfer-list.ts`). It is
+passive: nothing is fetched for these figures. Until EA has loaded the
+whole Transfer List once on this page load they show "—" and ask the user
+to open it in EA. The page checks for new figures on every refresh and on
+its one-second wallet tick, writing only when they changed. Kept in memory
+only, never stored or sent.
+
 The bot (`engine/sniper.ts`) searches the user's saved filters in turn, buys
 every listing at or under the price cap (cheapest first), and starts the next
 search a random delay from the user's range after the last one started (start
@@ -410,8 +422,9 @@ and narrows the rarity list. Players come from the web app's `players.json`
 The adapter waits for the web app to start (and log in) before its first
 probe, and builds the catalog then.
 
-Not yet available: transfer list, sold and unsold counts (the adapter has no
-transfer list access yet).
+The transfer list, sold and unsold counts on the Nova AI page do not use the
+web app's services: they come passively from its trade-pile responses (see
+"The Sniping Bot page" above).
 
 ## 4. The ASSUMED SHAPE and the day-one verification checklist
 
