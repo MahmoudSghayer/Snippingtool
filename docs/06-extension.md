@@ -330,6 +330,31 @@ ratio through its own governor (`botGovernorSettings`, bounded by
 `BOT_GOVERNOR_BOUNDS`). The server kill switch and adapter probe failures
 stop it whatever the settings say.
 
+**Background tabs.** The bot's waits are timed in a small dedicated worker
+(`lib/background-timer.ts`), not on the page's own timers, which Chrome
+throttles in a hidden tab (to about once a minute after five minutes), so it
+keeps its pace minimised or behind another tab. If the page's CSP refuses
+the worker, the waits fall back to `setTimeout`. A tab Chrome discards to
+save memory still stops everything: add the EA web app to Chrome's "Always
+keep these sites active" list.
+
+**Auto-sell** (off by default; `BotSettings.autoSell`). After each buy the
+bot lists the card on the transfer market for an hour: at the market price
+moved by the user's EA price steps (−20 to +20), or at a fixed price. The
+market price is FUTBIN's lowest buy-now for the card on the chosen platform
+(`price.futbin`, `background/futbin.ts`; `www.futbin.com` is in the
+`ledger-auto` host permissions and the userscript's `@connect`), else the
+median Nova has recorded for it (`summary`). FUTBIN has no public API, so
+anything that doesn't read like its player-prices JSON counts as no price.
+Prices go on EA's grid (`roundToPriceStep` / `stepPrice` in `@sl/shared`),
+the starting bid one step under the buy-now. "Never sell at a loss" (on by
+default) skips a price that, after EA's 5% tax, is below what the card
+cost. Every outcome is in the log. The listing itself is the adapter's
+`list` act (`services.Item.list(item, start, buyNow, 3600)` in the
+observable shape, UNVERIFIED like the rest of it; the promise shape has
+none and answers `list_unsupported`), and the adapter only lists an item
+it bought itself on that page load (`list_not_bought` otherwise).
+
 **Snipe targets are built like EA's own search panel**: OVR range slider
 with Min/Max OVR, "Type Player Name" (with EA portraits), and Quality,
 Rarity, Position, Chemistry Style, Country/Region, League and Club rows.

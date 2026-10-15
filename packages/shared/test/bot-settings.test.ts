@@ -272,3 +272,57 @@ describe('botRiskLevel', () => {
     expect(risk.reasons).toHaveLength(2);
   });
 });
+
+describe('bot settings — auto-sell', () => {
+  it('starts off, at the market price, on console, never at a loss', () => {
+    expect(DEFAULT_BOT_SETTINGS.autoSell).toEqual({
+      enabled: false,
+      mode: 'market',
+      steps: 0,
+      fixedPrice: 10_000,
+      platform: 'console',
+      noLoss: true,
+    });
+    // Settings saved before auto-sell existed still parse, with it off.
+    const { autoSell: _drop, ...old } = DEFAULT_BOT_SETTINGS;
+    expect(botSettingsSchema.parse(old).autoSell.enabled).toBe(false);
+  });
+
+  it('rejects steps and fixed prices outside their limits', () => {
+    const bad = (autoSell: Partial<BotSettings['autoSell']>) =>
+      botSettingsSchema.safeParse({
+        ...DEFAULT_BOT_SETTINGS,
+        autoSell: { ...DEFAULT_BOT_SETTINGS.autoSell, ...autoSell },
+      }).success;
+    expect(bad({ steps: BOT_LIMITS.autoSellSteps.max + 1 })).toBe(false);
+    expect(bad({ fixedPrice: 100 })).toBe(false);
+    expect(bad({ steps: -3, fixedPrice: 25_000 })).toBe(true);
+  });
+
+  it('clamps what got into storage some other way, and keeps it through "Reset to recommended"', () => {
+    const wild = {
+      ...DEFAULT_BOT_SETTINGS,
+      autoSell: {
+        enabled: true,
+        mode: 'auction',
+        steps: -99,
+        fixedPrice: 1,
+        platform: 'switch',
+        noLoss: false,
+      },
+    } as unknown as BotSettings;
+    expect(clampBotSettings(wild).autoSell).toEqual({
+      enabled: true,
+      mode: 'market',
+      steps: BOT_LIMITS.autoSellSteps.min,
+      fixedPrice: BOT_LIMITS.autoSellPrice.min,
+      platform: 'console',
+      noLoss: false,
+    });
+    const mine = {
+      ...DEFAULT_BOT_SETTINGS,
+      autoSell: { ...DEFAULT_BOT_SETTINGS.autoSell, enabled: true, steps: 2 },
+    };
+    expect(withRecommendedLimits(mine).autoSell).toEqual(mine.autoSell);
+  });
+});

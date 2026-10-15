@@ -635,6 +635,15 @@ async function main(): Promise<void> {
             const r = await send<{ summary: PriceSummary }>('summary', { resourceId, minProfit: settingsCache.targets.minProfitPerSnipe });
             return r?.summary.median ?? null;
           },
+          // Auto-sell's market price: FUTBIN's, else the median Nova has
+          // recorded for the card (background/futbin.ts, model/prices.ts).
+          marketPrice: async (resourceId, platform) => {
+            const futbin = await send<{ price: number | null }>('price.futbin', { resourceId, platform });
+            if (futbin?.price) return { price: futbin.price, source: 'futbin' as const };
+            const r = await send<{ summary: PriceSummary }>('summary', { resourceId, minProfit: settingsCache.targets.minProfitPerSnipe });
+            const median = r?.summary.median;
+            return median ? { price: median, source: 'nova' as const } : null;
+          },
           // The hours-per-day limit survives a page reload.
           loadUsage: () => send<BotDailyUsage | null>('bot.usageGet'),
           saveUsage: (usage) => void send('bot.usageSet', usage),

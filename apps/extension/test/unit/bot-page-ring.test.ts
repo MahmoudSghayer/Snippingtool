@@ -26,6 +26,7 @@ it('counts a wait down every frame, and a dash refresh does not restart it', () 
       adapter: {
         search: vi.fn(),
         buy: vi.fn(),
+        list: vi.fn(),
         onAuctions: () => () => undefined,
         onBuyable: () => () => undefined,
         onProbe: () => () => undefined,

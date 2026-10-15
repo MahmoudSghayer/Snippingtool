@@ -45,9 +45,13 @@
  */
 import {
   BOT_GOVERNOR_BOUNDS,
+  MIN_SALE_PRICE,
+  MIN_START_PRICE,
   botGovernorSettings,
   botRiskLevel,
   clampBotSettings,
+  roundToPriceStep,
+  stepPrice,
 } from '@sl/shared';
 
 import { ACT_ERROR, isAdapterRefusal } from '../lib/act-auth.js';
@@ -162,7 +166,9 @@ export type SniperStopReason =
 export interface SniperLogEntry {
   id: number;
   at: number;
-  kind: 'bought' | 'failed' | 'blocked' | 'info';
+  /** `listed`: auto-sell put a bought card on the market (`price` is its
+   * buy-now, `message` how that price was chosen). */
+  kind: 'bought' | 'listed' | 'failed' | 'blocked' | 'info';
   resourceId?: number;
   assetId?: number;
   rating?: number;
@@ -212,7 +218,7 @@ export interface SniperState {
 }
 
 export interface SniperDeps {
-  adapter: Pick<AdapterClient, 'search' | 'buy' | 'onAuctions' | 'onBuyable' | 'onProbe' | 'onShape'>;
+  adapter: Pick<AdapterClient, 'search' | 'buy' | 'list' | 'onAuctions' | 'onBuyable' | 'onProbe' | 'onShape'>;
   getFilters: () => SniperFilter[];
   /** Expected resale price for a card, or null if the ledger has no data. */
   estimateSellPrice: (resourceId: number) => Promise<number | null>;
@@ -233,6 +239,12 @@ export interface SniperDeps {
   exclusive?: () => boolean;
   /** The server kill switch as the content script currently knows it. */
   killSwitch: () => { active: boolean; reason?: string };
+  /** Auto-sell's market price for a card: FUTBIN's, else Nova's own market
+   * data, else null. Omitted = auto-sell's market mode never lists. */
+  marketPrice?: (
+    resourceId: number,
+    platform: BotSettings['autoSell']['platform'],
+  ) => Promise<{ price: number; source: 'futbin' | 'nova' } | null>;
   onChange: () => void;
   onLog?: (entry: SniperLogEntry) => void;
   onSearchResult?: (result: SniperSearchResult) => void;
@@ -701,6 +713,7 @@ export class Sniper {
           if (!late.ok) return;
           const { sellPrice, profit } = estimate ?? (await this.estimate(m));
           this.recordBought(m, sellPrice, profit, late.latencyMs);
+          await this.autoSell(m);
         });
         if (signal.aborted) return true;
         this.deps.onChange();
@@ -710,6 +723,7 @@ export class Sniper {
       if (result.ok) {
         const { sellPrice, profit } = estimate ?? (await this.estimate(m));
         this.recordBought(m, sellPrice, profit, result.latencyMs);
+        await this.autoSell(m);
         if (t.stopAfterPurchases > 0 && this.stats.purchases >= t.stopAfterPurchases) {
           this.stop('purchase_limit');
           return true;
@@ -768,6 +782,39 @@ export class Sniper {
   private async estimate(m: SniperMatch): Promise<Estimate> {
     const sellPrice = await this.sellPrice(m.resourceId);
     return { sellPrice, profit: sellPrice == null ? null : Math.floor(sellPrice * (1 - EA_TAX)) - m.buyNow };
+  }
+
+  /** Auto-sell: list a card the bot just bought, at the user's price (the
+   * market price moved by their steps, or their fixed price). Never throws;
+   * whatever happens is in the log. */
+  private async autoSell(m: SniperMatch): Promise<void> {
+    const a = this.settings.autoSell;
+    if (!a.enabled || this.deps.killSwitch().active) return;
+    const card = { resourceId: m.resourceId, assetId: m.assetId, rating: m.rating };
+    const notListed = (why: string) => void this.addLog({ kind: 'blocked', ...card, message: `not listed: ${why}` });
+
+    let price: number;
+    let basis: string;
+    if (a.mode === 'fixed') {
+      price = roundToPriceStep(a.fixedPrice);
+      basis = 'your fixed price';
+    } else {
+      const market = (await this.deps.marketPrice?.(m.resourceId, a.platform).catch(() => null)) ?? null;
+      if (!market) return notListed('no market price for this card (FUTBIN and Nova have none)');
+      price = stepPrice(market.price, a.steps);
+      const steps = a.steps === 0 ? '' : `, ${a.steps > 0 ? '+' : ''}${a.steps} step${Math.abs(a.steps) === 1 ? '' : 's'}`;
+      basis = `${market.source === 'futbin' ? 'FUTBIN' : 'Nova market'} price ${coins(market.price)}${steps}`;
+    }
+    price = Math.max(MIN_SALE_PRICE, price);
+    if (a.noLoss && Math.floor(price * (1 - EA_TAX)) < m.buyNow) {
+      return notListed(`${coins(price)} would lose money after EA's 5% tax (bought for ${coins(m.buyNow)})`);
+    }
+    // Starting bid one step under the buy-now, as the web app suggests.
+    const start = Math.max(MIN_START_PRICE, stepPrice(price, -1));
+    const result = await this.deps.adapter.list(m.tradeId, start, price);
+    if (result.ok) this.addLog({ kind: 'listed', ...card, price, message: basis });
+    else notListed(result.error ?? 'EA did not accept the listing');
+    this.deps.onChange();
   }
 
   /** Why a match was not bought, once per listing: the same one comes back

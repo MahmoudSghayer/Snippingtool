@@ -82,7 +82,10 @@ export function observableServices() {
     observable({ success: true, data: { items: [] } }),
   );
   const bid = vi.fn((_item: unknown, _price: number): unknown => observable({ success: true, data: {} }));
-  return { services: { Item: { searchTransferMarket, bid } }, searchTransferMarket, bid };
+  const list = vi.fn(
+    (_item: unknown, _start: number, _buyNow: number, _seconds: number): unknown => observable({ success: true, data: {} }),
+  );
+  return { services: { Item: { searchTransferMarket, bid, list } }, searchTransferMarket, bid, list };
 }
 
 export function promiseServices() {

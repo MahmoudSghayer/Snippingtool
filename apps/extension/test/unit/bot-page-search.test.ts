@@ -56,6 +56,7 @@ function makeSniper(getFilters: () => SniperFilter[]): Sniper {
       adapter: {
         search: vi.fn(async () => ({ ok: true as const, auctions: [] })),
         buy: vi.fn(),
+        list: vi.fn(),
         onAuctions: () => () => undefined,
         onBuyable: () => () => undefined,
         onProbe: () => () => undefined,
