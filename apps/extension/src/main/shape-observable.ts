@@ -25,7 +25,7 @@ import { ACT_ERROR } from '../lib/act-auth.js';
 import { normaliseListing } from './ea-listing.js';
 import { ShapeError, assertSucceeded, extractListingArray, settle } from './ea-response.js';
 
-import type { BuyTarget, ServiceShape } from './shapes.js';
+import type { BuyTarget, ListTarget, ServiceShape } from './shapes.js';
 import type { FilterCriteria } from '@sl/shared';
 
 const apply = Reflect.apply;
@@ -122,7 +122,7 @@ async function call(services: Obj, name: string, args: unknown[], timeoutMs: num
   return settle(returned, timeoutMs, onLate);
 }
 
-/** Only an explicit `success: true` is a bought item. */
+/** Only an explicit `success: true` is a bought (or listed) item. */
 function bidSucceeded(response: unknown): boolean {
   return response !== null && typeof response === 'object' && (response as Obj).success === true;
 }
@@ -162,6 +162,21 @@ export function createObservableShape(timeoutMs: number): ServiceShape {
       // No verified call for a single trade's status in this shape (a
       // guess would be `refreshAuctions`); fail loud rather than guess.
       throw new ShapeError('readResult is not supported by the observable shape (no verified trade-status call)');
+    },
+    async list(services, target: ListTarget) {
+      // The web app's own "List on Transfer Market", as community
+      // autobuyers describe it: services.Item.list(item, startingBid,
+      // buyNowPrice, durationSeconds) -> observable. UNVERIFIED like the
+      // rest of this shape; only an explicit `success: true` counts.
+      if (!method(services, 'list')) throw new ShapeError('window.services.Item.list is not a function');
+      const response = await call(
+        services,
+        'list',
+        [target.entity, target.startPrice, target.buyNowPrice, target.durationSeconds],
+        timeoutMs,
+      );
+      const r = assertSucceeded(response, 'list', true);
+      if (!bidSucceeded(r)) throw new ShapeError('list did not report success: true');
     },
   };
 }

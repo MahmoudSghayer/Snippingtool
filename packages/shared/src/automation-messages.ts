@@ -31,5 +31,9 @@ export const AUTOMATION_BACKGROUND_MESSAGE_TYPES = [
    * `storage.local` for the Snipe Targets form. */
   'catalog.get',
   'catalog.save',
+  /** A card's current price on FUTBIN, for Nova AI's auto-sell. Background
+   * fetches it (FUTBIN has no public API; anything unreadable is null) and
+   * caches it briefly. */
+  'price.futbin',
 ] as const;
 export type AutomationBackgroundMessageType = (typeof AUTOMATION_BACKGROUND_MESSAGE_TYPES)[number];

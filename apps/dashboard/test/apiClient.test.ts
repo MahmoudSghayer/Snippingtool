@@ -124,7 +124,8 @@ describe('api client silent token refresh', () => {
         return jsonResponse({ accessToken: 'a', refreshToken: 'b', expiresIn: 900 }, 200);
       }
       meCalls += 1;
-      if (meCalls === 1) return jsonResponse({ code: 'AUTH_TOKEN_EXPIRED', message: 'expired' }, 401);
+      if (meCalls === 1)
+        return jsonResponse({ code: 'AUTH_TOKEN_EXPIRED', message: 'expired' }, 401);
       return jsonResponse({ id: 'user-1' }, 200);
     });
     const handler = vi.fn();
@@ -149,7 +150,8 @@ describe('api client silent token refresh', () => {
         return jsonResponse({ accessToken: 'a', refreshToken: 'b', expiresIn: 900 }, 200);
       }
       meCalls += 1;
-      if (meCalls === 1) return jsonResponse({ code: 'AUTH_TOKEN_EXPIRED', message: 'expired' }, 401);
+      if (meCalls === 1)
+        return jsonResponse({ code: 'AUTH_TOKEN_EXPIRED', message: 'expired' }, 401);
       return jsonResponse({ code: 'AUTH_SESSION_REVOKED', message: 'revoked' }, 401);
     });
     const handler = vi.fn();

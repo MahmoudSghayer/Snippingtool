@@ -24,9 +24,9 @@
 // entry list, so this build emits every file the manifest names, handoff.js
 // included) and generate-manifest.mjs directly (read-only — this suite never
 // edits apps/extension's own files) rather than duplicating either.
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { build } from 'vite';
 
@@ -39,10 +39,10 @@ export async function buildExtension(
   apiOrigin = process.env.E2E_API_ORIGIN ?? 'http://127.0.0.1:3100',
 ) {
   const { buildManifest } = await import(
-    path.join(extensionRoot, 'scripts', 'generate-manifest.mjs')
+    pathToFileURL(path.join(extensionRoot, 'scripts', 'generate-manifest.mjs')).href
   );
   const { LIB_ENTRIES, ES_GROUP_INPUTS } = await import(
-    path.join(extensionRoot, 'scripts', 'entries.mjs')
+    pathToFileURL(path.join(extensionRoot, 'scripts', 'entries.mjs')).href
   );
   const pkg = JSON.parse(readFileSync(path.join(extensionRoot, 'package.json'), 'utf8'));
 
@@ -130,6 +130,13 @@ export async function buildExtension(
   const manifest = buildManifest('ledger', { version: pkg.version, apiOrigin, updateUrl: '' });
   mkdirSync(outDir, { recursive: true });
   writeFileSync(path.join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+  // Same as build.mjs: Chrome refuses to load an unpacked extension whose
+  // manifest names an icon that is not there, and with --load-extension that
+  // refusal is a modal dialog that hangs launchPersistentContext.
+  mkdirSync(path.join(outDir, 'icons'), { recursive: true });
+  for (const file of Object.values(manifest.icons)) {
+    copyFileSync(path.join(extensionRoot, 'src', file), path.join(outDir, file));
+  }
 
   console.warn(
     `[tests/e2e] built extension (ledger, apiOrigin=${apiOrigin}) -> ${path.relative(repoRoot, outDir)}`,
@@ -141,6 +148,6 @@ export const EXTENSION_OUT_DIR = outDir;
 
 // Allow `node build-extension.mjs [apiOrigin]` standalone (e.g. for a
 // developer poking at the build without running the whole suite).
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   await buildExtension(process.argv[2]);
 }
