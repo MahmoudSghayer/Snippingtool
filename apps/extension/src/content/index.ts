@@ -36,6 +36,7 @@ import { Governor, type GovernorState } from '../engine/governor.js';
 import { rankCandidates, type ScoredOpportunity } from '../engine/ranker.js';
 import { countObservedSearches, governedSearch } from '../engine/search.js';
 import { handOffWasLate, readHandedOffNonce } from '../lib/act-auth.js';
+import { createBackgroundSleep } from '../lib/background-timer.js';
 import { riskLevelChangeEvent } from '../lib/bot-safety.js';
 import { logger } from '../lib/logger.js';
 import { singleFlight } from '../lib/single-flight.js';
@@ -626,6 +627,9 @@ async function main(): Promise<void> {
       sniper = new mod.Sniper(
         {
           adapter,
+          // Timed off the main thread, so the bot keeps its pace while the
+          // tab is minimised or in the background (lib/background-timer.ts).
+          sleep: createBackgroundSleep(),
           getFilters: () => (liveSearch ? [liveSearch] : []),
           estimateSellPrice: async (resourceId) => {
             const r = await send<{ summary: PriceSummary }>('summary', { resourceId, minProfit: settingsCache.targets.minProfitPerSnipe });
