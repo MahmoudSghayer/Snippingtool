@@ -300,7 +300,13 @@ search a random delay from the user's range after the last one started (start
 to start, so EA's answer time and any buying come out of the delay rather than
 being added to it), with breaks every N searches and rests every N
 minutes. Each missed buy's log line says how long after the search it went out
-and how long EA took to answer. It ships through the same `virtual:autobuyer-loader` alias as the
+and how long EA took to answer. EA answers a search it was just asked, word for
+word, from its cache, so each search steps its min buy-now price one notch up
+EA's price grid (`searchMinBuy`): from the filter's own min (or none) up to
+40% of the way to the max price (1,000 coins over the min with no max price),
+then over again. Every search in a cycle is one EA was not just asked, and
+only listings far under the max price are left out, by some searches of each
+cycle. It ships through the same `virtual:autobuyer-loader` alias as the
 autobuyer (`loadSniper()`), so the `ledger` build never contains it, and the
 autobuyer does not buy while the bot runs.
 

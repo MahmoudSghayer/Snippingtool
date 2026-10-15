@@ -14,7 +14,7 @@ import {
 } from '@sl/shared';
 import { describe, expect, it, vi } from 'vitest';
 
-import { Sniper, type SniperDeps, type SniperFilter } from '../../src/engine/sniper.js';
+import { Sniper, searchMinBuy, type SniperDeps, type SniperFilter } from '../../src/engine/sniper.js';
 import { ACT_ERROR } from '../../src/lib/act-auth.js';
 
 import type { ActionOutcome } from '../../src/content/adapter-client.js';
@@ -282,6 +282,35 @@ describe('Sniper — search and buy', () => {
     await h.done();
     expect(h.searches[0]).toMatchObject({ maxPrice: 7_000 });
     expect(h.buys).toEqual(['t-b']);
+  });
+
+  it('asks EA something new every search: the min buy-now price steps up the grid, the rest stays as set', async () => {
+    const h = setup({
+      filters: [{ id: 'f1', name: 'Target', filter: { resourceId: 100, maxPrice: 2_200, minRating: 84 } }],
+      results: [[], [], []],
+      maxSearches: 3,
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.searches).toEqual([
+      { resourceId: 100, maxPrice: 2_200, minRating: 84 },
+      { resourceId: 100, maxPrice: 2_200, minRating: 84, minPrice: 150 },
+      { resourceId: 100, maxPrice: 2_200, minRating: 84, minPrice: 200 },
+    ]);
+  });
+
+  it('counts each filter\'s searches on its own', async () => {
+    const h = setup({
+      filters: [
+        { id: 'a', name: 'A', filter: { resourceId: 100, maxPrice: 2_200 } },
+        { id: 'b', name: 'B', filter: { resourceId: 100, minPrice: 1_000, maxPrice: 2_000 } },
+      ],
+      results: [[], [], [], []],
+      maxSearches: 4,
+    });
+    h.sniper.start();
+    await h.done();
+    expect((h.searches as { minPrice?: number }[]).map((f) => f.minPrice)).toEqual([undefined, 1_000, 150, 1_100]);
   });
 
   it('skips a listing whose known profit is below the minimum, but buys unknown-profit ones', async () => {
@@ -1282,5 +1311,27 @@ describe('Sniper — says at Start whether it keeps searching in a background ta
     h.sniper.start();
     await h.done();
     expect(h.sniper.getLog().some((e) => e.message === message)).toBe(true);
+  });
+});
+
+describe('searchMinBuy', () => {
+  it('steps from no minimum up to 40% of the max price, then starts over', () => {
+    const cycle = Array.from({ length: 17 }, (_, i) => searchMinBuy(i, undefined, 2_200));
+    // 40% of 2,200 is 880: 150 to 850 in 50s, after the plain search.
+    expect(cycle).toEqual([undefined, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600, 650, 700, 750, 800, 850, undefined]);
+  });
+
+  it("starts from the filter's own minimum and keeps to EA's grid", () => {
+    // 40% of the way from 1,000 to 2,000 is 1,400; 100s above 1,000.
+    expect(Array.from({ length: 6 }, (_, i) => searchMinBuy(i, 1_000, 2_000))).toEqual([1_000, 1_100, 1_200, 1_300, 1_400, 1_000]);
+    // No room to step: always the filter's own.
+    expect([0, 1, 2].map((i) => searchMinBuy(i, 2_100, 2_200))).toEqual([2_100, 2_100, 2_100]);
+  });
+
+  it('steps up to 1,000 coins over the minimum when there is no max price', () => {
+    const cycle = Array.from({ length: 20 }, (_, i) => searchMinBuy(i, undefined, null));
+    expect(cycle[1]).toBe(150);
+    expect(cycle[18]).toBe(1_000);
+    expect(cycle[19]).toBeUndefined();
   });
 });
