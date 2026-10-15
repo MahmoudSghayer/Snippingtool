@@ -16,6 +16,12 @@
 #                           (backup, rollback tags, build, migrate, restart)
 #   OPS_ACTION=admin-login  HASH_B64=<base64 argon2id hash>: set the one admin
 #                           account's password, unlock it, clear its 2FA
+#   OPS_ACTION=account      EMAIL_SHA=<sha256 hex of the lowercased email>:
+#                           report why that account can't log in; with
+#                           HASH_B64 also set its password, unlock it, verify
+#                           its email, clear 2FA, make it the admin, and clear
+#                           the login rate limits. The email itself is never
+#                           sent or printed.
 set -euo pipefail
 
 ACTION="${OPS_ACTION:?set OPS_ACTION}"
@@ -46,7 +52,7 @@ psql_prod() {
   pg="$(container postgres)"
   [ -n "$pg" ] || { echo "no running postgres container in $project" >&2; exit 1; }
   docker exec -i "$@" "$pg" sh -c \
-    'psql -X -q -t -A -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v hash="${HASH:-}"'
+    'psql -X -q -t -A -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v hash="${HASH:-}" -v email_sha="${EMAIL_SHA:-}"'
 }
 env_value() { [ -f "$env_file" ] && sed -n "s/^$1=//p" "$env_file" | tail -n1 | tr -d '"' || true; }
 is_set() { [ -n "$(env_value "$1")" ] && echo set || echo 'not set'; }
@@ -116,6 +122,67 @@ SQL
 )"
     [ "$changed" = 1 ] || { echo 'the admin account was not updated' >&2; exit 1; }
     echo 'admin password set; account unlocked; 2FA cleared'
+    ;;
+
+  account)
+    sha="${EMAIL_SHA:?set EMAIL_SHA}"
+    [[ "$sha" =~ ^[0-9a-f]{64}$ ]] || { echo 'EMAIL_SHA is not a sha256' >&2; exit 1; }
+    match="encode(sha256(convert_to(lower(email::text), 'UTF8')), 'hex') = :'email_sha'"
+    report() {
+      psql_prod -e EMAIL_SHA="$sha" <<SQL
+SELECT 'account: role=' || role || ' status=' || status
+    || ' email_verified=' || (email_verified_at IS NOT NULL)
+    || ' locked=' || (locked_until IS NOT NULL AND locked_until > now())
+    || ' failed_logins=' || failed_login_count
+    || ' 2fa=' || (totp_enabled_at IS NOT NULL)
+    || ' pw=' || left(md5(password_hash), 8)
+    || ' account_bans=' || (SELECT count(*) FROM bans b
+                             WHERE b.user_id = u.id AND b.lifted_at IS NULL)
+  FROM users u WHERE $match;
+SQL
+    }
+    found="$(report)"
+    echo "${found:-account: no user with that email}"
+    echo "admins: $(echo "SELECT count(*) || ' (this email: ' || count(*) FILTER (WHERE $match) || ')' FROM users WHERE role = 'admin';" | psql_prod -e EMAIL_SHA="$sha")"
+    api="$(container api)"
+    if [ -n "$api" ]; then
+      echo 'login responses, last 3h:'
+      docker logs --since 3h "$api" 2>&1 | grep '/api/v1/auth/login' \
+        | grep -o '"statusCode":[0-9]*' | sort | uniq -c || true
+      echo 'error codes, last 3h:'
+      docker logs --since 3h "$api" 2>&1 | grep -o '"code":"[A-Z_]*"' | sort | uniq -c || true
+    fi
+    [ -n "${HASH_B64:-}" ] || exit 0
+    [ -n "$found" ] || { echo 'no such account: nothing changed' >&2; exit 1; }
+
+    hash="$(printf '%s' "$HASH_B64" | base64 -d)"
+    case "$hash" in
+      '$argon2id$'*) ;;
+      *) echo 'HASH_B64 is not an argon2id hash' >&2; exit 1 ;;
+    esac
+    changed="$(psql_prod -e HASH="$hash" -e EMAIL_SHA="$sha" <<SQL
+UPDATE users
+   SET password_hash = :'hash',
+       failed_login_count = 0,
+       locked_until = NULL,
+       totp_secret_enc = NULL,
+       totp_enabled_at = NULL,
+       email_verified_at = COALESCE(email_verified_at, now()),
+       status = 'active',
+       role = 'admin'
+ WHERE $match
+RETURNING 1;
+SQL
+)"
+    [ "$changed" = 1 ] || { echo 'the account was not updated' >&2; exit 1; }
+    rc="$(container redis)"
+    if [ -n "$rc" ]; then
+      cleared="$(docker exec -e REDISCLI_AUTH="$(env_value REDIS_PASSWORD)" "$rc" sh -c \
+        'c="redis-cli --tls --cacert /certs/ca.crt --no-auth-warning"; $c --scan --pattern "*ratelimit:login:*" | while read -r k; do $c del "$k" >/dev/null; echo x; done | wc -l')"
+      echo "login rate limits cleared: $cleared"
+    fi
+    echo 'password set; unlocked; email verified; 2FA cleared; admin'
+    echo "now: $(report)"
     ;;
 
   *)
