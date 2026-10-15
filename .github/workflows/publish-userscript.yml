@@ -1,10 +1,23 @@
 name: Publish userscript
 
-# Builds the Tampermonkey userscript and publishes it to the production VM's
-# dashboard.{DOMAIN}/userscript/ path (infra/caddy/Caddyfile), by running
-# infra/scripts/publish-userscript.sh there — the same script as a manual
-# publish. Every build gets a newer @version (scripts/build.mjs stamps it),
-# so installed scripts pick it up on Tampermonkey's next update check.
+# Builds the Tampermonkey userscript and publishes it to the production VM,
+# by running infra/scripts/publish-userscript.sh there (the same script as a
+# manual publish), to both places installs update from:
+#
+#   1. dashboard.{DOMAIN}/userscript/nova-trade.user.js, served by Caddy
+#      (infra/caddy/Caddyfile): the `userscript` build, with the origins and
+#      licence key below baked in.
+#   2. The per-user install link the dashboard hands out,
+#      api.{DOMAIN}/api/v1/downloads/userscript/<token>/nova-trade.user.js,
+#      and its nova-trade.meta.js update check. The API fills that in from a
+#      `userscript --template` build per request; this job installs a fresh
+#      template into the host directory the api containers mount as
+#      USERSCRIPT_TEMPLATE_DIR (infra/docker-compose.prod.yml), and the API
+#      serves it from the next request on. No API rebuild or restart.
+#
+# Every build gets a newer @version (scripts/build.mjs stamps it), and the
+# template gets the same one, so installs from either place pick it up on
+# Tampermonkey's next update check.
 #
 # Runs on every push to main that changes what goes into the userscript, and
 # by hand from the Actions tab. Skips with a notice, not a red run, until
@@ -16,6 +29,19 @@ name: Publish userscript
 # PRODUCTION_SSH_KNOWN_HOSTS (`ssh-keyscan <host>` output) to pin the host
 # key. These are repository secrets: a job with no `environment:` cannot
 # read the `production` environment's.
+#
+# One-time step on the server, for (2): once the VM's checkout has the
+# docker-compose.prod.yml that mounts the template directory, the api
+# containers have to be recreated once to get the mount (the next deploy
+# does it too). On the VM that infra/scripts/vm-deploy.sh deploys:
+#   docker compose -p sniper-ledger-prod -f infra/docker-compose.prod.yml \
+#     -f infra/docker-compose.localbuild.yml --env-file infra/.env.production \
+#     up -d --no-build api
+# On a stack deployed from registry images (release.yml), with the IMAGE_TAG
+# it runs: docker compose -f infra/docker-compose.prod.yml up -d api
+# Until then every publish still updates (1), installs the template where
+# the API will look for it, and warns that the API doesn't serve it yet.
+# The script never recreates containers itself: see docs/11-devops.md.
 #
 # Optional repository variables override the defaults below:
 # USERSCRIPT_DOMAIN, USERSCRIPT_DASHBOARD_ORIGIN, ENTITLEMENT_PUBLIC_KEY (the
@@ -76,6 +102,23 @@ jobs:
           USERSCRIPT_DOWNLOAD_URL: https://dashboard.${{ env.DOMAIN }}/userscript/nova-trade.user.js
         run: pnpm --filter @sl/extension build:userscript
 
+      - name: build the API's userscript template
+        if: steps.check.outputs.configured == 'true'
+        # The API fills in its own origins and licence key, and each user's
+        # download token, when it serves this (apps/api/src/lib/
+        # extension-download.ts), so it needs none of the settings above.
+        # It does take the script's @version, so installs from the
+        # dashboard see the same update as installs from the URL above.
+        run: |
+          set -euo pipefail
+          script=apps/extension/dist/userscript/nova-trade.user.js
+          version="$(grep -m1 -oE '@version[[:space:]]+[^[:space:]]+' "$script" | awk '{print $2}')"
+          if [ -z "$version" ]; then
+            echo "::error::Could not read @version from $script"
+            exit 1
+          fi
+          USERSCRIPT_VERSION="$version" pnpm --filter @sl/extension build:userscript-template
+
       - name: publish to the server
         if: steps.check.outputs.configured == 'true'
         env:
@@ -100,15 +143,23 @@ jobs:
           remote="$SSH_USER@$SSH_HOST"
           dir="/tmp/nova-userscript-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           build=apps/extension/dist/userscript
+          template=apps/extension/dist/userscript-template
           # shellcheck disable=SC2029 # $dir is meant to expand here, on the runner
-          ssh "${opts[@]}" "$remote" "mkdir -p '$dir'"
+          ssh "${opts[@]}" "$remote" "mkdir -p '$dir/template'"
           scp "${opts[@]}" "$build/nova-trade.user.js" "$build/nova-trade.meta.js" \
             infra/scripts/publish-userscript.sh "$remote:$dir/"
+          # Same file names as the build above, so in a directory of its own.
+          scp "${opts[@]}" "$template/nova-trade.user.js" "$template/nova-trade.meta.js" \
+            "$remote:$dir/template/"
           # The script copied with the build, not the VM's checkout of it,
-          # so the publish steps always match this commit.
+          # so the publish steps always match this commit. GITHUB_ACTIONS
+          # makes its warnings show up as annotations on this run.
           # shellcheck disable=SC2029 # $dir and $CADDY_CONTAINER expand on the runner
           ssh "${opts[@]}" "$remote" \
-            "USERSCRIPT_BUILD_DIR='$dir' CADDY_CONTAINER='$CADDY_CONTAINER' bash '$dir/publish-userscript.sh'; s=\$?; rm -rf '$dir'; exit \$s"
+            "USERSCRIPT_BUILD_DIR='$dir' USERSCRIPT_TEMPLATE_BUILD_DIR='$dir/template' CADDY_CONTAINER='$CADDY_CONTAINER' GITHUB_ACTIONS=true bash '$dir/publish-userscript.sh'; s=\$?; rm -rf '$dir'; exit \$s"
 
           version="$(grep -m1 -oE '@version[[:space:]]+[^[:space:]]+' "$build/nova-trade.user.js" | awk '{print $2}')"
-          echo "Published userscript @version ${version} to https://dashboard.${DOMAIN}/userscript/nova-trade.user.js" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "Published userscript @version ${version} to https://dashboard.${DOMAIN}/userscript/nova-trade.user.js"
+            echo "and as the template behind the dashboard's per-user install links (any warning above says if the API doesn't serve it yet)."
+          } >> "$GITHUB_STEP_SUMMARY"

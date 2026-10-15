@@ -11,7 +11,11 @@
 // The userscript works the same way (`userscript --template`, one file), and
 // additionally carries a placeholder download token in its @downloadURL and
 // @updateURL, replaced per request with the user's signed token
-// (lib/userscript-token.ts).
+// (lib/userscript-token.ts). Unlike the zip, its template can be replaced
+// while the API runs: production mounts USERSCRIPT_TEMPLATE_DIR from the
+// host, and infra/scripts/publish-userscript.sh installs a new template there
+// on every publish. So its cache is keyed on the template file's identity
+// too, and the next request after a publish serves the new script.
 
 import { createPublicKey } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
@@ -182,6 +186,9 @@ export interface UserscriptPackage {
 
 let cachedUserscript: { key: string; pkg: UserscriptPackage } | null = null;
 
+/** Where to look for the userscript template, in order: the configured
+ * directory, the API image's copy, and the monorepo's build output (for
+ * local runs). */
 function userscriptCandidateDirs(configured: string | undefined): string[] {
   const here = path.dirname(fileURLToPath(import.meta.url));
   return [
@@ -191,12 +198,25 @@ function userscriptCandidateDirs(configured: string | undefined): string[] {
   ];
 }
 
-export function findUserscriptTemplate(configured?: string): string | null {
+/** The first candidate directory that actually holds the template file,
+ * with a stamp of that file's identity. A directory without the file is
+ * skipped, which is how a configured directory that is still empty (a
+ * production mount before the first publish) falls back to the image's
+ * copy. The stamp changes when a publish renames a new file into place: a
+ * new inode, and normally a new mtime and size. */
+function locateUserscriptTemplate(
+  configured: string | undefined,
+): { file: string; stamp: string } | null {
   for (const dir of userscriptCandidateDirs(configured)) {
     const file = path.join(dir, USERSCRIPT_FILE);
-    if (existsSync(file)) return file;
+    const stat = statSync(file, { throwIfNoEntry: false });
+    if (stat?.isFile()) return { file, stamp: `${stat.ino}:${stat.size}:${stat.mtimeMs}` };
   }
   return null;
+}
+
+export function findUserscriptTemplate(configured?: string): string | null {
+  return locateUserscriptTemplate(configured)?.file ?? null;
 }
 
 /** The userscript's per-user URLs on this API. */
@@ -206,16 +226,23 @@ export function userscriptUrls(apiOrigin: string, token: string) {
 }
 
 /** Returns the userscript for this deployment, or `null` when no template
- * build is present. The origins are filled in once and cached; the token is
- * filled in per call. Its @downloadURL and @updateURL already point at
- * `userscriptUrls()` on APP_ORIGIN (the template build puts them there with
- * the placeholder origin and token). */
+ * build is present. The origins are filled in once per template file and
+ * cached; the token is filled in per call. Its @downloadURL and @updateURL
+ * already point at `userscriptUrls()` on APP_ORIGIN (the template build puts
+ * them there with the placeholder origin and token).
+ *
+ * The cache key includes the template file's stamp (one stat per call), so
+ * a template published into USERSCRIPT_TEMPLATE_DIR is picked up by the next
+ * call, the script and its meta.js alike, without a restart. If a publish
+ * lands between that stat and the read below, the new text is cached under
+ * the old stamp, and the next call reads it again under the new one. */
 export function getUserscriptPackage(config: UserscriptDownloadConfig): UserscriptPackage | null {
-  const file = findUserscriptTemplate(config.userscriptTemplateDir);
-  if (!file) return null;
+  const found = locateUserscriptTemplate(config.userscriptTemplateDir);
+  if (!found) return null;
+  const { file, stamp } = found;
 
   const replacements = originReplacements(config);
-  const cacheKey = JSON.stringify([file, replacements]);
+  const cacheKey = JSON.stringify([file, stamp, replacements]);
   if (cachedUserscript?.key === cacheKey) return cachedUserscript.pkg;
 
   let text = readFileSync(file, 'utf8');

@@ -57,6 +57,12 @@ services:
   api:
     image: ${REGISTRY:-ghcr.io/sniper-ledger}/api:${IMAGE_TAG:?set IMAGE_TAG (staging deploys the latest main-branch build, e.g. `main`, or a commit SHA — see release.yml)}
     <<: [*app-env, *restart-always]
+    # Unlike prod, no published userscript template is mounted here
+    # (USERSCRIPT_TEMPLATE_DIR): staging redeploys the api image on every
+    # push to main, so the template baked into it already has main's code,
+    # and publish-userscript.yml only publishes to production. A mount
+    # nothing refreshes would only shadow the newer templates of later
+    # images.
     environment:
       NODE_ENV: production
     depends_on:

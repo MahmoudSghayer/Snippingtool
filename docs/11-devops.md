@@ -210,14 +210,9 @@ change.
 `.github/workflows/publish-userscript.yml`: on every push to `main` that
 touches `apps/extension/`, `packages/shared/` or the lockfile (and by hand
 from the Actions tab), builds the Tampermonkey userscript for production
-and runs `infra/scripts/publish-userscript.sh` on the VM over SSH, so
-`dashboard.{$DOMAIN}/userscript/nova-trade.user.js` always matches `main`
-and installs update themselves. It reads `PRODUCTION_SSH_HOST`,
-`PRODUCTION_SSH_USER`, `PRODUCTION_SSH_PRIVATE_KEY` (and optionally
-`PRODUCTION_SSH_KNOWN_HOSTS`) as **repository** secrets, and skips with a
-notice until they exist. The domain, dashboard origin and licence public
-key default to the live deployment's; repository variables override them
-(see the workflow's header).
+and publishes it on the VM, both at its public URL and behind the
+dashboard's install links, so every install updates itself to `main`. See
+§4a.
 
 `.github/actions/setup-pnpm` pins pnpm/Node once (from root
 `package.json`'s `packageManager`) for every job in every workflow.
@@ -233,6 +228,109 @@ deliberately matrix-free per job so this stays a one-line addition.
 **Local mirrors** of the CI checks that don't need a live cluster:
 `pnpm ci:lint`, `pnpm ci:typecheck`, `pnpm ci:check-env`, `pnpm ci:hadolint`
 (needs `hadolint` on `PATH`), `pnpm ci:actionlint` (needs `actionlint`).
+
+### 4a. Publishing the userscript
+
+A Tampermonkey install updates from wherever it was installed from, and
+there are two places. `publish-userscript.yml` refreshes both on every
+publish, by running `infra/scripts/publish-userscript.sh` on the VM over
+SSH (the same script works by hand; its header lists the builds it needs):
+
+| Installed from                                                                                                                 | Polls for updates                        | What a publish does                                                                                                               |
+| ------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| The public URL, `dashboard.{$DOMAIN}/userscript/nova-trade.user.js`                                                            | `nova-trade.meta.js` next to it          | Builds `build:userscript` (origins and licence key baked in) and copies it into the `caddy_data` volume Caddy serves it from      |
+| The dashboard's install button: a signed per-user link, `api.{$DOMAIN}/api/v1/downloads/userscript/<token>/nova-trade.user.js` | `<token>/nova-trade.meta.js`, on the API | Builds `build:userscript-template` and installs it into `/var/lib/nova-trade/userscript-template` on the VM, which the API serves |
+
+**The API's template.** The API fills its origins, licence key and the
+user's token into a `userscript --template` build per request
+(`apps/api/src/lib/extension-download.ts`). The api containers mount
+`/var/lib/nova-trade/userscript-template` read-only at
+`/app/downloads/userscript-published`, which is their
+`USERSCRIPT_TEMPLATE_DIR` (`infra/docker-compose.prod.yml`). The API keys
+its cached script on that file's inode, size and mtime, so the next
+download or update check after a publish serves the new one, with no image
+rebuild and no restart. While the directory has no `nova-trade.user.js`
+(before the first publish), the API serves the template baked into its
+image at `/app/downloads/userscript-template` (`infra/docker/api.Dockerfile`),
+as it did before this mount existed. That copy only changes when the image
+is rebuilt, and carries the bare package version.
+
+**Versions.** Tampermonkey installs an update only when `@version` goes up.
+`scripts/build.mjs` stamps every `userscript` build
+(`0.1.0.202610151234`: the package version plus a UTC build stamp), and the
+workflow builds the template with that same version (`USERSCRIPT_VERSION`).
+The script refuses a template whose `@version` differs from the script's,
+or that isn't a `--template` build.
+
+**The swap.** The script writes the template through a short-lived
+container (the Caddy container's image, already on the host, with no
+network): once Docker has created the host directory for the bind mount it
+belongs to root, and the SSH user only needs to be able to run docker. Both
+files go into a temporary directory inside the mounted directory, then
+each is renamed over the live one, so the API reads either the old file or
+the new one, never part of one. The mounted directory itself is never
+replaced: a bind mount stays attached to the directory it was set up with,
+so renaming a new directory over it would leave the running containers
+looking at the old one. Afterwards the script checks that every api
+container sees the new `@version`.
+
+**One-time step on the server.** Only api containers created from the
+updated `docker-compose.prod.yml` have the mount. Once, after the VM's
+checkout has it (`git pull` in `/opt/sniper-ledger`), recreate them:
+
+```bash
+# The stack infra/scripts/vm-deploy.sh deploys (images built on the VM):
+docker compose -p sniper-ledger-prod \
+  -f infra/docker-compose.prod.yml -f infra/docker-compose.localbuild.yml \
+  --env-file infra/.env.production up -d --no-build api
+
+# A stack deployed from registry images by release.yml, with the IMAGE_TAG
+# it runs exported:
+docker compose -f infra/docker-compose.prod.yml up -d api
+```
+
+The next `vm-deploy.sh` or `release.yml` deploy does the same. Until then
+every publish still updates the public URL, installs the template where the
+API will look for it (so the API serves the latest one as soon as the
+containers are recreated), and ends with a warning that the API doesn't
+serve it yet.
+
+**Why the script doesn't recreate the containers itself.** It would be
+easy, but it isn't safe to do from here:
+
+- The publish job runs unattended on every push to `main` that touches the
+  extension, while production deploys wait for the `production`
+  environment's required reviewers. Recreating the production API from the
+  publish job would go around that gate.
+- It runs from a temporary copy, not the VM's checkout, so it doesn't know
+  which compose files, env file and image tag the stack was started with
+  (`vm-deploy.sh` and `release.yml` use different ones). A wrong guess
+  would move the API onto a different image.
+- Outside Swarm, `docker compose up -d` recreates the api replicas without
+  a rolling update (`update_config` only applies to Swarm), which is a
+  short API outage: something for a deploy, not a userscript publish.
+
+So it finds the api containers of Caddy's compose project with
+`docker inspect`, and warns when they don't mount the directory yet.
+
+Staging doesn't mount a template: it redeploys the api image on every push
+to `main`, so the copy baked into it already has `main`'s code, and nothing
+publishes to staging.
+
+**Rollback.** Rolling back the API images (§5.6) leaves the published
+template in place, as it leaves the public URL. To make the API serve its
+image's own copy again, remove
+`/var/lib/nova-trade/userscript-template/nova-trade.user.js` (as root); the
+API falls back on its next request. Installs that already updated keep
+their version, since Tampermonkey never moves to a lower `@version`: the
+fix for them is a new publish.
+
+**Setup.** The workflow reads `PRODUCTION_SSH_HOST`, `PRODUCTION_SSH_USER`
+(one that can run docker), `PRODUCTION_SSH_PRIVATE_KEY` (and optionally
+`PRODUCTION_SSH_KNOWN_HOSTS`) as **repository** secrets, and skips with a
+notice until they exist. The domain, dashboard origin and licence public
+key default to the live deployment's; repository variables override them
+(see the workflow's header).
 
 ## 5. Single-VM deployment guide
 

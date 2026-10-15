@@ -53,7 +53,10 @@ RUN pnpm --filter=@sl/api deploy --prod /prod/api
 # (apps/api/src/lib/extension-download.ts), so this image needs no
 # per-deployment build args for it. The Tampermonkey userscript
 # (GET /api/v1/downloads/userscript/:token/nova-trade.user.js) is built the
-# same way, and also gets each user's signed download token filled in.
+# same way, and also gets each user's signed download token filled in. In
+# production the template that every userscript publish installs in a
+# mounted directory takes precedence over this copy (USERSCRIPT_TEMPLATE_DIR,
+# docs/11-devops.md §4a); this one is the fallback until the first publish.
 RUN pnpm --filter=@sl/extension build:template \
  && pnpm --filter=@sl/extension build:userscript-template \
  && mkdir -p /prod/api/downloads \

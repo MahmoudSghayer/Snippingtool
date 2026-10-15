@@ -44,8 +44,10 @@ to `/api/v1/downloads/userscript/<signed token>/nova-trade.user.js`, which
 serves the `userscript --template` build with this deployment's origins and
 the user's token filled in, and only while their pass includes the
 autobuyer. The script's `@downloadURL`/`@updateURL` point at the same signed
-URLs, so Tampermonkey updates it when the extension version goes up, and
-stops getting updates (403) when the pass lapses. See
+URLs, so Tampermonkey updates it whenever the template the API serves gets a
+higher `@version` (in production, on every userscript publish:
+`docs/11-devops.md` §4a), and stops getting updates (403) when the pass
+lapses. See
 `apps/api/src/lib/extension-download.ts` and `lib/userscript-token.ts`.
 
 For local testing, a standalone build against a given API:

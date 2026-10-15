@@ -218,9 +218,13 @@ license key and the token. The token is an HMAC of the user id (key derived
 from COOKIE_SECRET, purpose `userscript-download:v1`), never stored;
 Tampermonkey fetches without cookies, so the signed URL is what identifies
 the user, and each request checks their pass (403 once it no longer
-includes the autobuyer). `@version` is the extension version, and
-`@downloadURL`/`@updateURL` are the same signed URLs, so updates follow
-extension releases. `GET /api/v1/downloads/userscript/link` gives the
+includes the autobuyer). `@downloadURL`/`@updateURL` are the same signed
+URLs. The image's copy has the extension version as its `@version`; in
+production every userscript publish installs a fresh template, with that
+publish's stamped `@version`, in a directory the API reads first
+(`USERSCRIPT_TEMPLATE_DIR`) and serves from the next request on, so installs
+from the dashboard update on every publish (`docs/11-devops.md` §4a).
+`GET /api/v1/downloads/userscript/link` gives the
 signed-in user their `installUrl`. No
 extension code forks for it; `src/userscript/` supplies what the manifest
 and the browser would otherwise provide:
