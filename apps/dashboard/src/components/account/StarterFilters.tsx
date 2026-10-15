@@ -41,8 +41,8 @@ export function StarterFilters() {
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm text-ink-2">
-        These are starting points to learn how searches work, not recommendations. Prices change
-        all the time, so edit them to suit your club and budget.
+        These are starting points to learn how searches work, not recommendations. Prices change all
+        the time, so edit them to suit your club and budget.
       </p>
       <ul className="flex flex-col gap-2">
         {STARTER_FILTERS.map((starter) => {
