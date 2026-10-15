@@ -59,6 +59,7 @@ import {
 } from '../model/catalog.js';
 
 import { NOVA_LOGO_SVG } from './brand.js';
+import { readWallet } from './ea-wallet.js';
 import { onTrusted } from './trusted-events.js';
 
 import type { Sniper, SniperLogEntry, SniperPhase, SniperSearchResult } from '../engine/sniper.js';
@@ -301,6 +302,11 @@ const CSS = `
   .risk.high, .lvl.high { background: color-mix(in srgb, var(--ea-danger) 18%, transparent); color: var(--ea-danger); }
   .risk.very_high, .lvl.very_high { background: var(--ea-danger); color: var(--ea-danger-ink); }
   .saved { color: var(--ea-success); font-size: 13px; min-width: 60px; text-align: right; }
+  .wallet { display: flex; align-items: center; gap: 8px; }
+  .wallet[hidden], .wallet .bal[hidden] { display: none; }
+  .wallet .bal { display: flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 999px; background: var(--ea-control); font-size: 15px; font-weight: 500; white-space: nowrap; }
+  .wallet .bal .coin { margin-left: 0; }
+  .wallet .fp { padding: 1px 5px; border-radius: 4px; background: var(--ea-accent); color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .3px; }
   .close { border: 0; background: none; font-size: 22px; line-height: 1; color: var(--ea-muted); padding: 4px 8px; border-radius: var(--ea-radius); }
   .close:hover { color: var(--ea-text); background: var(--ea-control); }
   .notice { margin: 12px 20px 0; padding: 10px 14px; border-radius: var(--ea-radius); background: color-mix(in srgb, var(--ea-warning) 14%, transparent); color: var(--ea-warning); }
@@ -540,6 +546,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   let refreshQueued = false;
   let catalog: Catalog | null = null;
   let catalogPoll: ReturnType<typeof setInterval> | null = null;
+  let walletPoll: ReturnType<typeof setInterval> | null = null;
 
   /** Takes the latest catalog; re-renders only when it changed, and never
    * while a list is open (the user may be scrolling it). */
@@ -560,6 +567,10 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       <span class="risk" id="risk"></span>
       <span class="spacer"></span>
       <span class="saved" id="saved" aria-live="polite"></span>
+      <span class="wallet" id="wallet" hidden>
+        <span class="bal" id="w-coins" title="Your coins"><span class="amt"></span>${COIN}</span>
+        <span class="bal" id="w-points" title="Your FC Points"><span class="amt"></span><span class="fp" aria-hidden="true">FP</span></span>
+      </span>
       <button class="close" id="close" type="button" aria-label="Close Nova AI">✕</button>
     </div>
     <div class="notice" id="notice" hidden></div>
@@ -1752,8 +1763,27 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     notice.textContent = deps.getUnavailableReason() ?? '';
   }
 
+  /** The trader's coins and FC Points, as EA's top bar shows them
+   * (ui/ea-wallet.ts): the page covers that bar. Each shows once it can be
+   * read. */
+  function renderWallet(): void {
+    const w = readWallet(doc);
+    for (const [id, value] of [
+      ['w-coins', w.coins],
+      ['w-points', w.points],
+    ] as const) {
+      const el = $(id);
+      el.hidden = value == null;
+      const text = value == null ? '' : fmt(value);
+      const amt = el.querySelector('.amt')!;
+      if (amt.textContent !== text) amt.textContent = text;
+    }
+    $('wallet').hidden = w.coins == null && w.points == null;
+  }
+
   function refreshLive(): void {
     renderTop();
+    renderWallet();
     renderDash();
     renderFeeds();
   }
@@ -1816,6 +1846,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       // EA's lists arrive in two steps (files, then the web app's own lists
       // once it has started); pick each one up while the page is open.
       catalogPoll = setInterval(loadCatalog, 3_000);
+      // EA updates its top bar after every buy, sale and pack: follow it.
+      walletPoll = setInterval(renderWallet, 1_000);
       ringFrame = requestAnimationFrame(animate);
       openListeners.forEach((cb) => cb(true));
     },
@@ -1826,6 +1858,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       if (ringFrame != null) cancelAnimationFrame(ringFrame);
       if (catalogPoll) clearInterval(catalogPoll);
       catalogPoll = null;
+      if (walletPoll) clearInterval(walletPoll);
+      walletPoll = null;
       ringFrame = null;
       openListeners.forEach((cb) => cb(false));
     },

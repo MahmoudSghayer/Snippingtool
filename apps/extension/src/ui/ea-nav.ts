@@ -50,6 +50,21 @@ function findNav(doc: Document): HTMLElement | null {
   return null;
 }
 
+/** EA's top bar: the first candidate that is laid out. EA can keep more
+ * than one in the page, and a hidden one (an empty box) found first left
+ * the bot page over the visible bar, hiding the coin balance. */
+function findHeader(doc: Document): HTMLElement | null {
+  let first: HTMLElement | null = null;
+  for (const sel of HEADER_SELECTORS) {
+    for (const el of doc.querySelectorAll<HTMLElement>(sel)) {
+      first ??= el;
+      const r = el.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) return el;
+    }
+  }
+  return first;
+}
+
 type Rect = Pick<DOMRect, 'left' | 'top' | 'right' | 'bottom' | 'width' | 'height'>;
 
 /** EA's content area: the window minus the navigation (a sidebar on either
@@ -116,7 +131,7 @@ export function installNavItem(hooks: NavHooks, doc: Document = document): NavIt
   }
 
   function measure(nav: HTMLElement): void {
-    const header = HEADER_SELECTORS.map((sel) => doc.querySelector<HTMLElement>(sel)).find((el) => el != null);
+    const header = findHeader(doc);
     const view = doc.defaultView ?? window;
     hooks.onBounds(
       contentBounds(nav.getBoundingClientRect(), header?.getBoundingClientRect() ?? null, view.innerWidth, view.innerHeight),
