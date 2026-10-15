@@ -16,7 +16,7 @@ import { generateLicenseKey, LICENSE_KEY_RANDOM_BYTES, validateLicenseKeyFormat 
 import { and, desc, eq, isNotNull, isNull, lt } from 'drizzle-orm';
 
 import { fastHash } from '../../lib/crypto.js';
-import { findDeviceByFingerprint } from '../../lib/devices.js';
+import { findDeviceByFingerprint, isDeviceLimitExempt } from '../../lib/devices.js';
 import { AppError, AppErrors } from '../../lib/errors.js';
 import { newId } from '../../lib/ids.js';
 import { checkBans } from '../bans/service.js';
@@ -210,10 +210,10 @@ export async function validateLicense(
   const existingDevice = await findDeviceByFingerprint(db, license.userId, fingerprint);
 
   // Only an already-active device is free: a new one, or a revoked one
-  // coming back, must fit under the limit.
+  // coming back, must fit under the limit (admins have none).
   if (!existingDevice || existingDevice.status !== 'active') {
     const activeCount = await countActiveDevicesForUser(db, license.userId);
-    if (activeCount >= license.maxDevices) {
+    if (activeCount >= license.maxDevices && !(await isDeviceLimitExempt(db, license.userId))) {
       throw new AppError('DEVICE_LIMIT_REACHED', 'Device limit reached for this license.', {
         maxDevices: license.maxDevices,
       });

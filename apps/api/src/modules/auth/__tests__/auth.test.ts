@@ -434,6 +434,29 @@ describe('auth module', () => {
       expect(decodeJwt(body.accessToken as string).role).toBe('admin');
     });
 
+    it('has no device limit for an admin', async () => {
+      const ip = nextIp();
+      const email = 'many-devices-admin@example.com';
+      const adminUserId = await registerAndVerify(email, ip);
+      await app.db.update(users).set({ role: 'admin' }).where(eq(users.id, adminUserId));
+
+      // No subscription: a customer would be held to the trial's 1 device.
+      for (const n of [1, 2, 3]) {
+        const res = await offApp.inject({
+          method: 'POST',
+          url: '/api/v1/auth/login',
+          remoteAddress: ip,
+          payload: {
+            email,
+            password: 'correcthorsebattery12',
+            device: { ...device, fingerprint: `admin-device-fingerprint-00000000${n}` },
+          },
+        });
+        expect(res.statusCode).toBe(200);
+        expect(res.json().status).toBe('ok');
+      }
+    });
+
     it('does not ask a code of someone who had turned 2FA on', async () => {
       const ip = nextIp();
       const email = 'had-2fa@example.com';
