@@ -35,6 +35,7 @@ const PROTECTED_ROUTES: Array<{
   { method: 'POST', path: '/api/v1/auth/device/register' },
   { method: 'POST', path: '/api/v1/ws/ticket' },
   { method: 'GET', path: '/api/v1/admin/users' },
+  { method: 'POST', path: '/api/v1/admin/users' },
   { method: 'GET', path: '/api/v1/admin/audit' },
   { method: 'GET', path: '/api/v1/admin/toggles' },
   { method: 'GET', path: '/api/v1/admin/config' },

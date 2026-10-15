@@ -16,6 +16,7 @@ export function isAdminRole(value: unknown): value is AdminRole {
 export const PERMISSIONS = [
   'users.read',
   'users.write',
+  'users.create',
   'users.suspend',
   'users.ban',
   'users.force_logout',
@@ -40,8 +41,9 @@ export function isPermission(value: unknown): value is Permission {
 
 /**
  * `super_admin` gets everything. The other three roles are deliberately
- * narrow: `support` can act on a single user's account but never touch money
- * or config; `analyst` is read-only everywhere including audit, for
+ * narrow: `support` can act on a single user's account (including creating
+ * one, `users.create`) but never touch money or config; `analyst` is
+ * read-only everywhere including audit, for
  * reporting without write risk; `billing` owns the money-shaped surface
  * (subscriptions, coupons, plans) plus enough user read access to look up an
  * account, but cannot suspend/ban or force logout.
@@ -51,6 +53,7 @@ export const PERMISSION_MATRIX: Readonly<Record<AdminRole, readonly Permission[]
   support: [
     'users.read',
     'users.write',
+    'users.create',
     'users.suspend',
     'users.force_logout',
     'users.reset_password',

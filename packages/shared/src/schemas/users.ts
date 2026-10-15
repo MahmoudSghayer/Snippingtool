@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 import { ADMIN_ROLES, PERMISSIONS } from '../permissions.js';
 
-import { emailSchema } from './auth.js';
+import { emailSchema, passwordSchema } from './auth.js';
 import { timeZoneSchema } from './timezone.js';
 
 export const USER_STATUSES = ['active', 'suspended', 'banned', 'deleted'] as const;
@@ -69,6 +69,22 @@ export const adminUserListQuerySchema = z
   })
   .strict();
 export type AdminUserListQuery = z.infer<typeof adminUserListQuerySchema>;
+
+/** `POST /admin/users`: an admin creates a plain `user` account. There is no
+ * `role` field on purpose: an admin account also needs an `admin_users` row
+ * and its own 2FA enrolment, so this route never creates one. The password
+ * follows the same rules as self-registration. `emailVerified` defaults to
+ * true so the account can sign in straight away; false sends the usual
+ * verification email instead. */
+export const adminCreateUserRequestSchema = z
+  .object({
+    email: emailSchema,
+    password: passwordSchema,
+    emailVerified: z.boolean().default(true),
+    reason: z.string().min(1).max(1000),
+  })
+  .strict();
+export type AdminCreateUserRequest = z.infer<typeof adminCreateUserRequestSchema>;
 
 export const adminSuspendUserRequestSchema = z
   .object({

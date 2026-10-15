@@ -24,6 +24,7 @@ describe('hasPermission', () => {
 
   it('lets support act on a user account but not on billing', () => {
     expect(hasPermission('support', 'users.suspend')).toBe(true);
+    expect(hasPermission('support', 'users.create')).toBe(true);
     expect(hasPermission('support', 'users.ban')).toBe(false);
     expect(hasPermission('support', 'coupons.write')).toBe(false);
   });
@@ -33,6 +34,11 @@ describe('hasPermission', () => {
     expect(hasPermission('billing', 'coupons.write')).toBe(true);
     expect(hasPermission('billing', 'users.ban')).toBe(false);
     expect(hasPermission('billing', 'users.force_logout')).toBe(false);
+  });
+
+  it('keeps account creation away from the read-only and money roles', () => {
+    expect(hasPermission('analyst', 'users.create')).toBe(false);
+    expect(hasPermission('billing', 'users.create')).toBe(false);
   });
 
   it('covers every declared admin role', () => {
