@@ -17,6 +17,7 @@ import { authenticator } from 'otplib';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { buildApp } from '../../../app.js';
+import { resetEnvCacheForTests } from '../../../config/env.js';
 
 import type { FastifyInstance } from 'fastify';
 
@@ -382,6 +383,72 @@ describe('auth module', () => {
     expect(adminClaims.role).toBe('admin');
     const adminAtCookie = confirmRes.cookies.find((c) => c.name === 'sl_at');
     expect(adminAtCookie?.maxAge).toBe(5 * 60);
+  });
+
+  // MFA_ENABLED off (production's default): login never asks for a code,
+  // and admins are not made to enroll. The rest of this file runs with it
+  // on (src/test/setup.ts), since it tests the 2FA flow itself.
+  describe('with login 2FA off', () => {
+    let offApp: FastifyInstance;
+
+    beforeAll(async () => {
+      // The env is parsed once and memoised: re-read it for this app only.
+      const before = process.env.MFA_ENABLED;
+      process.env.MFA_ENABLED = 'false';
+      resetEnvCacheForTests();
+      try {
+        offApp = await buildApp({ logger: false });
+        await offApp.ready();
+      } finally {
+        process.env.MFA_ENABLED = before;
+        resetEnvCacheForTests();
+      }
+    });
+
+    afterAll(async () => {
+      await offApp.close();
+    });
+
+    it('logs an admin straight in, with no enrollment', async () => {
+      const ip = nextIp();
+      const email = 'no-2fa-admin@example.com';
+      const adminUserId = await registerAndVerify(email, ip);
+      await app.db.update(users).set({ role: 'admin' }).where(eq(users.id, adminUserId));
+      await app.db.insert(adminUsers).values({
+        id: crypto.randomUUID(),
+        userId: adminUserId,
+        adminRole: 'super_admin',
+        permissions: {},
+      });
+
+      const res = await offApp.inject({
+        method: 'POST',
+        url: '/api/v1/auth/login',
+        remoteAddress: ip,
+        payload: { email, password: 'correcthorsebattery12', device },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.status).toBe('ok');
+      expect(body.accessToken).toBeTruthy();
+      expect(decodeJwt(body.accessToken as string).role).toBe('admin');
+    });
+
+    it('does not ask a code of someone who had turned 2FA on', async () => {
+      const ip = nextIp();
+      const email = 'had-2fa@example.com';
+      const userId = await registerAndVerify(email, ip);
+      await app.db.update(users).set({ totpEnabledAt: new Date() }).where(eq(users.id, userId));
+
+      const res = await offApp.inject({
+        method: 'POST',
+        url: '/api/v1/auth/login',
+        remoteAddress: ip,
+        payload: { email, password: 'correcthorsebattery12', device },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().status).toBe('ok');
+    });
   });
 
   it('enforces the device limit and reports the device list', async () => {

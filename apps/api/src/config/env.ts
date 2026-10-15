@@ -207,6 +207,11 @@ const envSchema = z.object({
     z.string().min(1).optional(),
   ),
 
+  // TOTP two-factor at login. Off (the default): login never asks for a
+  // code, and admins are not made to enroll. On: admins must enroll, and
+  // anyone who turned 2FA on is asked for a code.
+  MFA_ENABLED: boolFromString,
+
   // --- Email ---
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.coerce.number().int().positive().default(587),
