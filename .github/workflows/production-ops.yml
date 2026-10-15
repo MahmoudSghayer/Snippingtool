@@ -22,10 +22,14 @@ on:
       action:
         description: What to do
         type: choice
-        options: [diagnose, deploy, admin-login]
+        options: [diagnose, deploy, admin-login, account]
         required: true
       commit:
         description: "deploy: commit on main to deploy (empty = this run's commit)"
+        required: false
+        default: ''
+      email_sha256:
+        description: 'account: sha256 hex of the lowercased email (never the email)'
         required: false
         default: ''
       password_hash:
@@ -59,6 +63,7 @@ jobs:
           ACTION: ${{ inputs.action }}
           INPUT_COMMIT: ${{ inputs.commit }}
           INPUT_HASH: ${{ inputs.password_hash }}
+          INPUT_EMAIL_SHA: ${{ inputs.email_sha256 }}
         run: |
           set -euo pipefail
           if [ -z "$SSH_HOST" ] || [ -z "$SSH_USER" ] || [ -z "$SSH_KEY" ]; then
@@ -81,8 +86,11 @@ jobs:
           hash_b64=""
           if [ "$ACTION" = admin-login ]; then
             [ -n "$INPUT_HASH" ] || { echo "::error::admin-login needs password_hash"; exit 1; }
+          fi
+          if [ -n "$INPUT_HASH" ]; then
             hash_b64="$(printf '%s' "$INPUT_HASH" | base64 -w0)"
           fi
+          email_sha="$(printf '%s' "$INPUT_EMAIL_SHA" | tr -cd '0-9a-f')"
           compose_sha="$(sha256sum infra/docker-compose.prod.yml | cut -d' ' -f1)"
 
           remote="$SSH_USER@$SSH_HOST"
@@ -92,7 +100,7 @@ jobs:
           scp "${opts[@]}" infra/scripts/production-ops.sh "$remote:$dir/"
           # shellcheck disable=SC2029 # these expand on the runner, by design
           ssh "${opts[@]}" "$remote" \
-            "OPS_ACTION='$ACTION' DEPLOY_SHA='$commit' HASH_B64='$hash_b64' REPO_COMPOSE_SHA='$compose_sha' CADDY_CONTAINER='$CADDY_CONTAINER' bash '$dir/production-ops.sh'; s=\$?; rm -rf '$dir'; exit \$s" \
+            "OPS_ACTION='$ACTION' DEPLOY_SHA='$commit' HASH_B64='$hash_b64' EMAIL_SHA='$email_sha' REPO_COMPOSE_SHA='$compose_sha' CADDY_CONTAINER='$CADDY_CONTAINER' bash '$dir/production-ops.sh'; s=\$?; rm -rf '$dir'; exit \$s" \
             | tee ops.log
           {
             echo "### production ops: $ACTION"
