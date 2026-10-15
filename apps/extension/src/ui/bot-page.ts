@@ -577,7 +577,12 @@ const CSS = `
   .c-yellow { border-left-color: var(--ea-coin); } .c-orange { border-left-color: var(--ea-warning); }
   .ring-box { grid-column: span 2; display: flex; align-items: center; justify-content: center; position: relative; min-height: 150px; contain: layout paint; }
   .ring-wrap { display: contents; }
-  .ring { width: 130px; height: 130px; }
+  .ring { position: relative; width: 130px; height: 130px; }
+  .ring-track, .ring-fill { position: absolute; inset: 0; box-sizing: border-box; border-radius: 50%; border: 7px solid var(--ea-line); }
+  .ring-fill { border-color: var(--ea-accent); will-change: transform; }
+  .ring-half { position: absolute; inset: 0; }
+  .ring-r, .ring-r .ring-fill { clip-path: inset(0 0 0 50%); }
+  .ring-l, .ring-l .ring-fill { clip-path: inset(0 50% 0 0); }
   .ring-label { position: absolute; text-align: center; }
   .ring-label .t { font-size: 30px; font-weight: 500; }
   .ring-label .p { font-size: 12px; color: var(--ea-muted); }
@@ -1877,57 +1882,66 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
 
   // ---- the countdown ring -------------------------------------------------
   //
-  // Built once. Each wait's arc is one animation the browser runs itself
-  // (the Web Animations API), started when the wait starts: smooth at the
-  // display's frame rate, and nothing per frame for a busy page to delay.
-  // Without that API (tests), the arc is set every frame instead. The text
-  // is updated every frame, written only when it changes.
-  const RING_R = 56;
-  const RING_C = 2 * Math.PI * RING_R;
+  // Built once. The arc is two half rings, each rotated out of its half of
+  // the circle: the left one during the first half of the wait, the right
+  // one during the second. Both rotations are handed to the browser (the
+  // Web Animations API) when the wait starts, and only `transform` animates,
+  // which the browser runs on its compositor thread: the arc keeps moving
+  // smoothly even while EA's page keeps the main thread busy (an animated
+  // SVG stroke runs on the main thread, and stuttered with it). Without that
+  // API (tests), the arc is set every frame instead. The text is updated
+  // every frame, written only when it changes.
   const ring = (() => {
     const el = document.createElement('div');
     el.className = 'ring-wrap';
     el.innerHTML = `
-      <svg class="ring" viewBox="0 0 130 130" aria-hidden="true">
-        <circle cx="65" cy="65" r="${RING_R}" fill="none" stroke="var(--ea-line)" stroke-width="7"/>
-        <circle class="arc" cx="65" cy="65" r="${RING_R}" fill="none" stroke="var(--ea-accent)" stroke-width="7" stroke-linecap="round"
-          stroke-dasharray="${RING_C}" stroke-dashoffset="${RING_C}" transform="rotate(-90 65 65)"/>
-      </svg>
+      <div class="ring" aria-hidden="true">
+        <div class="ring-track"></div>
+        <div class="ring-half ring-r"><div class="ring-fill"></div></div>
+        <div class="ring-half ring-l"><div class="ring-fill"></div></div>
+      </div>
       <div class="ring-label"><div class="t">0s</div><div class="p"></div></div>
       <div class="elapsed">Running for<b>0:00</b></div>`;
     return {
       el,
-      arc: el.querySelector('.arc') as SVGCircleElement,
+      left: el.querySelector('.ring-l .ring-fill') as HTMLElement,
+      right: el.querySelector('.ring-r .ring-fill') as HTMLElement,
       time: el.querySelector('.ring-label .t') as HTMLElement,
       phase: el.querySelector('.ring-label .p') as HTMLElement,
       elapsed: el.querySelector('.elapsed b') as HTMLElement,
       /** The wait the arc is counting down, and how long it was. */
       endsAt: null as number | null,
       total: 0,
-      offset: '',
-      anim: null as Animation | null,
+      shown: '',
+      anims: [] as Animation[],
     };
   })();
 
-  function setArc(offset: string): void {
-    if (offset !== ring.offset) {
-      ring.offset = offset;
-      ring.arc.setAttribute('stroke-dashoffset', offset);
-    }
+  /** The arc at `fraction` of the wait left (1 full, 0 empty), set directly:
+   * between waits, and where the page has no Web Animations API. */
+  function setArc(fraction: number): void {
+    const spent = 1 - Math.min(1, Math.max(0, fraction));
+    const left = -180 * Math.min(1, spent * 2);
+    const right = -180 * Math.max(0, spent * 2 - 1);
+    const key = `${left.toFixed(2)}/${right.toFixed(2)}`;
+    if (key === ring.shown) return;
+    ring.shown = key;
+    ring.left.style.transform = `rotate(${left.toFixed(2)}deg)`;
+    ring.right.style.transform = `rotate(${right.toFixed(2)}deg)`;
   }
 
   /** A new wait (or none): the arc starts full and empties as it runs out. */
   function startArc(remaining: number): void {
-    ring.anim?.cancel();
-    ring.anim = null;
-    if (remaining <= 0) return setArc(RING_C.toFixed(2));
-    setArc('0.00');
-    if (typeof ring.arc.animate !== 'function') return;
-    ring.anim = ring.arc.animate([{ strokeDashoffset: '0px' }, { strokeDashoffset: `${RING_C.toFixed(2)}px` }], {
-      duration: remaining,
-      easing: 'linear',
-      fill: 'forwards',
-    });
+    for (const a of ring.anims) a.cancel();
+    ring.anims = [];
+    setArc(remaining > 0 ? 1 : 0);
+    if (remaining <= 0 || typeof ring.left.animate !== 'function') return;
+    const half = remaining / 2;
+    const turn = [{ transform: 'rotate(0deg)' }, { transform: 'rotate(-180deg)' }];
+    ring.anims = [
+      ring.left.animate(turn, { duration: half, easing: 'linear', fill: 'forwards' }),
+      ring.right.animate(turn, { duration: half, delay: half, easing: 'linear', fill: 'both' }),
+    ];
   }
 
   function setText(el: HTMLElement, text: string): void {
@@ -1945,10 +1959,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       ring.total = remaining;
       startArc(remaining);
     }
-    if (!ring.anim) {
-      const fraction = remaining > 0 && ring.total > 0 ? remaining / ring.total : 0;
-      setArc((RING_C * (1 - fraction)).toFixed(2));
-    }
+    if (ring.anims.length === 0) setArc(remaining > 0 && ring.total > 0 ? remaining / ring.total : 0);
     const secs = remaining / 1000;
     setText(ring.time, remaining > 0 ? (secs >= 60 ? clock(remaining) : `${Math.ceil(secs)}s`) : '0s');
     setText(ring.phase, PHASE_LABEL[state?.phase ?? 'idle']);

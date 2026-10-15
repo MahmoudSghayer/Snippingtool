@@ -58,34 +58,37 @@ function mountPage(sniper: Sniper) {
   return { page, root: shadows.rootOf(document.getElementById('ledger-bot-page')!) };
 }
 
-it('hands each wait to the browser as one animation, and a refresh neither restarts it nor rebuilds the dash', () => {
+it('hands each wait to the compositor as two rotations, and a refresh neither restarts them nor rebuilds the dash', () => {
   const animate = vi.fn(() => ({ cancel: vi.fn() }) as unknown as Animation);
-  (SVGElement.prototype as unknown as { animate: unknown }).animate = animate;
+  (HTMLElement.prototype as unknown as { animate: unknown }).animate = animate;
   try {
     const sniper = makeSniper();
     let state = { ...sniper.state, phase: 'waiting' as const, phaseEndsAt: Date.now() + 10_000 };
     vi.spyOn(sniper, 'state', 'get').mockImplementation(() => state);
     const { page, root } = mountPage(sniper);
 
-    expect(animate).toHaveBeenCalledTimes(1);
-    const [frames, timing] = animate.mock.calls[0] as unknown as [Keyframe[], KeyframeAnimationOptions];
-    expect(frames[0]).toEqual({ strokeDashoffset: '0px' });
-    expect(timing).toMatchObject({ duration: 10_000, easing: 'linear', fill: 'forwards' });
+    // Only transform animates (compositor-friendly): the left half turns
+    // away during the first half of the wait, the right half during the second.
+    expect(animate).toHaveBeenCalledTimes(2);
+    const calls = animate.mock.calls as unknown as [Keyframe[], KeyframeAnimationOptions][];
+    for (const [frames] of calls) expect(frames).toEqual([{ transform: 'rotate(0deg)' }, { transform: 'rotate(-180deg)' }]);
+    expect(calls[0]![1]).toMatchObject({ duration: 5_000, easing: 'linear', fill: 'forwards' });
+    expect(calls[1]![1]).toMatchObject({ duration: 5_000, delay: 5_000, easing: 'linear', fill: 'both' });
 
     const searches = root.getElementById('d-searches');
     vi.advanceTimersByTime(3_000);
     page.refresh();
     vi.advanceTimersByTime(20);
-    expect(animate).toHaveBeenCalledTimes(1);
+    expect(animate).toHaveBeenCalledTimes(2);
     expect(root.getElementById('d-searches')).toBe(searches);
 
-    // The next wait gets its own animation.
+    // The next wait gets its own animations.
     state = { ...state, phaseEndsAt: Date.now() + 8_000 };
     vi.advanceTimersByTime(20);
-    expect(animate).toHaveBeenCalledTimes(2);
+    expect(animate).toHaveBeenCalledTimes(4);
     page.close();
   } finally {
-    delete (SVGElement.prototype as unknown as { animate?: unknown }).animate;
+    delete (HTMLElement.prototype as unknown as { animate?: unknown }).animate;
   }
 });
 
@@ -125,7 +128,9 @@ it('counts a wait down every frame, and a dash refresh does not restart it', () 
   page.open();
   shadows.restore();
   const root = shadows.rootOf(document.getElementById('ledger-bot-page')!);
-  const offset = () => Number(root.querySelector('.ring .arc')!.getAttribute('stroke-dashoffset'));
+  // How far the arc has emptied, in degrees of rotation (0 full, 360 empty).
+  const angle = (sel: string) => -Number(/rotate\((-?[\d.]+)deg\)/.exec((root.querySelector(sel) as HTMLElement).style.transform)?.[1] ?? 0);
+  const offset = () => angle('.ring-l .ring-fill') + angle('.ring-r .ring-fill');
   const ring = root.querySelector('.ring-wrap');
   expect(ring).not.toBeNull();
 
