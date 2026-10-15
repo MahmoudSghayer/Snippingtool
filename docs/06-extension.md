@@ -285,6 +285,15 @@ Transfers in EA's left navigation (`ui/ea-nav.ts`) opens a full page
 (`ui/bot-page.ts`) with the bot's settings on the left and the live session on
 the right. The in-page panel and the userscript's SL menu open it too.
 
+The page header shows the trader's coins and FC Points, read once a second
+from EA's own top bar (`ui/ea-wallet.ts`: `.view-navbar-currency-coins` /
+`-points`, an assumed shape like the navigation's), since the page can sit
+over that bar. Under the search, **Recent searches** lists the last 10
+searches the bot was started on, newest first; clicking one fills the search
+in again. It is a log, not saved filters: kept in extension storage
+(`sl.bot.recentSearches.v1`, Tampermonkey's storage in the userscript
+build), never sent anywhere.
+
 The bot (`engine/sniper.ts`) searches the user's saved filters in turn, buys
 every listing at or under the price cap (cheapest first), and starts the next
 search a random delay from the user's range after the last one started (start
@@ -385,7 +394,7 @@ and narrows the rarity list. Players come from the web app's `players.json`
 | Search     | `services.Item.clearTransferMarketCache()` then `services.Item.searchTransferMarket(new UTSearchCriteriaDTO(), page)` -> observable; `res.data.items`                                                |
 | Buy now    | `services.Item.bid(item, auction.buyNowPrice)`                                                                                                                                                       |
 | Criteria   | `type` (set first), `maskedDefId`, `level` (`bronze`/`silver`/`gold`/`SP`), `rarities`, `position` / `zone` (130-132), `playStyle`, `nation`, `league`, `club`, `minBuy`/`maxBuy`, `ovrMin`/`ovrMax` |
-| Items      | `definitionId`, `databaseId` (base player id), `rating`, `getAuctionData()` -> `tradeId`, `buyNowPrice`, `expires`                                                                                   |
+| Items      | `definitionId`, `databaseId` (base player id, read as the listing's `assetId`), `rating`, `getAuctionData()` -> `tradeId`, `buyNowPrice`, `expires`                                                  |
 | Navigation | `.ut-tab-bar-item` buttons, Transfers has `icon-transfer`; top bar `.ut-navigation-bar-view`                                                                                                         |
 
 The adapter waits for the web app to start (and log in) before its first

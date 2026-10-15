@@ -90,6 +90,12 @@ export interface BotPageDeps {
   /** EA's player/club/league/nation lists, if the web app has loaded them
    * since the extension was installed (model/catalog.ts). */
   getCatalog: () => Promise<Catalog | null>;
+  /** Where the recent-searches log is kept between page loads. Without it
+   * the log lasts until the page reloads. */
+  recentSearches?: {
+    load: () => Promise<unknown>;
+    save: (list: RecentSearch[]) => Promise<void>;
+  };
 }
 
 /** Where EA's content area is, in px from each window edge. */
@@ -182,7 +188,75 @@ export function buildFilterFromForm(form: TargetForm): { filter: FilterCriteria 
   return { filter };
 }
 
-const COIN = `<svg class="coin" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7" fill="#f5c542"/><circle cx="8" cy="8" r="4.6" fill="none" stroke="#b8860b" stroke-width="1.4"/></svg>`;
+// ---- recent searches -------------------------------------------------------
+// Every search the user starts the bot on, newest first, so an earlier one
+// is a click away. A log, not saved filters: nothing to name or manage.
+
+export const MAX_RECENT_SEARCHES = 10;
+
+export interface RecentSearch {
+  /** When the bot was started on it. */
+  at: number;
+  /** How the page described it then (EA's labels may not be loaded later). */
+  name: string;
+  form: TargetForm;
+}
+
+/** The same search, whatever order or time it was run at. */
+function recentKey(form: TargetForm): string {
+  const built = buildFilterFromForm(form);
+  return 'filter' in built ? JSON.stringify(built.filter) : '';
+}
+
+/** `entry` at the top of `list`; an earlier run of the same search moves up
+ * rather than appearing twice. */
+export function addRecentSearch(list: readonly RecentSearch[], entry: RecentSearch): RecentSearch[] {
+  const key = recentKey(entry.form);
+  return [entry, ...list.filter((r) => recentKey(r.form) !== key)].slice(0, MAX_RECENT_SEARCHES);
+}
+
+const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+
+/** The form a stored entry describes, field by field: anything of the wrong
+ * type is left blank, so a damaged entry can never break the page. */
+function formFrom(raw: Record<string, unknown>): TargetForm {
+  const form = blankForm();
+  const num = (v: unknown) => (isNum(v) ? v : null);
+  const str = (v: unknown) => (typeof v === 'string' ? v.slice(0, 100) : null);
+  if (isNum(raw.minOvr)) form.minOvr = Math.min(OVR_MAX, Math.max(OVR_MIN, raw.minOvr));
+  if (isNum(raw.maxOvr)) form.maxOvr = Math.min(OVR_MAX, Math.max(OVR_MIN, raw.maxOvr));
+  const p = raw.player as Record<string, unknown> | null | undefined;
+  if (p && typeof p === 'object' && isNum(p.id) && typeof p.name === 'string')
+    form.player = { id: p.id, name: p.name.slice(0, 100), rating: num(p.rating) };
+  form.playerQuery = str(raw.playerQuery) ?? '';
+  form.quality = str(raw.quality);
+  form.position = str(raw.position);
+  form.rarity = num(raw.rarity);
+  form.chem = num(raw.chem);
+  form.nation = num(raw.nation);
+  form.league = num(raw.league);
+  form.club = num(raw.club);
+  form.minBuy = num(raw.minBuy);
+  form.maxBuy = num(raw.maxBuy);
+  return form;
+}
+
+/** What storage held, as recent searches: entries that are not one, or no
+ * longer describe a search, are dropped. */
+export function parseRecentSearches(raw: unknown): RecentSearch[] {
+  if (!Array.isArray(raw)) return [];
+  const out: RecentSearch[] = [];
+  for (const r of raw.slice(0, MAX_RECENT_SEARCHES) as unknown[]) {
+    if (!r || typeof r !== 'object') continue;
+    const e = r as Record<string, unknown>;
+    if (!isNum(e.at) || typeof e.name !== 'string' || !e.form || typeof e.form !== 'object') continue;
+    const form = formFrom(e.form as Record<string, unknown>);
+    if (recentKey(form)) out.push({ at: e.at, name: e.name.slice(0, 200), form });
+  }
+  return out;
+}
+
+const COIN =`<svg class="coin" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7" fill="#f5c542"/><circle cx="8" cy="8" r="4.6" fill="none" stroke="#b8860b" stroke-width="1.4"/></svg>`;
 const PLAY = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9.5-5.5z" fill="currentColor"/></svg>`;
 const STOP = `<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="10" height="10" rx="1.5" fill="currentColor"/></svg>`;
 
@@ -447,6 +521,13 @@ const CSS = `
   .price .step:hover { background: var(--ea-control-hover); }
   .search-actions { display: flex; justify-content: flex-end; margin-top: 8px; }
   .search-hint { color: var(--ea-muted); font-size: 12px; margin-top: 10px; }
+  .recent { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; margin-bottom: 6px; border: 1px solid var(--ea-line);
+    border-radius: var(--ea-radius); background: var(--ea-control); color: var(--ea-text); text-align: left; }
+  .recent:hover { background: var(--ea-control-hover); }
+  .recent .rc-main { flex: 1; min-width: 0; }
+  .recent .rc-name { display: block; font-size: 14px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .recent .rc-when { display: block; color: var(--ea-muted); font-size: 12px; }
+  .recent .rc-use { color: var(--ea-accent); font-size: 13px; font-weight: 500; }
 
   /* Start bar: pinned to the bottom of the settings column */
   .runbar { position: sticky; bottom: 0; z-index: 6; padding: 16px; background: var(--ea-panel); border-top: 1px solid var(--ea-line); }
@@ -576,7 +657,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     <div class="notice" id="notice" hidden></div>
     <div class="body">
       <div class="settings" id="settings">
-        <div class="settings-scroll"><div id="targets"></div><div id="knobs"></div></div>
+        <div class="settings-scroll"><div id="targets"></div><div id="recent"></div><div id="knobs"></div></div>
         <div class="runbar">
           <button class="start" id="start" type="button">${PLAY}<span>Start</span></button>
           <div class="run-status" id="run-status" aria-live="polite"></div>
@@ -619,8 +700,68 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
 
   function renderSettings(): void {
     renderTargets();
+    renderRecent();
     renderKnobs();
   }
+
+  // ---- recent searches ----------------------------------------------------
+
+  let recent: RecentSearch[] = [];
+  let recentLoaded = false;
+
+  function renderRecent(): void {
+    const wasOpen = root.querySelector('#recent details')?.hasAttribute('open') ?? true;
+    const body = recent.length
+      ? recent
+          .map(
+            (r, i) => `<button type="button" class="recent" data-recent="${i}" title="Search with this again">
+              <span class="rc-main"><span class="rc-name">${esc(r.name)}</span><span class="rc-when">${esc(timeOfDay(r.at))}${
+                new Date(r.at).toDateString() === new Date().toDateString() ? '' : `, ${esc(new Date(r.at).toLocaleDateString())}`
+              }</span></span>
+              <span class="rc-use">Use</span></button>`,
+          )
+          .join('')
+      : '<div class="hint">Every search you start the bot on shows up here. Click one to fill the search with it again.</div>';
+    $('recent').innerHTML = section('Recent searches', body, '', wasOpen);
+  }
+
+  /** Picks up the log kept from earlier page loads, once. */
+  function loadRecent(): void {
+    if (recentLoaded || !deps.recentSearches) return;
+    recentLoaded = true;
+    void deps.recentSearches
+      .load()
+      .catch(() => null)
+      .then((raw) => {
+        // Oldest first, so each search keeps its latest run, and one
+        // started while this loaded stays on top.
+        let merged: RecentSearch[] = [];
+        for (const r of [...parseRecentSearches(raw), ...recent].sort((a, b) => a.at - b.at))
+          merged = addRecentSearch(merged, r);
+        recent = merged;
+        renderRecent();
+      });
+  }
+
+  const copyForm = (f: TargetForm): TargetForm => ({ ...f, player: f.player ? { ...f.player } : null });
+
+  function rememberSearch(name: string): void {
+    recent = addRecentSearch(recent, { at: Date.now(), name, form: copyForm(form) });
+    renderRecent();
+    void deps.recentSearches?.save(recent).catch(() => undefined);
+  }
+
+  onTrusted($('recent'), 'click', (e) => {
+    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-recent]');
+    if (!el) return;
+    const r = recent[Number(el.dataset.recent)];
+    if (!r) return;
+    form = copyForm(r.form);
+    openDd = null;
+    suggestions = [];
+    renderTargets();
+    say('Search filled in', false);
+  });
 
   /** Auto-sell: what happens to a card right after the bot buys it. */
   function autoSellSection(s: BotSettings): string {
@@ -1814,6 +1955,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       deps.setLiveSearch(r.search);
       sniper.setSettings(settings);
       sniper.start();
+      if (sniper.isRunning()) rememberSearch(r.search.name);
     }
     refreshLive();
   });
@@ -1843,6 +1985,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         if (!page.hidden) refreshLive();
       });
       loadCatalog();
+      loadRecent();
       // EA's lists arrive in two steps (files, then the web app's own lists
       // once it has started); pick each one up while the page is open.
       catalogPoll = setInterval(loadCatalog, 3_000);
