@@ -19,7 +19,7 @@
 #   OPS_ACTION=account      EMAIL_SHA=<sha256 hex of the lowercased email>:
 #                           report why that account can't log in; with
 #                           HASH_B64 also set its password, unlock it, verify
-#                           its email, clear 2FA, make it the admin, and clear
+#                           its email, clear 2FA, make it a super_admin, and clear
 #                           the login rate limits. The email itself is never
 #                           sent or printed.
 set -euo pipefail
@@ -135,6 +135,8 @@ SELECT 'account: role=' || role || ' status=' || status
     || ' locked=' || (locked_until IS NOT NULL AND locked_until > now())
     || ' failed_logins=' || failed_login_count
     || ' 2fa=' || (totp_enabled_at IS NOT NULL)
+    || ' admin_role=' || coalesce((SELECT a.admin_role::text FROM admin_users a
+                                   WHERE a.user_id = u.id AND a.deleted_at IS NULL), 'none')
     || ' pw=' || left(md5(password_hash), 8)
     || ' account_bans=' || (SELECT count(*) FROM bans b
                              WHERE b.user_id = u.id AND b.lifted_at IS NULL)
@@ -175,13 +177,19 @@ RETURNING 1;
 SQL
 )"
     [ "$changed" = 1 ] || { echo 'the account was not updated' >&2; exit 1; }
+    # The admin pages are gated on an admin_users role, not just users.role.
+    psql_prod -e EMAIL_SHA="$sha" >/dev/null <<SQL
+INSERT INTO admin_users (user_id, admin_role)
+SELECT id, 'super_admin' FROM users WHERE $match
+ON CONFLICT (user_id) DO UPDATE SET admin_role = 'super_admin', deleted_at = NULL;
+SQL
     rc="$(container redis)"
     if [ -n "$rc" ]; then
       cleared="$(docker exec -e REDISCLI_AUTH="$(env_value REDIS_PASSWORD)" "$rc" sh -c \
         'c="redis-cli --tls --cacert /certs/ca.crt --no-auth-warning"; $c --scan --pattern "*ratelimit:login:*" | while read -r k; do $c del "$k" >/dev/null; echo x; done | wc -l')"
       echo "login rate limits cleared: $cleared"
     fi
-    echo 'password set; unlocked; email verified; 2FA cleared; admin'
+    echo 'password set; unlocked; email verified; 2FA cleared; admin (super_admin)'
     echo "now: $(report)"
     ;;
 
