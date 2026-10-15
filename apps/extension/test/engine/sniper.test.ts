@@ -299,6 +299,41 @@ describe('Sniper — search and buy', () => {
     ]);
   });
 
+  it('keeps the counters across Stop and Start, beside the log, until the reset button clears them', async () => {
+    const h = setup({ results: [[auction('t-a', 8_000)], [auction('t-b', 9_000)]], maxSearches: 1 });
+    h.sniper.start();
+    await h.done();
+    expect(h.sniper.getStats()).toMatchObject({ searches: 1, purchases: 1, coinsSpent: 8_000 });
+
+    h.sniper.start();
+    while (h.sniper.isRunning()) await new Promise((r) => setTimeout(r, 0));
+    expect(h.buys).toEqual(['t-a', 't-b']);
+    const stats = h.sniper.getStats();
+    expect(stats).toMatchObject({ searches: 2, purchases: 2, coinsSpent: 17_000, profit: 21_000 });
+    expect(stats.topSnipes).toHaveLength(2);
+    expect(h.sniper.getLog().filter((e) => e.kind === 'bought')).toHaveLength(2);
+
+    h.sniper.reset();
+    expect(h.sniper.getStats()).toMatchObject({ searches: 0, purchases: 0, coinsSpent: 0, profit: 0, topSnipes: [] });
+  });
+
+  it('applies "stop after N purchases" to each run, not to the counters', async () => {
+    const h = setup({
+      settings: { thresholds: { ...DEFAULT_BOT_SETTINGS.thresholds, stopAfterPurchases: 1 } },
+      results: [[auction('t-a', 8_000)], [auction('t-b', 9_000)]],
+      maxSearches: 5,
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.sniper.state.stopReason).toBe('purchase_limit');
+
+    h.sniper.start();
+    while (h.sniper.isRunning()) await new Promise((r) => setTimeout(r, 0));
+    expect(h.buys).toEqual(['t-a', 't-b']);
+    expect(h.sniper.state.stopReason).toBe('purchase_limit');
+    expect(h.sniper.getStats().purchases).toBe(2);
+  });
+
   it('counts each filter\'s searches on its own', async () => {
     const h = setup({
       filters: [
@@ -1197,6 +1232,57 @@ describe('Sniper — auto-sell after a buy', () => {
     await h.done();
     expect(h.lists).toEqual([['t-a', 14_750, 15_000]]);
     expect(listedLog(h)?.message).toBe('your fixed price');
+  });
+
+  it("shows the buy at the user's own sell price, not a market estimate they never chose", async () => {
+    const h = setup({
+      settings: {
+        ...autoSell({ mode: 'fixed', fixedPrice: 1_700 }),
+        thresholds: { ...DEFAULT_BOT_SETTINGS.thresholds, minProfit: 0 },
+      },
+      results: [[auction('t-a', 2_200)]],
+      // Nova's estimate said 2,500: the user said 1,700.
+      sellPrice: 2_500,
+      maxSearches: 1,
+    });
+    h.sniper.start();
+    await h.done();
+    const bought = h.sniper.getLog().find((e) => e.kind === 'bought');
+    // 1,700 less 5% is 1,615: 585 under the 2,200 paid.
+    expect(bought).toMatchObject({ price: 2_200, sellPrice: 1_700, profit: -585 });
+    expect(h.sniper.getStats().profit).toBe(-585);
+    expect(notListed(h)?.message).toBe(
+      "not listed: 1,700 coins would lose money after EA's 5% tax (bought for 2,200 coins)",
+    );
+  });
+
+  it("skips a buy the user's own sell price makes a loss, under a minimum profit", async () => {
+    const h = setup({
+      settings: {
+        ...autoSell({ mode: 'fixed', fixedPrice: 1_700 }),
+        thresholds: { ...DEFAULT_BOT_SETTINGS.thresholds, minProfit: 100 },
+      },
+      results: [[auction('t-a', 2_200)]],
+      sellPrice: 2_500,
+      maxSearches: 1,
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.buys).toEqual([]);
+  });
+
+  it('shows the buy at the market price moved by the steps auto-sell lists at', async () => {
+    const h = setup({
+      settings: autoSell({ steps: -2 }),
+      results: [[auction('t-a', 8_000)]],
+      sellPrice: 20_000,
+      marketPrice: async () => ({ price: 20_000, source: 'futbin' }),
+      maxSearches: 1,
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.sniper.getLog().find((e) => e.kind === 'bought')).toMatchObject({ sellPrice: 19_500 });
+    expect(listedLog(h)?.price).toBe(19_500);
   });
 
   it('keeps the card when there is no market price for it', async () => {

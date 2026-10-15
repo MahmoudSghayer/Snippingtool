@@ -259,7 +259,8 @@ export interface SniperState {
 export interface SniperDeps {
   adapter: Pick<AdapterClient, 'search' | 'buy' | 'list' | 'onAuctions' | 'onBuyable' | 'onProbe' | 'onShape'>;
   getFilters: () => SniperFilter[];
-  /** Expected resale price for a card, or null if the ledger has no data. */
+  /** What a card sells for on the market now, or null if unknown. Used
+   * where the user set no sell price of their own. */
   estimateSellPrice: (resourceId: number) => Promise<number | null>;
   /** Today's active time, as saved by an earlier page (null = none). */
   loadUsage?: () => Promise<BotDailyUsage | null>;
@@ -342,7 +343,13 @@ export class Sniper {
    * budgets are never saved (they would overwrite the stored ones). */
   private budgetHydrated = false;
   private abort: AbortController | null = null;
+  /** The page's counters: kept across Stop and Start, like the log beside
+   * them, until the page's reset button clears both (a Start that zeroed
+   * them left a buy in the log that no counter showed). */
   private stats: SniperStats = emptyStats();
+  /** This start's own buys, for the limits that apply to one run: stop
+   * after N purchases, and the session coin budget. */
+  private runTotals = { purchases: 0, coinsSpent: 0 };
   private stateValue: SniperState = {
     phase: 'idle',
     phaseEndsAt: null,
@@ -480,7 +487,8 @@ export class Sniper {
       });
     }
     this.freshRatioIfIdle();
-    this.stats = { ...emptyStats(), startedAt: this.now() };
+    this.stats.startedAt = this.now();
+    this.runTotals = { purchases: 0, coinsSpent: 0 };
     this.filterIndex = 0;
     this.searchRounds.clear();
     this.addLog({ kind: 'info', message: 'Bot started' });
@@ -509,6 +517,7 @@ export class Sniper {
   reset(): void {
     if (this.isRunning()) return;
     this.stats = emptyStats();
+    this.runTotals = { purchases: 0, coinsSpent: 0 };
     this.log.length = 0;
     this.results.length = 0;
     this.setState({ phase: 'idle', phaseEndsAt: null, stopReason: null, stopDetail: null });
@@ -697,8 +706,8 @@ export class Sniper {
     for (const m of matches) {
       if (signal.aborted) return true;
 
-      if (t.sessionCoinBudget > 0 && this.stats.coinsSpent + m.buyNow > t.sessionCoinBudget) {
-        if (this.stats.coinsSpent >= t.sessionCoinBudget) {
+      if (t.sessionCoinBudget > 0 && this.runTotals.coinsSpent + m.buyNow > t.sessionCoinBudget) {
+        if (this.runTotals.coinsSpent >= t.sessionCoinBudget) {
           this.stop('coin_budget');
           return true;
         }
@@ -793,6 +802,8 @@ export class Sniper {
           if (!late.ok) return;
           const { sellPrice, profit } = estimate ?? (await this.estimate(m));
           this.recordBought(m, sellPrice, profit, late.latencyMs);
+          // Shown now, not at the next search (the bot may have stopped).
+          this.deps.onChange();
           await this.autoSell(m);
         });
         if (signal.aborted) return true;
@@ -804,7 +815,7 @@ export class Sniper {
         const { sellPrice, profit } = estimate ?? (await this.estimate(m));
         this.recordBought(m, sellPrice, profit, result.latencyMs);
         await this.autoSell(m);
-        if (t.stopAfterPurchases > 0 && this.stats.purchases >= t.stopAfterPurchases) {
+        if (t.stopAfterPurchases > 0 && this.runTotals.purchases >= t.stopAfterPurchases) {
           this.stop('purchase_limit');
           return true;
         }
@@ -861,9 +872,25 @@ export class Sniper {
     return value;
   }
 
+  /** What a card bought at `m.buyNow` is expected to sell for, and the
+   * profit that leaves: the price auto-sell lists it at (`plannedSalePrice`),
+   * so the profit a buy shows, and the minimum-profit check, use the price
+   * the user set rather than an estimate they never chose. */
   private async estimate(m: SniperMatch): Promise<Estimate> {
-    const sellPrice = await this.sellPrice(m.resourceId);
+    const sellPrice = await this.plannedSalePrice(m);
     return { sellPrice, profit: sellPrice == null ? null : Math.floor(sellPrice * (1 - EA_TAX)) - m.buyNow };
+  }
+
+  /** The user's own sell price when they set one (even with auto-sell off:
+   * it is the price they said they sell at), else the market price, moved
+   * by auto-sell's steps when auto-sell lists the card. The same price
+   * `autoSell` lists at. */
+  private async plannedSalePrice(m: SniperMatch): Promise<number | null> {
+    const a = this.settings.autoSell;
+    if (a.mode === 'fixed') return Math.max(MIN_SALE_PRICE, roundToPriceStep(a.fixedPrice));
+    const market = await this.sellPrice(m.resourceId);
+    if (market == null) return null;
+    return a.enabled ? Math.max(MIN_SALE_PRICE, stepPrice(market, a.steps)) : market;
   }
 
   /** Auto-sell: list a card the bot just bought, at the user's price (the
@@ -918,6 +945,8 @@ export class Sniper {
   private recordBought(m: SniperMatch, sellPrice: number | null, profit: number | null, latencyMs: number): void {
     this.stats.purchases++;
     this.stats.coinsSpent += m.buyNow;
+    this.runTotals.purchases++;
+    this.runTotals.coinsSpent += m.buyNow;
     if (profit != null) this.stats.profit += profit;
     const entry = this.addLog({
       kind: 'bought',

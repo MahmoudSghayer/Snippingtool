@@ -306,6 +306,11 @@ to open it in EA. The page checks for new figures on every refresh and on
 its one-second wallet tick, writing only when they changed. Kept in memory
 only, never stored or sent.
 
+The Profit, Searches, Bought, Missed and Coins spent figures and Top snipes
+count everything since the page loaded, across Stop and Start, like the
+Activity log beside them; the reset button clears both. "Stop after N
+purchases" and the session coin budget count each run on its own.
+
 The bot (`engine/sniper.ts`) searches the user's saved filters in turn, buys
 every listing at or under the price cap (cheapest first), and starts the next
 search a random delay from the user's range after the last one started (start
@@ -381,8 +386,14 @@ leaves after EA's 5% tax and the profit per card at the max buy price
 market price is FUTBIN's lowest buy-now for the card on the chosen platform
 (`price.futbin`, `background/futbin.ts`; `www.futbin.com` is in the
 `ledger-auto` host permissions and the userscript's `@connect`), else the
-median Nova has recorded for it (`summary`). FUTBIN has no public API, so
-anything that doesn't read like its player-prices JSON counts as no price.
+second cheapest listing Nova saw still on the market in the last half hour
+(`recentMarketPrice`, `model/market-price.ts`, returned by `summary` as
+`market`; unknown with fewer than two), never the week's median, which ran
+far above what cards sell for. FUTBIN has no public API, so anything that
+doesn't read like its player-prices JSON counts as no price. A buy's "sells
+for" and profit, and the minimum-profit check, use the price auto-sell lists
+at: the user's own sell price when set (even with auto-sell off), else the
+market price, moved by the steps when auto-sell is on.
 Prices go on EA's grid (`roundToPriceStep` / `stepPrice` in `@sl/shared`),
 the starting bid one step under the buy-now. "Never sell at a loss" (on by
 default) skips a price that, after EA's 5% tax, is below what the card
