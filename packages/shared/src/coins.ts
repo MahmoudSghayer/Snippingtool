@@ -45,6 +45,49 @@ export function parseSalePrice(input: string): SalePriceResult {
   return { ok: true, coins };
 }
 
+// ---- EA's transfer-market price steps ---------------------------------------
+//
+// A listing's prices are always on EA's grid: multiples of 50 coins below
+// 1,000, of 100 up to 10,000, of 250 up to 50,000, of 500 up to 100,000, and
+// of 1,000 above that. A starting bid can be as low as 150.
+
+/** EA's lowest starting bid. */
+export const MIN_START_PRICE = 150;
+
+const PRICE_BANDS: readonly { below: number; step: number }[] = [
+  { below: 1_000, step: 50 },
+  { below: 10_000, step: 100 },
+  { below: 50_000, step: 250 },
+  { below: 100_000, step: 500 },
+  { below: Infinity, step: 1_000 },
+];
+
+/** The step between `price` and the next price up. */
+export function priceStep(price: number): number {
+  return PRICE_BANDS.find((b) => price < b.below)!.step;
+}
+
+function clampPrice(price: number): number {
+  return Math.min(MAX_COIN_PRICE, Math.max(MIN_START_PRICE, price));
+}
+
+/** The nearest price on EA's grid, within EA's limits. */
+export function roundToPriceStep(price: number): number {
+  const p = clampPrice(price);
+  const step = priceStep(p);
+  return clampPrice(Math.round(p / step) * step);
+}
+
+/** `price` moved `steps` steps along EA's grid (down when negative), the
+ * way the web app's price arrows move it; stops at EA's limits. */
+export function stepPrice(price: number, steps: number): number {
+  let p = roundToPriceStep(price);
+  for (let i = 0; i < Math.abs(steps); i++) {
+    p = steps > 0 ? clampPrice(p + priceStep(p)) : clampPrice(p - priceStep(p - 1));
+  }
+  return p;
+}
+
 /** A sale that loses more than half of what the card cost: worth a second
  * look before recording, since it's usually a missing digit. */
 export function isHeavyLoss(buyPrice: number, netProfit: number): boolean {

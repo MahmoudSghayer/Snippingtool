@@ -36,6 +36,7 @@ import { Governor, type GovernorState } from '../engine/governor.js';
 import { rankCandidates, type ScoredOpportunity } from '../engine/ranker.js';
 import { countObservedSearches, governedSearch } from '../engine/search.js';
 import { handOffWasLate, readHandedOffNonce } from '../lib/act-auth.js';
+import { createBackgroundSleep } from '../lib/background-timer.js';
 import { riskLevelChangeEvent } from '../lib/bot-safety.js';
 import { logger } from '../lib/logger.js';
 import { singleFlight } from '../lib/single-flight.js';
@@ -626,10 +627,22 @@ async function main(): Promise<void> {
       sniper = new mod.Sniper(
         {
           adapter,
+          // Timed off the main thread, so the bot keeps its pace while the
+          // tab is minimised or in the background (lib/background-timer.ts).
+          sleep: createBackgroundSleep(),
           getFilters: () => (liveSearch ? [liveSearch] : []),
           estimateSellPrice: async (resourceId) => {
             const r = await send<{ summary: PriceSummary }>('summary', { resourceId, minProfit: settingsCache.targets.minProfitPerSnipe });
             return r?.summary.median ?? null;
+          },
+          // Auto-sell's market price: FUTBIN's, else the median Nova has
+          // recorded for the card (background/futbin.ts, model/prices.ts).
+          marketPrice: async (resourceId, platform) => {
+            const futbin = await send<{ price: number | null }>('price.futbin', { resourceId, platform });
+            if (futbin?.price) return { price: futbin.price, source: 'futbin' as const };
+            const r = await send<{ summary: PriceSummary }>('summary', { resourceId, minProfit: settingsCache.targets.minProfitPerSnipe });
+            const median = r?.summary.median;
+            return median ? { price: median, source: 'nova' as const } : null;
           },
           // The hours-per-day limit survives a page reload.
           loadUsage: () => send<BotDailyUsage | null>('bot.usageGet'),

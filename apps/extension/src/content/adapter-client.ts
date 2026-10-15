@@ -62,6 +62,9 @@ export interface AdapterClient {
    * same resourceId (and assetId, when given). */
   buy(tradeId: string, price: number, card?: { resourceId: number; assetId?: number }): Promise<ActionOutcome>;
   readResult(tradeId: string): Promise<ActionOutcome>;
+  /** Automation builds: list a card this adapter bought (named by the
+   * tradeId it was bought under) on the transfer market. */
+  list(tradeId: string, startPrice: number, buyNowPrice: number): Promise<ActionOutcome>;
   /** The adapter's read-only diagnostics report, over the same
    * authenticated channel as every act call (docs/06-extension.md §4). */
   diagnostics(): Promise<ActionOutcome>;
@@ -96,7 +99,7 @@ export function pageWindow(): Window {
   return typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
 }
 
-type ActAction = 'search' | 'buy' | 'readResult' | 'diagnostics';
+type ActAction = 'search' | 'buy' | 'readResult' | 'diagnostics' | 'list';
 
 interface Pending {
   action: ActAction;
@@ -307,6 +310,7 @@ export function createAdapterClient(target: Window, nonce: string | null, option
           })
         : Promise.resolve({ ok: false, error: ACT_ERROR.priceMismatch, latencyMs: 0 }),
     readResult: (tradeId) => call({ action: 'readResult', tradeId }),
+    list: (tradeId, startPrice, buyNowPrice) => call({ action: 'list', tradeId, startPrice, buyNowPrice }),
     diagnostics: () => call({ action: 'diagnostics' }),
     onProbe: (cb) => {
       probeListeners.add(cb);

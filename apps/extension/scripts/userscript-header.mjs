@@ -46,8 +46,10 @@ export function buildUserscriptHeader(env) {
     // market call; content/index.ts waits for the DOM on its own.
     ['run-at', 'document-start'],
     ['noframes', ''],
-    // The only host the script talks to besides the page it runs on.
+    // The hosts the script talks to besides the page it runs on: the API,
+    // and FUTBIN for auto-sell's prices (background/futbin.ts).
     ['connect', apiHost],
+    ['connect', 'www.futbin.com'],
     ...GRANTS.map((g) => /** @type {[string, string]} */ (['grant', g])),
   ];
 
