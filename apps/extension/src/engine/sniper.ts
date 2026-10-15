@@ -198,7 +198,7 @@ export interface SniperState {
 }
 
 export interface SniperDeps {
-  adapter: Pick<AdapterClient, 'search' | 'buy' | 'onAuctions' | 'onProbe' | 'onShape'>;
+  adapter: Pick<AdapterClient, 'search' | 'buy' | 'onAuctions' | 'onBuyable' | 'onProbe' | 'onShape'>;
   getFilters: () => SniperFilter[];
   /** Expected resale price for a card, or null if the ledger has no data. */
   estimateSellPrice: (resourceId: number) => Promise<number | null>;
@@ -519,12 +519,24 @@ export class Sniper {
       const off = this.deps.adapter.onAuctions((raw) => {
         for (const a of raw as TrimmedAuction[]) collected.set(a.tradeId, a);
       });
+      // When the search's network response reaches the adapter before its
+      // own search call returns, the listings arrive marked unbuyable (no
+      // item entity yet), and the call's result only upgrades them
+      // (main/adapter.ts, isSecondSighting): without this, that search
+      // would buy nothing.
+      const offBuyable = this.deps.adapter.onBuyable((tradeIds) => {
+        for (const id of tradeIds) {
+          const a = collected.get(id);
+          if (a) collected.set(id, { ...a, buyable: true });
+        }
+      });
       const searchFilter: FilterCriteria =
         cap == null ? target.filter : { ...target.filter, maxPrice: cap };
       this.searchTimes.push(this.now());
       this.persistBudget();
       const outcome = await this.deps.adapter.search(searchFilter);
       off();
+      offBuyable();
       if (signal.aborted) return;
 
       this.stats.searches++;

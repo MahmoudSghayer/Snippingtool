@@ -153,6 +153,7 @@ describe('bot page — page scripts cannot drive it', () => {
           search: vi.fn(),
           buy: vi.fn(),
           onAuctions: () => () => undefined,
+          onBuyable: () => () => undefined,
           onProbe: () => () => undefined,
           onShape: () => () => undefined,
         },
