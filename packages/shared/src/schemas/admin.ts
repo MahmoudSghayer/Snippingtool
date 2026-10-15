@@ -6,18 +6,18 @@ import { PERMISSIONS } from '../permissions.js';
  * `before`/`after` are the app-layer diffing JSONB columns; `diff` is
  * precomputed server-side so the dashboard never has to. */
 export const auditLogEntrySchema = z.object({
-  id: z.string().uuid(),
+  id: z.string().guid(),
   actorType: z.enum(['user', 'admin', 'system']),
-  actorId: z.string().uuid().nullable(),
+  actorId: z.string().guid().nullable(),
   action: z.string().min(1).max(120),
   entityType: z.string().min(1).max(80),
   // Nullable: audit_logs.entity_id is a nullable uuid in the DB (some
   // system-actor actions have no single target entity) — widened here
   // (additive) to match; existing string-only consumers keep working.
   entityId: z.string().min(1).max(80).nullable(),
-  before: z.record(z.unknown()).nullable(),
-  after: z.record(z.unknown()).nullable(),
-  diff: z.record(z.unknown()).nullable(),
+  before: z.record(z.string(), z.unknown()).nullable(),
+  after: z.record(z.string(), z.unknown()).nullable(),
+  diff: z.record(z.string(), z.unknown()).nullable(),
   requestId: z.string().min(1).max(80).nullable(),
   occurredAt: z.string().datetime(),
 });
@@ -25,12 +25,12 @@ export type AuditLogEntry = z.infer<typeof auditLogEntrySchema>;
 
 export const auditLogQuerySchema = z
   .object({
-    actorId: z.string().uuid().optional(),
+    actorId: z.string().guid().optional(),
     entityType: z.string().min(1).max(80).optional(),
     // audit_logs.entity_id is a `uuid` column (02-database.md §6.9) — validated
     // here so a malformed filter value 400s as VALIDATION_FAILED instead of
     // reaching the database and raising a Postgres type-cast error (500).
-    entityId: z.string().uuid().optional(),
+    entityId: z.string().guid().optional(),
     from: z.string().datetime().optional(),
     to: z.string().datetime().optional(),
   })
@@ -52,7 +52,7 @@ export const featureToggleDtoSchema = z.object({
   enabled: z.boolean(),
   rolloutPercent: z.number().int().min(0).max(100),
   planGate: z.string().min(1).max(40).nullable(),
-  updatedBy: z.string().uuid().nullable(),
+  updatedBy: z.string().guid().nullable(),
 });
 export type FeatureToggleDto = z.infer<typeof featureToggleDtoSchema>;
 
@@ -67,9 +67,11 @@ export type UpdateFeatureToggleRequest = z.infer<typeof updateFeatureToggleReque
 
 export const systemConfigDtoSchema = z.object({
   key: z.string().min(1).max(80),
-  value: z.unknown(),
+  // `.optional()`: zod 4 rejects an absent key whose schema is a bare
+  // `z.unknown()`; zod 3 accepted it.
+  value: z.unknown().optional(),
   isSecret: z.boolean(),
-  updatedBy: z.string().uuid().nullable(),
+  updatedBy: z.string().guid().nullable(),
 });
 export type SystemConfigDto = z.infer<typeof systemConfigDtoSchema>;
 

@@ -37,7 +37,7 @@ export const registerRequestSchema = z
     /** The Terms of Service and Refund Policy must be accepted to register;
      * the API records TERMS_VERSION against the account. */
     acceptTerms: z.literal(true, {
-      errorMap: () => ({ message: 'You must accept the Terms of Service to create an account.' }),
+      error: 'You must accept the Terms of Service to create an account.',
     }),
   })
   .strict();
@@ -50,7 +50,7 @@ export type RegisterRequest = z.infer<typeof registerRequestSchema>;
  * must not treat a successful register as an implicit login. */
 export const registerResponseSchema = z
   .object({
-    userId: z.string().uuid(),
+    userId: z.string().guid(),
   })
   .strict();
 export type RegisterResponse = z.infer<typeof registerResponseSchema>;

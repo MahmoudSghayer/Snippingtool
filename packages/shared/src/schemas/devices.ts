@@ -6,7 +6,7 @@ export const DEVICE_STATUSES = ['active', 'revoked'] as const;
 export type DeviceStatus = (typeof DEVICE_STATUSES)[number];
 
 export const deviceDtoSchema = z.object({
-  id: z.string().uuid(),
+  id: z.string().guid(),
   name: z.string().min(1).max(120).nullable(),
   browser: z.string().min(1).max(60).nullable(),
   os: z.string().min(1).max(60).nullable(),
@@ -24,7 +24,7 @@ export type RegisterDeviceRequest = z.infer<typeof registerDeviceRequestSchema>;
 
 export const revokeDeviceRequestSchema = z
   .object({
-    deviceId: z.string().uuid(),
+    deviceId: z.string().guid(),
   })
   .strict();
 export type RevokeDeviceRequest = z.infer<typeof revokeDeviceRequestSchema>;

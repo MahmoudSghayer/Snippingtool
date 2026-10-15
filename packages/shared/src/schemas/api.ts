@@ -8,7 +8,7 @@ import { ERROR_CODES } from '../constants/errors.js';
 export const apiErrorSchema = z.object({
   code: z.enum(ERROR_CODES),
   message: z.string().min(1),
-  details: z.record(z.unknown()).optional(),
+  details: z.record(z.string(), z.unknown()).optional(),
   requestId: z.string().min(1),
 });
 export type ApiError = z.infer<typeof apiErrorSchema>;

@@ -29,7 +29,7 @@ const baseActivityEvent = z
     // Bounded: user_activity and search_activity are partitioned on it
     // (see ingest-bounds.ts).
     occurredAt: ingestTimestampSchema,
-    deviceId: z.string().uuid().optional(), // absent before device registration completes
+    deviceId: z.string().guid().optional(), // absent before device registration completes
   })
   .strict();
 
@@ -64,7 +64,7 @@ export const filterChangeActivitySchema = baseActivityEvent.extend({
   type: z.literal('filter_change'),
   metadata: z
     .object({
-      filterId: z.string().uuid().optional(),
+      filterId: z.string().guid().optional(),
       action: z.enum(['created', 'updated', 'deleted', 'activated', 'deactivated']),
     })
     .strict(),
@@ -136,9 +136,9 @@ export type ActivityIngestBatch = z.infer<typeof activityIngestBatchSchema>;
 // ---------------------------------------------------------------------------
 
 const adminActivityRowBase = z.object({
-  id: z.string().uuid(),
-  userId: z.string().uuid(),
-  deviceId: z.string().uuid().nullable(),
+  id: z.string().guid(),
+  userId: z.string().guid(),
+  deviceId: z.string().guid().nullable(),
   occurredAt: z.string().datetime(),
 });
 
@@ -146,7 +146,7 @@ const adminActivityRowBase = z.object({
 export const adminLoginActivityRowSchema = adminActivityRowBase.extend({
   type: z.literal('login'),
   ip: z.string().nullable(),
-  metadata: z.record(z.unknown()),
+  metadata: z.record(z.string(), z.unknown()),
 });
 export type AdminLoginActivityRow = z.infer<typeof adminLoginActivityRowSchema>;
 
@@ -154,7 +154,7 @@ export type AdminLoginActivityRow = z.infer<typeof adminLoginActivityRowSchema>;
 export const adminErrorActivityRowSchema = adminActivityRowBase.extend({
   type: z.literal('error'),
   ip: z.string().nullable(),
-  metadata: z.record(z.unknown()),
+  metadata: z.record(z.string(), z.unknown()),
 });
 export type AdminErrorActivityRow = z.infer<typeof adminErrorActivityRowSchema>;
 
@@ -165,7 +165,7 @@ export type AdminErrorActivityRow = z.infer<typeof adminErrorActivityRowSchema>;
 export const adminFilterChangeActivityRowSchema = adminActivityRowBase.extend({
   type: z.literal('filter_change'),
   metadata: z.object({
-    filterId: z.string().uuid().optional(),
+    filterId: z.string().guid().optional(),
     action: z.enum(['created', 'updated', 'deleted', 'activated', 'deactivated']),
   }),
 });
@@ -194,8 +194,8 @@ export type AdminSnipeActivityRow = z.infer<typeof adminSnipeActivityRowSchema>;
 
 /** `GET /admin/activity/devices` — extension version/OS distribution summary. */
 export const adminActivityDevicesSummarySchema = z.object({
-  byVersion: z.record(z.number().int().min(0)),
-  byOs: z.record(z.number().int().min(0)),
+  byVersion: z.record(z.string(), z.number().int().min(0)),
+  byOs: z.record(z.string(), z.number().int().min(0)),
   total: z.number().int().min(0),
 });
 export type AdminActivityDevicesSummary = z.infer<typeof adminActivityDevicesSummarySchema>;
@@ -203,7 +203,7 @@ export type AdminActivityDevicesSummary = z.infer<typeof adminActivityDevicesSum
 /** `GET /admin/activity/ips` — `ip_activity` rows. */
 export const adminIpActivityRowSchema = z.object({
   ip: z.string(),
-  userId: z.string().uuid().nullable(),
+  userId: z.string().guid().nullable(),
   country: z.string().nullable(),
   asn: z.number().int().nullable(),
   firstSeen: z.string().datetime(),

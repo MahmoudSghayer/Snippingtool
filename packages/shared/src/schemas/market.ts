@@ -166,7 +166,7 @@ export const eventDateConfidenceSchema = z.enum(['announced', 'stated', 'inferre
 export type EventDateConfidence = z.infer<typeof eventDateConfidenceSchema>;
 
 export const marketEventSchema = z.object({
-  id: z.string().uuid(),
+  id: z.string().guid(),
   kind: marketEventKindSchema,
   title: z.string(),
   slug: z.string(),

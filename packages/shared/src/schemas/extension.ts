@@ -21,12 +21,12 @@ export const bootstrapRequestSchema = z
 export type BootstrapRequest = z.infer<typeof bootstrapRequestSchema>;
 
 export const bootstrapResponseSchema = z.object({
-  userId: z.string().uuid(),
+  userId: z.string().guid(),
   /** The signed-in user's own account email, so the extension can show who
    * it is signed in as. Bootstrap only (omitted from heartbeat below); the
    * API never logs it. */
   email: z.string().email(),
-  deviceId: z.string().uuid(),
+  deviceId: z.string().guid(),
   subscription: subscriptionDtoSchema.nullable(),
   license: licenseDtoSchema.nullable(),
   features: z.array(z.enum(FEATURE_KEYS)),
@@ -53,7 +53,7 @@ export { entitlementBlobClaimsSchema, type EntitlementBlobClaims } from './entit
  * shape bootstrap returns, plus lets the server push a kill switch. */
 export const heartbeatRequestSchema = z
   .object({
-    deviceId: z.string().uuid(),
+    deviceId: z.string().guid(),
     extensionVersion: z.string().min(1).max(30),
     engineState: z.enum(['idle', 'running', 'paused', 'halted']),
   })
@@ -74,14 +74,14 @@ export const telemetryEventSchema = z
     name: z.string().min(1).max(80),
     // Stored in the month-partitioned `user_activity` (ingest-bounds.ts).
     occurredAt: ingestTimestampSchema,
-    data: z.record(z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
+    data: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
   })
   .strict();
 export type TelemetryEvent = z.infer<typeof telemetryEventSchema>;
 
 export const telemetryFlushRequestSchema = z
   .object({
-    deviceId: z.string().uuid(),
+    deviceId: z.string().guid(),
     events: z.array(telemetryEventSchema).min(1).max(500),
   })
   .strict();
@@ -90,7 +90,7 @@ export type TelemetryFlushRequest = z.infer<typeof telemetryFlushRequestSchema>;
 /** `POST /extension/errors` — the ring-buffer flush from `lib/errors.ts`. */
 export const extensionErrorReportSchema = z
   .object({
-    deviceId: z.string().uuid(),
+    deviceId: z.string().guid(),
     extensionVersion: z.string().min(1).max(30),
     errors: z
       .array(

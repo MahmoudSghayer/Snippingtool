@@ -14,7 +14,7 @@ import { defineJob } from './types.js';
 
 export const PAYMENTS_NOTIFY_JOB = 'payments.notify';
 
-const dataSchema = z.object({ claimId: z.string().uuid() });
+const dataSchema = z.object({ claimId: z.string().guid() });
 export type PaymentsNotifyData = z.infer<typeof dataSchema>;
 
 const GOLD = 0xe0b04a;

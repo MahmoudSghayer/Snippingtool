@@ -55,8 +55,8 @@ const grantLifetimeBodySchema = z.object({
   reason: z.string().min(1).max(1000),
 });
 
-const idParams = z.object({ id: z.string().uuid() });
-const userIdParams = z.object({ userId: z.string().uuid() });
+const idParams = z.object({ id: z.string().guid() });
+const userIdParams = z.object({ userId: z.string().guid() });
 
 function toListItem(row: SubscriptionRow & { plan: PlanRow; user: { id: string; email: string } }) {
   return { ...toSubscriptionDto(row, row.plan), userId: row.user.id, userEmail: row.user.email };
@@ -500,7 +500,7 @@ export default fp(
           summary: "Override one license's device limit (does not touch its plan/subscription).",
           params: idParams,
           body: adminDeviceLimitOverrideRequestSchema,
-          response: { 200: z.object({ id: z.string().uuid(), maxDevices: z.number().int() }) },
+          response: { 200: z.object({ id: z.string().guid(), maxDevices: z.number().int() }) },
         },
       },
       async (request) => {
