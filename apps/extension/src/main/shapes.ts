@@ -49,6 +49,14 @@ export interface BuyTarget {
   onLate?: (bought: boolean) => void;
 }
 
+export interface ListTarget {
+  /** The item entity this adapter bought (`actBuy`). */
+  entity: unknown;
+  startPrice: number;
+  buyNowPrice: number;
+  durationSeconds: number;
+}
+
 export interface ServiceShape {
   readonly name: ShapeName;
   /** `null` when this shape's functions are all present on `services`,
@@ -67,6 +75,10 @@ export interface ServiceShape {
   buy(services: Record<string, unknown>, target: BuyTarget): Promise<void>;
   /** Whether `tradeId` is still an open listing. Rejects when unreadable. */
   readResult(services: Record<string, unknown>, tradeId: string): Promise<boolean>;
+  /** List a bought item on the transfer market (auto-sell). Resolves only
+   * when EA's service says it worked. Absent on a shape with no known
+   * listing call. */
+  list?(services: Record<string, unknown>, target: ListTarget): Promise<void>;
 }
 
 export const SHAPES: readonly ServiceShape[] = [createObservableShape(SERVICE_CALL_TIMEOUT_MS), createPromiseShape(SERVICE_CALL_TIMEOUT_MS)];

@@ -64,6 +64,9 @@ const USERSCRIPT_BUILD = import.meta.env.VITE_BUILD_TARGET === 'userscript';
 /** Only automation builds have the Sniping Bot page the catalog is for:
  * the listable `ledger` build never builds one or fetches EA's data files. */
 const CATALOG_ENABLED = import.meta.env.VITE_AUTOMATION === '1';
+/** Likewise only automation builds list what Nova AI bought (auto-sell):
+ * the listable build has no `list` act at all. */
+const LISTING_ENABLED = import.meta.env.VITE_AUTOMATION === '1';
 
 // ---- act-channel authentication (docs/09-security.md §13) --------------------
 // Taken first thing, at `document_start`, before any page script exists:
@@ -96,6 +99,7 @@ const now = Date.now;
 const URLCtor = URL;
 const mapGet = Map.prototype.get;
 const mapSet = Map.prototype.set;
+const mapDelete = Map.prototype.delete;
 const mapClear = Map.prototype.clear;
 const setHas = Set.prototype.has;
 const setAdd = Set.prototype.add;
@@ -215,7 +219,7 @@ function post(kind: string, data: unknown): void {
 }
 
 interface ActionResult {
-  action: 'search' | 'buy' | 'readResult' | 'diagnostics';
+  action: 'search' | 'buy' | 'readResult' | 'diagnostics' | 'list';
   requestId: string;
   ok: boolean;
   requestedAt: number;
@@ -439,10 +443,15 @@ let lastPileResponse: { path: string; at: number; value: unknown } | null = null
  */
 interface SeenListing {
   buyNow: number;
-  /** The card, as EA's own response said: a buy that names a resourceId
-   * must match it (`priceCheck`), and likewise an assetId. */
-  resourceId: number;
-  assetId: number;
+  /** The card, as EA's own responses said: a buy that names a resourceId
+   * must be one of these (`priceCheck`), and likewise an assetId. Every id
+   * any sighting gave is kept, not just the latest: one search reaches the
+   * adapter twice (its act result's item entity, and the network response
+   * it caused, see `isSecondSighting`), the two can name the card by
+   * different ids, and content was told only one of them. Keeping only the
+   * latest refused real buys of the right card (`resource_mismatch`). */
+  resourceIds: number[];
+  assetIds: number[];
   expiresAt: number | null;
   /** The item entity an act search returned for this listing, for shapes
    * that buy on the entity. Absent for a listing only seen passively. */
@@ -460,15 +469,31 @@ function rememberListing(a: TrimmedAuction, entity: unknown): SeenListing {
       rememberedListings = 1;
     }
   }
-  // A passive sighting after an act search keeps the entity: it is still
-  // the same listing (a relist gets a new tradeId).
+  // A passive sighting after an act search keeps the entity, and the card
+  // ids it gave: it is still the same listing (a relist gets a new tradeId).
   const keep = entity ?? previous?.entity;
+  const resourceIds = withId(previous?.resourceIds, a.resourceId);
+  const assetIds = withId(previous?.assetIds, a.assetId);
   const seen: SeenListing =
     keep === undefined
-      ? { buyNow: a.buyNow, resourceId: a.resourceId, assetId: a.assetId, expiresAt: a.expiresAt }
-      : { buyNow: a.buyNow, resourceId: a.resourceId, assetId: a.assetId, expiresAt: a.expiresAt, entity: keep };
+      ? { buyNow: a.buyNow, resourceIds, assetIds, expiresAt: a.expiresAt }
+      : { buyNow: a.buyNow, resourceIds, assetIds, expiresAt: a.expiresAt, entity: keep };
   apply(mapSet, lastSeenListings, [a.tradeId, seen]);
   return seen;
+}
+
+/** `ids` plus `id`, once. Plain loops, not Array methods the page could
+ * have replaced. */
+function withId(ids: readonly number[] | undefined, id: number): number[] {
+  const out: number[] = [];
+  if (ids) for (let i = 0; i < ids.length; i++) out[out.length] = ids[i]!;
+  if (!hasId(out, id)) out[out.length] = id;
+  return out;
+}
+
+function hasId(ids: readonly number[], id: number): boolean {
+  for (let i = 0; i < ids.length; i++) if (ids[i] === id) return true;
+  return false;
 }
 
 /** A mixed page: some entries unreadable. Not a failed response (the rest
@@ -852,8 +877,8 @@ interface CardIds {
 function priceCheck(tradeId: string, price: number, at: number, card: CardIds): string | null {
   const listing = apply(mapGet, lastSeenListings, [tradeId]) as SeenListing | undefined;
   if (!listing || (listing.expiresAt != null && listing.expiresAt <= at)) return ACT_ERROR.listingUnknown;
-  if (card.resourceId !== undefined && listing.resourceId !== card.resourceId) return ACT_ERROR.resourceMismatch;
-  if (card.assetId !== undefined && listing.assetId !== card.assetId) return ACT_ERROR.resourceMismatch;
+  if (card.resourceId !== undefined && !hasId(listing.resourceIds, card.resourceId)) return ACT_ERROR.resourceMismatch;
+  if (card.assetId !== undefined && !hasId(listing.assetIds, card.assetId)) return ACT_ERROR.resourceMismatch;
   // buyNow 0 means the listing has no buy-now price: nothing to match.
   if (listing.buyNow <= 0 || listing.buyNow !== price) return ACT_ERROR.priceMismatch;
   return null;
@@ -877,9 +902,11 @@ async function actBuy(requestId: string, tradeId: string, price: number, card: C
       // in a second signed result content is waiting for.
       onLate: (bought) => {
         adapterLog.add(`late buy answer (${shape.name}): ${bought ? 'bought' : 'not bought'}`);
+        if (LISTING_ENABLED && bought) rememberBought(tradeId, entity);
         postResult({ action: 'buy', requestId, ok: bought, late: true, requestedAt, completedAt: now() });
       },
     });
+    if (LISTING_ENABLED) rememberBought(tradeId, entity);
     adapterLog.add(`buy ok (${shape.name})`);
     postResult({ action: 'buy', requestId, ok: true, requestedAt, completedAt: now() });
   } catch (err) {
@@ -888,6 +915,49 @@ async function actBuy(requestId: string, tradeId: string, price: number, card: C
       return;
     }
     fail('buy', requestId, requestedAt, errorText(err), describeError(err));
+  }
+}
+
+// ---- auto-sell (automation builds) ------------------------------------------
+
+/** How long auto-sell lists a card for: one hour, the web app's shortest. */
+const LIST_DURATION_SECONDS = 3600;
+const MAX_BOUGHT_ITEMS = 500;
+/** Items this adapter bought on this page load, by the tradeId they were
+ * bought under: the only things `actList` will ever put on the market, so
+ * no request, signed or not, can list anything else in the user's club. */
+const boughtItems = new Map<string, unknown>();
+let boughtCount = 0;
+
+function rememberBought(tradeId: string, entity: unknown): void {
+  if (entity === undefined) return;
+  if (++boughtCount > MAX_BOUGHT_ITEMS) {
+    apply(mapClear, boughtItems, []);
+    boughtCount = 1;
+  }
+  apply(mapSet, boughtItems, [tradeId, entity]);
+}
+
+async function actList(requestId: string, tradeId: string, startPrice: number, buyNowPrice: number): Promise<void> {
+  const requestedAt = now();
+  const { result, selection } = runProbeAndReport();
+  const shape = selection.shape;
+  if (!result.ok || !shape) return fail('list', requestId, requestedAt, result.reason);
+  if (!shape.list) return fail('list', requestId, requestedAt, 'list_unsupported');
+  const entity = apply(mapGet, boughtItems, [tradeId]);
+  if (entity === undefined) return fail('list', requestId, requestedAt, 'list_not_bought');
+  try {
+    await shape.list(servicesRoot() as Record<string, unknown>, {
+      entity,
+      startPrice,
+      buyNowPrice,
+      durationSeconds: LIST_DURATION_SECONDS,
+    });
+    apply(mapDelete, boughtItems, [tradeId]);
+    adapterLog.add(`list ok (${shape.name})`);
+    postResult({ action: 'list', requestId, ok: true, requestedAt, completedAt: now() });
+  } catch (err) {
+    fail('list', requestId, requestedAt, errorText(err), describeError(err));
   }
 }
 
@@ -964,6 +1034,7 @@ type ActRequest =
   | { action: 'search'; requestId: string; filter: FilterCriteria }
   | { action: 'buy'; requestId: string; tradeId: string; price: number; resourceId?: number; assetId?: number }
   | { action: 'readResult'; requestId: string; tradeId: string }
+  | { action: 'list'; requestId: string; tradeId: string; startPrice: number; buyNowPrice: number }
   | { action: 'diagnostics'; requestId: string }
   | { action: 'catalog'; requestId: string };
 
@@ -977,6 +1048,13 @@ function asActRequest(value: unknown): ActRequest | null {
   if (d.action === 'diagnostics' || d.action === 'catalog') return d as unknown as ActRequest;
   if (typeof d.tradeId !== 'string' || d.tradeId === '') return null;
   if (d.action === 'readResult') return d as unknown as ActRequest;
+  if (d.action === 'list') {
+    // EA's limits, and a starting bid below the buy-now price.
+    const start = d.startPrice as number;
+    const bin = d.buyNowPrice as number;
+    if (!isInteger(start) || !isInteger(bin) || start < 150 || bin < 200 || bin > 15_000_000 || start >= bin) return null;
+    return d as unknown as ActRequest;
+  }
   if (d.action === 'buy') {
     if (!isInteger(d.price) || (d.price as number) <= 0) return null;
     for (const id of [d.resourceId, d.assetId]) if (id !== undefined && (!isInteger(id) || (id as number) <= 0)) return null;
@@ -1001,6 +1079,9 @@ async function handleActRequest(data: unknown, mac: unknown): Promise<void> {
   if (request.action === 'search') await actSearch(request.requestId, request.filter);
   else if (request.action === 'buy') await actBuy(request.requestId, request.tradeId, request.price, { resourceId: request.resourceId, assetId: request.assetId });
   else if (request.action === 'readResult') await actReadResult(request.requestId, request.tradeId);
+  else if (request.action === 'list') {
+    if (LISTING_ENABLED) await actList(request.requestId, request.tradeId, request.startPrice, request.buyNowPrice);
+  }
   else if (request.action === 'catalog') await refreshCatalog(true);
   else actDiagnostics(request.requestId);
 }

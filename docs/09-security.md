@@ -418,6 +418,10 @@ rewrite history, only add to it.
   the adapter synchronously; content's copy stays inside the one bundle,
   never on a global); only its adapter checks the message origin instead
   of `event.source`, because Tampermonkey posts through `unsafeWindow`.
+  Tampermonkey does not guarantee `document-start` runs before page
+  scripts, and on Chrome it often does not; the userscript hands off
+  anyway and logs that it was late, rather than locking Nova AI on every
+  such load (see docs/threat-model.md §3.1 for what that leaves open).
 - **Runtime message validation** (added/extended this pass,
   `background/index.ts`):
   - `sender.id !== browser.runtime.id` is checked first — only ever acts

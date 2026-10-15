@@ -131,7 +131,10 @@ export class DefaultEntitlementProvider implements EntitlementProvider {
     const key = await importPKCS8(this.signingKeyPem, 'EdDSA');
     // `killSwitchActive` is omitted (not `false`) when the caller didn't pass
     // it, so a blob can never claim "off" by accident.
-    const claims = killSwitchActive === undefined ? { snapshot, deviceId } : { snapshot, deviceId, killSwitchActive };
+    const claims =
+      killSwitchActive === undefined
+        ? { snapshot, deviceId }
+        : { snapshot, deviceId, killSwitchActive };
     return new SignJWT(claims)
       .setProtectedHeader({ alg: 'EdDSA' })
       .setSubject(userId)

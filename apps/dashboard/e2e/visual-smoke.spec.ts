@@ -99,12 +99,20 @@ test.describe('visual smoke (screenshots + no console errors)', () => {
     // there; the font-family stack already falls back to system fonts
     // regardless). Everything else still fails the assertion below.
     const IGNORED_CONSOLE_PATTERNS = [/ERR_CERT_AUTHORITY_INVALID/];
+    // /account's "Getting started" checklist (GettingStarted.tsx) reads two
+    // plan-gated endpoints, and the seeded admin has no plan: each answers
+    // 403 FEATURE_NOT_IN_PLAN, which the checklist expects, but Chromium
+    // still logs the failed load. A 403 from anything else still fails.
+    const PLAN_GATED_URLS = [/\/api\/v1\/filters(\?|$)/, /\/api\/v1\/trades(\?|$)/];
 
     const consoleErrors: string[] = [];
     page.on('console', (msg) => {
-      if (msg.type() === 'error' && !IGNORED_CONSOLE_PATTERNS.some((p) => p.test(msg.text()))) {
-        consoleErrors.push(`[console] ${msg.text()}`);
-      }
+      if (msg.type() !== 'error') return;
+      const text = msg.text();
+      if (IGNORED_CONSOLE_PATTERNS.some((p) => p.test(text))) return;
+      if (text.includes('status of 403') && PLAN_GATED_URLS.some((p) => p.test(msg.location().url)))
+        return;
+      consoleErrors.push(`[console] ${text}`);
     });
     page.on('pageerror', (err) => consoleErrors.push(`[pageerror] ${err.message}`));
 
