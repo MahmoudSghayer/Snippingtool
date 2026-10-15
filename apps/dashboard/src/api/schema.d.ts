@@ -162,7 +162,6 @@ export interface paths {
                                 id: string;
                                 /** Format: uuid */
                                 userId: string;
-                                /** Format: uuid */
                                 deviceId: string | null;
                                 /** Format: date-time */
                                 occurredAt: string;
@@ -220,7 +219,6 @@ export interface paths {
                                 id: string;
                                 /** Format: uuid */
                                 userId: string;
-                                /** Format: uuid */
                                 deviceId: string | null;
                                 /** Format: date-time */
                                 occurredAt: string;
@@ -278,7 +276,6 @@ export interface paths {
                                 id: string;
                                 /** Format: uuid */
                                 userId: string;
-                                /** Format: uuid */
                                 deviceId: string | null;
                                 /** Format: date-time */
                                 occurredAt: string;
@@ -338,7 +335,6 @@ export interface paths {
                                 id: string;
                                 /** Format: uuid */
                                 userId: string;
-                                /** Format: uuid */
                                 deviceId: string | null;
                                 /** Format: date-time */
                                 occurredAt: string;
@@ -394,7 +390,6 @@ export interface paths {
                                 id: string;
                                 /** Format: uuid */
                                 userId: string;
-                                /** Format: uuid */
                                 deviceId: string | null;
                                 /** Format: date-time */
                                 occurredAt: string;
@@ -491,7 +486,6 @@ export interface paths {
                     content: {
                         "application/json": {
                             ip: string;
-                            /** Format: uuid */
                             userId: string | null;
                             country: string | null;
                             asn: number | null;
@@ -1151,7 +1145,6 @@ export interface paths {
                             id: string;
                             /** @enum {string} */
                             actorType: "user" | "admin" | "system";
-                            /** Format: uuid */
                             actorId: string | null;
                             action: string;
                             entityType: string;
@@ -1250,17 +1243,13 @@ export interface paths {
                             items: {
                                 /** Format: uuid */
                                 id: string;
-                                /** Format: uuid */
                                 userId: string | null;
                                 /** @enum {string} */
                                 type: "account" | "ip" | "device" | "hwid";
                                 value: string;
                                 reason: string;
-                                /** Format: uuid */
                                 issuedBy: string | null;
-                                /** Format: date-time */
                                 expiresAt: string | null;
-                                /** Format: date-time */
                                 liftedAt: string | null;
                                 /** Format: date-time */
                                 createdAt: string;
@@ -1286,7 +1275,6 @@ export interface paths {
                         type: "account" | "ip" | "device" | "hwid";
                         value?: string;
                         reason: string;
-                        /** Format: date-time */
                         expiresAt?: string | null;
                         /** Format: uuid */
                         userId?: string;
@@ -1303,17 +1291,13 @@ export interface paths {
                         "application/json": {
                             /** Format: uuid */
                             id: string;
-                            /** Format: uuid */
                             userId: string | null;
                             /** @enum {string} */
                             type: "account" | "ip" | "device" | "hwid";
                             value: string;
                             reason: string;
-                            /** Format: uuid */
                             issuedBy: string | null;
-                            /** Format: date-time */
                             expiresAt: string | null;
-                            /** Format: date-time */
                             liftedAt: string | null;
                             /** Format: date-time */
                             createdAt: string;
@@ -1364,17 +1348,13 @@ export interface paths {
                         "application/json": {
                             /** Format: uuid */
                             id: string;
-                            /** Format: uuid */
                             userId: string | null;
                             /** @enum {string} */
                             type: "account" | "ip" | "device" | "hwid";
                             value: string;
                             reason: string;
-                            /** Format: uuid */
                             issuedBy: string | null;
-                            /** Format: date-time */
                             expiresAt: string | null;
-                            /** Format: date-time */
                             liftedAt: string | null;
                             /** Format: date-time */
                             createdAt: string;
@@ -1415,7 +1395,6 @@ export interface paths {
                             key: string;
                             value?: unknown;
                             isSecret: boolean;
-                            /** Format: uuid */
                             updatedBy: string | null;
                         }[];
                     };
@@ -1467,7 +1446,6 @@ export interface paths {
                             key: string;
                             value?: unknown;
                             isSecret: boolean;
-                            /** Format: uuid */
                             updatedBy: string | null;
                         };
                     };
@@ -1515,7 +1493,6 @@ export interface paths {
                                 planCodes: string[];
                                 maxRedemptions: number | null;
                                 redeemedCount: number;
-                                /** Format: date-time */
                                 expiresAt: string | null;
                                 isActive: boolean;
                             }[];
@@ -1542,7 +1519,6 @@ export interface paths {
                         value: number;
                         planCodes: ("trial" | "basic" | "pro" | "ultimate" | "lifetime")[];
                         maxRedemptions: number | null;
-                        /** Format: date-time */
                         expiresAt: string | null;
                         reason: string;
                     };
@@ -1565,7 +1541,6 @@ export interface paths {
                             planCodes: string[];
                             maxRedemptions: number | null;
                             redeemedCount: number;
-                            /** Format: date-time */
                             expiresAt: string | null;
                             isActive: boolean;
                         };
@@ -1607,7 +1582,6 @@ export interface paths {
                     "application/json": {
                         isActive?: boolean;
                         maxRedemptions?: number | null;
-                        /** Format: date-time */
                         expiresAt?: string | null;
                         reason: string;
                     };
@@ -1630,7 +1604,6 @@ export interface paths {
                             planCodes: string[];
                             maxRedemptions: number | null;
                             redeemedCount: number;
-                            /** Format: date-time */
                             expiresAt: string | null;
                             isActive: boolean;
                         };
@@ -1683,9 +1656,7 @@ export interface paths {
                                 };
                                 /** @enum {string} */
                                 status: "open" | "reviewed" | "dismissed";
-                                /** Format: uuid */
                                 reviewedBy: string | null;
-                                /** Format: date-time */
                                 reviewedAt: string | null;
                                 /** Format: date-time */
                                 createdAt: string;
@@ -1752,9 +1723,7 @@ export interface paths {
                             };
                             /** @enum {string} */
                             status: "open" | "reviewed" | "dismissed";
-                            /** Format: uuid */
                             reviewedBy: string | null;
-                            /** Format: date-time */
                             reviewedAt: string | null;
                             /** Format: date-time */
                             createdAt: string;
@@ -2059,11 +2028,8 @@ export interface paths {
                                 };
                                 /** @enum {string} */
                                 status: "trialing" | "active" | "past_due" | "canceled" | "suspended" | "expired" | "lifetime";
-                                /** Format: date-time */
                                 currentPeriodStart: string | null;
-                                /** Format: date-time */
                                 currentPeriodEnd: string | null;
-                                /** Format: date-time */
                                 trialEndsAt: string | null;
                                 cancelAtPeriodEnd: boolean;
                                 autoRenew: boolean;
@@ -2130,16 +2096,12 @@ export interface paths {
                                 };
                                 /** @enum {string} */
                                 status: "trialing" | "active" | "past_due" | "canceled" | "suspended" | "expired" | "lifetime";
-                                /** Format: date-time */
                                 currentPeriodStart: string | null;
-                                /** Format: date-time */
                                 currentPeriodEnd: string | null;
-                                /** Format: date-time */
                                 trialEndsAt: string | null;
                                 cancelAtPeriodEnd: boolean;
                                 autoRenew: boolean;
                             } | null;
-                            /** Format: uuid */
                             currentLicenseId: string | null;
                             history: {
                                 /** Format: uuid */
@@ -2159,11 +2121,8 @@ export interface paths {
                                 };
                                 /** @enum {string} */
                                 status: "trialing" | "active" | "past_due" | "canceled" | "suspended" | "expired" | "lifetime";
-                                /** Format: date-time */
                                 currentPeriodStart: string | null;
-                                /** Format: date-time */
                                 currentPeriodEnd: string | null;
-                                /** Format: date-time */
                                 trialEndsAt: string | null;
                                 cancelAtPeriodEnd: boolean;
                                 autoRenew: boolean;
@@ -2234,11 +2193,8 @@ export interface paths {
                             };
                             /** @enum {string} */
                             status: "trialing" | "active" | "past_due" | "canceled" | "suspended" | "expired" | "lifetime";
-                            /** Format: date-time */
                             currentPeriodStart: string | null;
-                            /** Format: date-time */
                             currentPeriodEnd: string | null;
-                            /** Format: date-time */
                             trialEndsAt: string | null;
                             cancelAtPeriodEnd: boolean;
                             autoRenew: boolean;
@@ -2305,11 +2261,8 @@ export interface paths {
                             };
                             /** @enum {string} */
                             status: "trialing" | "active" | "past_due" | "canceled" | "suspended" | "expired" | "lifetime";
-                            /** Format: date-time */
                             currentPeriodStart: string | null;
-                            /** Format: date-time */
                             currentPeriodEnd: string | null;
-                            /** Format: date-time */
                             trialEndsAt: string | null;
                             cancelAtPeriodEnd: boolean;
                             autoRenew: boolean;
@@ -2376,11 +2329,8 @@ export interface paths {
                             };
                             /** @enum {string} */
                             status: "trialing" | "active" | "past_due" | "canceled" | "suspended" | "expired" | "lifetime";
-                            /** Format: date-time */
                             currentPeriodStart: string | null;
-                            /** Format: date-time */
                             currentPeriodEnd: string | null;
-                            /** Format: date-time */
                             trialEndsAt: string | null;
                             cancelAtPeriodEnd: boolean;
                             autoRenew: boolean;
@@ -2446,11 +2396,8 @@ export interface paths {
                             };
                             /** @enum {string} */
                             status: "trialing" | "active" | "past_due" | "canceled" | "suspended" | "expired" | "lifetime";
-                            /** Format: date-time */
                             currentPeriodStart: string | null;
-                            /** Format: date-time */
                             currentPeriodEnd: string | null;
-                            /** Format: date-time */
                             trialEndsAt: string | null;
                             cancelAtPeriodEnd: boolean;
                             autoRenew: boolean;
@@ -2516,11 +2463,8 @@ export interface paths {
                             };
                             /** @enum {string} */
                             status: "trialing" | "active" | "past_due" | "canceled" | "suspended" | "expired" | "lifetime";
-                            /** Format: date-time */
                             currentPeriodStart: string | null;
-                            /** Format: date-time */
                             currentPeriodEnd: string | null;
-                            /** Format: date-time */
                             trialEndsAt: string | null;
                             cancelAtPeriodEnd: boolean;
                             autoRenew: boolean;
@@ -2588,11 +2532,8 @@ export interface paths {
                             };
                             /** @enum {string} */
                             status: "trialing" | "active" | "past_due" | "canceled" | "suspended" | "expired" | "lifetime";
-                            /** Format: date-time */
                             currentPeriodStart: string | null;
-                            /** Format: date-time */
                             currentPeriodEnd: string | null;
-                            /** Format: date-time */
                             trialEndsAt: string | null;
                             cancelAtPeriodEnd: boolean;
                             autoRenew: boolean;
@@ -2742,7 +2683,6 @@ export interface paths {
                             enabled: boolean;
                             rolloutPercent: number;
                             planGate: string | null;
-                            /** Format: uuid */
                             updatedBy: string | null;
                         }[];
                     };
@@ -2800,7 +2740,6 @@ export interface paths {
                             enabled: boolean;
                             rolloutPercent: number;
                             planGate: string | null;
-                            /** Format: uuid */
                             updatedBy: string | null;
                         };
                     };
@@ -2842,7 +2781,6 @@ export interface paths {
                                 id: string;
                                 /** Format: email */
                                 email: string;
-                                /** Format: date-time */
                                 emailVerifiedAt: string | null;
                                 /** @enum {string} */
                                 status: "active" | "suspended" | "banned" | "deleted";
@@ -2850,16 +2788,13 @@ export interface paths {
                                 role: "user" | "admin";
                                 totpEnabled: boolean;
                                 timezone: string | null;
-                                /** Format: date-time */
                                 timezoneSetAt: string | null;
                                 referralCode: string | null;
                                 /** Format: date-time */
                                 createdAt: string;
-                                /** Format: date-time */
                                 lastLoginAt: string | null;
-                                /** @enum {string|null} */
-                                adminRole: "super_admin" | "support" | "analyst" | "billing" | null;
-                                permissions: ("users.read" | "users.write" | "users.suspend" | "users.ban" | "users.force_logout" | "users.reset_password" | "subscriptions.read" | "subscriptions.write" | "coupons.write" | "plans.write" | "audit.read" | "analytics.read" | "system.read" | "system.write" | "feature_toggles.write" | "config.write")[];
+                                adminRole: ("super_admin" | "support" | "analyst" | "billing") | null;
+                                permissions: ("users.read" | "users.write" | "users.create" | "users.suspend" | "users.ban" | "users.force_logout" | "users.reset_password" | "subscriptions.read" | "subscriptions.write" | "coupons.write" | "plans.write" | "audit.read" | "analytics.read" | "system.read" | "system.write" | "feature_toggles.write" | "config.write")[];
                             }[];
                             nextCursor: string | null;
                         };
@@ -2868,7 +2803,57 @@ export interface paths {
             };
         };
         put?: never;
-        post?: never;
+        /** Create a user account (role `user`) with a password the admin sets. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** Format: email */
+                        email: string;
+                        password: string & (unknown & unknown);
+                        /** @default true */
+                        emailVerified?: boolean;
+                        reason: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            id: string;
+                            /** Format: email */
+                            email: string;
+                            emailVerifiedAt: string | null;
+                            /** @enum {string} */
+                            status: "active" | "suspended" | "banned" | "deleted";
+                            /** @enum {string} */
+                            role: "user" | "admin";
+                            totpEnabled: boolean;
+                            timezone: string | null;
+                            timezoneSetAt: string | null;
+                            referralCode: string | null;
+                            /** Format: date-time */
+                            createdAt: string;
+                            lastLoginAt: string | null;
+                            adminRole: ("super_admin" | "support" | "analyst" | "billing") | null;
+                            permissions: ("users.read" | "users.write" | "users.create" | "users.suspend" | "users.ban" | "users.force_logout" | "users.reset_password" | "subscriptions.read" | "subscriptions.write" | "coupons.write" | "plans.write" | "audit.read" | "analytics.read" | "system.read" | "system.write" | "feature_toggles.write" | "config.write")[];
+                        };
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -2904,7 +2889,6 @@ export interface paths {
                             id: string;
                             /** Format: email */
                             email: string;
-                            /** Format: date-time */
                             emailVerifiedAt: string | null;
                             /** @enum {string} */
                             status: "active" | "suspended" | "banned" | "deleted";
@@ -2912,16 +2896,13 @@ export interface paths {
                             role: "user" | "admin";
                             totpEnabled: boolean;
                             timezone: string | null;
-                            /** Format: date-time */
                             timezoneSetAt: string | null;
                             referralCode: string | null;
                             /** Format: date-time */
                             createdAt: string;
-                            /** Format: date-time */
                             lastLoginAt: string | null;
-                            /** @enum {string|null} */
-                            adminRole: "super_admin" | "support" | "analyst" | "billing" | null;
-                            permissions: ("users.read" | "users.write" | "users.suspend" | "users.ban" | "users.force_logout" | "users.reset_password" | "subscriptions.read" | "subscriptions.write" | "coupons.write" | "plans.write" | "audit.read" | "analytics.read" | "system.read" | "system.write" | "feature_toggles.write" | "config.write")[];
+                            adminRole: ("super_admin" | "support" | "analyst" | "billing") | null;
+                            permissions: ("users.read" | "users.write" | "users.create" | "users.suspend" | "users.ban" | "users.force_logout" | "users.reset_password" | "subscriptions.read" | "subscriptions.write" | "coupons.write" | "plans.write" | "audit.read" | "analytics.read" | "system.read" | "system.write" | "feature_toggles.write" | "config.write")[];
                         };
                     };
                 };
@@ -2960,7 +2941,6 @@ export interface paths {
                             id: string;
                             /** Format: email */
                             email: string;
-                            /** Format: date-time */
                             emailVerifiedAt: string | null;
                             /** @enum {string} */
                             status: "active" | "suspended" | "banned" | "deleted";
@@ -2968,16 +2948,13 @@ export interface paths {
                             role: "user" | "admin";
                             totpEnabled: boolean;
                             timezone: string | null;
-                            /** Format: date-time */
                             timezoneSetAt: string | null;
                             referralCode: string | null;
                             /** Format: date-time */
                             createdAt: string;
-                            /** Format: date-time */
                             lastLoginAt: string | null;
-                            /** @enum {string|null} */
-                            adminRole: "super_admin" | "support" | "analyst" | "billing" | null;
-                            permissions: ("users.read" | "users.write" | "users.suspend" | "users.ban" | "users.force_logout" | "users.reset_password" | "subscriptions.read" | "subscriptions.write" | "coupons.write" | "plans.write" | "audit.read" | "analytics.read" | "system.read" | "system.write" | "feature_toggles.write" | "config.write")[];
+                            adminRole: ("super_admin" | "support" | "analyst" | "billing") | null;
+                            permissions: ("users.read" | "users.write" | "users.create" | "users.suspend" | "users.ban" | "users.force_logout" | "users.reset_password" | "subscriptions.read" | "subscriptions.write" | "coupons.write" | "plans.write" | "audit.read" | "analytics.read" | "system.read" | "system.write" | "feature_toggles.write" | "config.write")[];
                         };
                     };
                 };
@@ -3007,7 +2984,6 @@ export interface paths {
                 content: {
                     "application/json": {
                         reason: string;
-                        /** Format: date-time */
                         expiresAt?: string | null;
                     };
                 };
@@ -3024,7 +3000,6 @@ export interface paths {
                             id: string;
                             /** Format: email */
                             email: string;
-                            /** Format: date-time */
                             emailVerifiedAt: string | null;
                             /** @enum {string} */
                             status: "active" | "suspended" | "banned" | "deleted";
@@ -3032,16 +3007,13 @@ export interface paths {
                             role: "user" | "admin";
                             totpEnabled: boolean;
                             timezone: string | null;
-                            /** Format: date-time */
                             timezoneSetAt: string | null;
                             referralCode: string | null;
                             /** Format: date-time */
                             createdAt: string;
-                            /** Format: date-time */
                             lastLoginAt: string | null;
-                            /** @enum {string|null} */
-                            adminRole: "super_admin" | "support" | "analyst" | "billing" | null;
-                            permissions: ("users.read" | "users.write" | "users.suspend" | "users.ban" | "users.force_logout" | "users.reset_password" | "subscriptions.read" | "subscriptions.write" | "coupons.write" | "plans.write" | "audit.read" | "analytics.read" | "system.read" | "system.write" | "feature_toggles.write" | "config.write")[];
+                            adminRole: ("super_admin" | "support" | "analyst" | "billing") | null;
+                            permissions: ("users.read" | "users.write" | "users.create" | "users.suspend" | "users.ban" | "users.force_logout" | "users.reset_password" | "subscriptions.read" | "subscriptions.write" | "coupons.write" | "plans.write" | "audit.read" | "analytics.read" | "system.read" | "system.write" | "feature_toggles.write" | "config.write")[];
                         };
                     };
                 };
@@ -3090,7 +3062,6 @@ export interface paths {
                             id: string;
                             /** Format: email */
                             email: string;
-                            /** Format: date-time */
                             emailVerifiedAt: string | null;
                             /** @enum {string} */
                             status: "active" | "suspended" | "banned" | "deleted";
@@ -3098,16 +3069,13 @@ export interface paths {
                             role: "user" | "admin";
                             totpEnabled: boolean;
                             timezone: string | null;
-                            /** Format: date-time */
                             timezoneSetAt: string | null;
                             referralCode: string | null;
                             /** Format: date-time */
                             createdAt: string;
-                            /** Format: date-time */
                             lastLoginAt: string | null;
-                            /** @enum {string|null} */
-                            adminRole: "super_admin" | "support" | "analyst" | "billing" | null;
-                            permissions: ("users.read" | "users.write" | "users.suspend" | "users.ban" | "users.force_logout" | "users.reset_password" | "subscriptions.read" | "subscriptions.write" | "coupons.write" | "plans.write" | "audit.read" | "analytics.read" | "system.read" | "system.write" | "feature_toggles.write" | "config.write")[];
+                            adminRole: ("super_admin" | "support" | "analyst" | "billing") | null;
+                            permissions: ("users.read" | "users.write" | "users.create" | "users.suspend" | "users.ban" | "users.force_logout" | "users.reset_password" | "subscriptions.read" | "subscriptions.write" | "coupons.write" | "plans.write" | "audit.read" | "analytics.read" | "system.read" | "system.write" | "feature_toggles.write" | "config.write")[];
                         };
                     };
                 };
@@ -4134,13 +4102,11 @@ export interface paths {
                                 planCodes: string[];
                                 maxRedemptions: number | null;
                                 redeemedCount: number;
-                                /** Format: date-time */
                                 expiresAt: string | null;
                                 isActive: boolean;
                             } | null;
                             discountPreview: string | null;
-                            /** @enum {string|null} */
-                            reason: "NOT_FOUND" | "EXPIRED" | "MAX_REDEMPTIONS" | "ALREADY_REDEEMED" | "PLAN_NOT_ELIGIBLE" | null;
+                            reason: ("NOT_FOUND" | "EXPIRED" | "MAX_REDEMPTIONS" | "ALREADY_REDEEMED" | "PLAN_NOT_ELIGIBLE") | null;
                         };
                     };
                 };
@@ -4187,7 +4153,6 @@ export interface paths {
                             firstSeenAt: string;
                             /** Format: date-time */
                             lastSeenAt: string;
-                            /** Format: date-time */
                             trustedAt: string | null;
                             isCurrent: boolean;
                         }[];
@@ -4276,7 +4241,6 @@ export interface paths {
                             firstSeenAt: string;
                             /** Format: date-time */
                             lastSeenAt: string;
-                            /** Format: date-time */
                             trustedAt: string | null;
                             isCurrent: boolean;
                         };
@@ -4514,6 +4478,8 @@ export interface paths {
                         "application/json": {
                             /** Format: uuid */
                             userId: string;
+                            /** Format: email */
+                            email: string;
                             /** Format: uuid */
                             deviceId: string;
                             subscription: {
@@ -4534,11 +4500,8 @@ export interface paths {
                                 };
                                 /** @enum {string} */
                                 status: "trialing" | "active" | "past_due" | "canceled" | "suspended" | "expired" | "lifetime";
-                                /** Format: date-time */
                                 currentPeriodStart: string | null;
-                                /** Format: date-time */
                                 currentPeriodEnd: string | null;
-                                /** Format: date-time */
                                 trialEndsAt: string | null;
                                 cancelAtPeriodEnd: boolean;
                                 autoRenew: boolean;
@@ -4548,7 +4511,6 @@ export interface paths {
                                 /** @enum {string} */
                                 status: "active" | "expired" | "revoked";
                                 maxDevices: number;
-                                /** Format: date-time */
                                 expiresAt: string | null;
                             } | null;
                             features: ("ledger.recorder" | "ledger.price_model" | "assist.ranker" | "assist.filter_rotation" | "assist.session_pnl" | "assist.risk_meter" | "automation.autobuyer" | "dashboard.analytics" | "dashboard.multi_device" | "support.priority" | "mobile.remote")[];
@@ -4648,11 +4610,8 @@ export interface paths {
                                 };
                                 /** @enum {string} */
                                 status: "trialing" | "active" | "past_due" | "canceled" | "suspended" | "expired" | "lifetime";
-                                /** Format: date-time */
                                 currentPeriodStart: string | null;
-                                /** Format: date-time */
                                 currentPeriodEnd: string | null;
-                                /** Format: date-time */
                                 trialEndsAt: string | null;
                                 cancelAtPeriodEnd: boolean;
                                 autoRenew: boolean;
@@ -4662,7 +4621,6 @@ export interface paths {
                                 /** @enum {string} */
                                 status: "active" | "expired" | "revoked";
                                 maxDevices: number;
-                                /** Format: date-time */
                                 expiresAt: string | null;
                             } | null;
                             features: ("ledger.recorder" | "ledger.price_model" | "assist.ranker" | "assist.filter_rotation" | "assist.session_pnl" | "assist.risk_meter" | "automation.autobuyer" | "dashboard.analytics" | "dashboard.multi_device" | "support.priority" | "mobile.remote")[];
@@ -4733,7 +4691,7 @@ export interface paths {
                             /** Format: date-time */
                             occurredAt: string;
                             data?: {
-                                [key: string]: string | number | boolean | ("null" | null);
+                                [key: string]: string | number | boolean | null;
                             };
                         }[];
                     };
@@ -5337,7 +5295,6 @@ export interface paths {
                             /** @enum {string} */
                             status: "active" | "expired" | "revoked";
                             maxDevices: number;
-                            /** Format: date-time */
                             expiresAt: string | null;
                         } | null;
                     };
@@ -5438,15 +5395,12 @@ export interface paths {
                                 status: string | null;
                                 features: string[];
                                 deviceLimit: number;
-                                /** Format: date-time */
                                 expiresAt: string | null;
-                                /** Format: date-time */
                                 currentPeriodEnd: string | null;
                                 license: {
                                     keyPrefix: string;
                                     status: string;
                                     maxDevices: number;
-                                    /** Format: date-time */
                                     expiresAt: string | null;
                                 } | null;
                             };
@@ -5678,16 +5632,13 @@ export interface paths {
                                 sourceUrl: string | null;
                                 /** Format: date-time */
                                 announcedAt: string;
-                                /** Format: date-time */
                                 startsAt: string | null;
-                                /** Format: date-time */
                                 endsAt: string | null;
                                 /** @enum {string} */
                                 dateConfidence: "announced" | "stated" | "inferred";
                                 fcTitle: string | null;
                                 summary: string | null;
                             }[];
-                            /** Format: date-time */
                             lastCollectedAt: string | null;
                         };
                     };
@@ -5737,7 +5688,6 @@ export interface paths {
                                 data: {
                                     [key: string]: unknown;
                                 };
-                                /** Format: date-time */
                                 readAt: string | null;
                                 /** Format: date-time */
                                 createdAt: string;
@@ -5872,7 +5822,6 @@ export interface paths {
                                 rejectReason: string | null;
                                 /** Format: date-time */
                                 createdAt: string;
-                                /** Format: date-time */
                                 reviewedAt: string | null;
                             }[];
                         };
@@ -5919,7 +5868,6 @@ export interface paths {
                             rejectReason: string | null;
                             /** Format: date-time */
                             createdAt: string;
-                            /** Format: date-time */
                             reviewedAt: string | null;
                         };
                     };
@@ -5974,7 +5922,6 @@ export interface paths {
                                 rejectReason: string | null;
                                 /** Format: date-time */
                                 createdAt: string;
-                                /** Format: date-time */
                                 reviewedAt: string | null;
                                 user: {
                                     /** Format: uuid */
@@ -6038,7 +5985,6 @@ export interface paths {
                                 rejectReason: string | null;
                                 /** Format: date-time */
                                 createdAt: string;
-                                /** Format: date-time */
                                 reviewedAt: string | null;
                             };
                             subscription: {
@@ -6059,11 +6005,8 @@ export interface paths {
                                 };
                                 /** @enum {string} */
                                 status: "trialing" | "active" | "past_due" | "canceled" | "suspended" | "expired" | "lifetime";
-                                /** Format: date-time */
                                 currentPeriodStart: string | null;
-                                /** Format: date-time */
                                 currentPeriodEnd: string | null;
-                                /** Format: date-time */
                                 trialEndsAt: string | null;
                                 cancelAtPeriodEnd: boolean;
                                 autoRenew: boolean;
@@ -6126,7 +6069,6 @@ export interface paths {
                             rejectReason: string | null;
                             /** Format: date-time */
                             createdAt: string;
-                            /** Format: date-time */
                             reviewedAt: string | null;
                         };
                     };
@@ -6175,7 +6117,6 @@ export interface paths {
                                 currency: string;
                                 /** @enum {string} */
                                 status: "pending" | "succeeded" | "failed" | "refunded" | "disputed";
-                                /** Format: uri */
                                 invoiceUrl: string | null;
                                 /** Format: date-time */
                                 createdAt: string;
@@ -6328,9 +6269,7 @@ export interface paths {
                             items: {
                                 /** Format: uuid */
                                 id: string;
-                                /** Format: uuid */
                                 deviceId: string | null;
-                                /** Format: uuid */
                                 sessionId: string | null;
                                 /** @enum {string} */
                                 kind: "actions_per_hour" | "session_length" | "buy_search_ratio" | "coin_flow" | "hard_stop" | "kill_switch";
@@ -6426,9 +6365,7 @@ export interface paths {
                             items: {
                                 /** Format: uuid */
                                 id: string;
-                                /** Format: uuid */
                                 deviceId: string | null;
-                                /** Format: uuid */
                                 sessionId: string | null;
                                 /** @enum {string} */
                                 kind: "actions_per_hour" | "session_length" | "buy_search_ratio" | "coin_flow" | "hard_stop" | "kill_switch";
@@ -6476,7 +6413,6 @@ export interface paths {
                         "application/json": {
                             /** Format: uuid */
                             id: string;
-                            /** Format: uuid */
                             deviceId: string | null;
                             ip: string | null;
                             userAgent: string | null;
@@ -6837,11 +6773,8 @@ export interface paths {
                                 };
                                 /** @enum {string} */
                                 status: "trialing" | "active" | "past_due" | "canceled" | "suspended" | "expired" | "lifetime";
-                                /** Format: date-time */
                                 currentPeriodStart: string | null;
-                                /** Format: date-time */
                                 currentPeriodEnd: string | null;
-                                /** Format: date-time */
                                 trialEndsAt: string | null;
                                 cancelAtPeriodEnd: boolean;
                                 autoRenew: boolean;
@@ -6851,7 +6784,6 @@ export interface paths {
                                 /** @enum {string} */
                                 status: "active" | "expired" | "revoked";
                                 maxDevices: number;
-                                /** Format: date-time */
                                 expiresAt: string | null;
                             } | null;
                             devices: {
@@ -6867,7 +6799,6 @@ export interface paths {
                                 firstSeenAt: string;
                                 /** Format: date-time */
                                 lastSeenAt: string;
-                                /** Format: date-time */
                                 trustedAt: string | null;
                                 isCurrent: boolean;
                             }[];
@@ -6877,15 +6808,12 @@ export interface paths {
                                 status: string | null;
                                 features: string[];
                                 deviceLimit: number;
-                                /** Format: date-time */
                                 expiresAt: string | null;
-                                /** Format: date-time */
                                 currentPeriodEnd: string | null;
                                 license: {
                                     keyPrefix: string;
                                     status: string;
                                     maxDevices: number;
-                                    /** Format: date-time */
                                     expiresAt: string | null;
                                 } | null;
                             };
@@ -6946,11 +6874,8 @@ export interface paths {
                                 };
                                 /** @enum {string} */
                                 status: "trialing" | "active" | "past_due" | "canceled" | "suspended" | "expired" | "lifetime";
-                                /** Format: date-time */
                                 currentPeriodStart: string | null;
-                                /** Format: date-time */
                                 currentPeriodEnd: string | null;
-                                /** Format: date-time */
                                 trialEndsAt: string | null;
                                 cancelAtPeriodEnd: boolean;
                                 autoRenew: boolean;
@@ -6959,7 +6884,6 @@ export interface paths {
                                 key: string;
                                 keyPrefix: string;
                                 maxDevices: number;
-                                /** Format: date-time */
                                 expiresAt: string | null;
                             };
                         };
@@ -7016,11 +6940,8 @@ export interface paths {
                             };
                             /** @enum {string} */
                             status: "trialing" | "active" | "past_due" | "canceled" | "suspended" | "expired" | "lifetime";
-                            /** Format: date-time */
                             currentPeriodStart: string | null;
-                            /** Format: date-time */
                             currentPeriodEnd: string | null;
-                            /** Format: date-time */
                             trialEndsAt: string | null;
                             cancelAtPeriodEnd: boolean;
                             autoRenew: boolean;
@@ -7078,11 +6999,8 @@ export interface paths {
                             };
                             /** @enum {string} */
                             status: "trialing" | "active" | "past_due" | "canceled" | "suspended" | "expired" | "lifetime";
-                            /** Format: date-time */
                             currentPeriodStart: string | null;
-                            /** Format: date-time */
                             currentPeriodEnd: string | null;
-                            /** Format: date-time */
                             trialEndsAt: string | null;
                             cancelAtPeriodEnd: boolean;
                             autoRenew: boolean;
@@ -7131,7 +7049,6 @@ export interface paths {
                             status: "bought" | "listed" | "sold" | "expired" | "unsold";
                             /** Format: date-time */
                             boughtAt: string;
-                            /** Format: date-time */
                             soldAt: string | null;
                         }[];
                     };
@@ -7206,7 +7123,6 @@ export interface paths {
                             status: "bought" | "listed" | "sold" | "expired" | "unsold";
                             /** Format: date-time */
                             boughtAt: string;
-                            /** Format: date-time */
                             soldAt: string | null;
                         };
                     };
@@ -7265,7 +7181,6 @@ export interface paths {
                                 status: "bought" | "listed" | "sold" | "expired" | "unsold";
                                 /** Format: date-time */
                                 boughtAt: string;
-                                /** Format: date-time */
                                 soldAt: string | null;
                                 cardName: string | null;
                             }[];
@@ -7395,7 +7310,6 @@ export interface paths {
                             id: string;
                             /** Format: email */
                             email: string;
-                            /** Format: date-time */
                             emailVerifiedAt: string | null;
                             /** @enum {string} */
                             status: "active" | "suspended" | "banned" | "deleted";
@@ -7403,16 +7317,13 @@ export interface paths {
                             role: "user" | "admin";
                             totpEnabled: boolean;
                             timezone: string | null;
-                            /** Format: date-time */
                             timezoneSetAt: string | null;
                             referralCode: string | null;
                             /** Format: date-time */
                             createdAt: string;
-                            /** Format: date-time */
                             lastLoginAt: string | null;
-                            /** @enum {string|null} */
-                            adminRole: "super_admin" | "support" | "analyst" | "billing" | null;
-                            permissions: ("users.read" | "users.write" | "users.suspend" | "users.ban" | "users.force_logout" | "users.reset_password" | "subscriptions.read" | "subscriptions.write" | "coupons.write" | "plans.write" | "audit.read" | "analytics.read" | "system.read" | "system.write" | "feature_toggles.write" | "config.write")[];
+                            adminRole: ("super_admin" | "support" | "analyst" | "billing") | null;
+                            permissions: ("users.read" | "users.write" | "users.create" | "users.suspend" | "users.ban" | "users.force_logout" | "users.reset_password" | "subscriptions.read" | "subscriptions.write" | "coupons.write" | "plans.write" | "audit.read" | "analytics.read" | "system.read" | "system.write" | "feature_toggles.write" | "config.write")[];
                         };
                     };
                 };
@@ -7477,7 +7388,6 @@ export interface paths {
                             id: string;
                             /** Format: email */
                             email: string;
-                            /** Format: date-time */
                             emailVerifiedAt: string | null;
                             /** @enum {string} */
                             status: "active" | "suspended" | "banned" | "deleted";
@@ -7485,16 +7395,13 @@ export interface paths {
                             role: "user" | "admin";
                             totpEnabled: boolean;
                             timezone: string | null;
-                            /** Format: date-time */
                             timezoneSetAt: string | null;
                             referralCode: string | null;
                             /** Format: date-time */
                             createdAt: string;
-                            /** Format: date-time */
                             lastLoginAt: string | null;
-                            /** @enum {string|null} */
-                            adminRole: "super_admin" | "support" | "analyst" | "billing" | null;
-                            permissions: ("users.read" | "users.write" | "users.suspend" | "users.ban" | "users.force_logout" | "users.reset_password" | "subscriptions.read" | "subscriptions.write" | "coupons.write" | "plans.write" | "audit.read" | "analytics.read" | "system.read" | "system.write" | "feature_toggles.write" | "config.write")[];
+                            adminRole: ("super_admin" | "support" | "analyst" | "billing") | null;
+                            permissions: ("users.read" | "users.write" | "users.create" | "users.suspend" | "users.ban" | "users.force_logout" | "users.reset_password" | "subscriptions.read" | "subscriptions.write" | "coupons.write" | "plans.write" | "audit.read" | "analytics.read" | "system.read" | "system.write" | "feature_toggles.write" | "config.write")[];
                         };
                     };
                 };

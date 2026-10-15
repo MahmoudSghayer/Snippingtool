@@ -293,12 +293,12 @@ the single source of truth; `fastify.requirePermission(permission)`
 `authenticate`) plus the caller's `admin_users.admin_role` granting that
 permission.
 
-| Role          | Gets                                                                                                                                                                                                                                      |
-| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `super_admin` | Every permission.                                                                                                                                                                                                                         |
-| `support`     | `users.read`, `users.write`, `users.suspend`, `users.force_logout`, `users.reset_password`, `subscriptions.read`, `audit.read`. Never money (`subscriptions.write`, `coupons.write`, `plans.write`) or config/system/analytics.           |
-| `analyst`     | `users.read`, `subscriptions.read`, `audit.read`, `analytics.read`, `system.read`. Read-only everywhere, including audit — safe for reporting with zero write risk.                                                                       |
-| `billing`     | `users.read`, `subscriptions.read`, `subscriptions.write`, `coupons.write`, `plans.write`, `audit.read`. The money-shaped surface, plus enough user read access to look up an account — but never `users.suspend`/`.ban`/`.force_logout`. |
+| Role          | Gets                                                                                                                                                                                                                                            |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `super_admin` | Every permission.                                                                                                                                                                                                                               |
+| `support`     | `users.read`, `users.write`, `users.create`, `users.suspend`, `users.force_logout`, `users.reset_password`, `subscriptions.read`, `audit.read`. Never money (`subscriptions.write`, `coupons.write`, `plans.write`) or config/system/analytics. |
+| `analyst`     | `users.read`, `subscriptions.read`, `audit.read`, `analytics.read`, `system.read`. Read-only everywhere, including audit — safe for reporting with zero write risk.                                                                             |
+| `billing`     | `users.read`, `subscriptions.read`, `subscriptions.write`, `coupons.write`, `plans.write`, `audit.read`. The money-shaped surface, plus enough user read access to look up an account — but never `users.suspend`/`.ban`/`.force_logout`.       |
 
 The caller's own resolved `admin_role`/permission set (this table, applied)
 is exposed client-side on `GET /users/me` (`userDtoSchema.adminRole`/

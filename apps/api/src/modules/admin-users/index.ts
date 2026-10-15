@@ -1,10 +1,11 @@
-// /api/v1/admin/users — search/get/patch/suspend/unsuspend/reset-password/
-// force-logout. Every mutation is permission-gated per @sl/shared's
-// PERMISSION_MATRIX and writes an audit_logs row (before/after) via
-// recordAudit, plus an admin_actions row for the admin-specific action log.
+// /api/v1/admin/users — search/create/get/patch/suspend/unsuspend/
+// reset-password/force-logout. Every mutation is permission-gated per
+// @sl/shared's PERMISSION_MATRIX and writes an audit_logs row (before/after)
+// via recordAudit, plus an admin_actions row for the admin-specific action log.
 
 import { adminActions, users, type User } from '@sl/db';
 import {
+  adminCreateUserRequestSchema,
   adminSuspendUserRequestSchema,
   paginatedResponseSchema,
   updateProfileRequestSchema,
@@ -17,12 +18,18 @@ import { z } from 'zod';
 
 import { forceLogoutNoticeHtml, forceLogoutNoticeText } from '../../emails/templates.js';
 import { recordAudit } from '../../lib/audit.js';
-import { AppErrors } from '../../lib/errors.js';
+import { hashSecret } from '../../lib/crypto.js';
+import { AppErrors, isUniqueViolation } from '../../lib/errors.js';
 import { newId } from '../../lib/ids.js';
 import { decodeCursor, encodeCursor } from '../../lib/pagination.js';
 import { ADMIN_RATE_LIMIT } from '../../lib/rate-limit-tiers.js';
 import { publishToUser } from '../../ws/publish.js';
-import { revokeAllUserSessions, listAllUserSessionIds, bumpUserVersion } from '../auth/repo.js';
+import {
+  revokeAllUserSessions,
+  listAllUserSessionIds,
+  bumpUserVersion,
+  findUserByEmail,
+} from '../auth/repo.js';
 
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
@@ -138,6 +145,89 @@ export default fp(
           nextCursor:
             hasMore && last ? encodeCursor({ v: last.createdAt.toISOString(), id: last.id }) : null,
         };
+      },
+    );
+
+    app.post(
+      '/api/v1/admin/users',
+      {
+        onRequest: [fastify.requirePermission('users.create')],
+        preHandler: [fastify.verifyCsrf],
+        config: { rateLimit: ADMIN_RATE_LIMIT },
+        schema: {
+          tags: ['admin'],
+          summary: 'Create a user account (role `user`) with a password the admin sets.',
+          body: adminCreateUserRequestSchema,
+          response: { 201: userDtoSchema },
+        },
+      },
+      async (request, reply) => {
+        const { email, password, emailVerified, reason } = request.body;
+        const duplicate = () => AppErrors.conflict('An account with this email already exists.');
+
+        if (await findUserByEmail(fastify.db, email)) throw duplicate();
+        const adminRowId = await getAdminUserRowId(fastify, request.authUser!.id);
+
+        let created: User | undefined;
+        try {
+          [created] = await fastify.db
+            .insert(users)
+            .values({
+              id: newId(),
+              email,
+              passwordHash: await hashSecret(password),
+              role: 'user',
+              emailVerifiedAt: emailVerified ? new Date() : null,
+              // terms_version stays NULL: the account holder has not
+              // accepted the Terms themselves, unlike self-registration.
+            })
+            .returning();
+        } catch (err) {
+          // Lost a race with a signup for the same address
+          // (users_email_unique_live).
+          if (isUniqueViolation(err)) throw duplicate();
+          throw err;
+        }
+        const user = created!;
+
+        if (!emailVerified) {
+          const { sendVerificationEmail } = await import('../auth/service.js');
+          await sendVerificationEmail(
+            {
+              db: fastify.db,
+              redis: fastify.redis,
+              entitlements: fastify.entitlements,
+              mailer: fastify.mailer,
+              jwtPrivateKey: fastify.config.JWT_PRIVATE_KEY ?? '',
+              cookieSecret: fastify.config.COOKIE_SECRET,
+            },
+            user.id,
+            user.email,
+          ).catch((err) =>
+            // The account exists either way; the user can ask for a new
+            // link from the sign-in page (POST /auth/resend-verification).
+            fastify.log.warn({ err }, 'admin-created account: verification email failed'),
+          );
+        }
+
+        await logAdminAction(
+          fastify,
+          adminRowId,
+          request.authUser!.id,
+          'user.created',
+          user.id,
+          reason,
+          null,
+          {
+            email: user.email,
+            role: user.role,
+            status: user.status,
+            emailVerified: Boolean(user.emailVerifiedAt),
+          },
+          request,
+        );
+
+        return reply.status(201).send(toDto(user));
       },
     );
 

@@ -1,32 +1,55 @@
-import { USER_STATUSES } from '@sl/shared';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { adminCreateUserRequestSchema, USER_STATUSES } from '@sl/shared';
 import {
   Badge,
   Button,
+  Checkbox,
   DataTable,
   Drawer,
   formatDate,
   formatDateTime,
   FormField,
+  IconButton,
   Input,
+  Modal,
+  PasswordInput,
   Select,
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
+  Textarea,
   type ColumnDef,
 } from '@sl/ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearch } from '@tanstack/react-router';
+import { Check, Copy, RefreshCw } from 'lucide-react';
 import { useState } from 'react';
+import { Controller, useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 
-import { api, apiErrorMessage } from '@/api/client.js';
+import { api, apiErrorMessage, isApiErrorBody } from '@/api/client.js';
 import { ReasonDialog } from '@/components/ReasonDialog.js';
 import { SubscriptionActions } from '@/components/SubscriptionActions.js';
+import { generatePassword } from '@/lib/password.js';
+import { usePermission } from '@/lib/permissions.js';
 
 import type { FlagDto, UserDto } from '@sl/shared';
+import type { z } from 'zod';
 
 const ANY = 'any';
+
+// @hookform/resolvers v5 types the form by the schema's input (`emailVerified`
+// optional, it defaults to true) and the submit handler by its output.
+type CreateAccountInput = z.input<typeof adminCreateUserRequestSchema>;
+type CreateAccount = z.output<typeof adminCreateUserRequestSchema>;
+
+const CREATE_ACCOUNT_DEFAULTS: CreateAccountInput = {
+  email: '',
+  password: '',
+  emailVerified: true,
+  reason: '',
+};
 
 const columns: ColumnDef<UserDto, unknown>[] = [
   { accessorKey: 'email', header: 'Email' },
@@ -62,6 +85,8 @@ export function UsersPage() {
   const [cursor, setCursor] = useState<string | undefined>(undefined);
   const [cursorStack, setCursorStack] = useState<string[]>([]);
   const [selected, setSelected] = useState<UserDto | null>(null);
+  const canCreate = usePermission('users.create');
+  const [createOpen, setCreateOpen] = useState(false);
 
   const usersQuery = useQuery({
     queryKey: ['admin', 'users', q, status, cursor],
@@ -88,6 +113,7 @@ export function UsersPage() {
           <h1 className="text-xl font-semibold text-ink">Users</h1>
           <p className="mt-1 text-sm text-ink-2">Search, moderate and manage subscriptions.</p>
         </div>
+        {canCreate && <Button onClick={() => setCreateOpen(true)}>Create account</Button>}
       </div>
 
       <div className="flex flex-wrap items-end gap-3">
@@ -152,7 +178,172 @@ export function UsersPage() {
           onChanged={() => void queryClient.invalidateQueries({ queryKey: ['admin', 'users'] })}
         />
       )}
+
+      {canCreate && (
+        <CreateAccountDialog
+          open={createOpen}
+          onOpenChange={setCreateOpen}
+          onCreated={(user) => {
+            void queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
+            // Open the new account straight away; its Subscription tab is
+            // where a pass gets granted (POST /admin/subscriptions/{userId}/activate).
+            setSelected(user);
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+/** `POST /admin/users` (`users.create`): email, a password the admin sets or
+ * generates, and the audit reason. The password is only ever in this form:
+ * the API never returns or logs it, so the admin copies it here. */
+function CreateAccountDialog({
+  open,
+  onOpenChange,
+  onCreated,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onCreated: (user: UserDto) => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const form = useForm<CreateAccountInput, unknown, CreateAccount>({
+    resolver: zodResolver(adminCreateUserRequestSchema),
+    defaultValues: CREATE_ACCOUNT_DEFAULTS,
+  });
+  const { errors } = form.formState;
+  const password = form.watch('password');
+
+  function close() {
+    onOpenChange(false);
+    form.reset(CREATE_ACCOUNT_DEFAULTS);
+  }
+
+  const createMutation = useMutation({
+    mutationFn: async (values: CreateAccount) => {
+      const { data, error } = await api.POST('/api/v1/admin/users', { body: values });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (user) => {
+      toast.success('Account created', { description: user.email });
+      close();
+      onCreated(user);
+    },
+    onError: (error) => {
+      if (isApiErrorBody(error) && error.code === 'CONFLICT') {
+        form.setError('email', { message: error.message });
+      }
+      toast.error("Couldn't create account", { description: apiErrorMessage(error) });
+    },
+  });
+
+  const submit = form.handleSubmit((values) => createMutation.mutate(values));
+
+  function copyPassword() {
+    void navigator.clipboard.writeText(password).then(
+      () => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1500);
+      },
+      () => toast.error('Couldn’t copy. Select the password and copy it by hand.'),
+    );
+  }
+
+  return (
+    <Modal
+      open={open}
+      onOpenChange={(next) => (next ? onOpenChange(true) : close())}
+      title="Create account"
+      description="A user account that can sign in with the password you set here."
+      footer={
+        <>
+          <Button variant="outline" onClick={close}>
+            Cancel
+          </Button>
+          <Button loading={createMutation.isPending} onClick={submit}>
+            Create account
+          </Button>
+        </>
+      }
+    >
+      <form className="flex flex-col gap-4" onSubmit={submit} noValidate>
+        <FormField label="Email" htmlFor="create-email" error={errors.email?.message}>
+          <Input
+            id="create-email"
+            type="email"
+            autoComplete="off"
+            invalid={!!errors.email}
+            {...form.register('email')}
+          />
+        </FormField>
+        <FormField
+          label="Password"
+          htmlFor="create-password"
+          error={errors.password?.message}
+          hint="Copy it now and pass it on securely. It isn't shown again."
+        >
+          <div className="flex gap-2">
+            <div className="min-w-0 flex-1">
+              <PasswordInput
+                id="create-password"
+                autoComplete="new-password"
+                invalid={!!errors.password}
+                {...form.register('password')}
+              />
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              leftIcon={<RefreshCw className="size-4" aria-hidden="true" />}
+              onClick={() =>
+                form.setValue('password', generatePassword(), {
+                  shouldDirty: true,
+                  shouldValidate: true,
+                })
+              }
+            >
+              Generate
+            </Button>
+            <IconButton
+              variant="outline"
+              label={copied ? 'Copied' : 'Copy password'}
+              icon={copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+              disabled={!password}
+              onClick={copyPassword}
+            />
+          </div>
+        </FormField>
+        <Controller
+          control={form.control}
+          name="emailVerified"
+          render={({ field }) => (
+            <label className="flex items-start gap-2.5 text-sm text-ink">
+              <Checkbox
+                checked={field.value ?? true}
+                onCheckedChange={(checked) => field.onChange(checked === true)}
+              />
+              <span>
+                Email already verified
+                <span className="block text-xs text-ink-2">
+                  Untick to email them a verification link instead. They can't sign in until they
+                  confirm it.
+                </span>
+              </span>
+            </label>
+          )}
+        />
+        <FormField
+          label="Reason"
+          htmlFor="create-reason"
+          error={errors.reason?.message}
+          hint="Recorded in the audit log."
+        >
+          <Textarea id="create-reason" rows={3} {...form.register('reason')} />
+        </FormField>
+      </form>
+    </Modal>
   );
 }
 

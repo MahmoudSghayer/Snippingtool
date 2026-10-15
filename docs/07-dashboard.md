@@ -67,21 +67,46 @@ User pages:
 Admin pages and the endpoints/permissions they exercise (full detail in
 `docs/03-api.md`/`docs/05-subscriptions.md`):
 
-| Page                     | Endpoints                                                                                                                                                                                                                       | Permission(s)                                                                            |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `/admin` Overview        | `GET /admin/analytics/overview`, WS `admin.overview.tick`                                                                                                                                                                       | `analytics.read`                                                                         |
-| `/admin/users`           | `GET/PATCH /admin/users`, `.../suspend`, `.../unsuspend`, `.../reset-password`, `.../force-logout`, `GET/POST /admin/bans`, `.../lift`, `GET /admin/flags`, `POST /admin/subscriptions/{userId}/activate`, `.../grant-lifetime` | `users.read`/`.write`/`.suspend`/`.reset_password`/`.force_logout`                       |
-| `/admin/profits`         | `GET /admin/analytics/profits`, `.../profits/leaderboard`                                                                                                                                                                       | `analytics.read`                                                                         |
-| `/admin/activity`        | `GET /admin/activity/{logins,searches,snipes,errors,devices,ips}`                                                                                                                                                               | `analytics.read`                                                                         |
-| `/admin/system`          | `GET /admin/system/health`                                                                                                                                                                                                      | `system.read`                                                                            |
-| `/admin/audit`           | `GET /admin/audit`                                                                                                                                                                                                              | `audit.read`                                                                             |
-| `/admin/subscriptions`   | `GET /admin/analytics/subscriptions`                                                                                                                                                                                            | `analytics.read`                                                                         |
-| `/admin/coupons`         | `GET/POST /admin/coupons`, `PATCH .../{id}`                                                                                                                                                                                     | `coupons.write`                                                                          |
-| `/admin/plans`           | `GET/POST /admin/plans`, `PATCH/POST .../{id}(/archive)`                                                                                                                                                                        | `plans.write`                                                                            |
-| `/admin/flags`           | `GET /admin/flags`, `POST .../{id}/review`                                                                                                                                                                                      | `users.suspend`/`.ban` (flags share the moderation permission, `05-subscriptions.md` §8) |
-| `/admin/bans`            | `GET/POST /admin/bans`, `POST .../{id}/lift`                                                                                                                                                                                    | `users.suspend`/`.ban`                                                                   |
-| `/admin/feature-toggles` | `GET /admin/toggles`, `PATCH .../{key}`                                                                                                                                                                                         | `feature_toggles.write`                                                                  |
-| `/admin/config`          | `GET /admin/config`, `PUT .../{key}`                                                                                                                                                                                            | `system.read` / `config.write`                                                           |
+| Page                     | Endpoints                                                                                                                                                                                                                            | Permission(s)                                                                            |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| `/admin` Overview        | `GET /admin/analytics/overview`, WS `admin.overview.tick`                                                                                                                                                                            | `analytics.read`                                                                         |
+| `/admin/users`           | `GET/POST/PATCH /admin/users`, `.../suspend`, `.../unsuspend`, `.../reset-password`, `.../force-logout`, `GET/POST /admin/bans`, `.../lift`, `GET /admin/flags`, `POST /admin/subscriptions/{userId}/activate`, `.../grant-lifetime` | `users.read`/`.write`/`.create`/`.suspend`/`.reset_password`/`.force_logout`             |
+| `/admin/profits`         | `GET /admin/analytics/profits`, `.../profits/leaderboard`                                                                                                                                                                            | `analytics.read`                                                                         |
+| `/admin/activity`        | `GET /admin/activity/{logins,searches,snipes,errors,devices,ips}`                                                                                                                                                                    | `analytics.read`                                                                         |
+| `/admin/system`          | `GET /admin/system/health`                                                                                                                                                                                                           | `system.read`                                                                            |
+| `/admin/audit`           | `GET /admin/audit`                                                                                                                                                                                                                   | `audit.read`                                                                             |
+| `/admin/subscriptions`   | `GET /admin/analytics/subscriptions`                                                                                                                                                                                                 | `analytics.read`                                                                         |
+| `/admin/coupons`         | `GET/POST /admin/coupons`, `PATCH .../{id}`                                                                                                                                                                                          | `coupons.write`                                                                          |
+| `/admin/plans`           | `GET/POST /admin/plans`, `PATCH/POST .../{id}(/archive)`                                                                                                                                                                             | `plans.write`                                                                            |
+| `/admin/flags`           | `GET /admin/flags`, `POST .../{id}/review`                                                                                                                                                                                           | `users.suspend`/`.ban` (flags share the moderation permission, `05-subscriptions.md` §8) |
+| `/admin/bans`            | `GET/POST /admin/bans`, `POST .../{id}/lift`                                                                                                                                                                                         | `users.suspend`/`.ban`                                                                   |
+| `/admin/feature-toggles` | `GET /admin/toggles`, `PATCH .../{key}`                                                                                                                                                                                              | `feature_toggles.write`                                                                  |
+| `/admin/config`          | `GET /admin/config`, `PUT .../{key}`                                                                                                                                                                                                 | `system.read` / `config.write`                                                           |
+
+**Creating an account (`/admin/users`)**: the page header's "Create
+account" button is rendered only when the caller holds `users.create`
+(`usePermission`, the same gate `SubscriptionActions`/`/admin/payments` use
+for their actions). It opens a `Modal` form (react-hook-form resolving
+against `@sl/shared`'s `adminCreateUserRequestSchema`, `POST /admin/users`)
+with:
+
+- **Email**.
+- **Password**, with the shared `passwordSchema` rules. **Generate** fills a
+  20-character random password (`src/lib/password.ts`: Web Crypto,
+  rejection-sampled, at least one lowercase, uppercase, digit and symbol,
+  look-alike characters left out). The field's eye toggle shows it, and the
+  copy button copies it. The API never returns the password, so this form is
+  the admin's only chance to copy it.
+- **Email already verified**, ticked by default. Unticked, the API emails the
+  user a verification link and they can't sign in until they confirm it.
+- **Reason**, recorded in the audit log.
+
+On success the users list is refetched and the new account's detail drawer
+opens. Its Subscription tab is where a pass gets granted, through the
+existing `POST /admin/subscriptions/{userId}/activate`/`.../grant-lifetime`
+(which needs `subscriptions.write`). API errors show in a toast; a `409`
+(email already taken) also shows inline under Email, and the form stays open.
+Covered by `test/AdminUsersPage.test.tsx`.
 
 ## 3. Data flow
 

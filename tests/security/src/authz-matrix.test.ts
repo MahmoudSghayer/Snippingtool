@@ -110,6 +110,12 @@ const ADMIN_ROUTES: AdminRoute[] = [
     body: {},
   },
   { method: 'GET', path: '/api/v1/admin/users', permission: 'users.read' },
+  {
+    method: 'POST',
+    path: '/api/v1/admin/users',
+    permission: 'users.create',
+    body: { email: 'matrix-new@example.com', password: 'matrix-passw0rd-123', reason: 'x' },
+  },
   { method: 'GET', path: `/api/v1/admin/users/${NIL_LIKE_UUID}`, permission: 'users.read' },
   {
     method: 'PATCH',
