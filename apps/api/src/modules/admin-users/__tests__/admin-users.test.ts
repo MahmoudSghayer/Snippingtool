@@ -163,7 +163,7 @@ describe('admin-users module: POST /admin/users (create account)', () => {
   let ipCounter = 10;
   const nextIp = () => `198.51.100.${++ipCounter % 254}`;
   const device = { fingerprint: 'admin-created-fp-000000000000001' };
-  const PASSWORD = 'Created-by-admin-42';
+  const INITIAL_PW = 'Created-by-admin-42';
 
   beforeAll(async () => {
     process.env.NODE_ENV = 'test';
@@ -194,7 +194,7 @@ describe('admin-users module: POST /admin/users (create account)', () => {
 
     const res = await createUser(token, {
       email: 'New.Member@Example.com',
-      password: PASSWORD,
+      password: INITIAL_PW,
       reason: 'customer paid by bank transfer',
     });
     expect(res.statusCode).toBe(201);
@@ -208,7 +208,7 @@ describe('admin-users module: POST /admin/users (create account)', () => {
       permissions: [],
     });
     expect(body.emailVerifiedAt).toEqual(expect.any(String));
-    expect(res.body).not.toContain(PASSWORD);
+    expect(res.body).not.toContain(INITIAL_PW);
     expect(body).not.toHaveProperty('passwordHash');
 
     const row = await app.db.query.users.findFirst({ where: eq(users.id, body.id) });
@@ -220,7 +220,7 @@ describe('admin-users module: POST /admin/users (create account)', () => {
       method: 'POST',
       url: '/api/v1/auth/login',
       remoteAddress: nextIp(),
-      payload: { email: 'new.member@example.com', password: PASSWORD, device },
+      payload: { email: 'new.member@example.com', password: INITIAL_PW, device },
     });
     expect(login.statusCode).toBe(200);
     expect(login.json().status).toBe('ok');
@@ -230,7 +230,7 @@ describe('admin-users module: POST /admin/users (create account)', () => {
     const { token } = await createAdmin(app, 'support', 'support-creator@example.com');
     const res = await createUser(token, {
       email: 'by-support@example.com',
-      password: PASSWORD,
+      password: INITIAL_PW,
       reason: 'onboarding',
     });
     expect(res.statusCode).toBe(201);
@@ -241,7 +241,7 @@ describe('admin-users module: POST /admin/users (create account)', () => {
 
     const res = await createUser(token, {
       email: 'unverified@example.com',
-      password: PASSWORD,
+      password: INITIAL_PW,
       emailVerified: false,
       reason: 'user will confirm their own address',
     });
@@ -253,7 +253,7 @@ describe('admin-users module: POST /admin/users (create account)', () => {
       method: 'POST',
       url: '/api/v1/auth/login',
       remoteAddress: nextIp(),
-      payload: { email: 'unverified@example.com', password: PASSWORD, device },
+      payload: { email: 'unverified@example.com', password: INITIAL_PW, device },
     });
     expect(login.statusCode).toBe(403);
     expect(login.json().code).toBe('AUTH_EMAIL_NOT_VERIFIED');
@@ -265,7 +265,7 @@ describe('admin-users module: POST /admin/users (create account)', () => {
 
     const res = await createUser(token, {
       email: 'Taken@Example.com',
-      password: PASSWORD,
+      password: INITIAL_PW,
       reason: 'duplicate attempt',
     });
     expect(res.statusCode).toBe(409);
@@ -282,7 +282,7 @@ describe('admin-users module: POST /admin/users (create account)', () => {
       const { token } = await createAdmin(app, role, `${role}-nocreate@example.com`);
       const res = await createUser(token, {
         email: `blocked-${role}@example.com`,
-        password: PASSWORD,
+        password: INITIAL_PW,
         reason: 'should not work',
       });
       expect(res.statusCode).toBe(403);
@@ -297,7 +297,7 @@ describe('admin-users module: POST /admin/users (create account)', () => {
   it('requires the CSRF token on a cookie session', async () => {
     const { token } = await createAdmin(app, 'super_admin', 'creator4@example.com');
     const csrf = app.signCookie('admin-create-csrf-token');
-    const payload = { email: 'csrf@example.com', password: PASSWORD, reason: 'csrf check' };
+    const payload = { email: 'csrf@example.com', password: INITIAL_PW, reason: 'csrf check' };
 
     const missing = await app.inject({
       method: 'POST',
@@ -332,7 +332,7 @@ describe('admin-users module: POST /admin/users (create account)', () => {
 
     const res = await createUser(token, {
       email: 'audited@example.com',
-      password: PASSWORD,
+      password: INITIAL_PW,
       reason: 'migrated from the old system',
     });
     expect(res.statusCode).toBe(201);
@@ -362,7 +362,7 @@ describe('admin-users module: POST /admin/users (create account)', () => {
     });
 
     const stored = JSON.stringify([audit, actions]);
-    expect(stored).not.toContain(PASSWORD);
+    expect(stored).not.toContain(INITIAL_PW);
     expect(stored).not.toContain('argon2');
   });
 
@@ -377,12 +377,15 @@ describe('admin-users module: POST /admin/users (create account)', () => {
     expect(weak.statusCode).toBe(400);
     expect(weak.body).not.toContain('short1'); // the rejected password is not echoed back
 
-    const noReason = await createUser(token, { email: 'noreason@example.com', password: PASSWORD });
+    const noReason = await createUser(token, {
+      email: 'noreason@example.com',
+      password: INITIAL_PW,
+    });
     expect(noReason.statusCode).toBe(400);
 
     const withRole = await createUser(token, {
       email: 'sneaky@example.com',
-      password: PASSWORD,
+      password: INITIAL_PW,
       reason: 'x',
       role: 'admin',
     });
