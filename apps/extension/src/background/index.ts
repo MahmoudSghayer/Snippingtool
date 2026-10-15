@@ -39,6 +39,7 @@ import browser from 'webextension-polyfill';
 
 import { refreshOnStartup } from '../lib/auth.js';
 import { logger } from '../lib/logger.js';
+import { recentMarketPrice } from '../model/market-price.js';
 import { margin, maxSnipePrice, summarise } from '../model/prices.js';
 import * as db from '../store/db.js';
 
@@ -114,6 +115,8 @@ const handlers: Record<string, Handler> = {
       summary: s,
       margin: s.floor == null ? null : margin(s, s.floor),
       maxSnipe: maxSnipePrice(s, minProfit || 1000),
+      // What the card sells for now (model/market-price.ts), for Nova AI.
+      market: recentMarketPrice(rows),
     };
   },
 

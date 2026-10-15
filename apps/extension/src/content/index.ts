@@ -656,25 +656,27 @@ async function main(): Promise<void> {
       // Timed off the main thread, so the bot keeps its pace while the tab
       // is minimised or in the background (lib/background-timer.ts).
       const timer = createBackgroundTimer();
+      // What a card sells for: FUTBIN's price, else what Nova saw it listed
+      // at in the last half hour (model/market-price.ts), else unknown. Both
+      // the profit estimate and auto-sell use it, so the profit a buy shows
+      // is the one its listing aims for.
+      const marketPrice = async (resourceId: number, platform: BotSettings['autoSell']['platform']) => {
+        const futbin = await send<{ price: number | null }>('price.futbin', { resourceId, platform });
+        if (futbin?.price) return { price: futbin.price, source: 'futbin' as const };
+        const r = await send<{ market?: number | null }>('summary', { resourceId, minProfit: settingsCache.targets.minProfitPerSnipe });
+        return r?.market ? { price: r.market, source: 'nova' as const } : null;
+      };
       sniper = new mod.Sniper(
         {
           adapter,
           sleep: timer.sleep,
           timingMode: timer.mode,
           getFilters: () => (liveSearch ? [liveSearch] : []),
-          estimateSellPrice: async (resourceId) => {
-            const r = await send<{ summary: PriceSummary }>('summary', { resourceId, minProfit: settingsCache.targets.minProfitPerSnipe });
-            return r?.summary.median ?? null;
-          },
-          // Auto-sell's market price: FUTBIN's, else the median Nova has
-          // recorded for the card (background/futbin.ts, model/prices.ts).
-          marketPrice: async (resourceId, platform) => {
-            const futbin = await send<{ price: number | null }>('price.futbin', { resourceId, platform });
-            if (futbin?.price) return { price: futbin.price, source: 'futbin' as const };
-            const r = await send<{ summary: PriceSummary }>('summary', { resourceId, minProfit: settingsCache.targets.minProfitPerSnipe });
-            const median = r?.summary.median;
-            return median ? { price: median, source: 'nova' as const } : null;
-          },
+          // Not the week's median of every listing (model/prices.ts): that
+          // ran far above what cards sell for.
+          estimateSellPrice: async (resourceId) =>
+            (await marketPrice(resourceId, (botSettings ?? DEFAULT_BOT_SETTINGS).autoSell.platform))?.price ?? null,
+          marketPrice,
           // The hours-per-day limit survives a page reload.
           loadUsage: () => send<BotDailyUsage | null>('bot.usageGet'),
           saveUsage: (usage) => void send('bot.usageSet', usage),
