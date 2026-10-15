@@ -11,10 +11,9 @@
 # path or project name of its own.
 #
 #   OPS_ACTION=diagnose     what runs where; changes nothing
-#   OPS_ACTION=deploy       IMAGE_TAG=<tag>: pull the api / worker / migrator
-#                           images at that tag, run the migrations, restart
-#                           api + worker, check health, roll back on failure;
-#                           records the tag in .env.production
+#   OPS_ACTION=deploy       DEPLOY_SHA=<commit on main>: fast-forward the
+#                           server's checkout to it and run vm-deploy.sh
+#                           (backup, rollback tags, build, migrate, restart)
 #   OPS_ACTION=admin-login  HASH_B64=<base64 argon2id hash>: set the one admin
 #                           account's password, unlock it, clear its 2FA
 set -euo pipefail
@@ -51,17 +50,13 @@ psql_prod() {
 }
 env_value() { [ -f "$env_file" ] && sed -n "s/^$1=//p" "$env_file" | tail -n1 | tr -d '"' || true; }
 is_set() { [ -n "$(env_value "$1")" ] && echo set || echo 'not set'; }
-api_healthy() {
-  local api
-  api="$(container api)"
-  [ -n "$api" ] && docker exec "$api" sh -c 'wget -q --spider "http://127.0.0.1:${PORT:-3000}/health/ready"'
-}
 
 case "$ACTION" in
   diagnose)
     echo "project:        $project"
     echo "compose file:   $compose_file"
     echo "env file:       $([ -f "$env_file" ] && echo present || echo missing)"
+    echo "checkout:       $(git -C "$infra_dir/.." log -1 --format='%h %s' 2>/dev/null || echo 'not a git checkout')"
     echo "IMAGE_TAG:      $(env_value IMAGE_TAG)"
     echo "REGISTRY:       $(env_value REGISTRY)"
     echo "api image:      $(docker inspect -f '{{.Config.Image}}' "$(container api)" 2>/dev/null || echo 'not running')"
@@ -77,30 +72,22 @@ case "$ACTION" in
     ;;
 
   deploy)
-    tag="${IMAGE_TAG:?set IMAGE_TAG}"
-    old="$(env_value IMAGE_TAG)"
-    echo "deploying $tag (was ${old:-unset})"
-    IMAGE_TAG="$tag" dc pull api worker migrator
-    IMAGE_TAG="$tag" dc run --rm migrator
-    IMAGE_TAG="$tag" dc up -d api worker
-    healthy=no
-    for _ in $(seq 1 30); do
-      if api_healthy; then healthy=yes; break; fi
-      sleep 4
-    done
-    if [ "$healthy" != yes ]; then
-      echo "api not healthy on $tag: rolling api + worker back to ${old:-the previous images}" >&2
-      [ -n "$old" ] && IMAGE_TAG="$old" dc up -d api worker
+    # The documented deploy (docs/runbooks/go-live.md): bring the server's
+    # checkout up to the commit, then infra/scripts/vm-deploy.sh, which backs
+    # up Postgres, tags the running images for rollback, builds, migrates,
+    # restarts and checks health.
+    want="${DEPLOY_SHA:?set DEPLOY_SHA}"
+    cd "$infra_dir/.."
+    echo "checkout was: $(git log -1 --format='%h %s')"
+    if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+      git status --short --untracked-files=no
+      echo 'the checkout has local changes: nothing changed' >&2
       exit 1
     fi
-    if [ -f "$env_file" ]; then
-      if grep -q '^IMAGE_TAG=' "$env_file"; then
-        sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=$tag/" "$env_file"
-      else
-        printf 'IMAGE_TAG=%s\n' "$tag" >>"$env_file"
-      fi
-    fi
-    echo "deployed $tag: api healthy"
+    git fetch -q "${REPO_URL:-https://github.com/MahmoudSghayer/Snippingtool.git}" main
+    git merge -q --ff-only "$want" || { echo "can't fast-forward to $want: nothing changed" >&2; exit 1; }
+    echo "checkout now: $(git log -1 --format='%h %s')"
+    infra/scripts/vm-deploy.sh --yes
     ;;
 
   admin-login)

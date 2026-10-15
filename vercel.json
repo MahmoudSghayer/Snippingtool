@@ -11,6 +11,10 @@
       "destination": "https://api.46.62.142.29.sslip.io/api/:path*"
     },
     {
+      "source": "/userscript/:path*",
+      "destination": "https://dashboard.46.62.142.29.sslip.io/userscript/:path*"
+    },
+    {
       "source": "/((?!assets/|site/|api/|terms$|terms/|refund-policy$|refund-policy/|app\\.html$|.*\\.[a-zA-Z0-9]+$).+)",
       "destination": "/app"
     }
