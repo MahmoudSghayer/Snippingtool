@@ -79,6 +79,10 @@ export interface ServiceShape {
    * when EA's service says it worked. Absent on a shape with no known
    * listing call. */
   list?(services: Record<string, unknown>, target: ListTarget): Promise<void>;
+  /** Have the web app reload the transfer list through its own service.
+   * Resolves when EA answered; the list itself reaches passive observation
+   * like any trade-pile load. Absent on a shape with no known call. */
+  refreshPile?(services: Record<string, unknown>): Promise<void>;
 }
 
 export const SHAPES: readonly ServiceShape[] = [createObservableShape(SERVICE_CALL_TIMEOUT_MS), createPromiseShape(SERVICE_CALL_TIMEOUT_MS)];
