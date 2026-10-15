@@ -658,3 +658,68 @@ describe('diagnostics', () => {
     expect(log.log.length).toBe(50);
   });
 });
+
+describe('auto-sell: listing a bought card', () => {
+  async function searchAndMaybeBuy(tradeId: number, buy: boolean) {
+    const svc = observableServices();
+    const entity = itemEntity({ tradeId, buyNowPrice: 20_000 });
+    svc.searchTransferMarket.mockReturnValueOnce(observable({ success: true, data: { items: [entity] } }));
+    install(svc.services);
+    expect((await act({ action: 'search', filter: {} })).data.ok).toBe(true);
+    if (buy) expect((await act({ action: 'buy', tradeId: String(tradeId), price: 20_000 })).data.ok).toBe(true);
+    return { svc, entity };
+  }
+
+  it('lists the very entity it bought, for an hour, and only once', async () => {
+    const { svc, entity } = await searchAndMaybeBuy(501, true);
+    const listed = await act({ action: 'list', tradeId: '501', startPrice: 24_750, buyNowPrice: 25_000 });
+    expect(listed.data).toMatchObject({ action: 'list', ok: true });
+    expect(await signer.verify(canonicalActMessage('action_result', listed.data), listed.mac!)).toBe(true);
+    expect(svc.list).toHaveBeenCalledTimes(1);
+    expect(svc.list.mock.calls[0]![0]).toBe(entity);
+    expect(svc.list.mock.calls[0]!.slice(1)).toEqual([24_750, 25_000, 3600]);
+
+    const again = await act({ action: 'list', tradeId: '501', startPrice: 24_750, buyNowPrice: 25_000 });
+    expect(again.data).toMatchObject({ ok: false, error: 'list_not_bought' });
+    expect(svc.list).toHaveBeenCalledTimes(1);
+  });
+
+  it('never lists a card it did not buy, whatever the request says', async () => {
+    const { svc } = await searchAndMaybeBuy(502, false);
+    expect((await act({ action: 'list', tradeId: '502', startPrice: 24_750, buyNowPrice: 25_000 })).data).toMatchObject({
+      ok: false,
+      error: 'list_not_bought',
+    });
+    expect(svc.list).not.toHaveBeenCalled();
+  });
+
+  it('reports EA refusing the listing', async () => {
+    const { svc } = await searchAndMaybeBuy(503, true);
+    svc.list.mockReturnValueOnce(observable({ success: false, status: 470 }));
+    const res = await act({ action: 'list', tradeId: '503', startPrice: 24_750, buyNowPrice: 25_000 });
+    expect(res.data).toMatchObject({ ok: false });
+    expect(String(res.data.error)).toMatch(/success: false/);
+  });
+
+  it('drops a request whose starting bid is not below the buy-now price', async () => {
+    const { svc } = await searchAndMaybeBuy(504, true);
+    const requestId = 'list-bad-prices';
+    const data = { action: 'list', requestId, tradeId: '504', startPrice: 25_000, buyNowPrice: 25_000 };
+    deliver({ channel: ADAPTER_CHANNEL, kind: 'act_request', data, mac: await signer.sign(canonicalActMessage('act_request', data)) });
+    for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 5));
+    expect(posted.find((m) => m.kind === 'action_result' && m.data.requestId === requestId)).toBeUndefined();
+    expect(svc.list).not.toHaveBeenCalled();
+  });
+
+  it('says the promise shape has no listing call', async () => {
+    const svc = promiseServices();
+    svc.search.mockResolvedValueOnce({ auctionInfo: [utasAuction({ tradeId: 505, buyNowPrice: 12_000 })] });
+    install(svc.services);
+    await act({ action: 'search', filter: {} });
+    expect((await act({ action: 'buy', tradeId: '505', price: 12_000 })).data.ok).toBe(true);
+    expect((await act({ action: 'list', tradeId: '505', startPrice: 14_750, buyNowPrice: 15_000 })).data).toMatchObject({
+      ok: false,
+      error: 'list_unsupported',
+    });
+  });
+});

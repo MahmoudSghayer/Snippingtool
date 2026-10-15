@@ -32,11 +32,14 @@
  * `.page`, so matching the live web app more closely is a token change.
  */
 import {
+  BOT_LIMITS,
   BOT_RISK_LABELS,
+  MIN_SALE_PRICE,
   RISK_ACKNOWLEDGMENT,
   SEARCH_DELAY_PRESETS,
   botRiskLevel,
   botSettingsSchema,
+  stepPrice,
   withRecommendedLimits,
   type BotRiskLevel,
   type BotSettings,
@@ -472,6 +475,7 @@ const CSS = `
   .c-green { border-left-color: var(--ea-success); } .c-red { border-left-color: var(--ea-danger); } .c-blue { border-left-color: var(--ea-accent); }
   .c-yellow { border-left-color: var(--ea-coin); } .c-orange { border-left-color: var(--ea-warning); }
   .ring-box { grid-column: span 2; display: flex; align-items: center; justify-content: center; position: relative; min-height: 150px; }
+  .ring-wrap { display: contents; }
   .ring { width: 130px; height: 130px; }
   .ring-label { position: absolute; text-align: center; }
   .ring-label .t { font-size: 30px; font-weight: 500; }
@@ -488,7 +492,7 @@ const CSS = `
   .feed h3 { margin: 0; padding: 12px 16px; font-size: 18px; line-height: 20px; font-weight: 500; color: var(--ea-muted); border-bottom: 1px solid var(--ea-line); }
   .feed .list { flex: 1; overflow-y: auto; padding: 8px; }
   .log { display: flex; align-items: center; gap: 10px; padding: 8px 12px; margin-bottom: 6px; border-radius: var(--ea-radius); background: var(--ea-surface); border-left: 3px solid var(--ea-line-strong); }
-  .log.bought { border-left-color: var(--ea-success); } .log.failed { border-left-color: var(--ea-danger); } .log.blocked { border-left-color: var(--ea-warning); }
+  .log.bought { border-left-color: var(--ea-success); } .log.failed { border-left-color: var(--ea-danger); } .log.blocked { border-left-color: var(--ea-warning); } .log.listed { border-left-color: var(--ea-accent); }
   .log .main { flex: 1; min-width: 0; }
   .log .main b { font-weight: 500; }
   .log .sub { color: var(--ea-muted); font-size: 12px; }
@@ -532,7 +536,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   const openListeners = new Set<(open: boolean) => void>();
   let settings = deps.getSettings();
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
-  let tick: ReturnType<typeof setInterval> | null = null;
+  let ringFrame: number | null = null;
   let refreshQueued = false;
   let catalog: Catalog | null = null;
   let catalogPoll: ReturnType<typeof setInterval> | null = null;
@@ -605,6 +609,46 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   function renderSettings(): void {
     renderTargets();
     renderKnobs();
+  }
+
+  /** Auto-sell: what happens to a card right after the bot buys it. */
+  function autoSellSection(s: BotSettings): string {
+    const a = s.autoSell;
+    const choice = (attr: string, value: string, on: boolean, label: string) =>
+      `<button type="button" class="preset" data-${attr}="${value}" aria-pressed="${on}"><b>${esc(label)}</b></button>`;
+    const market = a.mode === 'market';
+    const body =
+      field(
+        'Sell at',
+        market ? "FUTBIN's price, or Nova's market data when FUTBIN has none" : 'The same buy-now price for every card',
+        `<div class="presets">${choice('as-mode', 'market', market, 'Market price')}${choice('as-mode', 'fixed', !market, 'Fixed price')}</div>`,
+      ) +
+      (market
+        ? field(
+            'Price steps',
+            "EA price steps above (+) or below (-) the market price. 0 sells at it",
+            stepper('as-steps', signedSteps(a.steps), 'steps', 'Price steps'),
+          ) +
+          field(
+            'FUTBIN prices',
+            'The market your cards sell on',
+            `<div class="presets">${choice('as-platform', 'console', a.platform === 'console', 'Console')}${choice('as-platform', 'pc', a.platform === 'pc', 'PC')}</div>`,
+          )
+        : field(
+            'Fixed price',
+            'Buy-now price. The starting bid is one step lower',
+            stepper('as-price', String(a.fixedPrice), 'coins', 'Fixed price', true),
+          )) +
+      field(
+        'Never sell at a loss',
+        "Don't list a card for less than it cost, after EA's 5% tax",
+        toggle('as-noloss', a.noLoss, 'Never sell at a loss'),
+      );
+    return section('Auto-sell', body, `&nbsp;${toggle('as-on', a.enabled, 'Auto-sell')}`, a.enabled);
+  }
+
+  function signedSteps(n: number): string {
+    return n > 0 ? `+${n}` : String(n);
   }
 
   /** Settings above low the user has not confirmed yet: shown on the page,
@@ -716,6 +760,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         '',
         false,
       ) +
+      autoSellSection(s) +
       section(
         'Safety limits',
         field(
@@ -1311,6 +1356,12 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         cooldownSeconds: n('s-cooldown', s.safety.cooldownSeconds),
         maxCoinFlowPerHour: n('s-flow', s.safety.maxCoinFlowPerHour),
       },
+      autoSell: {
+        ...s.autoSell,
+        // Only the shown mode's field is on the page; the other keeps its value.
+        steps: n('as-steps', s.autoSell.steps),
+        fixedPrice: n('as-price', s.autoSell.fixedPrice),
+      },
     };
     const parsed = botSettingsSchema.safeParse(next);
     if (!parsed.success) {
@@ -1331,6 +1382,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         'safety.buyToSearchRatio': 's-ratio',
         'safety.cooldownSeconds': 's-cooldown',
         'safety.maxCoinFlowPerHour': 's-flow',
+        'autoSell.steps': 'as-steps',
+        'autoSell.fixedPrice': 'as-price',
       };
       const key = Object.keys(byPath).find((k) => path.startsWith(k));
       if (key) mark(byPath[key]!, false);
@@ -1388,16 +1441,37 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     if (!el) return;
     if (el.dataset.step) {
       const input = root.getElementById(el.dataset.step) as HTMLInputElement;
-      const step = (STEPS[el.dataset.step] ?? 1) * Number(el.dataset.dir);
-      const r = parseRange(input.value.replace(/[,\s]/g, ''), false);
-      if (!r) return;
-      const round = (v: number) => Math.max(0, Math.round(v * 100) / 100);
-      input.value =
-        r.min === r.max
-          ? String(round(r.min + step))
-          : `${round(r.min + step)}-${round(r.max + step)}`;
+      const dir = Number(el.dataset.dir);
+      const value = Number(input.value.replace(/[,\s]/g, ''));
+      if (el.dataset.step === 'as-price') {
+        // Along EA's price grid, like the web app's own price arrows.
+        if (!Number.isFinite(value)) return;
+        input.value = String(Math.max(MIN_SALE_PRICE, stepPrice(value, dir)));
+      } else if (el.dataset.step === 'as-steps') {
+        if (!Number.isFinite(value)) return;
+        input.value = signedSteps(Math.min(BOT_LIMITS.autoSellSteps.max, Math.max(BOT_LIMITS.autoSellSteps.min, Math.round(value) + dir)));
+      } else {
+        const step = (STEPS[el.dataset.step] ?? 1) * dir;
+        const r = parseRange(input.value.replace(/[,\s]/g, ''), false);
+        if (!r) return;
+        const round = (v: number) => Math.max(0, Math.round(v * 100) / 100);
+        input.value =
+          r.min === r.max
+            ? String(round(r.min + step))
+            : `${round(r.min + step)}-${round(r.max + step)}`;
+      }
       const next = readSettings();
       if (next) commit(next, false);
+    } else if (el.dataset.asMode || el.dataset.asPlatform) {
+      const s = shown();
+      const autoSell = el.dataset.asMode
+        ? { ...s.autoSell, mode: el.dataset.asMode === 'fixed' ? ('fixed' as const) : ('market' as const) }
+        : { ...s.autoSell, platform: el.dataset.asPlatform === 'pc' ? ('pc' as const) : ('console' as const) };
+      commit({ ...s, autoSell }, true);
+    } else if (el.id === 'as-on' || el.id === 'as-noloss') {
+      const s = shown();
+      const a = s.autoSell;
+      commit({ ...s, autoSell: el.id === 'as-on' ? { ...a, enabled: !a.enabled } : { ...a, noLoss: !a.noLoss } }, true);
     } else if (el.dataset.delay) {
       const min = Number(el.dataset.min);
       const max = Number(el.dataset.max);
@@ -1526,39 +1600,82 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         <div class="bar"><i style="width:0%"></i></div>
       </div>
     `;
+    // The ring survives the dash being rebuilt: moved, not recreated, so its
+    // countdown never restarts mid-wait.
+    root.getElementById('ringbox')?.append(ring.el);
     renderRing();
   }
 
+  // ---- the countdown ring -------------------------------------------------
+  //
+  // Built once and updated in place every animation frame while the page is
+  // open (`animate`): the arc moves continuously instead of in steps, and
+  // text is written only when it changes.
+  const RING_R = 56;
+  const RING_C = 2 * Math.PI * RING_R;
+  const ring = (() => {
+    const el = document.createElement('div');
+    el.className = 'ring-wrap';
+    el.innerHTML = `
+      <svg class="ring" viewBox="0 0 130 130" aria-hidden="true">
+        <circle cx="65" cy="65" r="${RING_R}" fill="none" stroke="var(--ea-line)" stroke-width="7"/>
+        <circle class="arc" cx="65" cy="65" r="${RING_R}" fill="none" stroke="var(--ea-accent)" stroke-width="7" stroke-linecap="round"
+          stroke-dasharray="${RING_C}" stroke-dashoffset="${RING_C}" transform="rotate(-90 65 65)"/>
+      </svg>
+      <div class="ring-label"><div class="t">0s</div><div class="p"></div></div>
+      <div class="elapsed">Running for<b>0:00</b></div>`;
+    return {
+      el,
+      arc: el.querySelector('.arc') as SVGCircleElement,
+      time: el.querySelector('.ring-label .t') as HTMLElement,
+      phase: el.querySelector('.ring-label .p') as HTMLElement,
+      elapsed: el.querySelector('.elapsed b') as HTMLElement,
+      /** The wait the arc is counting down, and how long it was. */
+      endsAt: null as number | null,
+      total: 0,
+      offset: '',
+    };
+  })();
+
+  function setText(el: HTMLElement, text: string): void {
+    if (el.textContent !== text) el.textContent = text;
+  }
+
   function renderRing(): void {
-    const box = root.getElementById('ringbox');
-    if (!box) return;
     const sniper = deps.getSniper();
     const state = sniper?.state;
     const now = Date.now();
     const endsAt = state?.phaseEndsAt ?? null;
     const remaining = endsAt ? Math.max(0, endsAt - now) : 0;
-    let fraction = 0;
-    if (endsAt && remaining > 0) {
-      const started =
-        (box.dataset.endsAt === String(endsAt) ? Number(box.dataset.total) : remaining) ||
-        remaining;
-      box.dataset.endsAt = String(endsAt);
-      box.dataset.total = String(started);
-      fraction = remaining / started;
+    if (endsAt !== ring.endsAt) {
+      ring.endsAt = endsAt;
+      ring.total = remaining;
+    }
+    const fraction = remaining > 0 && ring.total > 0 ? remaining / ring.total : 0;
+    const offset = (RING_C * (1 - fraction)).toFixed(2);
+    if (offset !== ring.offset) {
+      ring.offset = offset;
+      ring.arc.setAttribute('stroke-dashoffset', offset);
     }
     const secs = remaining / 1000;
-    const label = remaining > 0 ? (secs >= 60 ? clock(remaining) : `${Math.ceil(secs)}s`) : '0s';
-    const elapsed = sniper?.getStats().startedAt ? now - sniper.getStats().startedAt! : 0;
-    const r = 56;
-    const c = 2 * Math.PI * r;
-    box.innerHTML = `
-      <svg class="ring" viewBox="0 0 130 130" aria-hidden="true">
-        <circle cx="65" cy="65" r="${r}" fill="none" stroke="var(--ea-line)" stroke-width="7"/>
-        <circle cx="65" cy="65" r="${r}" fill="none" stroke="var(--ea-accent)" stroke-width="7" stroke-linecap="round"
-          stroke-dasharray="${c}" stroke-dashoffset="${c * (1 - fraction)}" transform="rotate(-90 65 65)"/>
-      </svg>
-      <div class="ring-label"><div class="t">${esc(label)}</div><div class="p">${esc(PHASE_LABEL[state?.phase ?? 'idle'])}</div></div>
-      <div class="elapsed">Running for<b>${clock(elapsed)}</b></div>`;
+    setText(ring.time, remaining > 0 ? (secs >= 60 ? clock(remaining) : `${Math.ceil(secs)}s`) : '0s');
+    setText(ring.phase, PHASE_LABEL[state?.phase ?? 'idle']);
+    const startedAt = sniper?.getStats().startedAt;
+    setText(ring.elapsed, clock(startedAt ? now - startedAt : 0));
+  }
+
+  /** One frame: the ring, and the run bar's clock once a second. */
+  let runClock = '';
+  function animate(): void {
+    renderRing();
+    const sniper = deps.getSniper();
+    const startedAt = sniper?.getStats().startedAt;
+    const c = sniper?.isRunning() && startedAt ? clock(Date.now() - startedAt) : '';
+    if (c !== runClock) {
+      runClock = c;
+      renderTop();
+    }
+    ringFrame = requestAnimationFrame(animate);
   }
 
   function logHtml(e: SniperLogEntry): string {
@@ -1574,11 +1691,15 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       return `<div class="log bought"><div class="main"><b>${who}</b> bought for <span class="amt">${fmt(e.price ?? 0)}${COIN}</span>
         <div class="sub">${when}${e.sellPrice != null ? `, sells for <span class="amt">${fmt(e.sellPrice)}${COIN}</span>` : ''}</div></div>${pill}</div>`;
     }
+    if (e.kind === 'listed') {
+      return `<div class="log listed"><div class="main"><b>${who}</b> listed for <span class="amt">${fmt(e.price ?? 0)}${COIN}</span>
+        <div class="sub">${when}, ${esc(e.message)}</div></div></div>`;
+    }
     if (e.kind === 'failed') {
       return `<div class="log failed"><div class="main">${e.resourceId != null ? `<b>${who}</b> missed at <span class="amt">${fmt(e.price ?? 0)}${COIN}</span>` : esc(e.message)}
         <div class="sub">${when}${e.resourceId != null ? `, ${esc(e.message)}` : ''}</div></div></div>`;
     }
-    return `<div class="log blocked"><div class="main">${esc(e.message)}<div class="sub">${when}</div></div></div>`;
+    return `<div class="log blocked"><div class="main">${e.resourceId != null ? `<b>${who}</b> ` : ''}${esc(e.message)}<div class="sub">${when}</div></div></div>`;
   }
 
   function resultHtml(r: SniperSearchResult): string {
@@ -1695,20 +1816,17 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       // EA's lists arrive in two steps (files, then the web app's own lists
       // once it has started); pick each one up while the page is open.
       catalogPoll = setInterval(loadCatalog, 3_000);
-      tick = setInterval(() => {
-        renderRing();
-        if (deps.getSniper()?.isRunning()) renderTop();
-      }, 250);
+      ringFrame = requestAnimationFrame(animate);
       openListeners.forEach((cb) => cb(true));
     },
     close() {
       if (page.hidden) return;
       page.hidden = true;
       delete host.dataset.open;
-      if (tick) clearInterval(tick);
+      if (ringFrame != null) cancelAnimationFrame(ringFrame);
       if (catalogPoll) clearInterval(catalogPoll);
       catalogPoll = null;
-      tick = null;
+      ringFrame = null;
       openListeners.forEach((cb) => cb(false));
     },
     toggle() {
