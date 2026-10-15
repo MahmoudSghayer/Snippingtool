@@ -403,9 +403,17 @@ observable shape, UNVERIFIED like the rest of it; the promise shape has
 none and answers `list_unsupported`), and the adapter only lists an item
 it bought itself on that page load (`list_not_bought` otherwise).
 
-**Snipe targets are built like EA's own search panel**: OVR range slider
-with Min/Max OVR, "Type Player Name" (with EA portraits), and Quality,
-Rarity, Position, Chemistry Style, Country/Region, League and Club rows.
+**The page is laid out like EA's "Search the Transfer Market" screen**: a
+back arrow and title on EA's navy bar, the pitch artwork behind two floating
+panels, and on the left one EA's tab row (Search / Settings; Start waiting on
+the risk confirmation links to Settings), then Reset beside the gradient
+Start button at the bottom.
+
+**Snipe targets are built like EA's own search panel**: "Type Player Name"
+(with EA portraits), then Quality, Rarity, Position, Chemistry Style,
+Country/Region, League and Club two to a row, then "Rating:", "Buy Now
+Price:" and "Sell Price:", each with its own Clear and EA's Min:/Max: boxes
+between − and +.
 The lists are the web app's own: `main/adapter.ts` calls its
 `UTDataProviderFactory` (`getRareItemLevelDP`, `getItemRarityDP`,
 `getPlayerPositionDP`, `getPlayStyleDP`, `getNationDP`, `getLeagueDP`,
