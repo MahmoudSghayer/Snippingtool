@@ -197,6 +197,11 @@ export interface SniperSearchResult {
   at: number;
   filterName: string;
   matches: SniperMatch[];
+  /** How many listings EA's answer held (matching or not), and the lowest
+   * buy-now among them: what tells "nothing listed at your price" apart
+   * from "listed, but not what the search is for". */
+  listings?: number;
+  cheapest?: number | null;
 }
 
 export interface SniperStats {
@@ -543,7 +548,7 @@ export class Sniper {
         if (failuresInRow >= MAX_SEARCH_FAILURES_IN_A_ROW) return this.stop('search_failing');
       } else {
         failuresInRow = 0;
-        this.addSearchResult(target.name, found.matches);
+        this.addSearchResult(target.name, found.matches, found.listings, found.cheapest);
         if (found.matches.length > 0) {
           this.setState({ phase: 'buying', phaseEndsAt: null, stopReason: null, stopDetail: null });
           if (await this.buyMatches(found.matches, signal, found.at)) return;
@@ -590,7 +595,10 @@ export class Sniper {
    * price cap, cheapest first. `at`: when EA's answer came back. */
   private async searchOnce(
     target: SniperFilter,
-  ): Promise<{ ok: true; matches: SniperMatch[]; at: number } | { ok: false; error: string; at: number }> {
+  ): Promise<
+    | { ok: true; matches: SniperMatch[]; at: number; listings: number; cheapest: number | null }
+    | { ok: false; error: string; at: number }
+  > {
     this.setState({ phase: 'searching', phaseEndsAt: null, stopReason: null, stopDetail: null });
     const cap = this.priceCap(target.filter);
     const collected = new Map<string, TrimmedAuction>();
@@ -621,6 +629,7 @@ export class Sniper {
     off();
     offBuyable();
     if (!outcome.ok) return { ok: false, error: outcome.error ?? 'unknown error', at };
+    const prices = [...collected.values()].map((a) => a.buyNow).filter((p) => p > 0);
     const matches = [...collected.values()]
       .filter((a) => this.matches(a, target.filter, cap))
       .sort((a, b) => a.buyNow - b.buyNow)
@@ -632,7 +641,7 @@ export class Sniper {
         buyNow: a.buyNow,
         expiresAt: a.expiresAt,
       }));
-    return { ok: true, matches, at };
+    return { ok: true, matches, at, listings: collected.size, cheapest: prices.length ? Math.min(...prices) : null };
   }
 
   /** Returns true when the bot stopped while buying. `searchedAt`: when
@@ -1084,8 +1093,13 @@ export class Sniper {
     return full;
   }
 
-  private addSearchResult(filterName: string, matches: SniperMatch[]): void {
-    const result: SniperSearchResult = { id: this.nextId++, at: this.now(), filterName, matches };
+  private addSearchResult(
+    filterName: string,
+    matches: SniperMatch[],
+    listings: number,
+    cheapest: number | null,
+  ): void {
+    const result: SniperSearchResult = { id: this.nextId++, at: this.now(), filterName, matches, listings, cheapest };
     this.results.unshift(result);
     if (this.results.length > MAX_SEARCH_RESULTS) this.results.length = MAX_SEARCH_RESULTS;
     this.deps.onSearchResult?.(result);

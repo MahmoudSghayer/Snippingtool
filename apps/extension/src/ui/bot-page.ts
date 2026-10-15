@@ -1900,8 +1900,15 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
 
   function resultHtml(r: SniperSearchResult): string {
     const when = timeOfDay(r.at);
-    if (r.matches.length === 0)
-      return `<div class="res"><span class="when">${when}</span>No matches</div>`;
+    if (r.matches.length === 0) {
+      const seen =
+        r.listings == null
+          ? ''
+          : r.listings === 0
+            ? ', nothing listed at your price'
+            : `, ${r.listings} listed${r.cheapest != null ? `, cheapest ${fmt(r.cheapest)}` : ''}`;
+      return `<div class="res"><span class="when">${when}</span>No matches${esc(seen)}</div>`;
+    }
     const rows = r.matches
       .map(
         (m) =>
