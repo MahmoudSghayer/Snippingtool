@@ -286,9 +286,12 @@ Transfers in EA's left navigation (`ui/ea-nav.ts`) opens a full page
 the right. The in-page panel and the userscript's SL menu open it too.
 
 The bot (`engine/sniper.ts`) searches the user's saved filters in turn, buys
-every listing at or under the price cap (cheapest first), then waits a random
-delay from the user's range, with breaks every N searches and rests every N
-minutes. It ships through the same `virtual:autobuyer-loader` alias as the
+every listing at or under the price cap (cheapest first), and starts the next
+search a random delay from the user's range after the last one started (start
+to start, so EA's answer time and any buying come out of the delay rather than
+being added to it), with breaks every N searches and rests every N
+minutes. Each missed buy's log line says how long after the search it went out
+and how long EA took to answer. It ships through the same `virtual:autobuyer-loader` alias as the
 autobuyer (`loadSniper()`), so the `ledger` build never contains it, and the
 autobuyer does not buy while the bot runs.
 
@@ -334,7 +337,10 @@ stop it whatever the settings say.
 (`lib/background-timer.ts`), not on the page's own timers, which Chrome
 throttles in a hidden tab (to about once a minute after five minutes), so it
 keeps its pace minimised or behind another tab. If the page's CSP refuses
-the worker, the waits fall back to `setTimeout`. A tab Chrome discards to
+the worker, or it stops answering (a page-timer backup ends any wait it misses
+by 5 s), the waits fall back to `setTimeout`; the log says at Start which mode
+is in use. While the bot runs the page holds a shared Web Lock
+(`nova-ai-running`), which Chrome does not freeze. A tab Chrome discards to
 save memory still stops everything: add the EA web app to Chrome's "Always
 keep these sites active" list.
 

@@ -69,6 +69,10 @@ function setup(opts: {
   /** The adapter's whole answer to a buy, when a test needs more than ok. */
   buyResult?: (tradeId: string) => ActionOutcome;
   sellPrice?: number | null;
+  /** What the bot's sleep says it is timed with. */
+  timingMode?: () => 'worker' | 'page';
+  /** How long each search takes EA to answer, on the test clock. */
+  searchTakesMs?: number;
   /** Replaces the fixed `sellPrice` lookup. */
   estimateSellPrice?: (resourceId: number) => Promise<number | null>;
   /** Auto-sell's market price (FUTBIN, else Nova). Omitted = none. */
@@ -124,6 +128,7 @@ function setup(opts: {
       search: async (filter) => {
         searches.push(filter);
         searchTimes.push(clock.t);
+        clock.t += opts.searchTakesMs ?? 0;
         const batch = results[Math.min(searches.length - 1, results.length - 1)]!;
         for (const cb of auctionsListeners) cb(batch);
         if (opts.upgrades) {
@@ -170,6 +175,7 @@ function setup(opts: {
         }
       : {}),
     ...(opts.marketPrice ? { marketPrice: opts.marketPrice } : {}),
+    ...(opts.timingMode ? { timingMode: opts.timingMode } : {}),
     ...(opts.entitled ? { entitled: opts.entitled } : {}),
     ...(opts.exclusive ? { exclusive: opts.exclusive } : {}),
     killSwitch: () => ({
@@ -1208,5 +1214,61 @@ describe('Sniper — auto-sell after a buy', () => {
     h.sniper.start();
     await h.done();
     expect(notListed(h)?.message).toBe('not listed: list reported success: false');
+  });
+});
+
+describe('Sniper — where a missed buy\'s time went', () => {
+  it('logs how long after the search the buy went out, and how long EA took to answer', async () => {
+    const h = setup({
+      results: [[auction('t-a', 8_000)]],
+      buyResult: () => ({ ok: false, error: 'item sold', latencyMs: 182 }),
+      maxSearches: 1,
+    });
+    h.sniper.start();
+    await h.done();
+    const missed = h.sniper.getLog().find((e) => e.kind === 'failed');
+    expect(missed?.message).toBe('item sold (sent 0 ms after the search came back; EA answered in 182 ms)');
+  });
+});
+
+describe('Sniper — searches start one delay apart, start to start', () => {
+  const fixedDelay = { searchDelay: { min: 8, max: 8 }, breaks: { ...DEFAULT_BOT_SETTINGS.breaks, enabled: false } };
+
+  it("takes EA's answer time out of the delay instead of adding it", async () => {
+    const h = setup({ settings: fixedDelay, results: [[]], searchTakesMs: 2_000, maxSearches: 3 });
+    h.sniper.start();
+    await h.done();
+    expect(h.waits.filter((w) => w.phase === 'waiting').map((w) => w.ms)).toEqual([6_000, 6_000, 6_000]);
+    // So searches go out exactly 8 s apart.
+    expect(h.searchTimes[1]! - h.searchTimes[0]!).toBe(8_000);
+    expect(h.searchTimes[2]! - h.searchTimes[1]!).toBe(8_000);
+  });
+
+  it('after a buy and its pause, searches again without waiting a second time', async () => {
+    const h = setup({
+      settings: { ...fixedDelay, safety: { ...DEFAULT_BOT_SETTINGS.safety, buyToSearchRatio: 1, cooldownSeconds: 10 } },
+      results: [[auction('t-a', 8_000)], []],
+      maxSearches: 2,
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.buys).toEqual(['t-a']);
+    // 10 s pause after the buy already covers the 8 s delay.
+    expect(h.searchTimes[1]! - h.searchTimes[0]!).toBe(10_000);
+  });
+});
+
+describe('Sniper — says at Start whether it keeps searching in a background tab', () => {
+  it.each([
+    ['worker' as const, 'Background searching is on: the bot keeps its pace in another tab'],
+    [
+      'page' as const,
+      "Background searching is limited: this page blocked the bot's background timer, so searching slows down while the tab is hidden",
+    ],
+  ])('%s', async (mode, message) => {
+    const h = setup({ results: [[]], timingMode: () => mode, maxSearches: 1 });
+    h.sniper.start();
+    await h.done();
+    expect(h.sniper.getLog().some((e) => e.message === message)).toBe(true);
   });
 });

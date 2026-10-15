@@ -443,10 +443,15 @@ let lastPileResponse: { path: string; at: number; value: unknown } | null = null
  */
 interface SeenListing {
   buyNow: number;
-  /** The card, as EA's own response said: a buy that names a resourceId
-   * must match it (`priceCheck`), and likewise an assetId. */
-  resourceId: number;
-  assetId: number;
+  /** The card, as EA's own responses said: a buy that names a resourceId
+   * must be one of these (`priceCheck`), and likewise an assetId. Every id
+   * any sighting gave is kept, not just the latest: one search reaches the
+   * adapter twice (its act result's item entity, and the network response
+   * it caused, see `isSecondSighting`), the two can name the card by
+   * different ids, and content was told only one of them. Keeping only the
+   * latest refused real buys of the right card (`resource_mismatch`). */
+  resourceIds: number[];
+  assetIds: number[];
   expiresAt: number | null;
   /** The item entity an act search returned for this listing, for shapes
    * that buy on the entity. Absent for a listing only seen passively. */
@@ -464,15 +469,31 @@ function rememberListing(a: TrimmedAuction, entity: unknown): SeenListing {
       rememberedListings = 1;
     }
   }
-  // A passive sighting after an act search keeps the entity: it is still
-  // the same listing (a relist gets a new tradeId).
+  // A passive sighting after an act search keeps the entity, and the card
+  // ids it gave: it is still the same listing (a relist gets a new tradeId).
   const keep = entity ?? previous?.entity;
+  const resourceIds = withId(previous?.resourceIds, a.resourceId);
+  const assetIds = withId(previous?.assetIds, a.assetId);
   const seen: SeenListing =
     keep === undefined
-      ? { buyNow: a.buyNow, resourceId: a.resourceId, assetId: a.assetId, expiresAt: a.expiresAt }
-      : { buyNow: a.buyNow, resourceId: a.resourceId, assetId: a.assetId, expiresAt: a.expiresAt, entity: keep };
+      ? { buyNow: a.buyNow, resourceIds, assetIds, expiresAt: a.expiresAt }
+      : { buyNow: a.buyNow, resourceIds, assetIds, expiresAt: a.expiresAt, entity: keep };
   apply(mapSet, lastSeenListings, [a.tradeId, seen]);
   return seen;
+}
+
+/** `ids` plus `id`, once. Plain loops, not Array methods the page could
+ * have replaced. */
+function withId(ids: readonly number[] | undefined, id: number): number[] {
+  const out: number[] = [];
+  if (ids) for (let i = 0; i < ids.length; i++) out[out.length] = ids[i]!;
+  if (!hasId(out, id)) out[out.length] = id;
+  return out;
+}
+
+function hasId(ids: readonly number[], id: number): boolean {
+  for (let i = 0; i < ids.length; i++) if (ids[i] === id) return true;
+  return false;
 }
 
 /** A mixed page: some entries unreadable. Not a failed response (the rest
@@ -856,8 +877,8 @@ interface CardIds {
 function priceCheck(tradeId: string, price: number, at: number, card: CardIds): string | null {
   const listing = apply(mapGet, lastSeenListings, [tradeId]) as SeenListing | undefined;
   if (!listing || (listing.expiresAt != null && listing.expiresAt <= at)) return ACT_ERROR.listingUnknown;
-  if (card.resourceId !== undefined && listing.resourceId !== card.resourceId) return ACT_ERROR.resourceMismatch;
-  if (card.assetId !== undefined && listing.assetId !== card.assetId) return ACT_ERROR.resourceMismatch;
+  if (card.resourceId !== undefined && !hasId(listing.resourceIds, card.resourceId)) return ACT_ERROR.resourceMismatch;
+  if (card.assetId !== undefined && !hasId(listing.assetIds, card.assetId)) return ACT_ERROR.resourceMismatch;
   // buyNow 0 means the listing has no buy-now price: nothing to match.
   if (listing.buyNow <= 0 || listing.buyNow !== price) return ACT_ERROR.priceMismatch;
   return null;

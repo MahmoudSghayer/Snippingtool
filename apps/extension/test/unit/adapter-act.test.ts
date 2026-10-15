@@ -31,8 +31,8 @@ function networkResponse(body: unknown, url: string): Response {
   return res;
 }
 
-function rawAuction(tradeId: number, buyNowPrice: number) {
-  return { tradeId, buyNowPrice, startingBid: 150, currentBid: 0, offers: 0, expires: 3600, itemData: { resourceId: 42, assetId: 42, rating: 85 } };
+function rawAuction(tradeId: number, buyNowPrice: number, card: { resourceId?: number; assetId?: number } = {}) {
+  return { tradeId, buyNowPrice, startingBid: 150, currentBid: 0, offers: 0, expires: 3600, itemData: { resourceId: 42, assetId: 42, rating: 85, ...card } };
 }
 
 interface Posted {
@@ -144,9 +144,9 @@ describe('act channel nonce gate', () => {
 });
 
 describe('buy price re-check', () => {
-  async function seeListing(tradeId: number, price: number): Promise<void> {
-    search.mockResolvedValueOnce({ auctionInfo: [rawAuction(tradeId, price)] });
-    const requestId = `see-${tradeId}-${price}`;
+  async function seeListing(tradeId: number, price: number, card: { resourceId?: number; assetId?: number } = {}): Promise<void> {
+    search.mockResolvedValueOnce({ auctionInfo: [rawAuction(tradeId, price, card)] });
+    const requestId = `see-${tradeId}-${price}-${card.resourceId ?? 42}-${card.assetId ?? 42}`;
     deliver(await signedRequest({ action: 'search', requestId, filter: {} }));
     await resultFor(requestId);
   }
@@ -195,6 +195,23 @@ describe('buy price re-check', () => {
     deliver(await signedRequest({ action: 'buy', requestId: 'buy-right-card', tradeId: '5005', price: 11_000, resourceId: 42, assetId: 42 }));
     expect((await resultFor('buy-right-card')).data).toMatchObject({ ok: true });
     expect(buyNow).toHaveBeenCalledWith('5005');
+  });
+
+  it('buys the card under any id EA gave the same listing, and still refuses any other card', async () => {
+    // One listing read twice (an act result's item entity and the network
+    // response it caused can name the card differently); content may have
+    // been told either reading.
+    await seeListing(5007, 52_000, { resourceId: 50_331_842, assetId: 228_702 });
+    await seeListing(5007, 52_000, { resourceId: 228_702, assetId: 228_702 });
+    deliver(await signedRequest({ action: 'buy', requestId: 'buy-other-card', tradeId: '5007', price: 52_000, resourceId: 77 }));
+    expect((await resultFor('buy-other-card')).data).toMatchObject({ ok: false, error: 'resource_mismatch' });
+    expect(buyNow).not.toHaveBeenCalled();
+
+    deliver(await signedRequest({ action: 'buy', requestId: 'buy-first-reading', tradeId: '5007', price: 52_000, resourceId: 50_331_842, assetId: 228_702 }));
+    expect((await resultFor('buy-first-reading')).data).toMatchObject({ ok: true });
+    deliver(await signedRequest({ action: 'buy', requestId: 'buy-latest-reading', tradeId: '5007', price: 52_000, resourceId: 228_702, assetId: 228_702 }));
+    expect((await resultFor('buy-latest-reading')).data).toMatchObject({ ok: true });
+    expect(buyNow).toHaveBeenCalledTimes(2);
   });
 
   it('drops a buy request whose resourceId is not a positive integer', async () => {

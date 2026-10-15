@@ -36,7 +36,7 @@ import { Governor, type GovernorState } from '../engine/governor.js';
 import { rankCandidates, type ScoredOpportunity } from '../engine/ranker.js';
 import { countObservedSearches, governedSearch } from '../engine/search.js';
 import { handOffWasLate, readHandedOffNonce } from '../lib/act-auth.js';
-import { createBackgroundSleep } from '../lib/background-timer.js';
+import { createBackgroundTimer } from '../lib/background-timer.js';
 import { riskLevelChangeEvent } from '../lib/bot-safety.js';
 import { logger } from '../lib/logger.js';
 import { singleFlight } from '../lib/single-flight.js';
@@ -582,6 +582,27 @@ async function main(): Promise<void> {
 
     // Called at load and whenever the page opens: a user who signs in from
     // the account view after the page loaded gets the bot without a reload.
+    // While the bot runs, this page holds a Web Lock: Chrome does not freeze
+    // a page that holds one, so a background tab keeps searching. Shared,
+    // so another EA tab is never kept waiting on it.
+    let tabLock: { done: boolean; release?: () => void } | null = null;
+    const holdTabWhileRunning = (): void => {
+      const running = sniper?.isRunning() ?? false;
+      if (running && !tabLock && typeof navigator.locks?.request === 'function') {
+        const held: { done: boolean; release?: () => void } = { done: false };
+        tabLock = held;
+        void navigator.locks
+          .request('nova-ai-running', { mode: 'shared' }, () =>
+            new Promise<void>((resolve) => (held.done ? resolve() : (held.release = resolve))),
+          )
+          .catch(() => undefined);
+      } else if (!running && tabLock) {
+        tabLock.done = true;
+        tabLock.release?.();
+        tabLock = null;
+      }
+    };
+
     const prepareSniper = async (fresh: boolean): Promise<void> => {
       if (sniper) {
         // A plan lost mid-session (the check below) empties `features`, and
@@ -624,12 +645,14 @@ async function main(): Promise<void> {
         unavailableReason = 'Nova AI is not available in this build.';
         return;
       }
+      // Timed off the main thread, so the bot keeps its pace while the tab
+      // is minimised or in the background (lib/background-timer.ts).
+      const timer = createBackgroundTimer();
       sniper = new mod.Sniper(
         {
           adapter,
-          // Timed off the main thread, so the bot keeps its pace while the
-          // tab is minimised or in the background (lib/background-timer.ts).
-          sleep: createBackgroundSleep(),
+          sleep: timer.sleep,
+          timingMode: timer.mode,
           getFilters: () => (liveSearch ? [liveSearch] : []),
           estimateSellPrice: async (resourceId) => {
             const r = await send<{ summary: PriceSummary }>('summary', { resourceId, minProfit: settingsCache.targets.minProfitPerSnipe });
@@ -656,7 +679,10 @@ async function main(): Promise<void> {
           // One EA tab runs the bot: the one holding the engine lease.
           exclusive: () => !!lease?.isHeld(),
           killSwitch: () => ({ active: killSwitchActive || !!governor?.isKillSwitchActive() }),
-          onChange: () => botPage.refresh(),
+          onChange: () => {
+            holdTabWhileRunning();
+            botPage.refresh();
+          },
           onAttempt: recordAttempt,
           onTrade: recordTrade,
         },
