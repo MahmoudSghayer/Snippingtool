@@ -284,7 +284,7 @@ export const adapterActionResultMessageSchema = z.object({
   channel: z.literal(ADAPTER_CHANNEL),
   kind: z.literal('action_result'),
   data: z.object({
-    action: z.enum(['search', 'buy', 'readResult', 'diagnostics', 'list']),
+    action: z.enum(['search', 'buy', 'readResult', 'diagnostics', 'list', 'pile']),
     requestId: z.string().min(1).optional(),
     ok: z.boolean(),
     requestedAt: z.number(),
@@ -356,6 +356,16 @@ export const adapterActRequestMessageSchema = z.object({
       tradeId: z.string().min(1),
       startPrice: z.number().int().min(150).max(15_000_000),
       buyNowPrice: z.number().int().min(200).max(15_000_000),
+    }),
+    /** Automation builds: have the web app reload the trader's transfer
+     * list through its own service (Nova AI's Sold / Unsold / Transfer list
+     * counts, after a listing and while the bot runs). The reply only says
+     * whether EA answered; the list itself reaches content as the usual
+     * passive `tradepile` message. The adapter refuses one within 15 s of
+     * the last (`pile_too_soon`). */
+    z.object({
+      action: z.literal('pile'),
+      requestId: z.string().min(1),
     }),
     /** Read-only: the adapter's diagnostics report (options page, "Copy
      * diagnostics"). Authenticated like every other act request, so no page

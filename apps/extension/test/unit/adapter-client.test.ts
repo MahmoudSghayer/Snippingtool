@@ -224,6 +224,18 @@ describe('diagnostics', () => {
   });
 });
 
+describe('transfer list reload (Nova AI counts)', () => {
+  it('asks the adapter with a signed pile request and resolves on its signed answer', async () => {
+    const promise = client.refreshPile();
+    const req = await lastRequest();
+    expect(req.data).toMatchObject({ action: 'pile' });
+    expect(Object.keys(req.data).sort()).toEqual(['action', 'requestId']);
+    expect(await signer.verify(canonicalActMessage('act_request', req.data), req.mac!)).toBe(true);
+    deliver(await signedResult({ action: 'pile', requestId: req.data.requestId, ok: true, requestedAt: 1, completedAt: 2 }));
+    await expect(promise).resolves.toMatchObject({ ok: true });
+  });
+});
+
 describe('a buy whose answer came after the adapter stopped waiting', () => {
   it('resolves timeout_unknown with a late promise that a signed late result settles', async () => {
     const promise = client.buy('t1', 1000);

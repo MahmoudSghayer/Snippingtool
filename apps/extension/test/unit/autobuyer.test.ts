@@ -50,6 +50,7 @@ function fakeAdapter(buyImpl: AdapterClient['buy'] = async () => ({ ok: true, la
     buy: buyImpl,
     readResult: vi.fn(async () => ({ ok: true, latencyMs: 5 })),
     list: vi.fn(async () => ({ ok: true, latencyMs: 5 })),
+    refreshPile: vi.fn(async () => ({ ok: true, latencyMs: 5 })),
     diagnostics: vi.fn(async () => ({ ok: false, latencyMs: 0 })),
     onProbe: (cb) => {
       probeCb = cb;

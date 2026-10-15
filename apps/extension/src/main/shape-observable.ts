@@ -195,5 +195,15 @@ export function createObservableShape(timeoutMs: number): ServiceShape {
       const r = assertSucceeded(response, 'list', true);
       if (!bidSucceeded(r)) throw new ShapeError('list did not report success: true');
     },
+    async refreshPile(services) {
+      // What the web app calls when its Transfer List opens, as community
+      // autobuyers describe it: services.Item.requestTransferItems() ->
+      // observable. UNVERIFIED like the rest of this shape. Its GET of the
+      // trade pile is read by passive observation (main/adapter.ts).
+      if (!method(services, 'requestTransferItems')) throw new ShapeError('window.services.Item.requestTransferItems is not a function');
+      const response = await call(services, 'requestTransferItems', [], timeoutMs);
+      const r = assertSucceeded(response, 'requestTransferItems', true);
+      if (!bidSucceeded(r)) throw new ShapeError('requestTransferItems did not report success: true');
+    },
   };
 }

@@ -274,6 +274,8 @@ export function parseRecentSearches(raw: unknown): RecentSearch[] {
 const COIN =`<svg class="coin" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7" fill="#f5c542"/><circle cx="8" cy="8" r="4.6" fill="none" stroke="#b8860b" stroke-width="1.4"/></svg>`;
 const PLAY = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9.5-5.5z" fill="currentColor"/></svg>`;
 const STOP = `<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="10" height="10" rx="1.5" fill="currentColor"/></svg>`;
+/** EA's back arrow, beside its screen titles. */
+const BACK = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 2.5 5 8l5.5 5.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
 function esc(s: unknown): string {
   return String(s).replace(
@@ -367,9 +369,21 @@ const CSS = `
     --ea-radius: 8px;
     --ea-radius-lg: 10px;
 
+    /* EA's "Search the Transfer Market" screen: its navy title bar, the
+       floating search panel and its slate rows, inputs and buttons. */
+    --ea-nav: #1b2433;
+    --ea-float: #1b2433;
+    --ea-row: #26354b;
+    --ea-row-hover: #2e3f59;
+    --ea-input: #111821;
+    --ea-input-line: #2b3648;
+    --ea-btn: #222e40;
+    --ea-btn-line: #34415a;
+    --ea-mint: #b1ffff;
+
     position: fixed; top: var(--top, 0px); right: var(--right, 0px); bottom: var(--bottom, 0px); left: var(--left, 0px);
     z-index: 2147482000;
-    display: flex; flex-direction: column; background: var(--ea-bg); color: var(--ea-text);
+    display: flex; flex-direction: column; background: var(--ea-nav); color: var(--ea-text);
     font: 400 16px/1.4 var(--ea-font); font-variant-numeric: tabular-nums;
   }
   .page[hidden] { display: none; }
@@ -380,7 +394,7 @@ const CSS = `
   button:disabled { cursor: not-allowed; }
 
   /* header */
-  .top { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--ea-line); background: var(--ea-panel); }
+  .top { display: flex; align-items: center; gap: 12px; padding: 14px 24px; background: var(--ea-nav); }
   .logo { width: 28px; height: 28px; flex: none; }
   .logo svg { display: block; width: 100%; height: 100%; }
   .top h1 { margin: 0; font-size: 24px; font-weight: 500; }
@@ -397,21 +411,36 @@ const CSS = `
   .saved { color: var(--ea-success); font-size: 13px; min-width: 60px; text-align: right; }
   .wallet { display: flex; align-items: center; gap: 8px; }
   .wallet[hidden], .wallet .bal[hidden] { display: none; }
-  .wallet .bal { display: flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 999px; background: var(--ea-control); font-size: 15px; font-weight: 500; white-space: nowrap; }
+  .wallet .bal { display: flex; align-items: center; gap: 6px; padding: 4px 6px; font-size: 17px; font-weight: 500; white-space: nowrap; }
   .wallet .bal .coin { margin-left: 0; }
   .wallet .fp { padding: 1px 5px; border-radius: 4px; background: var(--ea-accent); color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .3px; }
-  .close { border: 0; background: none; font-size: 22px; line-height: 1; color: var(--ea-muted); padding: 4px 8px; border-radius: var(--ea-radius); }
-  .close:hover { color: var(--ea-text); background: var(--ea-control); }
+  .close { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; margin-left: -8px; border: 0; background: none; color: var(--ea-text); padding: 0; border-radius: 50%; }
+  .close svg { width: 20px; height: 20px; }
+  .close:hover { background: var(--ea-btn); }
   .notice { margin: 12px 20px 0; padding: 10px 14px; border-radius: var(--ea-radius); background: color-mix(in srgb, var(--ea-warning) 14%, transparent); color: var(--ea-warning); }
   .notice[hidden] { display: none; }
 
-  .body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(380px, 42%) 1fr; }
+  /* EA's pitch artwork behind the panels: navy into teal, with its light
+     streaks. Static, so it costs nothing per frame. */
+  .body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(400px, 44%) 1fr; gap: 20px; padding: 20px 24px;
+    background:
+      linear-gradient(200deg, transparent 0 58%, rgba(205,255,245,.30) 58.4%, rgba(205,255,245,.06) 60.5%, transparent 61%),
+      linear-gradient(203deg, transparent 0 70%, rgba(205,255,245,.16) 70.3%, transparent 72%),
+      radial-gradient(70% 90% at 100% 100%, #6fe8c0 0%, #22b39f 30%, transparent 70%),
+      radial-gradient(60% 70% at 0% 0%, #34408f 0%, transparent 70%),
+      linear-gradient(120deg, #1d2f5a 0%, #183c5c 40%, #137c80 75%, #2cc4a4 100%); }
 
-  /* left column: search, settings, Start bar */
-  .settings { position: relative; overflow-y: auto; display: flex; flex-direction: column; border-right: 1px solid var(--ea-line); background: var(--ea-panel); }
-  .settings-scroll { flex: 1; padding: 16px 16px 8px; }
-  .card { background: var(--ea-surface); border-radius: var(--ea-radius-lg); margin-bottom: 8px; }
-  .card > summary { list-style: none; display: flex; align-items: center; gap: 10px; padding: 14px 16px; cursor: pointer; font-size: 18px; line-height: 20px; font-weight: 500; color: var(--ea-muted); }
+  /* left panel: EA's floating search panel, its tab row, the Reset/Start bar */
+  .settings { position: relative; min-height: 0; overflow: hidden; display: flex; flex-direction: column; background: var(--ea-float);
+    border-radius: 16px; box-shadow: 0 16px 40px rgba(0,0,0,.35); }
+  .tabs { display: flex; justify-content: center; gap: 8px; padding: 16px 16px 6px; }
+  .tab { min-width: 104px; padding: 9px 22px; border: 1px solid var(--ea-btn-line); border-radius: 6px; background: var(--ea-btn); color: var(--ea-text); font-size: 15px; }
+  .tab:hover { background: var(--ea-row-hover); }
+  .tab[aria-selected='true'] { border-color: var(--ea-mint); background: var(--ea-float); }
+  .settings[data-tab='search'] #knobs, .settings[data-tab='settings'] #targets, .settings[data-tab='settings'] #recent { display: none; }
+  .settings-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 24px 8px; scrollbar-width: thin; scrollbar-color: var(--ea-input-line) transparent; }
+  .card { background: var(--ea-row); border-radius: 6px; margin-bottom: 10px; }
+  .card > summary { list-style: none; display: flex; align-items: center; gap: 10px; padding: 14px 16px; cursor: pointer; font-size: 17px; line-height: 20px; font-weight: 600; color: var(--ea-text); }
   .card > summary::-webkit-details-marker { display: none; }
   .card > summary .chev { margin-left: auto; color: var(--ea-muted); transition: transform .15s; }
   .card[open] > summary .chev { transform: rotate(180deg); }
@@ -452,8 +481,8 @@ const CSS = `
   .riskhead { display: flex; align-items: center; gap: 10px; }
   .riskhead b { font-size: 17px; display: flex; align-items: center; gap: 8px; }
   .riskhead .spacer { flex: 1; }
-  .ghost, .riskhead button, .ackbox button { border: 1px solid var(--ea-line); background: var(--ea-bg); border-radius: 4px; min-height: 32px; padding: 8px 16px; color: var(--ea-text); font-size: 14px; line-height: 16px; }
-  .ghost:hover, .riskhead button:hover, .ackbox button:hover { background: var(--ea-panel); }
+  .ghost, .riskhead button, .ackbox button { border: 1px solid var(--ea-btn-line); background: var(--ea-btn); border-radius: 6px; min-height: 32px; padding: 8px 16px; color: var(--ea-text); font-size: 14px; line-height: 16px; }
+  .ghost:hover, .riskhead button:hover, .ackbox button:hover { background: var(--ea-row-hover); }
   .ghost:disabled { background: var(--ea-disabled); color: var(--ea-disabled-ink); }
   .lvl { padding: 3px 10px; border-radius: 6px; font-size: 13px; font-weight: 500; }
   .riskbar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin: 12px 0 8px; }
@@ -486,34 +515,39 @@ const CSS = `
   .picked button:hover { color: var(--ea-text); background: var(--ea-control); }
   .lbl { color: var(--ea-text-2); font-size: 14px; font-weight: 500; margin: 4px 0 8px; }
   .range2 { position: relative; height: 26px; margin: 0 8px 10px; }
-  .range2 .track { position: absolute; left: 0; right: 0; top: 11px; height: 4px; border-radius: 2px; background: var(--ea-line-strong); }
-  .range2 .track i { position: absolute; top: 0; bottom: 0; background: var(--ea-accent); border-radius: 2px; }
+  .range2 .track { position: absolute; left: 0; right: 0; top: 11px; height: 4px; border-radius: 2px; background: var(--ea-input-line); }
+  .range2 .track i { position: absolute; top: 0; bottom: 0; background: var(--ea-primary); border-radius: 2px; }
   .range2 input[type=range] { position: absolute; left: -8px; right: -8px; width: calc(100% + 16px); top: 0; height: 26px; margin: 0;
     background: none; pointer-events: none; -webkit-appearance: none; appearance: none; }
   .range2 input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; pointer-events: auto; width: 20px; height: 20px; border-radius: 50%;
     background: #fff; border: 0; box-shadow: 0 1px 4px rgba(0,0,0,.5); cursor: pointer; }
   .range2 input[type=range]::-moz-range-thumb { pointer-events: auto; width: 20px; height: 20px; border-radius: 50%; background: #fff; border: 0; cursor: pointer; }
-  .ovr-boxes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
-  .ovr-boxes label span { display: block; color: var(--ea-muted); font-size: 12px; margin: 0 2px 6px; }
-  .ovr-boxes input, .price input { width: 100%; height: 48px; padding: 0 12px; border-radius: var(--ea-radius); border: 1px solid var(--ea-line); background: var(--ea-control); color: var(--ea-text); font: inherit; font-size: 18px; }
-  .ea-player { display: flex; align-items: center; gap: 10px; padding: 0 12px; margin-bottom: 10px; min-height: 48px; border-radius: var(--ea-radius);
-    border: 1px solid var(--ea-line); background: var(--ea-bg); color: var(--ea-muted); }
-  .ea-player input { flex: 1; min-width: 0; padding: 12px 0; border: 0; background: none; color: var(--ea-text); font: inherit; font-size: 18px; outline: none; }
-  .ea-player input::placeholder { color: var(--ea-muted); }
+  .ovr-boxes { margin-bottom: 4px; }
+  .ovr-boxes input, .price input { width: 100%; min-width: 0; height: 44px; padding: 0 12px; border-radius: 4px; border: 1px solid var(--ea-input-line); background: var(--ea-input); color: var(--ea-text); font: inherit; font-size: 16px; }
+  .ovr-boxes input:focus, .price input:focus { outline: none; border-color: var(--ea-text); }
+  .price input::placeholder { color: var(--ea-text-2); opacity: .8; }
+  .ea-player { display: flex; align-items: center; gap: 10px; padding: 0 14px; margin-bottom: 10px; min-height: 48px; border-radius: 4px;
+    border: 1px solid var(--ea-input-line); background: var(--ea-input); color: var(--ea-text); }
+  .ea-player input { flex: 1; min-width: 0; padding: 12px 0; border: 0; background: none; color: var(--ea-text); font: inherit; font-size: 17px; outline: none; }
+  .ea-player input::placeholder { color: var(--ea-text-2); }
   .ea-player:focus-within { border-color: var(--ea-text); }
-  .dd { margin-bottom: 8px; }
-  .dd-row { display: flex; align-items: center; gap: 14px; width: 100%; min-height: 48px; padding: 6px 14px; border-radius: var(--ea-radius);
-    border: 1px solid var(--ea-line); background: var(--ea-control); color: var(--ea-text); text-align: left; }
-  .dd-row:hover { background: var(--ea-control-hover); }
+  /* EA's dropdowns: two to a row, slate, bold label, white caret */
+  .dd-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 6px; }
+  .dd { position: relative; min-width: 0; }
+  .dd.open { z-index: 20; }
+  .dd-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 48px; padding: 6px 14px; border-radius: 4px;
+    border: 1px solid transparent; background: var(--ea-row); color: var(--ea-text); text-align: left; }
+  .dd-row:hover { background: var(--ea-row-hover); }
   .dd.open .dd-row { border-color: var(--ea-text); border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
-  .dd.set .dd-row { border-color: var(--ea-text); }
-  .dd-icon { width: 26px; display: flex; justify-content: center; }
-  .dd-label { flex: 1; font-size: 16px; font-weight: 400; line-height: 1.2; }
-  .dd-label small { display: block; font-size: 12px; font-weight: 600; color: var(--ea-muted); }
+  .dd.set .dd-row { border-color: color-mix(in srgb, var(--ea-mint) 55%, transparent); }
+  .dd-icon { width: 26px; flex: none; display: flex; justify-content: center; }
+  .dd-label { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dd-label small { display: block; font-size: 11px; font-weight: 600; color: var(--ea-muted); }
   .dd-clear { padding: 4px 8px; color: var(--ea-muted); font-size: 14px; border-radius: 6px; }
-  .dd-clear:hover { color: var(--ea-text); background: var(--ea-control-hover); }
-  .dd-caret { font-size: 12px; color: var(--ea-muted); }
-  .dd-panel { border: 1px solid var(--ea-text); border-top: 0; border-radius: 0 0 var(--ea-radius) var(--ea-radius); background: var(--ea-surface-2); padding: 4px 0; }
+  .dd-clear:hover { color: var(--ea-text); background: var(--ea-row-hover); }
+  .dd-caret { font-size: 14px; color: var(--ea-text); }
+  .dd-panel { position: absolute; left: 0; right: 0; top: 100%; border: 1px solid var(--ea-text); border-top: 0; border-radius: 0 0 4px 4px;
+    background: var(--ea-surface-2); padding: 4px 0; box-shadow: 0 14px 30px rgba(0,0,0,.5); }
   .dd-opts { max-height: 280px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--ea-line-strong) var(--ea-surface-2); }
   .dd-opt { display: flex; align-items: center; gap: 16px; width: 100%; min-height: 48px; padding: 8px 14px; border: 0; border-radius: 0; background: none; color: var(--ea-text); text-align: left; font-size: 15px; }
   .dd-opt:hover { background: var(--ea-control-hover); }
@@ -533,28 +567,37 @@ const CSS = `
   .sg-face { flex: none; width: 34px; height: 34px; border-radius: 50%; overflow: hidden; background: var(--ea-control); }
   .sg-face img { width: 100%; height: 100%; object-fit: cover; object-position: top; }
   .dd-empty { color: var(--ea-muted); font-size: 13px; padding: 8px 14px; }
-  .price { display: grid; grid-template-columns: 40px 48px 1fr 48px; align-items: center; gap: 8px; margin-bottom: 8px; }
-  .price-k { color: var(--ea-muted); font-size: 13px; }
-  .price input { text-align: center; }
-  .price .step { height: 48px; border: 1px solid var(--ea-line); border-radius: var(--ea-radius); background: var(--ea-control); color: var(--ea-text); font-size: 20px; font-weight: 500; }
-  .price .step:hover { background: var(--ea-control-hover); }
-  .profit { color: var(--ea-text-2); font-size: 13px; line-height: 1.5; margin: 0 4px 8px; }
-  .profit b { color: var(--ea-text); font-weight: 500; }
-  .profit b.pos { color: var(--ea-success); } .profit b.neg { color: var(--ea-danger); }
-  .profit .muted { color: var(--ea-muted); }
-  .search-actions { display: flex; justify-content: flex-end; margin-top: 8px; }
-  .search-hint { color: var(--ea-muted); font-size: 12px; margin-top: 10px; }
-  .recent { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; margin-bottom: 6px; border: 1px solid var(--ea-line);
-    border-radius: var(--ea-radius); background: var(--ea-control); color: var(--ea-text); text-align: left; }
-  .recent:hover { background: var(--ea-control-hover); }
+  /* EA's "Buy Now Price:" block: heading and Clear, then Min: and Max:
+     side by side, each a box between a − and a + */
+  .sec-h { display: flex; align-items: baseline; justify-content: space-between; margin: 18px 0 8px; font-size: 17px; font-weight: 600; }
+  .sec-clear { border: 0; background: none; padding: 2px 4px; color: var(--ea-muted); font-size: 14px; }
+  .sec-clear:hover { color: var(--ea-text); }
+  .mm { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 48px; margin-bottom: 4px; }
+  .mm-col { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .mm-k { font-size: 15px; font-weight: 500; color: var(--ea-text); }
+  .price { display: grid; grid-template-columns: 30px minmax(0, 1fr) 30px; align-items: center; gap: 8px; }
+  .price .step { height: 36px; padding: 0; border: 0; background: none; color: var(--ea-text); font-size: 26px; font-weight: 500; line-height: 1; border-radius: 4px; }
+  .price .step[data-dir='-1'], .price .step[data-sell-step='-1'] { color: var(--ea-muted); }
+  .price .step:hover { background: var(--ea-btn); color: var(--ea-text); }
+  #ea-search .profit { color: var(--ea-text-2); font-size: 13px; line-height: 1.5; margin: 22px 0 0; }
+  #ea-search .profit b { color: var(--ea-text); font-weight: 500; }
+  #ea-search .profit b.pos { color: var(--ea-success); } #ea-search .profit b.neg { color: var(--ea-danger); }
+  #ea-search .profit .muted { color: var(--ea-muted); }
+  .search-hint { color: var(--ea-muted); font-size: 12px; margin: 14px 0 16px; }
+  .recent { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; margin-bottom: 6px; border: 1px solid var(--ea-input-line);
+    border-radius: 4px; background: var(--ea-input); color: var(--ea-text); text-align: left; }
+  .recent:hover { background: var(--ea-row-hover); }
   .recent .rc-main { flex: 1; min-width: 0; }
   .recent .rc-name { display: block; font-size: 14px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .recent .rc-when { display: block; color: var(--ea-muted); font-size: 12px; }
   .recent .rc-use { color: var(--ea-accent); font-size: 13px; font-weight: 500; }
 
-  /* Start bar: pinned to the bottom of the settings column */
-  .runbar { position: sticky; bottom: 0; z-index: 6; padding: 16px; background: var(--ea-panel); border-top: 1px solid var(--ea-line); }
-  .start { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; min-height: 48px; border: 0; border-radius: var(--ea-radius);
+  /* EA's Reset and Search pair, pinned to the bottom of the panel */
+  .runbar { position: relative; z-index: 6; padding: 14px 16px 12px; background: var(--ea-float); box-shadow: 0 -10px 18px -12px rgba(0,0,0,.6); }
+  .run-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .reset-search { min-height: 48px; border: 1px solid var(--ea-btn-line); border-radius: 6px; background: var(--ea-btn); color: var(--ea-text); font: 400 20px/20px var(--ea-font); padding: 12px 24px; }
+  .reset-search:hover { background: var(--ea-row-hover); }
+  .start { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; min-height: 48px; border: 0; border-radius: 6px;
     background: var(--ea-primary); color: var(--ea-primary-ink); font: 400 20px/20px var(--ea-font); padding: 12px 24px; }
   .start svg { width: 16px; height: 16px; }
   .start:hover:not(:disabled) { background: var(--ea-primary-hover); }
@@ -564,23 +607,25 @@ const CSS = `
   .start:disabled { background: #4f504c; color: #787873; }
   .run-status { margin-top: 8px; min-height: 18px; color: var(--ea-muted); font-size: 13px; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .run-status.bad { color: var(--ea-warning); }
+  .run-status.go { cursor: pointer; text-decoration: underline; }
 
   /* right column: the session */
-  .live { min-height: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 12px; padding: 16px; overflow: hidden; }
+  .live { min-height: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 12px; padding: 16px; overflow: hidden;
+    background: color-mix(in srgb, var(--ea-float) 94%, transparent); border-radius: 16px; box-shadow: 0 16px 40px rgba(0,0,0,.35); }
   .live-head { display: flex; align-items: center; gap: 12px; }
-  .live-head h2 { margin: 0; font-size: 18px; line-height: 20px; font-weight: 500; color: var(--ea-muted); }
+  .live-head h2 { margin: 0; font-size: 18px; line-height: 20px; font-weight: 600; color: var(--ea-text); }
   .dash { display: grid; grid-template-columns: 1fr 0.9fr 1.3fr 1.2fr; grid-template-rows: auto auto; gap: 12px; }
-  .tile { border-radius: var(--ea-radius-lg); padding: 14px; display: flex; flex-direction: column; justify-content: center; background: var(--ea-surface); }
+  .tile { border-radius: var(--ea-radius-lg); padding: 14px; display: flex; flex-direction: column; justify-content: center; background: var(--ea-row); }
   .tile .v { font-size: 26px; font-weight: 500; display: flex; align-items: center; }
   .tile .k { font-size: 12px; color: var(--ea-muted); }
   .tile.profit .v { color: var(--ea-coin); }
   .tile.searches .v { color: var(--ea-accent); }
-  .panelbox { background: var(--ea-surface); border: 0; border-radius: var(--ea-radius-lg); padding: 12px 14px; }
+  .panelbox { background: var(--ea-row); border: 0; border-radius: var(--ea-radius-lg); padding: 12px 14px; }
   .top-snipes h3 { margin: 0 0 8px; font-size: 18px; line-height: 20px; font-weight: 500; color: var(--ea-muted); }
   .ts-row { display: flex; justify-content: space-between; color: var(--ea-text-2); font-size: 13px; padding: 2px 0; }
   .ts-row:first-of-type { color: var(--ea-text); font-size: 15px; font-weight: 500; }
   .counters { grid-row: span 2; display: grid; gap: 6px; }
-  .counter { display: flex; align-items: center; justify-content: space-between; padding: 9px 12px; border-radius: var(--ea-radius); background: var(--ea-surface); border-left: 3px solid; font-size: 15px; }
+  .counter { display: flex; align-items: center; justify-content: space-between; padding: 9px 12px; border-radius: var(--ea-radius); background: var(--ea-row); border-left: 3px solid; font-size: 15px; }
   .counter .n { font-size: 15px; font-weight: 500; }
   .c-green { border-left-color: var(--ea-success); } .c-red { border-left-color: var(--ea-danger); } .c-blue { border-left-color: var(--ea-accent); }
   .c-yellow { border-left-color: var(--ea-coin); } .c-orange { border-left-color: var(--ea-warning); }
@@ -623,8 +668,10 @@ const CSS = `
 
   @media (max-width: 1100px) {
     .body { grid-template-columns: 1fr; overflow-y: auto; }
-    .settings { overflow: visible; border-right: 0; }
-    .live { overflow: visible; }
+    .settings { overflow: visible; min-height: auto; }
+    .settings-scroll { overflow: visible; flex: none; }
+    .runbar { position: sticky; bottom: -20px; padding-bottom: 32px; border-radius: 0 0 16px 16px; }
+    .live { overflow: visible; min-height: auto; }
     .dash { grid-template-columns: 1fr 1fr; }
     .counters, .ring-box { grid-column: span 2; grid-row: auto; }
     .feeds { grid-template-columns: 1fr; }
@@ -669,8 +716,13 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     });
   }
 
+  // Laid out like EA's own "Search the Transfer Market" screen: a back
+  // arrow and title over the pitch artwork, the search on a floating panel
+  // with EA's tab row, dropdown grid and price rows, and Reset beside the
+  // gradient button at the bottom.
   page.innerHTML = `
     <div class="top">
+      <button class="close" id="close" type="button" aria-label="Close Nova AI" title="Back to the web app">${BACK}</button>
       <span class="logo">${NOVA_LOGO_SVG}</span>
       <h1>Nova AI</h1>
       <span class="ver" title="Nova Trade version">v${esc(import.meta.env.VITE_EXTENSION_VERSION)}</span>
@@ -682,14 +734,20 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         <span class="bal" id="w-coins" title="Your coins"><span class="amt"></span>${COIN}</span>
         <span class="bal" id="w-points" title="Your FC Points"><span class="amt"></span><span class="fp" aria-hidden="true">FP</span></span>
       </span>
-      <button class="close" id="close" type="button" aria-label="Close Nova AI">✕</button>
     </div>
     <div class="notice" id="notice" hidden></div>
     <div class="body">
-      <div class="settings" id="settings">
+      <div class="settings" id="settings" data-tab="search">
+        <div class="tabs" role="tablist" aria-label="Nova AI">
+          <button type="button" class="tab" role="tab" data-tab="search" aria-selected="true">Search</button>
+          <button type="button" class="tab" role="tab" data-tab="settings" aria-selected="false">Settings</button>
+        </div>
         <div class="settings-scroll"><div id="targets"></div><div id="recent"></div><div id="knobs"></div></div>
         <div class="runbar">
-          <button class="start" id="start" type="button">${PLAY}<span>Start</span></button>
+          <div class="run-actions">
+            <button class="reset-search" id="nf-reset" type="button">Reset</button>
+            <button class="start" id="start" type="button">${PLAY}<span>Start</span></button>
+          </div>
           <div class="run-status" id="run-status" aria-live="polite"></div>
         </div>
       </div>
@@ -732,6 +790,13 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     renderTargets();
     renderRecent();
     renderKnobs();
+  }
+
+  /** EA's tab row over the left panel: the search, or the bot's settings. */
+  function showTab(tab: 'search' | 'settings'): void {
+    $('settings').dataset.tab = tab;
+    for (const b of root.querySelectorAll<HTMLElement>('.tabs [data-tab]')) b.setAttribute('aria-selected', String(b.dataset.tab === tab));
+    root.querySelector('.settings-scroll')?.scrollTo?.({ top: 0 });
   }
 
   // ---- recent searches ----------------------------------------------------
@@ -1218,23 +1283,30 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     return `left:${((form.minOvr - OVR_MIN) / span) * 100}%;right:${((OVR_MAX - form.maxOvr) / span) * 100}%`;
   }
 
-  function priceHtml(key: 'minBuy' | 'maxBuy', label: string): string {
-    const v = form[key];
-    return `<div class="price"><span class="price-k">${label}</span>
-      <button type="button" class="step" data-price="${key}" data-dir="-1" aria-label="Lower ${label.toLowerCase()} price">−</button>
-      <input id="nf-${key}" inputmode="numeric" placeholder="Any" value="${v == null ? '' : fmt(v)}" aria-label="${label} buy now price" />
-      <button type="button" class="step" data-price="${key}" data-dir="1" aria-label="Raise ${label.toLowerCase()} price">+</button></div>`;
+  /** A section heading the way EA's panel writes them ("Buy Now Price:"),
+   * with its "Clear" on the right. */
+  function secHead(title: string, clear: string): string {
+    return `<div class="sec-h"><span>${esc(title)}</span><button type="button" class="sec-clear" data-clear-sec="${clear}">Clear</button></div>`;
   }
 
-  /** The auto-sell price, right under the max buy price so the two (and
+  /** One price box as EA lays them out: "Min:" above, then − box +. */
+  function priceHtml(key: 'minBuy' | 'maxBuy', label: string): string {
+    const v = form[key];
+    return `<div class="mm-col"><span class="mm-k">${label}:</span><div class="price">
+      <button type="button" class="step" data-price="${key}" data-dir="-1" aria-label="Lower ${label.toLowerCase()} price">−</button>
+      <input id="nf-${key}" inputmode="numeric" placeholder="Any" value="${v == null ? '' : fmt(v)}" aria-label="${label} buy now price" />
+      <button type="button" class="step" data-price="${key}" data-dir="1" aria-label="Raise ${label.toLowerCase()} price">+</button></div></div>`;
+  }
+
+  /** The auto-sell price, right under the buy now prices so the two (and
    * the profit between them) read together. Empty: the FUTBIN price. */
   function sellHtml(): string {
     const a = shown().autoSell;
-    return `<div class="price"><span class="price-k">Sell</span>
+    return `<div class="mm"><div class="mm-col"><span class="mm-k">Sell at:</span><div class="price">
       <button type="button" class="step" data-sell-step="-1" aria-label="Lower sell price">−</button>
       <input id="nf-sell" inputmode="numeric" placeholder="FUTBIN" value="${a.mode === 'fixed' ? fmt(a.fixedPrice) : ''}" aria-label="Sell price (auto-sell)" />
-      <button type="button" class="step" data-sell-step="1" aria-label="Raise sell price">+</button></div>
-      <div class="profit" id="nf-profit" aria-live="polite"></div>`;
+      <button type="button" class="step" data-sell-step="1" aria-label="Raise sell price">+</button></div></div>
+      <div class="mm-col"><div class="profit" id="nf-profit" aria-live="polite"></div></div></div>`;
   }
 
   /** What selling at the Sell price leaves after EA's tax, and the profit
@@ -1289,25 +1361,12 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   }
 
   function renderTargets(): void {
-    const wasOpen = root.querySelector('#targets details')?.hasAttribute('open') ?? true;
     const players = catalog?.players.length ?? 0;
     const hint = !catalog
       ? "Loading EA's lists and players. Keep the web app open; they appear here on their own."
       : `${fmt(players)} players from EA's player list.${catalog.notes?.length ? ` Problems: ${catalog.notes.join(', ')}` : ''}`;
 
-    $('targets').innerHTML = section(
-      'Search',
-      `<div id="ea-search">
-        <div class="lbl">Rating</div>
-        <div class="range2">
-          <div class="track"><i id="ovr-fill" style="${ovrFill()}"></i></div>
-          <input type="range" id="nf-ovr-lo" min="${OVR_MIN}" max="${OVR_MAX}" value="${form.minOvr}" aria-label="Min rating" />
-          <input type="range" id="nf-ovr-hi" min="${OVR_MIN}" max="${OVR_MAX}" value="${form.maxOvr}" aria-label="Max rating" />
-        </div>
-        <div class="ovr-boxes">
-          <label><span>Min</span><input id="nf-minovr" inputmode="numeric" value="${form.minOvr}" /></label>
-          <label><span>Max</span><input id="nf-maxovr" inputmode="numeric" value="${form.maxOvr}" /></label>
-        </div>
+    $('targets').innerHTML = `<div class="ea-panel" id="ea-search">
         <div class="ea-player combo">${
           form.player
             ? `<div class="picked">${
@@ -1317,21 +1376,27 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
               }<span class="r">${form.player.rating ?? ''}</span><b>${esc(form.player.name)}</b>
                 <button type="button" id="nf-unpick" aria-label="Clear player">✕</button></div>`
             : `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="10" cy="10" r="6.5" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M15 15l6 6" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>
-               <input id="nf-player" placeholder="${players > 0 ? 'Player name' : 'Player name or id'}" autocomplete="off" value="${esc(form.playerQuery)}"
+               <input id="nf-player" placeholder="${players > 0 ? 'Type Player Name' : 'Type Player Name or id'}" autocomplete="off" value="${esc(form.playerQuery)}"
                 role="combobox" aria-label="Player" aria-expanded="false" aria-controls="nf-suggest" aria-autocomplete="list" />
                <div class="suggest" id="nf-suggest" role="listbox" hidden></div>`
         }</div>
-        ${DDS.map(ddHtml).join('')}
-        <div class="lbl" style="margin-top:16px">Buy now price, and the price to sell at</div>
-        ${priceHtml('minBuy', 'Min')}
-        ${priceHtml('maxBuy', 'Max')}
+        <div class="dd-grid">${DDS.map(ddHtml).join('')}</div>
+        ${secHead('Rating:', 'ovr')}
+        <div class="range2">
+          <div class="track"><i id="ovr-fill" style="${ovrFill()}"></i></div>
+          <input type="range" id="nf-ovr-lo" min="${OVR_MIN}" max="${OVR_MAX}" value="${form.minOvr}" aria-label="Min rating" />
+          <input type="range" id="nf-ovr-hi" min="${OVR_MIN}" max="${OVR_MAX}" value="${form.maxOvr}" aria-label="Max rating" />
+        </div>
+        <div class="mm ovr-boxes">
+          <label class="mm-col"><span class="mm-k">Min:</span><input id="nf-minovr" inputmode="numeric" value="${form.minOvr}" /></label>
+          <label class="mm-col"><span class="mm-k">Max:</span><input id="nf-maxovr" inputmode="numeric" value="${form.maxOvr}" /></label>
+        </div>
+        ${secHead('Buy Now Price:', 'buy')}
+        <div class="mm">${priceHtml('minBuy', 'Min')}${priceHtml('maxBuy', 'Max')}</div>
+        ${secHead('Sell Price:', 'sell')}
         ${sellHtml()}
-        <div class="search-actions"><button type="button" class="ghost" id="nf-reset">Clear search</button></div>
         <div class="search-hint">${esc(hint)}</div>
-      </div>`,
-      '',
-      wasOpen,
-    );
+      </div>`;
     if (openDd) {
       const opt =
         root.querySelector<HTMLElement>('.dd.open .dd-opt[aria-selected="true"]') ??
@@ -1443,10 +1508,15 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       const a = shown().autoSell;
       const base = (input ? parsePrice(input.value) : null) ?? a.fixedPrice;
       setSellPrice(stepPrice(base, Number(el.dataset.sellStep)));
-    } else if (el.id === 'nf-reset') {
-      form = blankForm();
-      openDd = null;
-      renderTargets();
+    } else if (el.dataset.clearSec) {
+      // A section's own "Clear", as on EA's panel.
+      const sec = el.dataset.clearSec;
+      if (sec === 'sell') setSellPrice(null);
+      else {
+        if (sec === 'ovr') setOvr(OVR_MIN, OVR_MAX);
+        else form = { ...form, minBuy: null, maxBuy: null };
+        renderTargets();
+      }
     }
     // A button inside <summary> must not also fold the card.
     if (el.closest('summary')) e.preventDefault();
@@ -1788,7 +1858,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       text = `Running for ${clock(startedAt ? Date.now() - startedAt : 0)}`;
       if ('error' in r) text += `. Search not updated: ${r.error}`;
     } else if (ackNeeded()) {
-      text = 'Confirm the risk level above to start';
+      text = 'Confirm the risk level on the Settings tab to start';
       bad = true;
     } else if ('error' in r) {
       text = r.error;
@@ -1806,6 +1876,9 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     start.title = start.disabled ? text : '';
     status.textContent = text;
     status.classList.toggle('bad', bad);
+    // Start waits on the risk confirmation, which is on the Settings tab:
+    // the line saying so takes the user there.
+    status.classList.toggle('go', !running && !!sniper && ackNeeded());
   }
 
   // ---- live side ----------------------------------------------------------
@@ -2162,6 +2235,20 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   onTrusted($('reset'), 'click', () => {
     deps.getSniper()?.reset();
     refreshLive();
+  });
+  // EA's Reset, beside the Start button: empties the whole search.
+  onTrusted($('nf-reset'), 'click', () => {
+    form = blankForm();
+    openDd = null;
+    showTab('search');
+    renderTargets();
+  });
+  onTrusted($('run-status'), 'click', () => {
+    if ($('run-status').classList.contains('go')) showTab('settings');
+  });
+  onTrusted(root.querySelector('.tabs')!, 'click', (e) => {
+    const tab = (e.target as HTMLElement).closest<HTMLElement>('[data-tab]')?.dataset.tab;
+    if (tab === 'search' || tab === 'settings') showTab(tab);
   });
   onTrusted($('close'), 'click', () => api.close());
   // Esc closes the page from anywhere on EA's page, like the nav item does.

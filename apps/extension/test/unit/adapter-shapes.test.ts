@@ -683,6 +683,30 @@ describe('diagnostics', () => {
   });
 });
 
+describe('transfer list reload (Nova AI counts)', () => {
+  // The adapter's clock is the real one and its last reload is module
+  // state (adapter.ts is imported once), so the 15 s gap is shown in one
+  // test: a reload, then another straight after.
+  it("has the web app reload its transfer list, then refuses another within 15 s", async () => {
+    const svc = observableServices();
+    install(svc.services);
+    const first = await act({ action: 'pile' });
+    expect(first.data).toMatchObject({ action: 'pile', ok: true });
+    expect(await signer.verify(canonicalActMessage('action_result', first.data), first.mac!)).toBe(true);
+    expect(svc.requestTransferItems).toHaveBeenCalledTimes(1);
+    expect(svc.requestTransferItems.mock.calls[0]).toEqual([]);
+
+    const again = await act({ action: 'pile' });
+    expect(again.data).toMatchObject({ ok: false, error: 'pile_too_soon' });
+    expect(svc.requestTransferItems).toHaveBeenCalledTimes(1);
+  });
+
+  it('says the promise shape has no reload call', async () => {
+    install(promiseServices().services);
+    expect((await act({ action: 'pile' })).data).toMatchObject({ ok: false, error: 'pile_unsupported' });
+  });
+});
+
 describe('auto-sell: listing a bought card', () => {
   async function searchAndMaybeBuy(tradeId: number, buy: boolean) {
     const svc = observableServices();

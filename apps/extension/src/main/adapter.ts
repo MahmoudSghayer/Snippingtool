@@ -219,7 +219,7 @@ function post(kind: string, data: unknown): void {
 }
 
 interface ActionResult {
-  action: 'search' | 'buy' | 'readResult' | 'diagnostics' | 'list';
+  action: 'search' | 'buy' | 'readResult' | 'diagnostics' | 'list' | 'pile';
   requestId: string;
   ok: boolean;
   requestedAt: number;
@@ -961,6 +961,32 @@ async function actList(requestId: string, tradeId: string, startPrice: number, b
   }
 }
 
+/** The shortest gap between two transfer-list reloads `actRefreshPile`
+ * asks EA for, whatever content sends: they are real requests to EA. */
+const PILE_REFRESH_MIN_GAP_MS = 15_000;
+let lastPileRefreshAt = -Infinity;
+
+/** Has the web app reload the transfer list through its own service (Nova
+ * AI's Sold / Unsold / Transfer list counts). Its GET of the trade pile is
+ * read by passive observation like any other (`handlePileBody`), so this
+ * replies only whether EA answered. */
+async function actRefreshPile(requestId: string): Promise<void> {
+  const requestedAt = now();
+  const { result, selection } = runProbeAndReport();
+  const shape = selection.shape;
+  if (!result.ok || !shape) return fail('pile', requestId, requestedAt, result.reason);
+  if (!shape.refreshPile) return fail('pile', requestId, requestedAt, 'pile_unsupported');
+  if (requestedAt - lastPileRefreshAt < PILE_REFRESH_MIN_GAP_MS) return fail('pile', requestId, requestedAt, 'pile_too_soon');
+  lastPileRefreshAt = requestedAt;
+  try {
+    await shape.refreshPile(servicesRoot() as Record<string, unknown>);
+    adapterLog.add(`pile refresh ok (${shape.name})`);
+    postResult({ action: 'pile', requestId, ok: true, requestedAt, completedAt: now() });
+  } catch (err) {
+    fail('pile', requestId, requestedAt, errorText(err), describeError(err));
+  }
+}
+
 async function actReadResult(requestId: string, tradeId: string): Promise<void> {
   const requestedAt = now();
   const { result, selection } = runProbeAndReport();
@@ -1036,7 +1062,8 @@ type ActRequest =
   | { action: 'readResult'; requestId: string; tradeId: string }
   | { action: 'list'; requestId: string; tradeId: string; startPrice: number; buyNowPrice: number }
   | { action: 'diagnostics'; requestId: string }
-  | { action: 'catalog'; requestId: string };
+  | { action: 'catalog'; requestId: string }
+  | { action: 'pile'; requestId: string };
 
 // Keep in sync with `adapterActRequestMessageSchema` (packages/shared/src/
 // ext-messages.ts): this file stays zod-free, so it re-checks the same shape
@@ -1045,7 +1072,7 @@ function asActRequest(value: unknown): ActRequest | null {
   const d = value as Record<string, unknown> | null;
   if (!d || typeof d !== 'object' || typeof d.requestId !== 'string' || d.requestId === '') return null;
   if (d.action === 'search') return d.filter && typeof d.filter === 'object' ? (d as unknown as ActRequest) : null;
-  if (d.action === 'diagnostics' || d.action === 'catalog') return d as unknown as ActRequest;
+  if (d.action === 'diagnostics' || d.action === 'catalog' || d.action === 'pile') return d as unknown as ActRequest;
   if (typeof d.tradeId !== 'string' || d.tradeId === '') return null;
   if (d.action === 'readResult') return d as unknown as ActRequest;
   if (d.action === 'list') {
@@ -1081,6 +1108,9 @@ async function handleActRequest(data: unknown, mac: unknown): Promise<void> {
   else if (request.action === 'readResult') await actReadResult(request.requestId, request.tradeId);
   else if (request.action === 'list') {
     if (LISTING_ENABLED) await actList(request.requestId, request.tradeId, request.startPrice, request.buyNowPrice);
+  }
+  else if (request.action === 'pile') {
+    if (LISTING_ENABLED) await actRefreshPile(request.requestId);
   }
   else if (request.action === 'catalog') await refreshCatalog(true);
   else actDiagnostics(request.requestId);

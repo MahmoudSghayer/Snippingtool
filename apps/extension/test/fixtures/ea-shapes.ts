@@ -86,12 +86,14 @@ export function observableServices() {
     (_item: unknown, _start: number, _buyNow: number, _seconds: number): unknown => observable({ success: true, data: {} }),
   );
   const clearTransferMarketCache = vi.fn((): void => undefined);
+  const requestTransferItems = vi.fn((): unknown => observable({ success: true, data: { items: [] } }));
   return {
-    services: { Item: { searchTransferMarket, bid, list, clearTransferMarketCache } },
+    services: { Item: { searchTransferMarket, bid, list, clearTransferMarketCache, requestTransferItems } },
     searchTransferMarket,
     bid,
     list,
     clearTransferMarketCache,
+    requestTransferItems,
   };
 }
 

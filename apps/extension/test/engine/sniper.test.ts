@@ -14,7 +14,7 @@ import {
 } from '@sl/shared';
 import { describe, expect, it, vi } from 'vitest';
 
-import { Sniper, searchMinBuy, type SniperDeps, type SniperFilter } from '../../src/engine/sniper.js';
+import { Sniper, missReason, searchMinBuy, type SniperDeps, type SniperFilter } from '../../src/engine/sniper.js';
 import { ACT_ERROR } from '../../src/lib/act-auth.js';
 
 import type { ActionOutcome } from '../../src/content/adapter-client.js';
@@ -399,7 +399,21 @@ describe('Sniper — search and buy', () => {
     await vi.waitFor(() => expect(h.buys).toEqual(['t-a']));
     release(20_000);
     await h.done();
-    expect(h.sniper.getLog().find((e) => e.kind === 'bought')?.sellPrice).toBe(20_000);
+    // Filled in when the lookup answers, without holding the bot up.
+    await vi.waitFor(() => expect(h.sniper.getLog().find((e) => e.kind === 'bought')?.sellPrice).toBe(20_000));
+  });
+
+  it('never lets a slow price lookup hold up a buy, even with a minimum profit', async () => {
+    const h = setup({
+      settings: { thresholds: { ...DEFAULT_BOT_SETTINGS.thresholds, minProfit: 15_000 } },
+      results: [[auction('t-a', 8_000)]],
+      // FUTBIN never answers: the profit is unknown, which is allowed.
+      estimateSellPrice: () => new Promise<number | null>(() => undefined),
+      maxSearches: 1,
+    });
+    h.sniper.start();
+    await vi.waitFor(() => expect(h.buys).toEqual(['t-a']));
+    await h.done();
   });
 
   it('looks a card\'s price up once for the searches that keep finding it', async () => {
@@ -1192,6 +1206,10 @@ describe('Sniper — auto-sell after a buy', () => {
     autoSell: { ...DEFAULT_BOT_SETTINGS.autoSell, enabled: true, ...over },
   });
   const listedLog = (h: Harness) => h.sniper.getLog().find((e) => e.kind === 'listed');
+  // The listing runs on its own after a buy: let it finish.
+  const settled = async () => {
+    for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 0));
+  };
   const notListed = (h: Harness) => h.sniper.getLog().find((e) => e.message.startsWith('not listed'));
 
   it('lists at the FUTBIN price moved by the chosen steps, starting bid one step lower', async () => {
@@ -1203,6 +1221,7 @@ describe('Sniper — auto-sell after a buy', () => {
     });
     h.sniper.start();
     await h.done();
+    await settled();
     expect(h.buys).toEqual(['t-a']);
     // 20,000 -> 19,750 -> 19,500 (250-coin steps), bid one step under.
     expect(h.lists).toEqual([['t-a', 19_250, 19_500]]);
@@ -1218,6 +1237,7 @@ describe('Sniper — auto-sell after a buy', () => {
     });
     h.sniper.start();
     await h.done();
+    await settled();
     expect(h.lists).toEqual([['t-a', 12_000, 12_250]]);
     expect(listedLog(h)?.message).toBe('Nova market price 12,000 coins, +1 step');
   });
@@ -1230,6 +1250,7 @@ describe('Sniper — auto-sell after a buy', () => {
     });
     h.sniper.start();
     await h.done();
+    await settled();
     expect(h.lists).toEqual([['t-a', 14_750, 15_000]]);
     expect(listedLog(h)?.message).toBe('your fixed price');
   });
@@ -1247,6 +1268,7 @@ describe('Sniper — auto-sell after a buy', () => {
     });
     h.sniper.start();
     await h.done();
+    await settled();
     const bought = h.sniper.getLog().find((e) => e.kind === 'bought');
     // 1,700 less 5% is 1,615: 585 under the 2,200 paid.
     expect(bought).toMatchObject({ price: 2_200, sellPrice: 1_700, profit: -585 });
@@ -1268,6 +1290,7 @@ describe('Sniper — auto-sell after a buy', () => {
     });
     h.sniper.start();
     await h.done();
+    await settled();
     expect(h.buys).toEqual([]);
   });
 
@@ -1281,6 +1304,7 @@ describe('Sniper — auto-sell after a buy', () => {
     });
     h.sniper.start();
     await h.done();
+    await settled();
     expect(h.sniper.getLog().find((e) => e.kind === 'bought')).toMatchObject({ sellPrice: 19_500 });
     expect(listedLog(h)?.price).toBe(19_500);
   });
@@ -1294,6 +1318,7 @@ describe('Sniper — auto-sell after a buy', () => {
     });
     h.sniper.start();
     await h.done();
+    await settled();
     expect(h.lists).toEqual([]);
     expect(notListed(h)?.message).toBe('not listed: no market price for this card (FUTBIN and Nova have none)');
   });
@@ -1309,6 +1334,7 @@ describe('Sniper — auto-sell after a buy', () => {
       });
       h.sniper.start();
       await h.done();
+    await settled();
       return h;
     };
     const guarded = await run(true);
@@ -1319,6 +1345,20 @@ describe('Sniper — auto-sell after a buy', () => {
     expect((await run(false)).lists).toEqual([['t-a', 7_900, 8_000]]);
   });
 
+  it('keeps searching while a listing is still on its way', async () => {
+    const h = setup({
+      settings: autoSell({ mode: 'fixed', fixedPrice: 15_000 }),
+      results: [[auction('t-a', 8_000)], []],
+      // EA never answers the listing.
+      listResult: () => new Promise(() => undefined) as unknown as ActionOutcome,
+      maxSearches: 2,
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.lists).toHaveLength(1);
+    expect(h.searches).toHaveLength(2);
+  });
+
   it('does nothing when auto-sell is off', async () => {
     const h = setup({
       results: [[auction('t-a', 8_000)]],
@@ -1327,6 +1367,7 @@ describe('Sniper — auto-sell after a buy', () => {
     });
     h.sniper.start();
     await h.done();
+    await settled();
     expect(h.buys).toEqual(['t-a']);
     expect(h.lists).toEqual([]);
   });
@@ -1340,21 +1381,35 @@ describe('Sniper — auto-sell after a buy', () => {
     });
     h.sniper.start();
     await h.done();
+    await settled();
     expect(notListed(h)?.message).toBe('not listed: list reported success: false');
   });
 });
 
-describe('Sniper — where a missed buy\'s time went', () => {
-  it('logs how long after the search the buy went out, and how long EA took to answer', async () => {
+describe('Sniper — a missed buy says why, in plain words', () => {
+  it("logs the reason, not EA's wording or the timings", async () => {
     const h = setup({
       results: [[auction('t-a', 8_000)]],
-      buyResult: () => ({ ok: false, error: 'item sold', latencyMs: 182 }),
+      buyResult: () => ({ ok: false, error: 'bid reported success: false (status 403)', latencyMs: 182 }),
       maxSearches: 1,
     });
     h.sniper.start();
     await h.done();
     const missed = h.sniper.getLog().find((e) => e.kind === 'failed');
-    expect(missed?.message).toBe('item sold (sent 0 ms after the search came back; EA answered in 182 ms)');
+    expect(missed?.message).toBe('someone else got it first');
+  });
+
+  it("puts EA's codes and the adapter's refusals into words", () => {
+    expect(missReason('bid reported success: false (status 461)')).toBe('someone else got it first');
+    expect(missReason('bid reported success: false (status 478)')).toBe('someone else got it first');
+    expect(missReason('bid reported success: false (status 470)')).toBe('not enough coins');
+    expect(missReason('bid reported success: false (status 458)')).toBe('EA wants a verification: solve it in the web app');
+    expect(missReason('bid reported success: false (status 512)')).toBe('EA is limiting requests: slow the bot down');
+    expect(missReason('bid reported success: false (status 500)')).toBe('EA refused it (error 500)');
+    expect(missReason(ACT_ERROR.priceMismatch)).toBe('the price changed');
+    expect(missReason(ACT_ERROR.listingUnknown)).toBe('the listing was gone');
+    expect(missReason('timed out waiting for adapter response')).toBe('EA did not answer in time');
+    expect(missReason(undefined)).toBe('EA did not say why');
   });
 });
 

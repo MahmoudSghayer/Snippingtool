@@ -76,6 +76,37 @@ const MAX_SEARCH_RESULTS = 50;
 const TOP_SNIPES = 5;
 /** Consecutive failed searches before the bot gives up. */
 const MAX_SEARCH_FAILURES_IN_A_ROW = 5;
+/** The longest a buy waits for its sell-price estimate (only needed for
+ * the minimum-profit check): a card this cheap is gone in moments, so a
+ * lookup still out after this counts as "unknown profit", which is
+ * allowed. The user's own sell price needs no lookup at all. */
+const PRE_BUY_ESTIMATE_WAIT_MS = 300;
+
+/**
+ * Why a buy missed, in the user's words: never EA's raw wording or the
+ * timings (they stay in the attempt telemetry). EA's codes as traders
+ * report them; the common one on a snipe is someone else's buy landing
+ * first.
+ */
+export function missReason(error: string | undefined): string {
+  if (!error) return 'EA did not say why';
+  const status = /status (\d{3})/.exec(error)?.[1];
+  if (status) {
+    if (status === '403' || status === '461' || status === '478') return 'someone else got it first';
+    if (status === '470') return 'not enough coins';
+    if (status === '458') return 'EA wants a verification: solve it in the web app';
+    if (status === '401') return 'your EA session ended: reload the web app';
+    if (status === '429' || status === '512' || status === '521') return 'EA is limiting requests: slow the bot down';
+    return `EA refused it (error ${status})`;
+  }
+  if (error === ACT_ERROR.priceMismatch) return 'the price changed';
+  if (error === ACT_ERROR.listingUnknown || error === ACT_ERROR.listingEntityUnknown) return 'the listing was gone';
+  if (error === ACT_ERROR.resourceMismatch) return 'a different card was listed';
+  if (error === ACT_ERROR.unauthenticated) return 'Nova AI lost its link to the page: reload it';
+  if (/timed out/i.test(error)) return 'EA did not answer in time';
+  return 'EA did not accept the buy';
+}
+
 /** How far up a search's price range its min buy-now price may step to
  * keep the search fresh (`searchMinBuy`), as a share of the range. */
 const FRESH_SEARCH_SHARE = 0.4;
@@ -597,7 +628,7 @@ export class Sniper {
         this.addSearchResult(target.name, found.matches, found.listings, found.cheapest);
         if (found.matches.length > 0) {
           this.setState({ phase: 'buying', phaseEndsAt: null, stopReason: null, stopDetail: null });
-          if (await this.buyMatches(found.matches, signal, found.at)) return;
+          if (await this.buyMatches(found.matches, signal)) return;
         }
       }
       this.deps.onChange();
@@ -694,10 +725,8 @@ export class Sniper {
     return { ok: true, matches, at, listings: collected.size, cheapest: prices.length ? Math.min(...prices) : null };
   }
 
-  /** Returns true when the bot stopped while buying. `searchedAt`: when
-   * the search that found `matches` came back, so a missed buy can say how
-   * long it took to send. */
-  private async buyMatches(matches: SniperMatch[], signal: AbortSignal, searchedAt: number): Promise<boolean> {
+  /** Returns true when the bot stopped while buying. */
+  private async buyMatches(matches: SniperMatch[], signal: AbortSignal): Promise<boolean> {
     const t = this.settings.thresholds;
     // Every listing's estimate starts now, side by side, before any buy: a
     // buy then waits for one lookup at most, and none waits for the last
@@ -720,10 +749,10 @@ export class Sniper {
       // moments) and the estimate is looked up afterwards, for the log.
       let estimate: Estimate | null = null;
       if (t.minProfit > 0) {
-        estimate = await this.estimate(m);
+        estimate = await this.estimateWithin(m, PRE_BUY_ESTIMATE_WAIT_MS);
         // Unknown profit is allowed: the user capped the price, and the
         // ledger may simply not have seen this card sell yet.
-        if (estimate.profit != null && estimate.profit < t.minProfit) {
+        if (estimate?.profit != null && estimate.profit < t.minProfit) {
           this.logSkip(
             m,
             `estimated profit ${coins(estimate.profit)} is under your minimum profit (${coins(t.minProfit)})`,
@@ -774,7 +803,6 @@ export class Sniper {
       // The resourceId binds the buy to the card this filter targets: the
       // adapter refuses it unless the listing it saw for this tradeId is
       // that card (a forged `auctions` message can claim any tradeId).
-      const sentAfterMs = this.now() - searchedAt;
       const result = await this.deps.adapter.buy(m.tradeId, m.buyNow, {
         resourceId: m.resourceId,
         assetId: m.assetId,
@@ -798,13 +826,12 @@ export class Sniper {
           latencyMs: result.latencyMs,
           errorCode: ACT_ERROR.timeoutUnknown,
         });
-        void result.late?.then(async (late) => {
+        void result.late?.then((late) => {
           if (!late.ok) return;
-          const { sellPrice, profit } = estimate ?? (await this.estimate(m));
-          this.recordBought(m, sellPrice, profit, late.latencyMs);
+          this.recordBought(m, late.latencyMs, estimate);
           // Shown now, not at the next search (the bot may have stopped).
           this.deps.onChange();
-          await this.autoSell(m);
+          this.autoSellInBackground(m);
         });
         if (signal.aborted) return true;
         this.deps.onChange();
@@ -812,9 +839,13 @@ export class Sniper {
       }
       if (signal.aborted && !result.ok) return true;
       if (result.ok) {
-        const { sellPrice, profit } = estimate ?? (await this.estimate(m));
-        this.recordBought(m, sellPrice, profit, result.latencyMs);
-        await this.autoSell(m);
+        // Nothing after a buy holds the bot up: the sell price fills in
+        // when its lookup answers, and the listing (a FUTBIN lookup and
+        // EA's listing call) runs on its own, while the bot goes straight
+        // on to the next listing and search. Only the user's own pause
+        // after a buy, when they set one, waits.
+        this.recordBought(m, result.latencyMs, estimate);
+        this.autoSellInBackground(m);
         if (t.stopAfterPurchases > 0 && this.runTotals.purchases >= t.stopAfterPurchases) {
           this.stop('purchase_limit');
           return true;
@@ -841,9 +872,7 @@ export class Sniper {
           assetId: m.assetId,
           rating: m.rating,
           price: m.buyNow,
-          // Where a miss's time went: our side (search back -> buy sent)
-          // and EA's (buy sent -> answer).
-          message: `${result.error ?? 'buy failed'} (sent ${sentAfterMs} ms after the search came back; EA answered in ${result.latencyMs} ms)`,
+          message: missReason(result.error),
         });
         this.deps.onAttempt?.({
           ...this.attemptBase(m),
@@ -881,6 +910,17 @@ export class Sniper {
     return { sellPrice, profit: sellPrice == null ? null : Math.floor(sellPrice * (1 - EA_TAX)) - m.buyNow };
   }
 
+  /** `estimate`, or null when it has not answered within `ms`. */
+  private async estimateWithin(m: SniperMatch, ms: number): Promise<Estimate | null> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<null>((resolve) => (timer = setTimeout(() => resolve(null), ms)));
+    try {
+      return await Promise.race([this.estimate(m), late]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   /** The user's own sell price when they set one (even with auto-sell off:
    * it is the price they said they sell at), else the market price, moved
    * by auto-sell's steps when auto-sell lists the card. The same price
@@ -891,6 +931,14 @@ export class Sniper {
     const market = await this.sellPrice(m.resourceId);
     if (market == null) return null;
     return a.enabled ? Math.max(MIN_SALE_PRICE, stepPrice(market, a.steps)) : market;
+  }
+
+  /** `autoSell` without holding up the bot. */
+  private autoSellInBackground(m: SniperMatch): void {
+    void this.autoSell(m).catch((err: unknown) => {
+      this.addLog({ kind: 'blocked', resourceId: m.resourceId, assetId: m.assetId, rating: m.rating, message: `not listed: ${String(err)}` });
+      this.deps.onChange();
+    });
   }
 
   /** Auto-sell: list a card the bot just bought, at the user's price (the
@@ -942,23 +990,36 @@ export class Sniper {
     });
   }
 
-  private recordBought(m: SniperMatch, sellPrice: number | null, profit: number | null, latencyMs: number): void {
+  /** Counts a buy at once. Its sell price and profit come from `known`
+   * when the buy already had them, else they are filled in (with the
+   * Profit figure and Top snipes) when the lookup answers. */
+  private recordBought(m: SniperMatch, latencyMs: number, known: Estimate | null): void {
     this.stats.purchases++;
     this.stats.coinsSpent += m.buyNow;
     this.runTotals.purchases++;
     this.runTotals.coinsSpent += m.buyNow;
-    if (profit != null) this.stats.profit += profit;
     const entry = this.addLog({
       kind: 'bought',
       resourceId: m.resourceId,
       assetId: m.assetId,
       rating: m.rating,
       price: m.buyNow,
-      sellPrice,
-      profit,
+      sellPrice: known?.sellPrice ?? null,
+      profit: known?.profit ?? null,
       message: 'bought',
     });
-    this.recordTopSnipe(entry);
+    const settle = (e: Estimate) => {
+      entry.sellPrice = e.sellPrice;
+      entry.profit = e.profit;
+      if (e.profit != null) this.stats.profit += e.profit;
+      this.recordTopSnipe(entry);
+    };
+    if (known) settle(known);
+    else
+      void this.estimate(m).then((e) => {
+        settle(e);
+        this.deps.onChange();
+      });
     this.deps.onAttempt?.({
       ...this.attemptBase(m),
       outcome: 'success',

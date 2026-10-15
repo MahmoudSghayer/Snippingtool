@@ -299,12 +299,19 @@ The dash's **Sold** and **Unsold** counters and its **Transfer list** panel
 listed) are counted from the trade-pile responses EA's own page already
 fetched, the same ones the trade lifecycle reads (section 4, item 8).
 Content keeps the last full `/tradepile` GET and applies each partial
-response (relist, item move) on top of it (`lib/transfer-list.ts`). It is
-passive: nothing is fetched for these figures. Until EA has loaded the
-whole Transfer List once on this page load they show "—" and ask the user
-to open it in EA. The page checks for new figures on every refresh and on
-its one-second wallet tick, writing only when they changed. Kept in memory
-only, never stored or sent.
+response (relist, item move) on top of it (`lib/transfer-list.ts`). EA's
+page only loads that list when its Transfer List opens, which it does not
+while Nova AI's page covers it, so the web app is asked to reload it
+(`lib/pile-refresh.ts`, the adapter's `pile` act): about 2 s after each card
+the bot lists, and every 3 minutes while the bot runs or the page is open
+(at once on a start or an open when the last reload is older), never more
+than once in 30 s; the adapter itself refuses one within 15 s
+(`pile_too_soon`). The reload's answer only says EA answered: the list
+reaches the counts through passive observation like any other load (and the
+trade lifecycle sees each sale the same way). Until a whole list has been
+seen they show "—" and ask the user to open it in EA. The page checks for
+new figures on every refresh and on its one-second wallet tick, writing only
+when they changed. Kept in memory only, never stored or sent.
 
 The Profit, Searches, Bought, Missed and Coins spent figures and Top snipes
 count everything since the page loaded, across Stop and Start, like the
@@ -316,8 +323,16 @@ every listing at or under the price cap (cheapest first), and starts the next
 search a random delay from the user's range after the last one started (start
 to start, so EA's answer time and any buying come out of the delay rather than
 being added to it), with breaks every N searches and rests every N
-minutes. Each missed buy's log line says how long after the search it went out
-and how long EA took to answer. EA answers a search it was just asked, word for
+minutes. Nothing after a buy holds the bot up: the buy counts at once, its
+sell price and profit fill in when their lookup answers, and auto-sell's
+listing (a FUTBIN lookup and EA's listing call) runs on its own while the
+bot goes on to the next listing and search; only the user's own "Pause
+after a buy" (Safety, 10 s by default, 0 for none) waits. With a minimum
+profit set, a buy waits at most 300 ms for its estimate (unknown profit is
+allowed). A missed buy's log line gives the reason in plain words
+(`missReason`: "someone else got it first" for EA's 403 / 461 / 478, "not
+enough coins", a verification, EA limiting requests), never EA's wording or
+the timings, which stay in the attempt telemetry. EA answers a search it was just asked, word for
 word, from its cache, so each search steps its min buy-now price one notch up
 EA's price grid (`searchMinBuy`): from the filter's own min (or none) up to
 40% of the way to the max price (1,000 coins over the min with no max price),
@@ -401,11 +416,23 @@ cost. Every outcome is in the log. The listing itself is the adapter's
 `list` act (`services.Item.list(item, start, buyNow, 3600)` in the
 observable shape, UNVERIFIED like the rest of it; the promise shape has
 none and answers `list_unsupported`), and the adapter only lists an item
-it bought itself on that page load (`list_not_bought` otherwise).
+it bought itself on that page load (`list_not_bought` otherwise). The
+transfer list reload is the adapter's `pile` act
+(`services.Item.requestTransferItems()` in the observable shape, what the
+web app is said to call when its Transfer List opens, UNVERIFIED; the
+promise shape answers `pile_unsupported`).
 
-**Snipe targets are built like EA's own search panel**: OVR range slider
-with Min/Max OVR, "Type Player Name" (with EA portraits), and Quality,
-Rarity, Position, Chemistry Style, Country/Region, League and Club rows.
+**The page is laid out like EA's "Search the Transfer Market" screen**: a
+back arrow and title on EA's navy bar, the pitch artwork behind two floating
+panels, and on the left one EA's tab row (Search / Settings; Start waiting on
+the risk confirmation links to Settings), then Reset beside the gradient
+Start button at the bottom.
+
+**Snipe targets are built like EA's own search panel**: "Type Player Name"
+(with EA portraits), then Quality, Rarity, Position, Chemistry Style,
+Country/Region, League and Club two to a row, then "Rating:", "Buy Now
+Price:" and "Sell Price:", each with its own Clear and EA's Min:/Max: boxes
+between − and +.
 The lists are the web app's own: `main/adapter.ts` calls its
 `UTDataProviderFactory` (`getRareItemLevelDP`, `getItemRarityDP`,
 `getPlayerPositionDP`, `getPlayStyleDP`, `getNationDP`, `getLeagueDP`,
