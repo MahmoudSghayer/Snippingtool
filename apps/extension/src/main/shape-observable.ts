@@ -3,6 +3,7 @@
  * autobuyers describe the FC web app. UNVERIFIED — see
  * docs/06-extension.md §4, day-one checklist.
  *
+ *   window.services.Item.clearTransferMarketCache(), then
  *   window.services.Item.searchTransferMarket(criteria, pageNumber)
  *     -> { observe(scope, (sender, response) => ...) }
  *     response: { success: boolean, data: { items: ItemEntity[] } }
@@ -122,6 +123,21 @@ async function call(services: Obj, name: string, args: unknown[], timeoutMs: num
   return settle(returned, timeoutMs, onLate);
 }
 
+/** What the web app calls before every transfer-market search (FC 27 code,
+ * docs/06-extension.md "Web app shape"): without it `searchTransferMarket`
+ * answers an identical search from its page cache, so a bot repeating one
+ * search kept seeing the same stale page and almost never a new listing.
+ * A page without it, or a clear that throws, still searches. */
+function clearMarketCache(services: unknown): void {
+  const m = method(services, 'clearTransferMarketCache');
+  if (!m) return;
+  try {
+    apply(m.fn, m.target, []);
+  } catch {
+    // The search itself still runs.
+  }
+}
+
 /** Only an explicit `success: true` is a bought (or listed) item. */
 function bidSucceeded(response: unknown): boolean {
   return response !== null && typeof response === 'object' && (response as Obj).success === true;
@@ -138,6 +154,7 @@ export function createObservableShape(timeoutMs: number): ServiceShape {
     },
     async search(services, filter) {
       const criteria = observableSearchCriteria(filter);
+      clearMarketCache(services);
       const response = await call(services, 'searchTransferMarket', [criteria, 1], timeoutMs);
       // `success` must be there and true: a list with no verdict is not one.
       return { response, entries: extractListingArray(response, { requireSuccess: true }) };

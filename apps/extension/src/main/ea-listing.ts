@@ -101,7 +101,11 @@ export function normaliseListing(entry: unknown): NormalisedListing | null {
   const listing: NormalisedListing = {
     tradeId: toStr(tradeIdRaw),
     resourceId,
-    assetId: num(item.assetId, 0),
+    // UTAS JSON calls the base player `assetId`; the web app's own item
+    // entity calls it `databaseId` (docs/06-extension.md, "checked against
+    // the FC 27 web app"). Read as 0 there, the act result and the network
+    // response for the same listing disagreed on it.
+    assetId: num(firstPresent(item.assetId, item.databaseId), 0),
     rating: num(item.rating, 0),
     buyNowPrice: num(auction.buyNowPrice, 0),
     startingBid: num(auction.startingBid, 0),
