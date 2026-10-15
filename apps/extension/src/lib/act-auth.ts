@@ -141,7 +141,7 @@ export function canonicalize(value: unknown): string {
 
 /** The message kinds that carry a MAC: content's requests, and the
  * adapter's results and catalog (the Sniping Bot's target choices). */
-export type SignedMessageKind = 'act_request' | 'action_result' | 'catalog';
+export type SignedMessageKind = 'act_request' | 'action_result' | 'catalog' | 'credits';
 
 /** What a MAC covers: the message kind (so a request's MAC can never pass as
  * a result's or a catalog's, or vice versa) plus the whole `data` payload. */

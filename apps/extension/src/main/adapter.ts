@@ -198,6 +198,9 @@ const EA_HOST = /(^|\.)ea\.com$/i;
 // `closed` at the price paid, which is a purchase, not a sale.
 const PILE_PATH = /\/ut\/game\/[^/]+\/(tradepile|auctionhouse\/relist|item)\/?$/i;
 const FULL_PILE_PATH = /\/tradepile\/?$/i;
+// A buy (EA's bid on a trade): read only for the coin balance its answer
+// states (`noteCredits`), never for anything else.
+const BID_PATH = /\/ut\/game\/[^/]+\/trade\/\d+\/bid\/?$/i;
 
 const stats = { seen: 0, parsed: 0, failed: 0 };
 
@@ -262,6 +265,31 @@ function postCatalog(catalog: Catalog): void {
     (mac) => {
       try {
         window.postMessage({ channel: ADAPTER_CHANNEL, kind: 'catalog', data, mac }, window.location.origin);
+      } catch {
+        /* a page that has torn down its origin is not our problem */
+      }
+    },
+    () => undefined,
+  );
+}
+
+/** The coin balance an EA response stated (`credits`), for Nova AI's
+ * wallet: EA's top bar is not always redrawn after the bot's own buys and
+ * sales. Sent when it changes, signed like the catalog. */
+let lastCredits: number | null = null;
+function noteCredits(payload: unknown): void {
+  // Only the automation builds have the Nova AI page that shows it.
+  if (!LISTING_ENABLED) return;
+  const credits = (payload as Record<string, unknown> | null)?.credits;
+  if (!isInteger(credits) || (credits as number) < 0 || credits === lastCredits) return;
+  lastCredits = credits as number;
+  const s = signer;
+  if (!s) return;
+  const data = { credits: credits as number, seenAt: now() };
+  s.sign(canonicalActMessage('credits', data)).then(
+    (mac) => {
+      try {
+        window.postMessage({ channel: ADAPTER_CHANNEL, kind: 'credits', data, mac }, window.location.origin);
       } catch {
         /* a page that has torn down its origin is not our problem */
       }
@@ -576,6 +604,7 @@ function handleBody(url: string, body: unknown, actIssued: boolean): void {
   }
 
   lastMarketResponse = { source: 'passive', at: now(), value: payload };
+  noteCredits(payload);
   const auctionInfo = (payload as Record<string, unknown> | null)?.auctionInfo;
   if (!payload || !Array.isArray(auctionInfo)) {
     // A market call with no auctionInfo is how a payload change first shows up.
@@ -611,6 +640,7 @@ function handlePileBody(path: string, body: unknown, method: string): void {
   const r = payload !== null && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;
   if (!r) return failure('response was not a JSON object');
   lastPileResponse = { path, at: now(), value: r };
+  noteCredits(r);
   // `auctionInfo` (tradepile, watchlist, trade status) or `itemData` (an
   // item move): both assumed envelopes.
   const list = Array.isArray(r.auctionInfo) ? r.auctionInfo : Array.isArray(r.itemData) ? r.itemData : null;
@@ -642,15 +672,17 @@ function shapeFailure(reason: string): void {
   post('shape', { ...stats, reason });
 }
 
-/** What an EA response is: the market, the trader's own trade pile, or
- * nothing the adapter reads. Only https on an EA host is ever either. */
-function classify(url: unknown): 'market' | 'pile' | null {
+/** What an EA response is: the market, the trader's own trade pile, a buy
+ * (read for its coin balance only), or nothing the adapter reads. Only
+ * https on an EA host is ever any of them. */
+function classify(url: unknown): 'market' | 'pile' | 'bid' | null {
   if (typeof url !== 'string' || url === '') return null;
   try {
     const parsed = new URLCtor(url, window.location.href);
     if (parsed.protocol !== 'https:' || !EA_HOST.test(parsed.hostname)) return null;
     if (MARKET_PATH.test(parsed.pathname)) return 'market';
     if (PILE_PATH.test(parsed.pathname)) return 'pile';
+    if (BID_PATH.test(parsed.pathname)) return 'bid';
     return null;
   } catch {
     return null;
@@ -666,9 +698,19 @@ function pathOf(url: string): string {
 }
 
 /** Route one response body the network really delivered. */
-function handleResponse(kind: 'market' | 'pile', url: string, body: unknown, actIssued: boolean, method: string): void {
+function handleResponse(kind: 'market' | 'pile' | 'bid', url: string, body: unknown, actIssued: boolean, method: string): void {
   if (kind === 'market') handleBody(url, body, actIssued);
-  else handlePileBody(pathOf(url), body, method);
+  else if (kind === 'pile') handlePileBody(pathOf(url), body, method);
+  else handleBidBody(body);
+}
+
+/** A buy's answer: only its coin balance is read. */
+function handleBidBody(body: unknown): void {
+  try {
+    if (typeof body === 'string' && body.length > 0) noteCredits(parseJson(body));
+  } catch {
+    /* not JSON: nothing to read */
+  }
 }
 
 // ---- XMLHttpRequest --------------------------------------------------------

@@ -103,6 +103,10 @@ export interface BotPageDeps {
    * (lib/transfer-list.ts): null until EA has loaded the whole list once.
    * Without it the Sold, Unsold and Transfer list figures stay empty. */
   getTransferList?: () => TransferListSummary | null;
+  /** The coin balance EA's own responses last stated (a market, trade-pile
+   * or buy answer), and when it arrived: EA's top bar is not always redrawn
+   * after the bot's own buys and sales. */
+  getCredits?: () => { credits: number; at: number } | null;
 }
 
 /** Where EA's content area is, in px from each window edge. */
@@ -2180,10 +2184,26 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   /** The trader's coins and FC Points, as EA's top bar shows them
    * (ui/ea-wallet.ts): the page covers that bar. Each shows once it can be
    * read. */
+  /** The coins to show: the balance EA's last response stated, unless
+   * EA's top bar has changed since it arrived (a pack bought by hand, say),
+   * which makes the bar the newer one. */
+  let creditsAt = 0;
+  let barAtCredits: number | null = null;
+  function walletCoins(bar: number | null): number | null {
+    const c = deps.getCredits?.() ?? null;
+    if (!c) return bar;
+    if (c.at !== creditsAt) {
+      creditsAt = c.at;
+      barAtCredits = bar;
+    }
+    return bar !== barAtCredits ? bar : c.credits;
+  }
+
   function renderWallet(): void {
     const w = readWallet(doc);
+    const coins = walletCoins(w.coins);
     for (const [id, value] of [
-      ['w-coins', w.coins],
+      ['w-coins', coins],
       ['w-points', w.points],
     ] as const) {
       const el = $(id);
@@ -2192,7 +2212,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       const amt = el.querySelector('.amt')!;
       if (amt.textContent !== text) amt.textContent = text;
     }
-    $('wallet').hidden = w.coins == null && w.points == null;
+    $('wallet').hidden = coins == null && w.points == null;
   }
 
   function refreshLive(): void {
