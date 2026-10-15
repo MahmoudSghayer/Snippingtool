@@ -68,8 +68,8 @@ describe('lib/analytics/rollup', () => {
   // The advisory lock is transaction-scoped: outside a transaction it is
   // released as soon as it is taken and serialises nothing.
   it('refuses to run outside a transaction', async () => {
-    await expect(
-      rollupProfitsForUserDay(db as never, newId(), '2024-06-03'),
-    ).rejects.toThrow(/transaction/);
+    await expect(rollupProfitsForUserDay(db as never, newId(), '2024-06-03')).rejects.toThrow(
+      /transaction/,
+    );
   });
 });

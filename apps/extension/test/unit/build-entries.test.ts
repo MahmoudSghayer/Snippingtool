@@ -19,10 +19,22 @@ const repoRoot = path.resolve(extensionRoot, '..', '..');
 interface Manifest {
   background: { service_worker: string };
   content_scripts: { js: string[] }[];
+  icons: Record<string, string>;
+  action: { default_popup: string; default_icon: Record<string, string> };
 }
 
 function manifestFiles(manifest: Manifest): string[] {
   return [manifest.background.service_worker, ...manifest.content_scripts.flatMap((c) => c.js)];
+}
+
+/** Every non-script file the manifest names. Chrome refuses to load an
+ * unpacked extension when one of these is missing too, not just a script. */
+function manifestAssets(manifest: Manifest): string[] {
+  return [
+    ...Object.values(manifest.icons),
+    ...Object.values(manifest.action.default_icon),
+    manifest.action.default_popup,
+  ];
 }
 
 describe('extension build entries', () => {
@@ -45,7 +57,9 @@ describe('extension build entries', () => {
     expect(res.status, res.stderr).toBe(0);
     const outDir = path.join(repoRoot, 'tests', 'e2e', '.artifacts', 'extension-dist', 'ledger');
     const manifest = JSON.parse(readFileSync(path.join(outDir, 'manifest.json'), 'utf8')) as Manifest;
-    const missing = manifestFiles(manifest).filter((file) => !existsSync(path.join(outDir, file)));
+    const missing = [...manifestFiles(manifest), ...manifestAssets(manifest)].filter(
+      (file) => !existsSync(path.join(outDir, file)),
+    );
     expect(missing).toEqual([]);
     expect(manifestFiles(manifest)).toContain('handoff.js');
   }, 180_000);

@@ -4,9 +4,10 @@
  * (`ui/bot-page.ts`, `BotSettings` in @sl/shared).
  *
  * Each cycle searches the next filter, collects what came back, and buys
- * every listing at or under the price cap, cheapest first. Between searches
- * it waits a random delay from the user's range; every N searches it takes a
- * break; every N minutes it rests.
+ * every listing at or under the price cap, cheapest first. Searches start a
+ * random delay from the user's range apart (measured start to start, so
+ * EA's answer time and buying come out of the delay); every N searches it
+ * takes a break; every N minutes it rests.
  *
  * The user sets every limit (within `BOT_LIMITS`); the defaults are the
  * recommended ones, and the page shows a live risk level for whatever the
@@ -45,9 +46,13 @@
  */
 import {
   BOT_GOVERNOR_BOUNDS,
+  MIN_SALE_PRICE,
+  MIN_START_PRICE,
   botGovernorSettings,
   botRiskLevel,
   clampBotSettings,
+  roundToPriceStep,
+  stepPrice,
 } from '@sl/shared';
 
 import { ACT_ERROR, isAdapterRefusal } from '../lib/act-auth.js';
@@ -73,6 +78,20 @@ const TOP_SNIPES = 5;
 const MAX_SEARCH_FAILURES_IN_A_ROW = 5;
 /** Shortest wait when the governor refuses a search, so a denied loop never spins. */
 const MIN_BLOCKED_WAIT_MS = 5_000;
+/** How long a card's sell-price estimate is reused (`Sniper.sellPrice`). */
+const PRICE_TTL_MS = 120_000;
+const MAX_CACHED_PRICES = 500;
+const MAX_SKIPS_REMEMBERED = 500;
+
+/** A listing's estimated sell price and profit after EA's tax (null: unknown). */
+interface Estimate {
+  sellPrice: number | null;
+  profit: number | null;
+}
+
+function coins(n: number): string {
+  return `${n.toLocaleString('en-US')} coins`;
+}
 const ONE_HOUR_MS = 3_600_000;
 /** How often the day's active time is written back while running. */
 const USAGE_SAVE_EVERY_MS = 30_000;
@@ -148,7 +167,9 @@ export type SniperStopReason =
 export interface SniperLogEntry {
   id: number;
   at: number;
-  kind: 'bought' | 'failed' | 'blocked' | 'info';
+  /** `listed`: auto-sell put a bought card on the market (`price` is its
+   * buy-now, `message` how that price was chosen). */
+  kind: 'bought' | 'listed' | 'failed' | 'blocked' | 'info';
   resourceId?: number;
   assetId?: number;
   rating?: number;
@@ -198,7 +219,7 @@ export interface SniperState {
 }
 
 export interface SniperDeps {
-  adapter: Pick<AdapterClient, 'search' | 'buy' | 'onAuctions' | 'onProbe' | 'onShape'>;
+  adapter: Pick<AdapterClient, 'search' | 'buy' | 'list' | 'onAuctions' | 'onBuyable' | 'onProbe' | 'onShape'>;
   getFilters: () => SniperFilter[];
   /** Expected resale price for a card, or null if the ledger has no data. */
   estimateSellPrice: (resourceId: number) => Promise<number | null>;
@@ -219,6 +240,12 @@ export interface SniperDeps {
   exclusive?: () => boolean;
   /** The server kill switch as the content script currently knows it. */
   killSwitch: () => { active: boolean; reason?: string };
+  /** Auto-sell's market price for a card: FUTBIN's, else Nova's own market
+   * data, else null. Omitted = auto-sell's market mode never lists. */
+  marketPrice?: (
+    resourceId: number,
+    platform: BotSettings['autoSell']['platform'],
+  ) => Promise<{ price: number; source: 'futbin' | 'nova' } | null>;
   onChange: () => void;
   onLog?: (entry: SniperLogEntry) => void;
   onSearchResult?: (result: SniperSearchResult) => void;
@@ -227,6 +254,9 @@ export interface SniperDeps {
   now?: () => number;
   random?: () => number;
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
+  /** Whether `sleep` keeps its pace in a background tab (`worker`) or runs
+   * on the page's throttled timers (`page`); said in the log at Start. */
+  timingMode?: () => 'worker' | 'page';
 }
 
 function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
@@ -260,6 +290,10 @@ export class Sniper {
   /** Sliding one-hour windows of search and buy times. */
   private searchTimes: number[] = [];
   private buyTimes: number[] = [];
+  /** Sell-price estimates by resourceId (`sellPrice`). */
+  private prices = new Map<number, { at: number; value: Promise<number | null> }>();
+  /** Listings already logged as skipped (`logSkip`). */
+  private skipped = new Set<string>();
   /** Today's active (non-rest) time, and when the current active stretch
    * began (null while resting or stopped). */
   private usage: BotDailyUsage = { day: '', activeMs: 0 };
@@ -408,6 +442,13 @@ export class Sniper {
     this.stats = { ...emptyStats(), startedAt: this.now() };
     this.filterIndex = 0;
     this.addLog({ kind: 'info', message: 'Bot started' });
+    const timing = this.deps.timingMode?.();
+    if (timing === 'worker') this.addLog({ kind: 'info', message: 'Background searching is on: the bot keeps its pace in another tab' });
+    else if (timing === 'page')
+      this.addLog({
+        kind: 'info',
+        message: "Background searching is limited: this page blocked the bot's background timer, so searching slows down while the tab is hidden",
+      });
     void this.run(this.abort.signal).catch((err) => this.stop('search_failing', String(err)));
   }
 
@@ -484,87 +525,125 @@ export class Sniper {
       if (filters.length === 0) return this.stop('no_filters');
       const target = filters[this.filterIndex++ % filters.length]!;
 
-      if (this.applyKillSwitch() || this.applyEntitlement() || this.applyExclusive()) return;
-      // The user's searches-per-hour limit, on its own window.
-      const searchWait = this.windowWait(this.searchTimes, s().safety.maxSearchesPerHour);
-      if (searchWait > 0) {
-        this.addLog({
-          kind: 'blocked',
-          message: `Search paused: ${this.searchTimes.length} searches in the last hour (your limit)`,
-        });
-        await this.wait('blocked', Math.max(searchWait, MIN_BLOCKED_WAIT_MS), signal);
-        continue;
-      }
-      const decision = this.governor!.allow({ kind: 'search' });
-      if (!decision.allowed) {
-        this.persistBudget(); // a hard stop's cooldown is part of the budget
-        if (decision.reason === 'kill_switch') return this.stop('kill_switch', decision.detail);
-        if (decision.detail?.startsWith('session_length')) return this.stop('session_length');
-        const snapshot = this.governor!.snapshot();
-        this.addLog({
-          kind: 'blocked',
-          message: `Search paused by safety limits (${decision.detail ?? decision.reason})`,
-        });
-        await this.wait(
-          'blocked',
-          Math.max(snapshot.cooldownRemainingMs, MIN_BLOCKED_WAIT_MS),
-          signal,
-        );
-        continue;
-      }
+      const gate = await this.searchGate(signal);
+      if (gate === 'stopped') return;
+      if (gate === 'wait') continue;
 
-      this.setState({ phase: 'searching', phaseEndsAt: null, stopReason: null, stopDetail: null });
-      const cap = this.priceCap(target.filter);
-      const collected = new Map<string, TrimmedAuction>();
-      const off = this.deps.adapter.onAuctions((raw) => {
-        for (const a of raw as TrimmedAuction[]) collected.set(a.tradeId, a);
-      });
-      const searchFilter: FilterCriteria =
-        cap == null ? target.filter : { ...target.filter, maxPrice: cap };
-      this.searchTimes.push(this.now());
-      this.persistBudget();
-      const outcome = await this.deps.adapter.search(searchFilter);
-      off();
+      // The search delay runs from this search's start to the next one's,
+      // so the time EA takes to answer, and any buying, come out of it
+      // rather than being added on top: the same pace, less dead time.
+      const startedAt = this.now();
+      const found = await this.searchOnce(target);
       if (signal.aborted) return;
-
       this.stats.searches++;
       searchesSinceBreak++;
-      if (!outcome.ok) {
+      if (!found.ok) {
         failuresInRow++;
-        this.addLog({
-          kind: 'failed',
-          message: `Search "${target.name}" failed: ${outcome.error ?? 'unknown error'}`,
-        });
+        this.addLog({ kind: 'failed', message: `Search "${target.name}" failed: ${found.error}` });
         if (failuresInRow >= MAX_SEARCH_FAILURES_IN_A_ROW) return this.stop('search_failing');
       } else {
         failuresInRow = 0;
-        const matches = [...collected.values()]
-          .filter((a) => this.matches(a, target.filter, cap))
-          .sort((a, b) => a.buyNow - b.buyNow)
-          .map((a) => ({
-            tradeId: a.tradeId,
-            resourceId: a.resourceId,
-            assetId: a.assetId,
-            rating: a.rating,
-            buyNow: a.buyNow,
-            expiresAt: a.expiresAt,
-          }));
-        this.addSearchResult(target.name, matches);
-        if (matches.length > 0) {
+        this.addSearchResult(target.name, found.matches);
+        if (found.matches.length > 0) {
           this.setState({ phase: 'buying', phaseEndsAt: null, stopReason: null, stopDetail: null });
-          const stopped = await this.buyMatches(matches, signal);
-          if (stopped) return;
+          if (await this.buyMatches(found.matches, signal, found.at)) return;
         }
       }
       this.deps.onChange();
 
-      await this.wait('waiting', this.pickSeconds(s().searchDelay) * 1000, signal);
+      const delayMs = this.pickSeconds(s().searchDelay) * 1000;
+      await this.wait('waiting', Math.max(0, delayMs - (this.now() - startedAt)), signal);
     }
   }
 
-  /** Returns true when the bot stopped while buying. */
-  private async buyMatches(matches: SniperMatch[], signal: AbortSignal): Promise<boolean> {
+  /** Whether a search may go out now: the kill switch, plan and engine
+   * lease, the user's searches-per-hour window and the governor. `wait`:
+   * it waited out a limit, so the loop starts over. */
+  private async searchGate(signal: AbortSignal): Promise<'go' | 'wait' | 'stopped'> {
+    if (this.applyKillSwitch() || this.applyEntitlement() || this.applyExclusive()) return 'stopped';
+    const searchWait = this.windowWait(this.searchTimes, this.settings.safety.maxSearchesPerHour);
+    if (searchWait > 0) {
+      this.addLog({
+        kind: 'blocked',
+        message: `Search paused: ${this.searchTimes.length} searches in the last hour (your limit)`,
+      });
+      await this.wait('blocked', Math.max(searchWait, MIN_BLOCKED_WAIT_MS), signal);
+      return signal.aborted ? 'stopped' : 'wait';
+    }
+    const decision = this.governor!.allow({ kind: 'search' });
+    if (decision.allowed) return 'go';
+    this.persistBudget(); // a hard stop's cooldown is part of the budget
+    if (decision.reason === 'kill_switch') {
+      this.stop('kill_switch', decision.detail);
+      return 'stopped';
+    }
+    if (decision.detail?.startsWith('session_length')) {
+      this.stop('session_length');
+      return 'stopped';
+    }
+    this.addLog({ kind: 'blocked', message: `Search paused by safety limits (${decision.detail ?? decision.reason})` });
+    await this.wait('blocked', Math.max(this.governor!.snapshot().cooldownRemainingMs, MIN_BLOCKED_WAIT_MS), signal);
+    return signal.aborted ? 'stopped' : 'wait';
+  }
+
+  /** One search through the adapter, and what it found at or under the
+   * price cap, cheapest first. `at`: when EA's answer came back. */
+  private async searchOnce(
+    target: SniperFilter,
+  ): Promise<{ ok: true; matches: SniperMatch[]; at: number } | { ok: false; error: string; at: number }> {
+    this.setState({ phase: 'searching', phaseEndsAt: null, stopReason: null, stopDetail: null });
+    const cap = this.priceCap(target.filter);
+    const collected = new Map<string, TrimmedAuction>();
+    const off = this.deps.adapter.onAuctions((raw) => {
+      for (const a of raw as TrimmedAuction[]) collected.set(a.tradeId, a);
+    });
+    // When the search's network response reaches the adapter before its
+    // own search call returns, the listings arrive marked unbuyable (no
+    // item entity yet), and the call's result only upgrades them
+    // (main/adapter.ts, isSecondSighting): without this, that search
+    // would buy nothing.
+    const offBuyable = this.deps.adapter.onBuyable((tradeIds) => {
+      for (const id of tradeIds) {
+        const a = collected.get(id);
+        if (a) collected.set(id, { ...a, buyable: true });
+      }
+    });
+    // Warm the estimate for the card this filter targets while EA
+    // searches, so a match does not wait for it.
+    if (this.settings.thresholds.minProfit > 0 && target.filter.resourceId != null)
+      void this.sellPrice(target.filter.resourceId);
+    this.searchTimes.push(this.now());
+    this.persistBudget();
+    const outcome = await this.deps.adapter.search(
+      cap == null ? target.filter : { ...target.filter, maxPrice: cap },
+    );
+    const at = this.now();
+    off();
+    offBuyable();
+    if (!outcome.ok) return { ok: false, error: outcome.error ?? 'unknown error', at };
+    const matches = [...collected.values()]
+      .filter((a) => this.matches(a, target.filter, cap))
+      .sort((a, b) => a.buyNow - b.buyNow)
+      .map((a) => ({
+        tradeId: a.tradeId,
+        resourceId: a.resourceId,
+        assetId: a.assetId,
+        rating: a.rating,
+        buyNow: a.buyNow,
+        expiresAt: a.expiresAt,
+      }));
+    return { ok: true, matches, at };
+  }
+
+  /** Returns true when the bot stopped while buying. `searchedAt`: when
+   * the search that found `matches` came back, so a missed buy can say how
+   * long it took to send. */
+  private async buyMatches(matches: SniperMatch[], signal: AbortSignal, searchedAt: number): Promise<boolean> {
     const t = this.settings.thresholds;
+    // Every listing's estimate starts now, side by side, before any buy: a
+    // buy then waits for one lookup at most, and none waits for the last
+    // buy's.
+    for (const m of matches) void this.sellPrice(m.resourceId);
     for (const m of matches) {
       if (signal.aborted) return true;
 
@@ -573,14 +652,26 @@ export class Sniper {
           this.stop('coin_budget');
           return true;
         }
+        this.logSkip(m, 'it would go over your session coin budget');
         continue; // a cheaper listing may still fit
       }
 
-      const sellPrice = await this.deps.estimateSellPrice(m.resourceId);
-      const profit = sellPrice == null ? null : Math.floor(sellPrice * (1 - EA_TAX)) - m.buyNow;
-      // Unknown profit is allowed: the user capped the price, and the ledger
-      // may simply not have seen this card sell yet.
-      if (t.minProfit > 0 && profit != null && profit < t.minProfit) continue;
+      // Only the minimum-profit check needs the estimate before buying.
+      // Without one the buy goes first (a listing this cheap is gone in
+      // moments) and the estimate is looked up afterwards, for the log.
+      let estimate: Estimate | null = null;
+      if (t.minProfit > 0) {
+        estimate = await this.estimate(m);
+        // Unknown profit is allowed: the user capped the price, and the
+        // ledger may simply not have seen this card sell yet.
+        if (estimate.profit != null && estimate.profit < t.minProfit) {
+          this.logSkip(
+            m,
+            `estimated profit ${coins(estimate.profit)} is under your minimum profit (${coins(t.minProfit)})`,
+          );
+          continue;
+        }
+      }
 
       if (this.applyKillSwitch() || this.applyEntitlement() || this.applyExclusive()) return true;
       if (this.windowWait(this.buyTimes, this.settings.safety.maxBuysPerHour) > 0) {
@@ -624,6 +715,7 @@ export class Sniper {
       // The resourceId binds the buy to the card this filter targets: the
       // adapter refuses it unless the listing it saw for this tradeId is
       // that card (a forged `auctions` message can claim any tradeId).
+      const sentAfterMs = this.now() - searchedAt;
       const result = await this.deps.adapter.buy(m.tradeId, m.buyNow, {
         resourceId: m.resourceId,
         assetId: m.assetId,
@@ -647,8 +739,11 @@ export class Sniper {
           latencyMs: result.latencyMs,
           errorCode: ACT_ERROR.timeoutUnknown,
         });
-        void result.late?.then((late) => {
-          if (late.ok) this.recordBought(m, sellPrice, profit, late.latencyMs);
+        void result.late?.then(async (late) => {
+          if (!late.ok) return;
+          const { sellPrice, profit } = estimate ?? (await this.estimate(m));
+          this.recordBought(m, sellPrice, profit, late.latencyMs);
+          await this.autoSell(m);
         });
         if (signal.aborted) return true;
         this.deps.onChange();
@@ -656,7 +751,9 @@ export class Sniper {
       }
       if (signal.aborted && !result.ok) return true;
       if (result.ok) {
+        const { sellPrice, profit } = estimate ?? (await this.estimate(m));
         this.recordBought(m, sellPrice, profit, result.latencyMs);
+        await this.autoSell(m);
         if (t.stopAfterPurchases > 0 && this.stats.purchases >= t.stopAfterPurchases) {
           this.stop('purchase_limit');
           return true;
@@ -683,7 +780,9 @@ export class Sniper {
           assetId: m.assetId,
           rating: m.rating,
           price: m.buyNow,
-          message: result.error ?? 'buy failed',
+          // Where a miss's time went: our side (search back -> buy sent)
+          // and EA's (buy sent -> answer).
+          message: `${result.error ?? 'buy failed'} (sent ${sentAfterMs} ms after the search came back; EA answered in ${result.latencyMs} ms)`,
         });
         this.deps.onAttempt?.({
           ...this.attemptBase(m),
@@ -698,6 +797,73 @@ export class Sniper {
   }
 
   // ---- helpers --------------------------------------------------------------
+
+  /** The sell-price estimate for a card, shared by every listing of it for
+   * PRICE_TTL_MS: a filter keeps finding the same card, and each lookup is a
+   * round trip to the service worker that a buy would otherwise wait on. */
+  private sellPrice(resourceId: number): Promise<number | null> {
+    const now = this.now();
+    const hit = this.prices.get(resourceId);
+    if (hit && now - hit.at < PRICE_TTL_MS) return hit.value;
+    const value = this.deps.estimateSellPrice(resourceId).catch(() => null);
+    this.prices.set(resourceId, { at: now, value });
+    if (this.prices.size > MAX_CACHED_PRICES) this.prices.delete(this.prices.keys().next().value!);
+    return value;
+  }
+
+  private async estimate(m: SniperMatch): Promise<Estimate> {
+    const sellPrice = await this.sellPrice(m.resourceId);
+    return { sellPrice, profit: sellPrice == null ? null : Math.floor(sellPrice * (1 - EA_TAX)) - m.buyNow };
+  }
+
+  /** Auto-sell: list a card the bot just bought, at the user's price (the
+   * market price moved by their steps, or their fixed price). Never throws;
+   * whatever happens is in the log. */
+  private async autoSell(m: SniperMatch): Promise<void> {
+    const a = this.settings.autoSell;
+    if (!a.enabled || this.deps.killSwitch().active) return;
+    const card = { resourceId: m.resourceId, assetId: m.assetId, rating: m.rating };
+    const notListed = (why: string) => void this.addLog({ kind: 'blocked', ...card, message: `not listed: ${why}` });
+
+    let price: number;
+    let basis: string;
+    if (a.mode === 'fixed') {
+      price = roundToPriceStep(a.fixedPrice);
+      basis = 'your fixed price';
+    } else {
+      const market = (await this.deps.marketPrice?.(m.resourceId, a.platform).catch(() => null)) ?? null;
+      if (!market) return notListed('no market price for this card (FUTBIN and Nova have none)');
+      price = stepPrice(market.price, a.steps);
+      const steps = a.steps === 0 ? '' : `, ${a.steps > 0 ? '+' : ''}${a.steps} step${Math.abs(a.steps) === 1 ? '' : 's'}`;
+      basis = `${market.source === 'futbin' ? 'FUTBIN' : 'Nova market'} price ${coins(market.price)}${steps}`;
+    }
+    price = Math.max(MIN_SALE_PRICE, price);
+    if (a.noLoss && Math.floor(price * (1 - EA_TAX)) < m.buyNow) {
+      return notListed(`${coins(price)} would lose money after EA's 5% tax (bought for ${coins(m.buyNow)})`);
+    }
+    // Starting bid one step under the buy-now, as the web app suggests.
+    const start = Math.max(MIN_START_PRICE, stepPrice(price, -1));
+    const result = await this.deps.adapter.list(m.tradeId, start, price);
+    if (result.ok) this.addLog({ kind: 'listed', ...card, price, message: basis });
+    else notListed(result.error ?? 'EA did not accept the listing');
+    this.deps.onChange();
+  }
+
+  /** Why a match was not bought, once per listing: the same one comes back
+   * on every search until it sells or expires. */
+  private logSkip(m: SniperMatch, why: string): void {
+    if (this.skipped.has(m.tradeId)) return;
+    this.skipped.add(m.tradeId);
+    if (this.skipped.size > MAX_SKIPS_REMEMBERED) this.skipped.delete(this.skipped.values().next().value!);
+    this.addLog({
+      kind: 'blocked',
+      resourceId: m.resourceId,
+      assetId: m.assetId,
+      rating: m.rating,
+      price: m.buyNow,
+      message: `skipped at ${coins(m.buyNow)}: ${why}`,
+    });
+  }
 
   private recordBought(m: SniperMatch, sellPrice: number | null, profit: number | null, latencyMs: number): void {
     this.stats.purchases++;
