@@ -561,7 +561,7 @@ const CSS = `
   .counter .n { font-size: 15px; font-weight: 500; }
   .c-green { border-left-color: var(--ea-success); } .c-red { border-left-color: var(--ea-danger); } .c-blue { border-left-color: var(--ea-accent); }
   .c-yellow { border-left-color: var(--ea-coin); } .c-orange { border-left-color: var(--ea-warning); }
-  .ring-box { grid-column: span 2; display: flex; align-items: center; justify-content: center; position: relative; min-height: 150px; }
+  .ring-box { grid-column: span 2; display: flex; align-items: center; justify-content: center; position: relative; min-height: 150px; contain: layout paint; }
   .ring-wrap { display: contents; }
   .ring { width: 130px; height: 130px; }
   .ring-label { position: absolute; text-align: center; }
@@ -1720,28 +1720,27 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     });
   }
 
-  function renderDash(): void {
-    const sniper = deps.getSniper();
-    const stats = sniper?.getStats();
-    const top = stats?.topSnipes ?? [];
-    wantNames(top.map((t) => t.assetId ?? t.resourceId));
+  /** Replaces an element's markup only when it changed: a refresh comes
+   * several times a search, and rebuilding what did not change is work done
+   * on the same thread that draws the countdown. */
+  const shownHtml = new WeakMap<HTMLElement, string>();
+  function setHtml(el: HTMLElement | null, html: string): void {
+    if (el && shownHtml.get(el) !== html) {
+      shownHtml.set(el, html);
+      el.innerHTML = html;
+    }
+  }
+
+  /** The dash is built once, with the ring in it, and updated in place. */
+  function buildDash(): void {
     $('dash').innerHTML = `
-      <div class="tile profit"><div class="v">${fmt(stats?.profit ?? 0)}${COIN}</div><div class="k">Profit</div></div>
-      <div class="tile searches"><div class="v">${fmt(stats?.searches ?? 0)}</div><div class="k">Searches</div></div>
-      <div class="panelbox top-snipes"><h3>Top snipes</h3>${
-        top.length === 0
-          ? '<div class="empty" style="padding:6px">No snipes yet</div>'
-          : top
-              .map(
-                (t) =>
-                  `<div class="ts-row"><span>${esc(nameOf(t.assetId ?? t.resourceId))}</span><span>${fmt(t.profit ?? 0)}${COIN}</span></div>`,
-              )
-              .join('')
-      }</div>
+      <div class="tile profit"><div class="v" id="d-profit"></div><div class="k">Profit</div></div>
+      <div class="tile searches"><div class="v" id="d-searches"></div><div class="k">Searches</div></div>
+      <div class="panelbox top-snipes"><h3>Top snipes</h3><div id="d-top"></div></div>
       <div class="counters">
-        <div class="counter c-green"><span>Bought</span><span class="n">${fmt(stats?.purchases ?? 0)}</span></div>
-        <div class="counter c-red"><span>Missed</span><span class="n">${fmt(stats?.failures ?? 0)}</span></div>
-        <div class="counter c-blue"><span>Coins spent</span><span class="n">${fmt(stats?.coinsSpent ?? 0)}</span></div>
+        <div class="counter c-green"><span>Bought</span><span class="n" id="d-bought"></span></div>
+        <div class="counter c-red"><span>Missed</span><span class="n" id="d-missed"></span></div>
+        <div class="counter c-blue"><span>Coins spent</span><span class="n" id="d-spent"></span></div>
         <div class="counter c-yellow" title="Transfer list tracking is not available yet"><span>Sold</span><span class="n na">—</span></div>
         <div class="counter c-orange" title="Transfer list tracking is not available yet"><span>Unsold</span><span class="n na">—</span></div>
       </div>
@@ -1752,17 +1751,41 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         <div class="bar"><i style="width:0%"></i></div>
       </div>
     `;
-    // The ring survives the dash being rebuilt: moved, not recreated, so its
-    // countdown never restarts mid-wait.
-    root.getElementById('ringbox')?.append(ring.el);
+    $('ringbox').append(ring.el);
+  }
+
+  function renderDash(): void {
+    if (!root.getElementById('ringbox')) buildDash();
+    const sniper = deps.getSniper();
+    const stats = sniper?.getStats();
+    const top = stats?.topSnipes ?? [];
+    wantNames(top.map((t) => t.assetId ?? t.resourceId));
+    setHtml($('d-profit'), `${fmt(stats?.profit ?? 0)}${COIN}`);
+    setText($('d-searches'), fmt(stats?.searches ?? 0));
+    setHtml(
+      $('d-top'),
+      top.length === 0
+        ? '<div class="empty" style="padding:6px">No snipes yet</div>'
+        : top
+            .map(
+              (t) =>
+                `<div class="ts-row"><span>${esc(nameOf(t.assetId ?? t.resourceId))}</span><span>${fmt(t.profit ?? 0)}${COIN}</span></div>`,
+            )
+            .join(''),
+    );
+    setText($('d-bought'), fmt(stats?.purchases ?? 0));
+    setText($('d-missed'), fmt(stats?.failures ?? 0));
+    setText($('d-spent'), fmt(stats?.coinsSpent ?? 0));
     renderRing();
   }
 
   // ---- the countdown ring -------------------------------------------------
   //
-  // Built once and updated in place every animation frame while the page is
-  // open (`animate`): the arc moves continuously instead of in steps, and
-  // text is written only when it changes.
+  // Built once. Each wait's arc is one animation the browser runs itself
+  // (the Web Animations API), started when the wait starts: smooth at the
+  // display's frame rate, and nothing per frame for a busy page to delay.
+  // Without that API (tests), the arc is set every frame instead. The text
+  // is updated every frame, written only when it changes.
   const RING_R = 56;
   const RING_C = 2 * Math.PI * RING_R;
   const ring = (() => {
@@ -1786,8 +1809,30 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       endsAt: null as number | null,
       total: 0,
       offset: '',
+      anim: null as Animation | null,
     };
   })();
+
+  function setArc(offset: string): void {
+    if (offset !== ring.offset) {
+      ring.offset = offset;
+      ring.arc.setAttribute('stroke-dashoffset', offset);
+    }
+  }
+
+  /** A new wait (or none): the arc starts full and empties as it runs out. */
+  function startArc(remaining: number): void {
+    ring.anim?.cancel();
+    ring.anim = null;
+    if (remaining <= 0) return setArc(RING_C.toFixed(2));
+    setArc('0.00');
+    if (typeof ring.arc.animate !== 'function') return;
+    ring.anim = ring.arc.animate([{ strokeDashoffset: '0px' }, { strokeDashoffset: `${RING_C.toFixed(2)}px` }], {
+      duration: remaining,
+      easing: 'linear',
+      fill: 'forwards',
+    });
+  }
 
   function setText(el: HTMLElement, text: string): void {
     if (el.textContent !== text) el.textContent = text;
@@ -1802,12 +1847,11 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     if (endsAt !== ring.endsAt) {
       ring.endsAt = endsAt;
       ring.total = remaining;
+      startArc(remaining);
     }
-    const fraction = remaining > 0 && ring.total > 0 ? remaining / ring.total : 0;
-    const offset = (RING_C * (1 - fraction)).toFixed(2);
-    if (offset !== ring.offset) {
-      ring.offset = offset;
-      ring.arc.setAttribute('stroke-dashoffset', offset);
+    if (!ring.anim) {
+      const fraction = remaining > 0 && ring.total > 0 ? remaining / ring.total : 0;
+      setArc((RING_C * (1 - fraction)).toFixed(2));
     }
     const secs = remaining / 1000;
     setText(ring.time, remaining > 0 ? (secs >= 60 ? clock(remaining) : `${Math.ceil(secs)}s`) : '0s');
@@ -1877,14 +1921,16 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       ...log.map((e) => e.assetId ?? e.resourceId),
       ...results.flatMap((r) => r.matches.map((m) => m.assetId)),
     ]);
-    $('log').innerHTML =
+    setHtml(
+      $('log'),
       log.length === 0
         ? '<div class="empty">Purchases and events appear here once Nova AI is running.</div>'
-        : log.map(logHtml).join('');
-    $('results').innerHTML =
-      results.length === 0
-        ? '<div class="empty">Each search appears here.</div>'
-        : results.map(resultHtml).join('');
+        : log.map(logHtml).join(''),
+    );
+    setHtml(
+      $('results'),
+      results.length === 0 ? '<div class="empty">Each search appears here.</div>' : results.map(resultHtml).join(''),
+    );
   }
 
   function renderTop(): void {

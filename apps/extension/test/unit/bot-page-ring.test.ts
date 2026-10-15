@@ -20,6 +20,75 @@ afterEach(() => {
   untrustedEvents();
 });
 
+function makeSniper(): Sniper {
+  return new Sniper(
+    {
+      adapter: {
+        search: vi.fn(),
+        buy: vi.fn(),
+        list: vi.fn(),
+        onAuctions: () => () => undefined,
+        onBuyable: () => () => undefined,
+        onProbe: () => () => undefined,
+        onShape: () => () => undefined,
+      },
+      getFilters: () => [],
+      estimateSellPrice: async () => null,
+      killSwitch: () => ({ active: false }),
+      onChange: () => undefined,
+    },
+    DEFAULT_BOT_SETTINGS,
+  );
+}
+
+function mountPage(sniper: Sniper) {
+  const shadows = captureShadowRoots();
+  const page = createBotPage({
+    getSniper: () => sniper,
+    getUnavailableReason: () => null,
+    prepare: async () => undefined,
+    getSettings: () => DEFAULT_BOT_SETTINGS,
+    saveSettings: async () => undefined,
+    setLiveSearch: () => undefined,
+    resolveNames: async () => ({}),
+    getCatalog: async () => null,
+  });
+  page.open();
+  shadows.restore();
+  return { page, root: shadows.rootOf(document.getElementById('ledger-bot-page')!) };
+}
+
+it('hands each wait to the browser as one animation, and a refresh neither restarts it nor rebuilds the dash', () => {
+  const animate = vi.fn(() => ({ cancel: vi.fn() }) as unknown as Animation);
+  (SVGElement.prototype as unknown as { animate: unknown }).animate = animate;
+  try {
+    const sniper = makeSniper();
+    let state = { ...sniper.state, phase: 'waiting' as const, phaseEndsAt: Date.now() + 10_000 };
+    vi.spyOn(sniper, 'state', 'get').mockImplementation(() => state);
+    const { page, root } = mountPage(sniper);
+
+    expect(animate).toHaveBeenCalledTimes(1);
+    const [frames, timing] = animate.mock.calls[0] as unknown as [Keyframe[], KeyframeAnimationOptions];
+    expect(frames[0]).toEqual({ strokeDashoffset: '0px' });
+    expect(timing).toMatchObject({ duration: 10_000, easing: 'linear', fill: 'forwards' });
+
+    const searches = root.getElementById('d-searches');
+    vi.advanceTimersByTime(3_000);
+    page.refresh();
+    vi.advanceTimersByTime(20);
+    expect(animate).toHaveBeenCalledTimes(1);
+    expect(root.getElementById('d-searches')).toBe(searches);
+
+    // The next wait gets its own animation.
+    state = { ...state, phaseEndsAt: Date.now() + 8_000 };
+    vi.advanceTimersByTime(20);
+    expect(animate).toHaveBeenCalledTimes(2);
+    page.close();
+  } finally {
+    delete (SVGElement.prototype as unknown as { animate?: unknown }).animate;
+  }
+});
+
 it('counts a wait down every frame, and a dash refresh does not restart it', () => {
   const sniper = new Sniper(
     {
