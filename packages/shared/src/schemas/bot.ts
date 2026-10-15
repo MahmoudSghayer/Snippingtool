@@ -92,6 +92,12 @@ const rangeDefault = (r: { min: number; max: number }) => ({ min: r.min, max: r.
  * settings still parse, and otherwise ignored. */
 const legacy = z.unknown().optional();
 
+// Each section's default is a `.prefault()`: a missing section is filled in
+// by parsing its default through the section's own schema (so `safety: {}`
+// picks up every per-field default, and each parse returns fresh nested
+// objects rather than shared references to the default), the way zod 3's
+// `.default()` behaved. Zod 4's `.default()` returns the value as is.
+
 export const botSettingsSchema = z
   .object({
     /** Legacy (the earlier recommended/custom switch). Ignored. */
@@ -102,7 +108,7 @@ export const botSettingsSchema = z
      * they saved settings above low risk. Null until then. */
     riskAcknowledgedAt: z.string().datetime().nullable().default(null).catch(null),
     /** Seconds between two searches. */
-    searchDelay: range(BOT_LIMITS.searchDelaySeconds, false).default(rangeDefault(R.searchDelay)),
+    searchDelay: range(BOT_LIMITS.searchDelaySeconds, false).prefault(rangeDefault(R.searchDelay)),
     breaks: z
       .object({
         enabled: z.boolean(),
@@ -111,7 +117,7 @@ export const botSettingsSchema = z
         seconds: range(BOT_LIMITS.breakSeconds, true),
       })
       .strict()
-      .default({
+      .prefault({
         enabled: R.breaks.enabled,
         searches: rangeDefault(R.breaks.searches),
         seconds: rangeDefault(R.breaks.seconds),
@@ -124,7 +130,7 @@ export const botSettingsSchema = z
         minutes: range(BOT_LIMITS.restMinutes, true),
       })
       .strict()
-      .default({
+      .prefault({
         enabled: R.rest.enabled,
         afterMinutes: rangeDefault(R.rest.afterMinutes),
         minutes: rangeDefault(R.rest.minutes),
@@ -143,7 +149,7 @@ export const botSettingsSchema = z
         sessionCoinBudget: int(BOT_LIMITS.sessionCoinBudget),
       })
       .strict()
-      .default({ maxBuyPrice: 0, minProfit: 1_000, stopAfterPurchases: 0, sessionCoinBudget: 0 }),
+      .prefault({ maxBuyPrice: 0, minProfit: 1_000, stopAfterPurchases: 0, sessionCoinBudget: 0 }),
     /** After every buy, list the card on the transfer market. */
     autoSell: z
       .object({
@@ -160,7 +166,7 @@ export const botSettingsSchema = z
         noLoss: z.boolean(),
       })
       .strict()
-      .default(DEFAULT_AUTO_SELL),
+      .prefault(DEFAULT_AUTO_SELL),
     safety: z
       .object({
         maxSearchesPerHour: int(BOT_LIMITS.maxSearchesPerHour).default(R.safety.maxSearchesPerHour),
@@ -178,7 +184,7 @@ export const botSettingsSchema = z
         sessionLengthMinutes: legacy,
       })
       .strict()
-      .default({}),
+      .prefault({}),
   })
   .strict();
 export type BotSettings = z.infer<typeof botSettingsSchema>;

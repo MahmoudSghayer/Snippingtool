@@ -94,7 +94,7 @@ export default fp(
         preHandler: [fastify.verifyCsrf],
         schema: {
           tags: ['filters'],
-          params: z.object({ id: z.string().uuid() }),
+          params: z.object({ id: z.string().guid() }),
           body: updateSavedFilterRequestSchema,
           response: { 200: savedFilterSchema },
         },
@@ -132,7 +132,7 @@ export default fp(
         preHandler: [fastify.verifyCsrf],
         schema: {
           tags: ['filters'],
-          params: z.object({ id: z.string().uuid() }),
+          params: z.object({ id: z.string().guid() }),
           response: { 200: z.object({ deleted: z.literal(true) }) },
         },
       },

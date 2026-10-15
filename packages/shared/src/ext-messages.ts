@@ -531,7 +531,9 @@ export function backgroundMessageEnvelopeSchemaFor(types: readonly string[]) {
 }
 
 export const backgroundResponseSchema = z.discriminatedUnion('ok', [
-  z.object({ ok: z.literal(true), data: z.unknown() }),
+  // `data` is absent when a handler returns nothing (zod 4 rejects an absent
+  // key whose schema is a bare `z.unknown()`, hence the `.optional()`).
+  z.object({ ok: z.literal(true), data: z.unknown().optional() }),
   /** `code` is the API's error code when the failure came from `apps/api`
    * (`AUTH_INVALID_CREDENTIALS`, `RATE_LIMITED`...), so a UI can explain it. */
   z.object({ ok: z.literal(false), error: z.string(), code: z.string().optional() }),
@@ -714,7 +716,7 @@ const extTelemetryPlainEventSchema = z
   .object({
     name: z.string().min(1).max(80),
     occurredAt: z.string().datetime(),
-    data: z.record(z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
+    data: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
   })
   .strict();
 
@@ -850,7 +852,7 @@ export type BotBudgetState = z.infer<typeof extBackgroundBotBudgetSetPayloadSche
  * (a random UUID per page load). Acquire answers `{ held, expiresAt }`. */
 export const extBackgroundEngineLockPayloadSchema = z
   .object({
-    ownerId: z.string().uuid(),
+    ownerId: z.string().guid(),
   })
   .strict();
 export type ExtEngineLockPayload = z.infer<typeof extBackgroundEngineLockPayloadSchema>;

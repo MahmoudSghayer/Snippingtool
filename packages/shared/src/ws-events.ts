@@ -16,18 +16,18 @@ export const subscriptionChangedEventSchema = z.object({
 
 export const sessionRevokedEventSchema = z.object({
   type: z.literal('session.revoked'),
-  sessionId: z.string().uuid(),
+  sessionId: z.string().guid(),
   reason: z.enum(['admin_force_logout', 'password_changed', 'token_reuse_detected', 'user']),
 });
 
 export const notificationNewEventSchema = z.object({
   type: z.literal('notification.new'),
   notification: z.object({
-    id: z.string().uuid(),
+    id: z.string().guid(),
     type: z.string().min(1).max(80),
     title: z.string().min(1).max(200),
     body: z.string().min(1).max(2000),
-    data: z.record(z.unknown()).optional(),
+    data: z.record(z.string(), z.unknown()).optional(),
   }),
 });
 

@@ -43,7 +43,7 @@ export function computeTradeProfit(
  * session/lifetime P&L. */
 export const tradeSchema = z
   .object({
-    id: z.string().uuid(),
+    id: z.string().guid(),
     tradeId: z.string().min(1).max(64),
     resourceId: z.number().int().positive(),
     assetId: z.number().int().positive().nullable(),

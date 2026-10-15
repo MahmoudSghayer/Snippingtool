@@ -12,7 +12,7 @@ export const USER_ROLES = ['user', 'admin'] as const;
 export type UserRole = (typeof USER_ROLES)[number];
 
 export const userDtoSchema = z.object({
-  id: z.string().uuid(),
+  id: z.string().guid(),
   email: emailSchema,
   emailVerifiedAt: z.string().datetime().nullable(),
   status: z.enum(USER_STATUSES),

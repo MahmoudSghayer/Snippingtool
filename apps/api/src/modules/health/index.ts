@@ -50,7 +50,7 @@ export default fp(
             }),
             503: z.object({
               status: z.literal('error'),
-              checks: z.record(z.enum(['ok', 'error'])),
+              checks: z.record(z.string(), z.enum(['ok', 'error'])),
             }),
           },
         },

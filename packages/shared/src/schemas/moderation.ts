@@ -12,12 +12,12 @@ export const BAN_TYPES = ['account', 'ip', 'device', 'hwid'] as const;
 export type BanType = (typeof BAN_TYPES)[number];
 
 export const banDtoSchema = z.object({
-  id: z.string().uuid(),
-  userId: z.string().uuid().nullable(),
+  id: z.string().guid(),
+  userId: z.string().guid().nullable(),
   type: z.enum(BAN_TYPES),
   value: z.string().max(320), // empty for an account ban, whose identity lives in `userId`
   reason: z.string().min(1).max(1000),
-  issuedBy: z.string().uuid().nullable(),
+  issuedBy: z.string().guid().nullable(),
   expiresAt: z.string().datetime().nullable(),
   liftedAt: z.string().datetime().nullable(),
   createdAt: z.string().datetime(),
@@ -29,7 +29,7 @@ export type BanDto = z.infer<typeof banDtoSchema>;
  * (this module) accept the exact same request shape. */
 export const createBanRequestSchema = adminBanUserRequestSchema
   .extend({
-    userId: z.string().uuid().optional(), // required when type = 'account', ignored otherwise
+    userId: z.string().guid().optional(), // required when type = 'account', ignored otherwise
   })
   .strict();
 export type CreateBanRequest = z.infer<typeof createBanRequestSchema>;
@@ -68,13 +68,13 @@ export const FLAG_STATUSES = ['open', 'reviewed', 'dismissed'] as const;
 export type FlagStatus = (typeof FLAG_STATUSES)[number];
 
 export const flagDtoSchema = z.object({
-  id: z.string().uuid(),
-  userId: z.string().uuid(),
+  id: z.string().guid(),
+  userId: z.string().guid(),
   kind: z.enum(FLAG_KINDS),
   severity: z.enum(FLAG_SEVERITIES),
-  evidence: z.record(z.unknown()),
+  evidence: z.record(z.string(), z.unknown()),
   status: z.enum(FLAG_STATUSES),
-  reviewedBy: z.string().uuid().nullable(),
+  reviewedBy: z.string().guid().nullable(),
   reviewedAt: z.string().datetime().nullable(),
   createdAt: z.string().datetime(),
 });
@@ -85,7 +85,7 @@ export const adminFlagListQuerySchema = z
     status: z.enum(FLAG_STATUSES).optional(),
     kind: z.enum(FLAG_KINDS).optional(),
     severity: z.enum(FLAG_SEVERITIES).optional(),
-    userId: z.string().uuid().optional(),
+    userId: z.string().guid().optional(),
   })
   .strict();
 export type AdminFlagListQuery = z.infer<typeof adminFlagListQuerySchema>;

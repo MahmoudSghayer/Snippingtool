@@ -54,7 +54,7 @@ export default fp(
         preHandler: [fastify.verifyCsrf],
         schema: {
           tags: ['devices'],
-          params: z.object({ id: z.string().uuid() }),
+          params: z.object({ id: z.string().guid() }),
           body: z.object({ name: z.string().min(1).max(120) }),
           response: { 200: deviceDtoSchema },
         },
@@ -85,7 +85,7 @@ export default fp(
         preHandler: [fastify.verifyCsrf],
         schema: {
           tags: ['devices'],
-          params: z.object({ id: z.string().uuid() }),
+          params: z.object({ id: z.string().guid() }),
           response: { 200: z.object({ revoked: z.literal(true) }) },
         },
       },

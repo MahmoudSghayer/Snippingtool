@@ -43,6 +43,12 @@ export const granularitySchema = z.preprocess(
 );
 export type Granularity = z.infer<typeof granularitySchema>;
 
+/** The canonical granularity alone, without the legacy input aliases: what
+ * responses carry. A response schema must not contain `granularitySchema`'s
+ * preprocess step, because apps/api serialises responses with zod's
+ * `encode`, which cannot run a one-way transform backwards. */
+export const canonicalGranularitySchema = granularitySchema.out;
+
 /** `from`/`to` are calendar-day strings (UTC), inclusive on both ends.
  * `granularity` controls series bucketing; `tz` is accepted for forward
  * compatibility (bucket-boundary math is UTC-only today — see
@@ -101,9 +107,9 @@ export const kpiOverviewSchema = z.object({
   ),
   extensionInstalls: z.object({
     total: z.number().int().min(0),
-    byBrowser: z.record(z.number().int().min(0)),
+    byBrowser: z.record(z.string(), z.number().int().min(0)),
   }),
-  versionDistribution: z.record(z.number().int().min(0)),
+  versionDistribution: z.record(z.string(), z.number().int().min(0)),
 });
 export type KpiOverview = z.infer<typeof kpiOverviewSchema>;
 
@@ -126,7 +132,7 @@ export const profitAnalyticsPointSchema = z.object({
 export type ProfitAnalyticsPoint = z.infer<typeof profitAnalyticsPointSchema>;
 
 export const profitAnalyticsResponseSchema = z.object({
-  granularity: granularitySchema,
+  granularity: canonicalGranularitySchema,
   items: z.array(profitAnalyticsPointSchema),
   lifetime: z.object({
     netProfit: z.number().int(),
@@ -146,7 +152,7 @@ export type ProfitLeaderboardQuery = z.infer<typeof profitLeaderboardQuerySchema
 
 export const profitLeaderboardEntrySchema = z.object({
   rank: z.number().int().min(1),
-  userId: z.string().uuid(),
+  userId: z.string().guid(),
   email: z.string().email(),
   netProfit: z.number().int(),
   coinsTraded: z.number().int().min(0),
@@ -180,7 +186,7 @@ export const activityAnalyticsPointSchema = z.object({
 export type ActivityAnalyticsPoint = z.infer<typeof activityAnalyticsPointSchema>;
 
 export const activityAnalyticsResponseSchema = z.object({
-  granularity: granularitySchema,
+  granularity: canonicalGranularitySchema,
   items: z.array(activityAnalyticsPointSchema),
 });
 export type ActivityAnalyticsResponse = z.infer<typeof activityAnalyticsResponseSchema>;
@@ -200,9 +206,9 @@ export const subscriptionMetricsPointSchema = z.object({
 export type SubscriptionMetricsPoint = z.infer<typeof subscriptionMetricsPointSchema>;
 
 export const subscriptionMetricsResponseSchema = z.object({
-  granularity: granularitySchema,
+  granularity: canonicalGranularitySchema,
   items: z.array(subscriptionMetricsPointSchema),
-  planMix: z.record(z.number().int().min(0)),
+  planMix: z.record(z.string(), z.number().int().min(0)),
   pastDueCount: z.number().int().min(0),
 });
 export type SubscriptionMetricsResponse = z.infer<typeof subscriptionMetricsResponseSchema>;
@@ -214,7 +220,7 @@ export type SubscriptionMetricsResponse = z.infer<typeof subscriptionMetricsResp
 export const featureUsageResponseSchema = z.object({
   from: z.string().date(),
   to: z.string().date(),
-  byFeature: z.record(z.number().int().min(0)),
+  byFeature: z.record(z.string(), z.number().int().min(0)),
 });
 export type FeatureUsageResponse = z.infer<typeof featureUsageResponseSchema>;
 
@@ -223,8 +229,8 @@ export const extensionUsageResponseSchema = z.object({
   to: z.string().date(),
   heartbeats: z.number().int().min(0),
   activeInstalls: z.number().int().min(0),
-  byVersion: z.record(z.number().int().min(0)),
-  byBrowser: z.record(z.number().int().min(0)),
+  byVersion: z.record(z.string(), z.number().int().min(0)),
+  byBrowser: z.record(z.string(), z.number().int().min(0)),
 });
 export type ExtensionUsageResponse = z.infer<typeof extensionUsageResponseSchema>;
 

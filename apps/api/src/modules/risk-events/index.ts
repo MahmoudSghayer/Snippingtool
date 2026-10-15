@@ -33,7 +33,7 @@ function toRow(r: typeof riskBudgetEvents.$inferSelect) {
   };
 }
 
-const userIdParams = z.object({ id: z.string().uuid() });
+const userIdParams = z.object({ id: z.string().guid() });
 
 export default fp(
   async function riskEventsModule(fastify: FastifyInstance) {

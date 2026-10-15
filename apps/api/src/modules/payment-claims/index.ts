@@ -32,7 +32,7 @@ import { approveClaim, createClaim, rejectClaim, toPaymentClaimDto } from './ser
 
 import type { FastifyInstance } from 'fastify';
 
-const idParams = z.object({ id: z.string().uuid() });
+const idParams = z.object({ id: z.string().guid() });
 
 /** Submitting a claim is cheap for the buyer and costs an admin a review,
  * so it gets its own tight limit. */
