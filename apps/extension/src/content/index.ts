@@ -41,6 +41,7 @@ import { riskLevelChangeEvent } from '../lib/bot-safety.js';
 import { logger } from '../lib/logger.js';
 import { singleFlight } from '../lib/single-flight.js';
 import { buildBoughtTrade } from '../lib/trade-report.js';
+import { createTransferListTracker } from '../lib/transfer-list.js';
 import { createBotPage, type LiveSearch } from '../ui/bot-page.js';
 import { createConfirmOverlay, type ConfirmOverlay } from '../ui/confirm-overlay.js';
 import { installNavItem } from '../ui/ea-nav.js';
@@ -248,9 +249,14 @@ async function main(): Promise<void> {
 
   // The trader's own trade pile (defect C13): background's trade lifecycle
   // links each item to the buy it came from and reports its sale once
-  // (lib/trade-lifecycle.ts). Not a search: nothing is counted here.
+  // (lib/trade-lifecycle.ts). The same responses keep the Nova AI page's
+  // transfer list counts (lib/transfer-list.ts). Not a search: the governor
+  // counts nothing for it. Forwarded first, so nothing in the page's counts
+  // can keep the items from the lifecycle.
+  const transferList = createTransferListTracker();
   adapter.onTradePile((items: TradePileItem[], full: boolean) => {
     void send('lifecycle.pile', { items, full });
+    transferList.update(items, full);
   });
 
   let probeOk = true;
@@ -743,6 +749,9 @@ async function main(): Promise<void> {
         load: async () => (await browser.storage.local.get(RECENT_SEARCHES_KEY))[RECENT_SEARCHES_KEY],
         save: (list) => browser.storage.local.set({ [RECENT_SEARCHES_KEY]: list }),
       },
+      // Read from the trade-pile responses EA's page fetched (above), never
+      // from a request of the extension's own.
+      getTransferList: () => transferList.summary(),
     });
     const nav = installNavItem({
       onToggle: () => botPage.toggle(),

@@ -48,6 +48,7 @@ import {
   type FilterCriteria,
 } from '@sl/shared';
 
+import { TRANSFER_LIST_SIZE, type TransferListSummary } from '../lib/transfer-list.js';
 import {
   SPECIAL_LEVEL,
   fold,
@@ -98,6 +99,10 @@ export interface BotPageDeps {
     load: () => Promise<unknown>;
     save: (list: RecentSearch[]) => Promise<void>;
   };
+  /** The trader's transfer list as EA's page last showed it
+   * (lib/transfer-list.ts): null until EA has loaded the whole list once.
+   * Without it the Sold, Unsold and Transfer list figures stay empty. */
+  getTransferList?: () => TransferListSummary | null;
 }
 
 /** Where EA's content area is, in px from each window edge. */
@@ -310,6 +315,10 @@ function parseRange(text: string, integer: boolean): { min: number; max: number 
   if (integer && (!Number.isInteger(a) || !Number.isInteger(b))) return null;
   return { min: Math.min(a, b), max: Math.max(a, b) };
 }
+
+/** On the transfer list figures until EA's page has loaded the whole list:
+ * they are read from what it loads, never asked of EA. */
+const TL_WAITING = 'Open your Transfer List in EA once and Nova AI will keep these up to date';
 
 const PHASE_LABEL: Record<SniperPhase, string> = {
   idle: 'Ready',
@@ -590,6 +599,8 @@ const CSS = `
   .elapsed b { display: block; color: var(--ea-text); font-size: 15px; }
   .tl .hd { display: flex; justify-content: space-between; color: var(--ea-text-2); font-size: 13px; }
   .tl .big { font-size: 18px; font-weight: 500; margin-top: 4px; }
+  .tl .of { font-size: 12px; font-weight: 600; }
+  .tl .sub { min-height: 17px; margin-top: 6px; color: var(--ea-muted); font-size: 12px; }
   .bar { height: 6px; border-radius: 3px; background: var(--ea-line); margin-top: 8px; overflow: hidden; }
   .bar > i { display: block; height: 100%; background: var(--ea-success); }
 
@@ -646,7 +657,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   let refreshQueued = false;
   let catalog: Catalog | null = null;
   let catalogPoll: ReturnType<typeof setInterval> | null = null;
-  let walletPoll: ReturnType<typeof setInterval> | null = null;
+  let livePoll: ReturnType<typeof setInterval> | null = null;
 
   /** Takes the latest catalog; re-renders only when it changed, and never
    * while a list is open (the user may be scrolling it). */
@@ -1832,6 +1843,10 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     }
   }
 
+  /** What the transfer list figures show now, so a render that would write
+   * the same figures does nothing. */
+  let tlShown = '';
+
   /** The dash is built once, with the ring in it, and updated in place. */
   function buildDash(): void {
     $('dash').innerHTML = `
@@ -1842,17 +1857,41 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         <div class="counter c-green"><span>Bought</span><span class="n" id="d-bought"></span></div>
         <div class="counter c-red"><span>Missed</span><span class="n" id="d-missed"></span></div>
         <div class="counter c-blue"><span>Coins spent</span><span class="n" id="d-spent"></span></div>
-        <div class="counter c-yellow" title="Transfer list tracking is not available yet"><span>Sold</span><span class="n na">—</span></div>
-        <div class="counter c-orange" title="Transfer list tracking is not available yet"><span>Unsold</span><span class="n na">—</span></div>
+        <div class="counter c-yellow" id="d-sold-row" title="${esc(TL_WAITING)}"><span>Sold</span><span class="n na" id="d-sold">—</span></div>
+        <div class="counter c-orange" id="d-unsold-row" title="${esc(TL_WAITING)}"><span>Unsold</span><span class="n na" id="d-unsold">—</span></div>
       </div>
       <div class="panelbox ring-box" id="ringbox"></div>
-      <div class="panelbox tl" title="Transfer list tracking is not available yet">
+      <div class="panelbox tl" id="d-tl" title="${esc(TL_WAITING)}">
         <div class="hd"><span>Transfer list</span></div>
-        <div class="big na">— <span style="font-size:12px;font-weight:600">/100</span></div>
-        <div class="bar"><i style="width:0%"></i></div>
+        <div class="big na" id="d-tl-big"><span id="d-tl-n">—</span> <span class="of">/${TRANSFER_LIST_SIZE}</span></div>
+        <div class="bar"><i id="d-tl-bar" style="width:0%"></i></div>
+        <div class="sub" id="d-tl-sub"></div>
       </div>
     `;
     $('ringbox').append(ring.el);
+    // Fresh elements: the next render writes the transfer list figures.
+    tlShown = '';
+  }
+
+  /** The Sold and Unsold counters and the Transfer list panel, from the
+   * transfer list as EA's page last showed it. Runs on every refresh and
+   * every second while the page is open, so it returns at once unless the
+   * figures changed. */
+  function renderTransferList(): void {
+    const s = deps.getTransferList?.() ?? null;
+    const key = s ? `${s.total}/${s.sold}/${s.unsold}/${s.listed}/${s.unlisted}/${s.seenAt}` : 'none';
+    if (key === tlShown || !root.getElementById('d-tl')) return;
+    tlShown = key;
+    const title = s ? `Your Transfer List as EA last showed it, at ${timeOfDay(s.seenAt)}` : TL_WAITING;
+    for (const id of ['d-sold-row', 'd-unsold-row', 'd-tl']) $(id).title = title;
+    for (const id of ['d-sold', 'd-unsold', 'd-tl-big']) $(id).classList.toggle('na', !s);
+    setText($('d-sold'), s ? fmt(s.sold) : '—');
+    setText($('d-unsold'), s ? fmt(s.unsold) : '—');
+    setText($('d-tl-n'), s ? fmt(s.total) : '—');
+    // The bar stops at a full list, even if a count kept up from partial
+    // responses runs over (a card that left the list unseen).
+    $('d-tl-bar').style.width = `${s ? Math.min(100, (s.total / TRANSFER_LIST_SIZE) * 100) : 0}%`;
+    setText($('d-tl-sub'), s ? `${fmt(s.listed)} listed · ${fmt(s.unlisted)} not listed` : '');
   }
 
   function renderDash(): void {
@@ -1877,6 +1916,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     setText($('d-bought'), fmt(stats?.purchases ?? 0));
     setText($('d-missed'), fmt(stats?.failures ?? 0));
     setText($('d-spent'), fmt(stats?.coinsSpent ?? 0));
+    renderTransferList();
     renderRing();
   }
 
@@ -2150,7 +2190,13 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       // once it has started); pick each one up while the page is open.
       catalogPoll = setInterval(loadCatalog, 3_000);
       // EA updates its top bar after every buy, sale and pack: follow it.
-      walletPoll = setInterval(renderWallet, 1_000);
+      // The transfer list figures ride on the same tick, for a list EA's
+      // page loads while the bot is stopped (nothing else refreshes the
+      // dash then). When nothing changed the check is one string compare.
+      livePoll = setInterval(() => {
+        renderWallet();
+        renderTransferList();
+      }, 1_000);
       ringFrame = requestAnimationFrame(animate);
       openListeners.forEach((cb) => cb(true));
     },
@@ -2161,8 +2207,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       if (ringFrame != null) cancelAnimationFrame(ringFrame);
       if (catalogPoll) clearInterval(catalogPoll);
       catalogPoll = null;
-      if (walletPoll) clearInterval(walletPoll);
-      walletPoll = null;
+      if (livePoll) clearInterval(livePoll);
+      livePoll = null;
       ringFrame = null;
       openListeners.forEach((cb) => cb(false));
     },
