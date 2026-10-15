@@ -44,6 +44,13 @@ describe('normaliseListing', () => {
     expect(normaliseListing(itemEntity({ tradeId: 4, buyNowPrice: 100, resourceId: 55 }, { idKey }))?.resourceId).toBe(55);
   });
 
+  it("takes the base player id from an entity's databaseId, as UTAS JSON's assetId", () => {
+    const entity = itemEntity({ tradeId: 6, buyNowPrice: 52_000, resourceId: 50_560_000 });
+    entity.databaseId = 228_702;
+    expect(normaliseListing(entity)).toMatchObject({ resourceId: 50_560_000, assetId: 228_702 });
+    expect(normaliseListing(utasAuction({ tradeId: 6, buyNowPrice: 52_000, resourceId: 228_702 }))?.assetId).toBe(228_702);
+  });
+
   it('keeps the name when there is one', () => {
     expect(normaliseListing(itemEntity({ tradeId: 5, buyNowPrice: 100 }, { name: 'Somebody' }))?.name).toBe('Somebody');
   });
