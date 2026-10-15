@@ -295,7 +295,7 @@ export default fp(
         preHandler: [fastify.verifyCsrf],
         schema: {
           tags: ['trades'],
-          params: z.object({ id: z.string().uuid() }),
+          params: z.object({ id: z.string().guid() }),
           body: closeTradeRequestSchema,
           response: { 200: tradeSchema },
         },

@@ -28,7 +28,7 @@ export const snipingAttemptSchema = z
      * attempt once (`ON CONFLICT DO NOTHING` on `(user_id, attempt_id,
      * occurred_at)`). Optional so extensions built before it keep working;
      * their retries can still duplicate. */
-    attemptId: z.string().uuid().optional(),
+    attemptId: z.string().guid().optional(),
     resourceId: z.number().int().positive(),
     tradeId: z.string().min(1).max(64).optional(), // absent when blocked pre-attempt
     targetPrice: coinPriceSchema,
@@ -37,7 +37,7 @@ export const snipingAttemptSchema = z
     latencyMs: z.number().int().min(0).nullable(),
     errorCode: z.string().min(1).max(80).nullable(),
     occurredAt: ingestTimestampSchema,
-    deviceId: z.string().uuid(),
+    deviceId: z.string().guid(),
   })
   .strict();
 export type SnipingAttempt = z.infer<typeof snipingAttemptSchema>;

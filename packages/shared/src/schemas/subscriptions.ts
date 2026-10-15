@@ -25,7 +25,7 @@ export type SubscriptionStatus = (typeof SUBSCRIPTION_STATUSES)[number];
  * `constants/plans.ts` and narrows there instead of relying on this schema
  * to do it. */
 export const planDtoSchema = z.object({
-  id: z.string().uuid(),
+  id: z.string().guid(),
   code: z.string().min(1).max(40),
   name: z.string().min(1).max(80),
   priceCents: z.number().int().min(0),
@@ -38,7 +38,7 @@ export const planDtoSchema = z.object({
 export type PlanDto = z.infer<typeof planDtoSchema>;
 
 export const subscriptionDtoSchema = z.object({
-  id: z.string().uuid(),
+  id: z.string().guid(),
   plan: planDtoSchema,
   status: z.enum(SUBSCRIPTION_STATUSES),
   currentPeriodStart: z.string().datetime().nullable(),
@@ -69,7 +69,7 @@ export const PAYMENT_STATUSES = ['pending', 'succeeded', 'failed', 'refunded', '
 export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
 
 export const paymentDtoSchema = z.object({
-  id: z.string().uuid(),
+  id: z.string().guid(),
   // 'stripe' is a legacy label kept in the payment_provider type (see
   // migrations/0034_drop_stripe.sql); new rows are always 'manual'.
   provider: z.enum(['stripe', 'manual']),
@@ -83,7 +83,7 @@ export type PaymentDto = z.infer<typeof paymentDtoSchema>;
 
 export const adminGrantSubscriptionRequestSchema = z
   .object({
-    userId: z.string().uuid(),
+    userId: z.string().guid(),
     planCode: z.enum(PLAN_CODES),
     periodDays: z.number().int().positive().nullable(), // null for lifetime plans
     reason: z.string().min(1).max(1000),
@@ -122,7 +122,7 @@ export const updateCouponRequestSchema = z
 export type UpdateCouponRequest = z.infer<typeof updateCouponRequestSchema>;
 
 export const couponDtoSchema = z.object({
-  id: z.string().uuid(),
+  id: z.string().guid(),
   code: z.string(),
   type: z.enum(COUPON_TYPES),
   value: z.number(),
@@ -303,7 +303,7 @@ export type AdminDeviceLimitOverrideRequest = z.infer<typeof adminDeviceLimitOve
 /** One row of `GET /admin/subscriptions` — `subscriptionDtoSchema` plus the
  * owning user's id/email, since the list view has no other user context. */
 export const adminSubscriptionListItemSchema = subscriptionDtoSchema.extend({
-  userId: z.string().uuid(),
+  userId: z.string().guid(),
   userEmail: emailSchema,
 });
 export type AdminSubscriptionListItem = z.infer<typeof adminSubscriptionListItemSchema>;
@@ -312,7 +312,7 @@ export const adminSubscriptionListQuerySchema = z
   .object({
     status: z.enum(SUBSCRIPTION_STATUSES).optional(),
     plan: z.string().min(1).max(40).optional(), // plan code
-    userId: z.string().uuid().optional(),
+    userId: z.string().guid().optional(),
     search: z.string().min(1).max(320).optional(), // owning user's email, substring
     cursor: z.string().min(1).max(2048).optional(),
     limit: z.coerce.number().int().min(1).max(200).default(50),
@@ -332,7 +332,7 @@ export const adminSubscriptionByUserResponseSchema = z.object({
   // route (`POST /admin/licenses/:id/device-limit`) is keyed by license id,
   // not subscription id, and this is otherwise undiscoverable from this
   // response alone. Null when `current` is null or has no active license.
-  currentLicenseId: z.string().uuid().nullable(),
+  currentLicenseId: z.string().guid().nullable(),
   history: z.array(subscriptionDtoSchema),
 });
 export type AdminSubscriptionByUserResponse = z.infer<typeof adminSubscriptionByUserResponseSchema>;
@@ -364,7 +364,7 @@ export const createPaymentClaimRequestSchema = z
 export type CreatePaymentClaimRequest = z.infer<typeof createPaymentClaimRequestSchema>;
 
 export const paymentClaimDtoSchema = z.object({
-  id: z.string().uuid(),
+  id: z.string().guid(),
   planCode: z.string(),
   planName: z.string().nullable(),
   amountCents: z.number().int(),
@@ -379,7 +379,7 @@ export const paymentClaimDtoSchema = z.object({
 export type PaymentClaimDto = z.infer<typeof paymentClaimDtoSchema>;
 
 export const adminPaymentClaimDtoSchema = paymentClaimDtoSchema.extend({
-  user: z.object({ id: z.string().uuid(), email: z.string() }),
+  user: z.object({ id: z.string().guid(), email: z.string() }),
 });
 export type AdminPaymentClaimDto = z.infer<typeof adminPaymentClaimDtoSchema>;
 

@@ -147,7 +147,7 @@ export default fp(
         onRequest: [fastify.requirePermission('users.read')],
         schema: {
           tags: ['admin'],
-          params: z.object({ id: z.string().uuid() }),
+          params: z.object({ id: z.string().guid() }),
           response: { 200: userDtoSchema },
         },
       },
@@ -168,7 +168,7 @@ export default fp(
         config: { rateLimit: ADMIN_RATE_LIMIT },
         schema: {
           tags: ['admin'],
-          params: z.object({ id: z.string().uuid() }),
+          params: z.object({ id: z.string().guid() }),
           body: updateProfileRequestSchema,
           response: { 200: userDtoSchema },
         },
@@ -214,7 +214,7 @@ export default fp(
         config: { rateLimit: ADMIN_RATE_LIMIT },
         schema: {
           tags: ['admin'],
-          params: z.object({ id: z.string().uuid() }),
+          params: z.object({ id: z.string().guid() }),
           body: adminSuspendUserRequestSchema,
           response: { 200: userDtoSchema },
         },
@@ -258,7 +258,7 @@ export default fp(
         config: { rateLimit: ADMIN_RATE_LIMIT },
         schema: {
           tags: ['admin'],
-          params: z.object({ id: z.string().uuid() }),
+          params: z.object({ id: z.string().guid() }),
           body: z.object({ reason: z.string().min(1).max(1000) }),
           response: { 200: userDtoSchema },
         },
@@ -300,7 +300,7 @@ export default fp(
         config: { rateLimit: ADMIN_RATE_LIMIT },
         schema: {
           tags: ['admin'],
-          params: z.object({ id: z.string().uuid() }),
+          params: z.object({ id: z.string().guid() }),
           body: z.object({ reason: z.string().min(1).max(1000) }),
           response: { 200: z.object({ sent: z.literal(true) }) },
         },
@@ -350,7 +350,7 @@ export default fp(
         config: { rateLimit: ADMIN_RATE_LIMIT },
         schema: {
           tags: ['admin'],
-          params: z.object({ id: z.string().uuid() }),
+          params: z.object({ id: z.string().guid() }),
           body: z.object({ reason: z.string().min(1).max(1000) }),
           response: {
             200: z.object({

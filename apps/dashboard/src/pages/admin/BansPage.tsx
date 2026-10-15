@@ -30,7 +30,7 @@ async function fetchBans() {
 
 const createBanFormSchema = z.object({
   type: z.enum(BAN_TYPES),
-  userId: z.string().uuid('Enter a valid user ID').optional().or(z.literal('')),
+  userId: z.string().guid('Enter a valid user ID').optional().or(z.literal('')),
   value: z.string().max(320).optional(),
 });
 type CreateBanForm = z.infer<typeof createBanFormSchema>;

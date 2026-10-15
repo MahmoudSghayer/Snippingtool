@@ -118,7 +118,7 @@ export default fp(
         schema: {
           tags: ['admin-coupons'],
           summary: 'Update a coupon (activate/deactivate, extend, change max redemptions).',
-          params: z.object({ id: z.string().uuid() }),
+          params: z.object({ id: z.string().guid() }),
           body: updateCouponRequestSchema,
           response: { 200: couponDtoSchema },
         },

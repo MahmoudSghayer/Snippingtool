@@ -11,8 +11,8 @@ import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 
 const sessionDtoSchema = z.object({
-  id: z.string().uuid(),
-  deviceId: z.string().uuid().nullable(),
+  id: z.string().guid(),
+  deviceId: z.string().guid().nullable(),
   ip: z.string().nullable(),
   userAgent: z.string().nullable(),
   createdAt: z.string().datetime(),
@@ -56,7 +56,7 @@ export default fp(
         preHandler: [fastify.verifyCsrf],
         schema: {
           tags: ['sessions'],
-          params: z.object({ id: z.string().uuid() }),
+          params: z.object({ id: z.string().guid() }),
           response: { 200: z.object({ revoked: z.literal(true) }) },
         },
       },

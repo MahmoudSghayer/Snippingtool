@@ -62,7 +62,7 @@ export default fp(
         schema: {
           tags: ['admin-flags'],
           summary: 'Mark a flag reviewed or dismissed.',
-          params: z.object({ id: z.string().uuid() }),
+          params: z.object({ id: z.string().guid() }),
           body: reviewFlagRequestSchema,
           response: { 200: flagDtoSchema },
         },

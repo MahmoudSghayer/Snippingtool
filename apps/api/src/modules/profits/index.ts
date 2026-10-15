@@ -8,8 +8,8 @@
 
 import { profits } from '@sl/db';
 import {
+  canonicalGranularitySchema,
   dailyProfitSchema,
-  granularitySchema,
   profitQuerySchema,
   type DailyProfit,
 } from '@sl/shared';
@@ -68,7 +68,10 @@ export default fp(
           tags: ['profits'],
           querystring: profitQuerySchema,
           response: {
-            200: z.object({ granularity: granularitySchema, items: z.array(dailyProfitSchema) }),
+            200: z.object({
+              granularity: canonicalGranularitySchema,
+              items: z.array(dailyProfitSchema),
+            }),
           },
         },
       },
