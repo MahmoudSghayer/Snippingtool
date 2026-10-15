@@ -46,7 +46,7 @@ describe('the Nova AI header balance', () => {
     untrustedEvents();
   });
 
-  function mount() {
+  function mount(getCredits?: () => { credits: number; at: number } | null) {
     const shadows = captureShadowRoots();
     const page = createBotPage({
       getSniper: () => null,
@@ -57,6 +57,7 @@ describe('the Nova AI header balance', () => {
       setLiveSearch: () => undefined,
       resolveNames: async () => ({}),
       getCatalog: async () => null,
+      ...(getCredits ? { getCredits } : {}),
     });
     shadows.restore();
     const root = shadows.rootOf(document.getElementById('ledger-bot-page')!);
@@ -66,6 +67,38 @@ describe('the Nova AI header balance', () => {
     };
     return { page, root, shown };
   }
+
+  it("shows the balance EA's answers state after the bot's buys and sales, even while EA's bar lags", () => {
+    eaTopBar('423,244', '200');
+    let credits: { credits: number; at: number } | null = null;
+    const { page, shown } = mount(() => credits);
+    page.open();
+    expect(shown('w-coins')).toBe('423,244');
+
+    // A buy for 2,200: EA's answer says 421,044, its bar still says 423,244.
+    credits = { credits: 421_044, at: 1 };
+    vi.advanceTimersByTime(1_000);
+    expect(shown('w-coins')).toBe('421,044');
+
+    // A sale, seen on the next transfer list load.
+    credits = { credits: 422_849, at: 2 };
+    vi.advanceTimersByTime(1_000);
+    expect(shown('w-coins')).toBe('422,849');
+
+    // EA's bar changes afterwards (a pack bought by hand): it is the newer.
+    eaTopBar('400,000', '200');
+    vi.advanceTimersByTime(1_000);
+    expect(shown('w-coins')).toBe('400,000');
+    page.close();
+  });
+
+  it("shows EA's balance when its bar cannot be read at all", () => {
+    document.body.innerHTML = '';
+    const { page, shown } = mount(() => ({ credits: 421_044, at: 1 }));
+    page.open();
+    expect(shown('w-coins')).toBe('421,044');
+    page.close();
+  });
 
   it("shows EA's coins and FC Points, and follows them while open", () => {
     eaTopBar('1,250,000', '120');

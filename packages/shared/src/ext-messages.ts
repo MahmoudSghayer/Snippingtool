@@ -400,6 +400,27 @@ export const adapterCatalogMessageSchema = z.object({
 });
 export type AdapterCatalogMessage = z.infer<typeof adapterCatalogMessageSchema>;
 
+/** The trader's coin balance, as EA's own responses state it (`credits`
+ * in a market, trade-pile or buy response), for Nova AI's wallet: EA's top
+ * bar is not always redrawn after the bot's own buys and sales. Signed
+ * like the catalog, so a page script cannot show the user a balance EA
+ * never sent. Never leaves the page. */
+export const adapterCreditsMessageSchema = z.object({
+  channel: z.literal(ADAPTER_CHANNEL),
+  kind: z.literal('credits'),
+  data: z
+    .object({
+      credits: z
+        .number()
+        .int()
+        .min(0)
+        .max(MAX_COIN_PRICE * 1_000),
+      seenAt: z.number(),
+    })
+    .strict(),
+  mac: adapterMessageMacSchema,
+});
+
 export const adapterMessageSchema = z.discriminatedUnion('kind', [
   adapterReadyMessageSchema,
   adapterProbeMessageSchema,
@@ -409,6 +430,7 @@ export const adapterMessageSchema = z.discriminatedUnion('kind', [
   adapterTradePileMessageSchema,
   adapterActionResultMessageSchema,
   adapterCatalogMessageSchema,
+  adapterCreditsMessageSchema,
 ]);
 export type AdapterMessage = z.infer<typeof adapterMessageSchema>;
 

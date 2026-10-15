@@ -255,6 +255,12 @@ async function main(): Promise<void> {
   // counts nothing for it. Forwarded first, so nothing in the page's counts
   // can keep the items from the lifecycle.
   const transferList = createTransferListTracker();
+  // The coin balance EA's own answers state (main/adapter.ts), for the Nova
+  // AI page's wallet.
+  let eaCredits: { credits: number; at: number } | null = null;
+  adapter.onCredits((credits) => {
+    eaCredits = { credits, at: Date.now() };
+  });
   adapter.onTradePile((items: TradePileItem[], full: boolean) => {
     void send('lifecycle.pile', { items, full });
     transferList.update(items, full);
@@ -775,6 +781,7 @@ async function main(): Promise<void> {
       // Read from the trade-pile responses EA's page fetched (above), never
       // from a request of the extension's own.
       getTransferList: () => transferList.summary(),
+      getCredits: () => eaCredits,
     });
     const nav = installNavItem({
       onToggle: () => botPage.toggle(),

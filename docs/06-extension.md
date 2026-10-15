@@ -288,7 +288,13 @@ the right. The in-page panel and the userscript's SL menu open it too.
 The page header shows the trader's coins and FC Points, read once a second
 from EA's own top bar (`ui/ea-wallet.ts`: `.view-navbar-currency-coins` /
 `-points`, an assumed shape like the navigation's), since the page can sit
-over that bar. Under the search, **Recent searches** lists the last 10
+over that bar. EA does not always redraw that bar after the bot's own buys
+and sales, so the coins prefer the balance EA's own answers state: the
+adapter reads `credits` from every market, trade-pile and buy (`/trade/<id>/
+bid`) response it sees and sends it, when it changes, as a signed `credits`
+message (automation builds only; never leaves the page). EA's bar wins again
+once it changes after that balance arrived (a pack bought by hand, say).
+Under the search, **Recent searches** lists the last 10
 searches the bot was started on, newest first; clicking one fills the search
 in again. It is a log, not saved filters: kept in extension storage
 (`sl.bot.recentSearches.v1`, Tampermonkey's storage in the userscript

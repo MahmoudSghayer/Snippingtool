@@ -83,6 +83,9 @@ export interface AdapterClient {
   /** Asks the adapter for them, over the authenticated act channel (it
    * sends them once the web app is ready). Nothing is sent without a key. */
   requestCatalog(): void;
+  /** The coin balance EA's own responses stated, signed by the adapter
+   * (Nova AI's wallet). Only a message whose MAC verifies reaches `cb`. */
+  onCredits(cb: (credits: number) => void): () => void;
   /** The trader's own trade-pile items the adapter read. Not a search. */
   /** `full`: a plain GET of the whole trade pile (see the message schema). */
   onTradePile(cb: (items: TradePileItem[], full: boolean) => void): () => void;
@@ -137,6 +140,7 @@ export function createAdapterClient(target: Window, nonce: string | null, option
   const auctionsListeners = new Set<(auctions: TrimmedAuction[]) => void>();
   const catalogListeners = new Set<(catalog: Catalog) => void>();
   const pileListeners = new Set<(items: TradePileItem[], full: boolean) => void>();
+  const creditsListeners = new Set<(credits: number) => void>();
   let probeStatus: ProbeStatus | null = null;
 
   function onMessage(event: MessageEvent): void {
@@ -167,6 +171,14 @@ export function createAdapterClient(target: Window, nonce: string | null, option
     }
     if (msg.kind === 'listings_buyable') {
       for (const cb of buyableListeners) cb(msg.data.tradeIds);
+      return;
+    }
+    if (msg.kind === 'credits') {
+      if (!signer || creditsListeners.size === 0) return;
+      const data = msg.data;
+      void signer.verify(canonicalActMessage('credits', data), msg.mac).then((valid) => {
+        if (valid) for (const cb of creditsListeners) cb(data.credits);
+      });
       return;
     }
     if (msg.kind === 'catalog') {
@@ -341,6 +353,10 @@ export function createAdapterClient(target: Window, nonce: string | null, option
       pileListeners.add(cb);
       return () => pileListeners.delete(cb);
     },
+    onCredits: (cb) => {
+      creditsListeners.add(cb);
+      return () => creditsListeners.delete(cb);
+    },
     dispose: () => {
       target.removeEventListener('message', onMessage);
       pending.clear();
@@ -352,6 +368,7 @@ export function createAdapterClient(target: Window, nonce: string | null, option
       auctionsListeners.clear();
       catalogListeners.clear();
       pileListeners.clear();
+      creditsListeners.clear();
     },
   };
 }

@@ -314,6 +314,51 @@ describe('the Sniping Bot catalog', () => {
   });
 });
 
+// Nova AI's wallet: the coin balance EA's own answers state (`credits`),
+// since EA's top bar is not always redrawn after the bot's buys and sales.
+describe("the coin balance from EA's answers", () => {
+  const EA = 'https://utas.mob.v4.prd.futc-ext.gcp.ea.com/ut/game/fc25';
+  const credits = () => posted.filter((m) => m.kind === 'credits');
+
+  it('sends the balance a market, trade-pile or buy answer states, signed, once per change', async () => {
+    nativeFetch.mockResolvedValueOnce(networkResponse({ auctionInfo: [], credits: 423_244 }, EA + '/transfermarket?num=21'));
+    await window.fetch(EA + '/transfermarket?num=21');
+    await vi.waitFor(() => expect(credits()).toHaveLength(1));
+    const first = credits()[0]!;
+    expect(first.data).toMatchObject({ credits: 423_244 });
+    expect(await signer.verify(canonicalActMessage('credits', first.data), first.mac)).toBe(true);
+
+    // The same balance again: nothing new to say.
+    nativeFetch.mockResolvedValueOnce(networkResponse({ auctionInfo: [], credits: 423_244 }, EA + '/transfermarket?num=21'));
+    await window.fetch(EA + '/transfermarket?num=21');
+    await settle();
+    expect(credits()).toHaveLength(1);
+
+    // A buy's answer: read for its balance only.
+    const before = posted.filter((m) => m.kind === 'auctions' || m.kind === 'tradepile').length;
+    nativeFetch.mockResolvedValueOnce(networkResponse({ credits: 421_044, auctionInfo: [rawAuction(6101, 2_200)] }, EA + '/trade/6101/bid'));
+    await window.fetch(EA + '/trade/6101/bid', { method: 'PUT' });
+    await vi.waitFor(() => expect(credits()).toHaveLength(2));
+    expect(credits()[1]!.data).toMatchObject({ credits: 421_044 });
+    expect(posted.filter((m) => m.kind === 'auctions' || m.kind === 'tradepile')).toHaveLength(before);
+
+    // A sale, seen on the next trade-pile load.
+    nativeFetch.mockResolvedValueOnce(networkResponse({ auctionInfo: [], credits: 422_849 }, EA + '/tradepile'));
+    await window.fetch(EA + '/tradepile');
+    await vi.waitFor(() => expect(credits()).toHaveLength(3));
+    expect(credits()[2]!.data).toMatchObject({ credits: 422_849 });
+  });
+
+  it('ignores a balance from anywhere but EA, and one that is not a whole number', async () => {
+    nativeFetch.mockResolvedValueOnce(networkResponse({ credits: 999_999_999 }, 'https://evil.example/ut/game/fc25/trade/1/bid'));
+    await window.fetch('https://evil.example/ut/game/fc25/trade/1/bid', { method: 'PUT' });
+    nativeFetch.mockResolvedValueOnce(networkResponse({ auctionInfo: [], credits: '5' }, EA + '/transfermarket'));
+    await window.fetch(EA + '/transfermarket');
+    await settle();
+    expect(credits()).toHaveLength(0);
+  });
+});
+
 // Defect C13: the trader's own trade pile, read passively like the market
 // (same https + *.ea.com check), and posted as its own `tradepile`
 // message, never as a search.

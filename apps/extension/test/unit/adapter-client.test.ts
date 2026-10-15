@@ -224,6 +224,19 @@ describe('diagnostics', () => {
   });
 });
 
+describe("the coin balance from EA's answers (Nova AI's wallet)", () => {
+  it('passes on a balance only when its MAC verifies under the nonce', async () => {
+    const cb = vi.fn();
+    client.onCredits(cb);
+    const data = { credits: 423_244, seenAt: 1 };
+    deliver({ channel: ADAPTER_CHANNEL, kind: 'credits', data, mac: 'f'.repeat(64) });
+    await flush();
+    expect(cb).not.toHaveBeenCalled();
+    deliver({ channel: ADAPTER_CHANNEL, kind: 'credits', data, mac: await signer.sign(canonicalActMessage('credits', data)) });
+    await vi.waitFor(() => expect(cb).toHaveBeenCalledWith(423_244));
+  });
+});
+
 describe('transfer list reload (Nova AI counts)', () => {
   it('asks the adapter with a signed pile request and resolves on its signed answer', async () => {
     const promise = client.refreshPile();
