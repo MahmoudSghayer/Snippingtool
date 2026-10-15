@@ -6,9 +6,9 @@ name: Production ops
 # infra/scripts/production-ops.sh, copied from this commit:
 #
 #   diagnose     what runs where (image tags, services, admin count); changes nothing
-#   deploy       run the api / worker images built for a commit (release.yml
-#                pushes `sha-<full sha>` and `main` tags on every push to main),
-#                after their migrations; rolls api + worker back if unhealthy
+#   deploy       bring the server's checkout up to a commit on main and run
+#                infra/scripts/vm-deploy.sh there (backup, rollback tags,
+#                build, migrate, restart, health check)
 #   admin-login  set the (single) admin account's password, unlock it and
 #                clear its 2FA
 #
@@ -24,8 +24,8 @@ on:
         type: choice
         options: [diagnose, deploy, admin-login]
         required: true
-      image_tag:
-        description: 'deploy: image tag to run (empty = sha-<this commit>)'
+      commit:
+        description: "deploy: commit on main to deploy (empty = this run's commit)"
         required: false
         default: ''
       password_hash:
@@ -57,7 +57,7 @@ jobs:
           SSH_KNOWN_HOSTS: ${{ secrets.PRODUCTION_SSH_KNOWN_HOSTS }}
           CADDY_CONTAINER: ${{ vars.CADDY_CONTAINER || 'sniper-ledger-prod-caddy-1' }}
           ACTION: ${{ inputs.action }}
-          INPUT_TAG: ${{ inputs.image_tag }}
+          INPUT_COMMIT: ${{ inputs.commit }}
           INPUT_HASH: ${{ inputs.password_hash }}
         run: |
           set -euo pipefail
@@ -68,7 +68,7 @@ jobs:
           install -m 700 -d ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          opts=(-i ~/.ssh/deploy_key -o BatchMode=yes)
+          opts=(-i ~/.ssh/deploy_key -o BatchMode=yes -o ServerAliveInterval=30)
           if [ -n "$SSH_KNOWN_HOSTS" ]; then
             printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
             opts+=(-o StrictHostKeyChecking=yes)
@@ -76,8 +76,8 @@ jobs:
             opts+=(-o StrictHostKeyChecking=accept-new)
           fi
 
-          tag="${INPUT_TAG:-sha-${GITHUB_SHA}}"
-          [[ "$tag" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::bad image_tag"; exit 1; }
+          commit="${INPUT_COMMIT:-$GITHUB_SHA}"
+          [[ "$commit" =~ ^[0-9a-f]{7,40}$ ]] || { echo "::error::commit must be a commit sha"; exit 1; }
           hash_b64=""
           if [ "$ACTION" = admin-login ]; then
             [ -n "$INPUT_HASH" ] || { echo "::error::admin-login needs password_hash"; exit 1; }
@@ -92,7 +92,7 @@ jobs:
           scp "${opts[@]}" infra/scripts/production-ops.sh "$remote:$dir/"
           # shellcheck disable=SC2029 # these expand on the runner, by design
           ssh "${opts[@]}" "$remote" \
-            "OPS_ACTION='$ACTION' IMAGE_TAG='$tag' HASH_B64='$hash_b64' REPO_COMPOSE_SHA='$compose_sha' CADDY_CONTAINER='$CADDY_CONTAINER' bash '$dir/production-ops.sh'; s=\$?; rm -rf '$dir'; exit \$s" \
+            "OPS_ACTION='$ACTION' DEPLOY_SHA='$commit' HASH_B64='$hash_b64' REPO_COMPOSE_SHA='$compose_sha' CADDY_CONTAINER='$CADDY_CONTAINER' bash '$dir/production-ops.sh'; s=\$?; rm -rf '$dir'; exit \$s" \
             | tee ops.log
           {
             echo "### production ops: $ACTION"

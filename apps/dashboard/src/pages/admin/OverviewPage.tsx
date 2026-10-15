@@ -15,6 +15,7 @@ import { Activity, AlertTriangle, DollarSign, TrendingUp, Users } from 'lucide-r
 import { useState } from 'react';
 
 import { api } from '@/api/client.js';
+import { LatestScriptCard } from '@/components/admin/LatestScriptCard.js';
 import { useAdminLiveStore } from '@/stores/adminLive.js';
 
 /** `/admin` — KPI overview. Live online/active-snipe/error counters come
@@ -66,6 +67,8 @@ export function OverviewPage() {
         description="Platform health and growth at a glance."
         actions={<DateRangePicker value={range} onChange={setRange} />}
       />
+
+      <LatestScriptCard />
 
       <KpiGrid>
         <StatTile
