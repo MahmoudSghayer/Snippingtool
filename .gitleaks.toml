@@ -12,8 +12,18 @@ title = "sniper-ledger"
 [extend]
 useDefault = true
 
+#
+# The three extension unit-test files below hold test fixtures only: the
+# Ed25519 keypair the test build verifies entitlements with (its public half
+# is set in apps/extension/vitest.config.ts; release builds take
+# ENTITLEMENT_PUBLIC_KEY from the repository variables instead and refuse to
+# build without one), JWS blobs signed with that test key, and made-up
+# passwords for mocked register/login calls.
 [allowlist]
-description = "dev-only example keys the API refuses to run with in production"
+description = "dev-only example keys the API refuses to run with in production, and extension test fixtures"
 paths = [
   '''^infra/env/\.env\.development\.example$''',
+  '''^apps/extension/test/unit/license-test-keys\.ts$''',
+  '''^apps/extension/test/unit/adapter-shapes\.test\.ts$''',
+  '''^apps/extension/test/unit/register-verify-email\.test\.ts$''',
 ]
