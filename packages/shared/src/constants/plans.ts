@@ -78,7 +78,9 @@ export const LISTABLE_FEATURE_KEYS = [
   'support.priority',
   'mobile.remote',
 ] as const satisfies readonly FeatureKey[];
-export const AUTOMATION_FEATURE_KEYS = ['automation.autobuyer'] as const satisfies readonly FeatureKey[];
+export const AUTOMATION_FEATURE_KEYS = [
+  'automation.autobuyer',
+] as const satisfies readonly FeatureKey[];
 
 /** Features unlocked per plan. Every paid plan includes the autobuyer; the
  * plans differ in the mobile companion and in how long the pass lasts

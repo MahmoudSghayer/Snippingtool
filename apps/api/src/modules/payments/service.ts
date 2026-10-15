@@ -4,7 +4,6 @@
 import { payments, type Database } from '@sl/db';
 import { and, desc, eq, lt } from 'drizzle-orm';
 
-
 import { decodeCursor, paginate } from '../../lib/pagination.js';
 
 export type PaymentRow = typeof payments.$inferSelect;

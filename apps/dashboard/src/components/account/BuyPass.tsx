@@ -87,7 +87,7 @@ function PlanCard({ plan, current }: { plan: PlanDto; current: boolean }) {
   const price = formatCurrencyFromCents(plan.priceCents, plan.currency.toUpperCase());
 
   return (
-    <Card className={cn('bg-surface-2', current && 'border-gold', !available && 'opacity-80')}>
+    <Card className={cn('bg-surface-2', current && 'border-gold')}>
       <CardHeader>
         <CardTitle>{plan.name}</CardTitle>
         {current ? (

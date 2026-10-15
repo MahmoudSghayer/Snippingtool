@@ -6,6 +6,9 @@
 # zip, which needs no publish step (it rebuilds from the api image on every
 # deploy).
 #
+# .github/workflows/publish-userscript.yml runs this on the VM on every push
+# to main that changes the userscript; running it by hand still works.
+#
 # This script never restarts anything: it only copies two files into a
 # volume a running container already serves, and Tampermonkey polls
 # nova-trade.meta.js for updates on its own schedule (no-cache is set on
