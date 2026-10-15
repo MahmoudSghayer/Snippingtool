@@ -255,7 +255,9 @@ Differences that follow from there being no extension process:
   act-channel nonce and puts it on `<html>` before injecting the adapter,
   which takes it synchronously, as `handoff.js` does in the extension
   (`lib/act-auth.ts`'s `handOffNonceWithinBundle`; content's copy stays in
-  the bundle, not on Tampermonkey's global). Content talks to the page
+  the bundle, not on Tampermonkey's global). When Tampermonkey injects
+  after page scripts have started, it still hands off, and content logs
+  that it was late. Content talks to the page
   through `unsafeWindow`, so the userscript's adapter (only) accepts act
   requests by origin rather than by `event.source`; every request, result
   and catalog is still MAC-checked.

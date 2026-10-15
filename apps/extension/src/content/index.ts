@@ -35,7 +35,7 @@ import { AssistEngine, activeFilterHandles } from '../engine/assist.js';
 import { Governor, type GovernorState } from '../engine/governor.js';
 import { rankCandidates, type ScoredOpportunity } from '../engine/ranker.js';
 import { countObservedSearches, governedSearch } from '../engine/search.js';
-import { readHandedOffNonce } from '../lib/act-auth.js';
+import { handOffWasLate, readHandedOffNonce } from '../lib/act-auth.js';
 import { riskLevelChangeEvent } from '../lib/bot-safety.js';
 import { logger } from '../lib/logger.js';
 import { singleFlight } from '../lib/single-flight.js';
@@ -118,6 +118,8 @@ async function main(): Promise<void> {
   // closed (assist/automation cannot buy); M1 recording does not need it.
   const actNonce = readHandedOffNonce();
   if (!actNonce) logger.warn('no act-channel nonce was handed off — assist/automation buys are disabled on this page', 'adapter');
+  else if (handOffWasLate())
+    logger.warn('the act-channel nonce was handed off after page scripts may have run (late userscript injection)', 'adapter');
   const adapter = createAdapterClient(pageWindow(), actNonce);
   // The options page's "Copy diagnostics" (content/diagnostics.ts). Wired
   // here, before any bootstrap, so it answers even when M2/M3 never boots —
@@ -607,8 +609,7 @@ async function main(): Promise<void> {
       }
       botSettings = botSettings ?? (await send<BotSettings>('bot.settingsGet'));
       // No act-channel nonce: the adapter cannot authenticate a single
-      // search or buy. In the userscript that means page scripts had already
-      // run when it installed (userscript/setup.ts refuses the handoff then).
+      // search or buy (handoff.js never ran on this page load).
       if (!actNonce) unavailableReason = NO_ACT_CHANNEL_REASON;
       else if (!signedIn) unavailableReason = 'Sign in to Nova Trade to use Nova AI.';
       else if (!allowed) unavailableReason = 'Your plan does not include Nova AI.';
