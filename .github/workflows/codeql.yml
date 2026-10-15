@@ -17,7 +17,7 @@ on:
 
 permissions:
   contents: read
-  actions: read # codeql-action v3 reads its own workflow run metadata
+  actions: read # codeql-action reads its own workflow run metadata
   security-events: write # only used once `upload: always` is restored (see the analyze step)
 
 jobs:
@@ -29,7 +29,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: initialize CodeQL
-        uses: github/codeql-action/init@3ea06614dafe36dec890db3446326e0d40ce53d4 # v3
+        uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           languages: javascript-typescript
           # No compiled artifacts needed for JS/TS analysis (unlike a
@@ -43,7 +43,7 @@ jobs:
       # (docs/11-devops.md "CI/CD"). Flip `upload` to `always` once the
       # repository is public or has Advanced Security.
       - name: perform CodeQL analysis
-        uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v3
+        uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           category: '/language:javascript-typescript'
           upload: never
