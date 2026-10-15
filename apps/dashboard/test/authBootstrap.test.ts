@@ -36,7 +36,8 @@ describe('ensureBootstrapped', () => {
         return jsonResponse({ accessToken: 'a', refreshToken: 'b', expiresIn: 900 }, 200);
       }
       meCalls += 1;
-      if (meCalls === 1) return jsonResponse({ code: 'AUTH_TOKEN_EXPIRED', message: 'expired' }, 401);
+      if (meCalls === 1)
+        return jsonResponse({ code: 'AUTH_TOKEN_EXPIRED', message: 'expired' }, 401);
       return jsonResponse({ id: 'user-1', role: 'user', permissions: [] }, 200);
     });
 

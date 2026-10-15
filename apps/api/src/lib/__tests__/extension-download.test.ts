@@ -34,7 +34,10 @@ describe('lib/extension-download key substitution', () => {
 
   beforeAll(() => {
     templateDir = mkdtempSync(path.join(tmpdir(), 'nova-key-template-'));
-    writeFileSync(path.join(templateDir, 'manifest.json'), JSON.stringify({ manifest_version: 3, version: '9.9.9' }));
+    writeFileSync(
+      path.join(templateDir, 'manifest.json'),
+      JSON.stringify({ manifest_version: 3, version: '9.9.9' }),
+    );
     writeFileSync(
       path.join(templateDir, 'background.js'),
       `const KEY="${TEMPLATE_PLACEHOLDERS.licensePublicKey}";`,
@@ -64,7 +67,10 @@ describe('lib/extension-download key substitution', () => {
     const key = /const KEY="([^"]*)"/.exec(background)?.[1] ?? '';
     expect(key).toMatch(/^[A-Za-z0-9_-]{43}$/);
 
-    const blob = await new DefaultEntitlementProvider({} as Database, privatePem).signEntitlementBlob(
+    const blob = await new DefaultEntitlementProvider(
+      {} as Database,
+      privatePem,
+    ).signEntitlementBlob(
       SNAPSHOT,
       '22222222-2222-4222-8222-222222222222',
       '11111111-1111-4111-8111-111111111111',
@@ -74,7 +80,9 @@ describe('lib/extension-download key substitution', () => {
     // The extension's import: base64url -> bytes; 32 bytes -> 'raw'.
     const raw = new Uint8Array(Buffer.from(key, 'base64url'));
     expect(raw.length).toBe(32);
-    const cryptoKey = await crypto.subtle.importKey('raw', raw, { name: 'Ed25519' }, false, ['verify']);
+    const cryptoKey = await crypto.subtle.importKey('raw', raw, { name: 'Ed25519' }, false, [
+      'verify',
+    ]);
     const [h, c, s] = blob.split('.') as [string, string, string];
     const ok = await crypto.subtle.verify(
       'Ed25519',
