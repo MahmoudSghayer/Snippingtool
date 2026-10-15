@@ -323,8 +323,16 @@ every listing at or under the price cap (cheapest first), and starts the next
 search a random delay from the user's range after the last one started (start
 to start, so EA's answer time and any buying come out of the delay rather than
 being added to it), with breaks every N searches and rests every N
-minutes. Each missed buy's log line says how long after the search it went out
-and how long EA took to answer. EA answers a search it was just asked, word for
+minutes. Nothing after a buy holds the bot up: the buy counts at once, its
+sell price and profit fill in when their lookup answers, and auto-sell's
+listing (a FUTBIN lookup and EA's listing call) runs on its own while the
+bot goes on to the next listing and search; only the user's own "Pause
+after a buy" (Safety, 10 s by default, 0 for none) waits. With a minimum
+profit set, a buy waits at most 300 ms for its estimate (unknown profit is
+allowed). A missed buy's log line gives the reason in plain words
+(`missReason`: "someone else got it first" for EA's 403 / 461 / 478, "not
+enough coins", a verification, EA limiting requests), never EA's wording or
+the timings, which stay in the attempt telemetry. EA answers a search it was just asked, word for
 word, from its cache, so each search steps its min buy-now price one notch up
 EA's price grid (`searchMinBuy`): from the filter's own min (or none) up to
 40% of the way to the max price (1,000 coins over the min with no max price),
