@@ -201,7 +201,11 @@ const envSchema = z.object({
   // Directory holding the `userscript --template` build (nova-trade.user.js)
   // that GET /downloads/userscript/:token/... serves. The image ships it at
   // /app/downloads/userscript-template; in the repo it's
-  // apps/extension/dist/userscript-template. Unset = look in both.
+  // apps/extension/dist/userscript-template. Those two are always tried
+  // after this one, which is skipped while it has no nova-trade.user.js.
+  // docker-compose.prod.yml points it at a host directory that
+  // infra/scripts/publish-userscript.sh refreshes on every publish; a new
+  // file there is served from the next request on, without a restart.
   USERSCRIPT_TEMPLATE_DIR: z.preprocess(
     (v) => (v === '' ? undefined : v),
     z.string().min(1).optional(),

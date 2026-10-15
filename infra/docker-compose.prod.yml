@@ -58,10 +58,22 @@ services:
     <<: [*app-env, *restart-always]
     environment:
       NODE_ENV: production
-    # Read-only CA cert so the API can *verify* the Redis server cert
-    # rather than blindly trusting it (plugins/redis.ts, REDIS_TLS_CA_FILE).
+      # The userscript template behind the dashboard's install links
+      # (apps/api/src/lib/extension-download.ts), mounted below.
+      USERSCRIPT_TEMPLATE_DIR: /app/downloads/userscript-published
     volumes:
+      # Read-only CA cert so the API can *verify* the Redis server cert
+      # rather than blindly trusting it (plugins/redis.ts, REDIS_TLS_CA_FILE).
       - ./certs:/certs:ro
+      # .github/workflows/publish-userscript.yml installs a fresh template
+      # here on every publish (infra/scripts/publish-userscript.sh), and the
+      # API serves it from the next request on, without a rebuild or
+      # restart. Until the first publish the directory is empty and the API
+      # falls back to the template baked into its image, which this must
+      # therefore not be mounted over (/app/downloads/userscript-template).
+      # Changing this mount needs the api containers recreated once:
+      # docs/11-devops.md, "Publishing the userscript".
+      - /var/lib/nova-trade/userscript-template:/app/downloads/userscript-published:ro
     depends_on:
       postgres:
         condition: service_healthy

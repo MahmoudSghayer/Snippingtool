@@ -72,13 +72,16 @@ if (template && target === 'ledger') {
 // Tampermonkey only installs an update when `@version` goes up, so every
 // hand-published userscript build gets its own: the package version plus a
 // UTC build stamp (0.1.0.202609230830 > 0.1.0.202609221900).
-// USERSCRIPT_VERSION pins it. The API-served template uses the extension
-// version as is, so the userscript updates when the extension does.
+// USERSCRIPT_VERSION pins it, for the template too. Without it the
+// API-served template uses the extension version as is (the copy baked into
+// the API image). .github/workflows/publish-userscript.yml builds the
+// template it installs for the API with the published script's version, so
+// installs from the dashboard update on every publish as well.
 // The same version is compiled in, so the page can show which one runs.
 const version =
-  target === 'userscript' && !template
+  target === 'userscript'
     ? process.env.USERSCRIPT_VERSION ||
-      `${pkg.version}.${new Date().toISOString().replace(/\D/g, '').slice(0, 12)}`
+      (template ? pkg.version : `${pkg.version}.${new Date().toISOString().replace(/\D/g, '').slice(0, 12)}`)
     : pkg.version;
 
 // SL_EXT_OUT_DIR lets a test build into a scratch directory

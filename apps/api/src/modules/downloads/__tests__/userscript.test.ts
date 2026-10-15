@@ -4,7 +4,7 @@
 // its update URLs pointing back at the same signed link.
 
 import { generateKeyPairSync } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -186,6 +186,41 @@ describe('downloads module (/api/v1/downloads/userscript)', () => {
       expect((await fetchAnon(await installUrl(noPass))).statusCode).toBe(403);
     } finally {
       (app.config as { ENTITLEMENT_PUBLIC_KEY?: string }).ENTITLEMENT_PUBLIC_KEY = original;
+    }
+  });
+
+  // infra/scripts/publish-userscript.sh renames a new template into the
+  // mounted USERSCRIPT_TEMPLATE_DIR on every publish. Tampermonkey's next
+  // update check (meta.js) must see the new @version, and the script it
+  // then fetches must be the new one, from the same running API.
+  it('serves a newly published template on the next request, without a restart', async () => {
+    const { token } = await createUser('monthly@example.com', true);
+    const url = await installUrl(token);
+    const metaUrl = url.replace(/user\.js$/, 'meta.js');
+    expect((await fetchAnon(metaUrl)).body).toContain('// @version      1.2.3');
+
+    const live = path.join(templateDir, 'nova-trade.user.js');
+    const incoming = path.join(templateDir, '.incoming-test');
+    mkdirSync(incoming);
+    writeFileSync(
+      path.join(incoming, 'nova-trade.user.js'),
+      TEMPLATE.replace('@version      1.2.3', '@version      1.2.4').replace(
+        'const API=',
+        'const NEW=1;const API=',
+      ),
+    );
+    renameSync(path.join(incoming, 'nova-trade.user.js'), live);
+    rmSync(incoming, { recursive: true });
+    try {
+      const meta = await fetchAnon(metaUrl);
+      expect(meta.statusCode).toBe(200);
+      expect(meta.body).toContain('// @version      1.2.4');
+      const script = await fetchAnon(url);
+      expect(script.body).toContain('// @version      1.2.4');
+      expect(script.body).toContain('const NEW=1;');
+      for (const placeholder of Object.values(P)) expect(script.body).not.toContain(placeholder);
+    } finally {
+      writeFileSync(live, TEMPLATE);
     }
   });
 
