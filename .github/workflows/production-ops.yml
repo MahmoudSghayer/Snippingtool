@@ -1,0 +1,102 @@
+name: Production ops
+
+# Manual-only maintenance on the production server, over the same SSH
+# secrets publish-userscript.yml uses (PRODUCTION_SSH_HOST / _USER /
+# _PRIVATE_KEY, optional _KNOWN_HOSTS). The work itself is
+# infra/scripts/production-ops.sh, copied from this commit:
+#
+#   diagnose     what runs where (image tags, services, admin count); changes nothing
+#   deploy       run the api / worker images built for a commit (release.yml
+#                pushes `sha-<full sha>` and `main` tags on every push to main),
+#                after their migrations; rolls api + worker back if unhealthy
+#   admin-login  set the (single) admin account's password, unlock it and
+#                clear its 2FA
+#
+# This repository and its logs are public: never pass a password here. For
+# admin-login, `password_hash` takes the new password's argon2id hash, e.g.
+#   node -e "require('argon2').hash(process.argv[1],{type:2}).then(console.log)" '<password>'
+# run from apps/api, which is safe to show.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: What to do
+        type: choice
+        options: [diagnose, deploy, admin-login]
+        required: true
+      image_tag:
+        description: 'deploy: image tag to run (empty = sha-<this commit>)'
+        required: false
+        default: ''
+      password_hash:
+        description: "admin-login: the new password's argon2id hash (never the password)"
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+# One at a time: two deploys must never interleave.
+concurrency:
+  group: production-ops
+  cancel-in-progress: false
+
+jobs:
+  ops:
+    name: ${{ inputs.action }}
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: run on the production server
+        env:
+          SSH_HOST: ${{ secrets.PRODUCTION_SSH_HOST }}
+          SSH_USER: ${{ secrets.PRODUCTION_SSH_USER }}
+          SSH_KEY: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.PRODUCTION_SSH_KNOWN_HOSTS }}
+          CADDY_CONTAINER: ${{ vars.CADDY_CONTAINER || 'sniper-ledger-prod-caddy-1' }}
+          ACTION: ${{ inputs.action }}
+          INPUT_TAG: ${{ inputs.image_tag }}
+          INPUT_HASH: ${{ inputs.password_hash }}
+        run: |
+          set -euo pipefail
+          if [ -z "$SSH_HOST" ] || [ -z "$SSH_USER" ] || [ -z "$SSH_KEY" ]; then
+            echo "::error::PRODUCTION_SSH_HOST / PRODUCTION_SSH_USER / PRODUCTION_SSH_PRIVATE_KEY are not all set"
+            exit 1
+          fi
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          opts=(-i ~/.ssh/deploy_key -o BatchMode=yes)
+          if [ -n "$SSH_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+            opts+=(-o StrictHostKeyChecking=yes)
+          else
+            opts+=(-o StrictHostKeyChecking=accept-new)
+          fi
+
+          tag="${INPUT_TAG:-sha-${GITHUB_SHA}}"
+          [[ "$tag" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::bad image_tag"; exit 1; }
+          hash_b64=""
+          if [ "$ACTION" = admin-login ]; then
+            [ -n "$INPUT_HASH" ] || { echo "::error::admin-login needs password_hash"; exit 1; }
+            hash_b64="$(printf '%s' "$INPUT_HASH" | base64 -w0)"
+          fi
+          compose_sha="$(sha256sum infra/docker-compose.prod.yml | cut -d' ' -f1)"
+
+          remote="$SSH_USER@$SSH_HOST"
+          dir="/tmp/nova-ops-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          # shellcheck disable=SC2029 # $dir is meant to expand here, on the runner
+          ssh "${opts[@]}" "$remote" "mkdir -p '$dir'"
+          scp "${opts[@]}" infra/scripts/production-ops.sh "$remote:$dir/"
+          # shellcheck disable=SC2029 # these expand on the runner, by design
+          ssh "${opts[@]}" "$remote" \
+            "OPS_ACTION='$ACTION' IMAGE_TAG='$tag' HASH_B64='$hash_b64' REPO_COMPOSE_SHA='$compose_sha' CADDY_CONTAINER='$CADDY_CONTAINER' bash '$dir/production-ops.sh'; s=\$?; rm -rf '$dir'; exit \$s" \
+            | tee ops.log
+          {
+            echo "### production ops: $ACTION"
+            echo '```'
+            cat ops.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

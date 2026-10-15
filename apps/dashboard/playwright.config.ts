@@ -63,6 +63,9 @@ export default defineConfig({
       reuseExistingServer: true,
       timeout: 60_000,
       env: {
+        // Login 2FA is off by default (apps/api config/env.ts
+        // MFA_ENABLED); these specs drive the admin's 2FA, so it is on.
+        MFA_ENABLED: 'true',
         DATABASE_URL,
         REDIS_URL,
         DASHBOARD_ORIGIN,

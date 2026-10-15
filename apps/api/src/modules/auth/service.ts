@@ -71,6 +71,10 @@ export interface AuthContext {
    * existing tests that build an ad-hoc `AuthContext` without it keep
    * working unchanged. */
   loginRateLimit?: { max: number; windowMs: number };
+  /** TOTP two-factor at login (`MFA_ENABLED`). Off: login never asks for a
+   * code and admins are not made to enroll. Optional, and on when left
+   * out, so contexts built by hand in tests keep the 2FA flow they test. */
+  mfaEnabled?: boolean;
 }
 
 const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000;
@@ -311,8 +315,9 @@ export async function login(
 
   await resetLoginFailures(ctx.db, user.id);
 
-  const requiresEnrollment = user.role === 'admin' && !user.totpEnabledAt;
-  const requiresVerification = Boolean(user.totpEnabledAt);
+  const mfaEnabled = ctx.mfaEnabled ?? true;
+  const requiresEnrollment = mfaEnabled && user.role === 'admin' && !user.totpEnabledAt;
+  const requiresVerification = mfaEnabled && Boolean(user.totpEnabledAt);
 
   if (requiresEnrollment || requiresVerification) {
     const ticket = generateMfaTicket();

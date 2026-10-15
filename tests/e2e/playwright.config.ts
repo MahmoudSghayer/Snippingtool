@@ -52,6 +52,9 @@ export const EXTENSION_ID = computeUnpackedExtensionId(EXTENSION_OUT_DIR);
 
 const apiEnv = {
   ...process.env,
+  // Login 2FA is off by default (apps/api config/env.ts MFA_ENABLED); these
+  // journeys drive the admin's 2FA enrollment, so they run with it on.
+  MFA_ENABLED: 'true',
   DATABASE_URL,
   REDIS_URL,
   PORT: String(API_PORT),

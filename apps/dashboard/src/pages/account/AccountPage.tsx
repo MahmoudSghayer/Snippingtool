@@ -7,12 +7,7 @@ import { PaymentHistory, PayWithPayPal, SubmitPayment } from '@/components/accou
 import { DevicesCard } from '@/components/account/DevicesCard.js';
 import { GettingStarted } from '@/components/account/GettingStarted.js';
 import { PassSummary } from '@/components/account/PassSummary.js';
-import {
-  ChangePasswordCard,
-  DeleteAccountCard,
-  EmailCard,
-  TwoFactorCard,
-} from '@/components/account/Security.js';
+import { ChangePasswordCard, DeleteAccountCard, EmailCard } from '@/components/account/Security.js';
 import { ExtensionDownloadCard } from '@/components/ExtensionDownload.js';
 import { useWsGateway } from '@/hooks/useWsGateway.js';
 import { useAuthStore } from '@/stores/auth.js';
@@ -113,7 +108,7 @@ export function AccountPage() {
       <AccountSection id="security" index={5} title="Account and security">
         <EmailCard />
         <ChangePasswordCard />
-        <TwoFactorCard />
+        {/* No two-factor card: login 2FA is off (apps/api MFA_ENABLED). */}
         <DeleteAccountCard />
       </AccountSection>
     </div>

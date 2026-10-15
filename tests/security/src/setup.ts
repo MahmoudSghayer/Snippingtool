@@ -10,6 +10,9 @@ import { config } from 'dotenv';
 config({ path: fileURLToPath(new URL('../../../apps/api/.env', import.meta.url)) });
 
 process.env.NODE_ENV ??= 'test';
+// Login 2FA is off by default (apps/api config/env.ts MFA_ENABLED); these
+// tests cover the 2FA flow, so they run with it on.
+process.env.MFA_ENABLED ??= 'true';
 // A dedicated Redis logical DB, distinct from @sl/api's own test suite's
 // default (15, config/env.ts's REDIS_TEST_DB) — so this package can safely
 // run in the same environment as (or concurrently with) `pnpm --filter
