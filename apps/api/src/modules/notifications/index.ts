@@ -14,11 +14,11 @@ import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 
 const notificationDtoSchema = z.object({
-  id: z.string().uuid(),
+  id: z.string().guid(),
   type: z.string(),
   title: z.string(),
   body: z.string().nullable(),
-  data: z.record(z.unknown()),
+  data: z.record(z.string(), z.unknown()),
   readAt: z.string().datetime().nullable(),
   createdAt: z.string().datetime(),
 });
@@ -79,7 +79,7 @@ export default fp(
         preHandler: [fastify.verifyCsrf],
         schema: {
           tags: ['notifications'],
-          params: z.object({ id: z.string().uuid() }),
+          params: z.object({ id: z.string().guid() }),
           response: { 200: z.object({ ok: z.literal(true) }) },
         },
       },

@@ -45,6 +45,7 @@ export default fp(
                 uptimeInSeconds: z.string().optional(),
               }),
               queues: z.record(
+                z.string(),
                 z.object({
                   waiting: z.number(),
                   active: z.number(),
@@ -54,7 +55,7 @@ export default fp(
                 }),
               ),
               wsOnlineUsers: z.number(),
-              extensionVersions: z.record(z.number()),
+              extensionVersions: z.record(z.string(), z.number()),
               errorRateLast5Min: z.number(),
             }),
           },

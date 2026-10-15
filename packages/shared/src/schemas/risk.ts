@@ -18,8 +18,8 @@ export type RiskEventKind = (typeof RISK_EVENT_KINDS)[number];
 
 export const riskBudgetEventSchema = z
   .object({
-    deviceId: z.string().uuid(),
-    sessionId: z.string().uuid(),
+    deviceId: z.string().guid(),
+    sessionId: z.string().guid(),
     kind: z.enum(RISK_EVENT_KINDS),
     value: z.number(),
     threshold: z.number(),
@@ -49,9 +49,9 @@ export type ReportRiskBudgetEventsRequest = z.infer<typeof reportRiskBudgetEvent
  * they're required): both columns are `ON DELETE SET NULL`, so a row can
  * outlive the device/session it was logged against. */
 export const riskBudgetEventRowSchema = z.object({
-  id: z.string().uuid(),
-  deviceId: z.string().uuid().nullable(),
-  sessionId: z.string().uuid().nullable(),
+  id: z.string().guid(),
+  deviceId: z.string().guid().nullable(),
+  sessionId: z.string().guid().nullable(),
   kind: z.enum(RISK_EVENT_KINDS),
   value: z.number(),
   threshold: z.number(),

@@ -90,8 +90,13 @@ export default fp(async function errorHandlerPlugin(fastify: FastifyInstance) {
   });
 });
 
+/** One entry of `error.validation` as fastify-type-provider-zod (v7+) builds
+ * it from a zod issue: the issue's path joined into `instancePath`
+ * (`/attempts/1/occurredAt`), and every other issue field (a custom issue's
+ * own `params` included) spread into `params`. */
 interface ValidationEntry {
-  params?: { issue?: { path?: (string | number)[]; params?: { code?: unknown } } };
+  instancePath?: string;
+  params?: { params?: { code?: unknown } };
 }
 
 /** The sorted, distinct item indices (`<array>.<index>.<field>`) of a
@@ -101,10 +106,10 @@ interface ValidationEntry {
 function outOfWindowIndices(validation: readonly unknown[]): number[] | null {
   const indices = new Set<number>();
   for (const entry of validation as ValidationEntry[]) {
-    const issue = entry.params?.issue;
-    if (issue?.params?.code !== TIMESTAMP_OUT_OF_WINDOW) return null;
-    const index = issue.path?.[1];
-    if (typeof index === 'number') indices.add(index);
+    if (entry.params?.params?.code !== TIMESTAMP_OUT_OF_WINDOW) return null;
+    // ['', '<array>', '<index>', '<field>']
+    const index = entry.instancePath?.split('/')[2];
+    if (index !== undefined && /^\d+$/.test(index)) indices.add(Number(index));
   }
   return [...indices].sort((a, b) => a - b);
 }

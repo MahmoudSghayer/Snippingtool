@@ -453,7 +453,7 @@ export default fp(
         schema: {
           tags: ['auth'],
           body: deviceFingerprintSchema,
-          response: { 200: z.object({ deviceId: z.string().uuid() }) },
+          response: { 200: z.object({ deviceId: z.string().guid() }) },
         },
       },
       async (request) => {

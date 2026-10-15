@@ -49,7 +49,9 @@ export default fp(
           tags: ['admin'],
           params: z.object({ key: z.string().min(1) }),
           body: z.object({
-            value: z.unknown(),
+            // `.optional()`: zod 4 rejects an absent key whose schema is a
+            // bare `z.unknown()`; zod 3 accepted it.
+            value: z.unknown().optional(),
             isSecret: z.boolean().optional(),
             description: z.string().max(500).optional(),
           }),

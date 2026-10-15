@@ -34,7 +34,7 @@ export const autoPrefix = '/api/v1/admin/plans';
  * so this admin-facing DTO widens `code` to a free-form string and adds the
  * admin-only fields (`isActive`, `sortOrder`, timestamps). */
 const adminPlanDtoSchema = z.object({
-  id: z.string().uuid(),
+  id: z.string().guid(),
   code: z.string(),
   name: z.string(),
   priceCents: z.number().int().min(0),
@@ -137,7 +137,7 @@ export default fp(
         schema: {
           tags: ['admin-plans'],
           summary: 'Update a plan.',
-          params: z.object({ id: z.string().uuid() }),
+          params: z.object({ id: z.string().guid() }),
           body: planUpdateRequestSchema,
           response: { 200: adminPlanDtoSchema },
         },
@@ -184,7 +184,7 @@ export default fp(
         schema: {
           tags: ['admin-plans'],
           summary: 'Archive a plan (is_active = false). Never a hard delete.',
-          params: z.object({ id: z.string().uuid() }),
+          params: z.object({ id: z.string().guid() }),
           body: z.object({ reason: z.string().min(1).max(1000) }),
           response: { 200: adminPlanDtoSchema },
         },

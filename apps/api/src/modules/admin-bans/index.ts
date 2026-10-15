@@ -111,7 +111,7 @@ export default fp(
         schema: {
           tags: ['admin-bans'],
           summary: 'Lift a ban.',
-          params: z.object({ id: z.string().uuid() }),
+          params: z.object({ id: z.string().guid() }),
           body: liftBanRequestSchema,
           response: { 200: banDtoSchema },
         },

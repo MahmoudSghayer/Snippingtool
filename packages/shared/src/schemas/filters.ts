@@ -27,7 +27,7 @@ export const filterCriteriaSchema = z
 export type FilterCriteria = z.infer<typeof filterCriteriaSchema>;
 
 export const savedFilterSchema = z.object({
-  id: z.string().uuid(),
+  id: z.string().guid(),
   name: z.string().min(1).max(80),
   filter: filterCriteriaSchema,
   filterHash: z.string().min(1).max(128),
@@ -62,7 +62,7 @@ export type UpdateSavedFilterRequest = z.infer<typeof updateSavedFilterRequestSc
  */
 export const filterStatsSchema = z
   .object({
-    filterId: z.string().uuid(),
+    filterId: z.string().guid(),
     windowStart: z.string().datetime(),
     searches: z.number().int().min(0),
     attempts: z.number().int().min(0),
@@ -89,7 +89,7 @@ export type ReportFilterStatsRequest = z.infer<typeof reportFilterStatsRequestSc
  * caller's own filters' stats in range are returned. */
 export const filterStatsQuerySchema = z
   .object({
-    filterId: z.string().uuid().optional(),
+    filterId: z.string().guid().optional(),
     from: z.string().datetime().optional(),
     to: z.string().datetime().optional(),
   })
