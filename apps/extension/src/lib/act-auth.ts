@@ -207,17 +207,18 @@ export function handOffNonce(doc: Document = document, isolatedGlobal: object = 
  * synchronously, which takes and removes it before any page script runs.
  */
 let bundleNonceHolder: object | null = null;
+/** Whether `handOffNonceWithinBundle` ran after a page script may have. */
+let bundleHandOffLate = false;
 
 /**
- * Whether it is still safe to put the nonce on <html>: the document is
- * still being parsed and holds no <script> element yet, so no page script
- * can have run. The extension's handoff.js is guaranteed that by running at
- * `document_start`; a userscript is not (Tampermonkey can inject late — a
- * slow browser start, a script enabled on an open tab, "instant" injection
- * off). A page script that ran first could watch <html> with a
- * MutationObserver (`attributeOldValue` shows the nonce as it is removed)
- * or hook `crypto.subtle.importKey`, and with the nonce forge results and
- * catalogs.
+ * Whether the handoff is running before any page script: the document is
+ * still being parsed and holds no <script> element yet. The extension's
+ * handoff.js is guaranteed that by running at `document_start`; a
+ * userscript is not (Tampermonkey injects document-start scripts "as fast
+ * as possible", which on Chrome is routinely after EA's first scripts). A
+ * page script that ran first could watch <html> with a MutationObserver
+ * (`attributeOldValue` shows the nonce as it is removed) or hook
+ * `crypto.subtle.importKey`, and with the nonce forge results and catalogs.
  */
 export function isSafeToHandOff(doc: Document = document): boolean {
   if (doc.readyState !== 'loading') return false;
@@ -230,14 +231,25 @@ export function isSafeToHandOff(doc: Document = document): boolean {
 }
 
 /** Userscript only: `handOffNonce` with content's copy kept in this
- * module's closure (see above). Call before injecting the adapter. Fails
- * closed: when `isSafeToHandOff` says a page script may already have run,
- * nothing is handed off and it returns null, so the act channel stays
- * locked for this page load (content tells the user to reload). */
-export function handOffNonceWithinBundle(doc: Document = document): string | null {
+ * module's closure (see above). Call before injecting the adapter.
+ *
+ * It hands off even when `isSafeToHandOff` says a page script may already
+ * have run (`handOffWasLate` then says so). Refusing used to lock the act
+ * channel on every load Tampermonkey injected late, which on Chrome is most
+ * of them, and a reload could not fix it. What that refusal kept out is a
+ * page script written to steal this nonce — and such a script can already
+ * press EA's own Buy Now without Nova Trade (docs/threat-model.md §3.1). */
+export function handOffNonceWithinBundle(doc: Document = document): string {
   bundleNonceHolder = {};
-  if (!isSafeToHandOff(doc)) return null;
+  bundleHandOffLate = !isSafeToHandOff(doc);
   return handOffNonce(doc, bundleNonceHolder);
+}
+
+/** Userscript only: whether this page load's handoff ran after a page
+ * script may have (see `handOffNonceWithinBundle`). Always false in the
+ * extension, whose handoff.js runs at `document_start`. */
+export function handOffWasLate(): boolean {
+  return bundleHandOffLate;
 }
 
 /** ISOLATED world, content.js: the nonce handoff.ts minted for this page

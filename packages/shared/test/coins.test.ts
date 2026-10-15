@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
-import { isHeavyLoss, MIN_SALE_PRICE, parseCoins, parseSalePrice } from '../src/coins.js';
+import {
+  isHeavyLoss,
+  MIN_SALE_PRICE,
+  MIN_START_PRICE,
+  parseCoins,
+  parseSalePrice,
+  priceStep,
+  roundToPriceStep,
+  stepPrice,
+} from '../src/coins.js';
 import { MAX_COIN_PRICE } from '../src/schemas/ingest-bounds.js';
 
 describe('parseCoins', () => {
@@ -79,5 +88,46 @@ describe('isHeavyLoss', () => {
     expect(isHeavyLoss(10_000, -5_000)).toBe(false);
     expect(isHeavyLoss(10_000, -100)).toBe(false);
     expect(isHeavyLoss(10_000, 2_000)).toBe(false);
+  });
+});
+
+describe("EA's price steps", () => {
+  it.each([
+    [150, 50],
+    [950, 50],
+    [1_000, 100],
+    [9_900, 100],
+    [10_000, 250],
+    [49_750, 250],
+    [50_000, 500],
+    [99_500, 500],
+    [100_000, 1_000],
+  ])('the step above %i is %i', (price, step) => {
+    expect(priceStep(price)).toBe(step);
+  });
+
+  it.each([
+    [12_345, 12_250],
+    [12_400, 12_500],
+    [999, 1_000],
+    [1_049, 1_000],
+    [10, MIN_START_PRICE],
+    [MAX_COIN_PRICE + 5_000, MAX_COIN_PRICE],
+  ])('rounds %i to %i on the grid', (price, rounded) => {
+    expect(roundToPriceStep(price)).toBe(rounded);
+  });
+
+  it.each([
+    [10_000, 1, 10_250],
+    [10_000, -1, 9_900],
+    [1_000, -1, 950],
+    [950, 1, 1_000],
+    [100_000, -2, 99_000],
+    [12_500, 0, 12_500],
+    [12_345, 2, 12_750],
+    [200, -5, MIN_START_PRICE],
+    [MAX_COIN_PRICE, 3, MAX_COIN_PRICE],
+  ])('%i moved %i steps is %i', (price, steps, moved) => {
+    expect(stepPrice(price, steps)).toBe(moved);
   });
 });

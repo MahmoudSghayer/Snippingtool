@@ -137,6 +137,39 @@ const EXCEPTIONS: Record<string, { missing: Column[]; reason: string }> = {
     missing: ['deleted_at'],
     reason: 'generated KPI store, rewritten by the nightly job, not soft-deleted (§6.10)',
   },
+  // §6.11 market intelligence — collector output and its review queue, not user-owned entities
+  cards: {
+    missing: ['deleted_at'],
+    reason: 'canonical card identity every series references, never removed (§6.11)',
+  },
+  card_source_ids: {
+    missing: ['deleted_at', 'row_version'],
+    reason: 'alias rows written once by the resolver, never edited concurrently (§6.11)',
+  },
+  price_observations: {
+    missing: ['updated_at', 'deleted_at', 'row_version'],
+    reason: 'partitioned append-mostly time series, aged out by month (§6.11)',
+  },
+  raw_documents: {
+    missing: ['updated_at', 'deleted_at', 'row_version'],
+    reason: 'fetched document kept as received for parser replay (§6.11)',
+  },
+  collector_runs: {
+    missing: ['updated_at', 'deleted_at', 'row_version'],
+    reason: 'one health record per collector run (§6.11)',
+  },
+  news_items: {
+    missing: ['deleted_at', 'row_version'],
+    reason: 'fetched article, filled in by a later pass, never removed (§6.11)',
+  },
+  market_events: {
+    missing: ['deleted_at', 'row_version'],
+    reason: 'derived classification, corrected by re-running it (§6.11)',
+  },
+  news_signals: {
+    missing: ['deleted_at', 'row_version'],
+    reason: 'review queue; reviewed_at is the terminal state (§6.11)',
+  },
 };
 
 describe('schema conventions: created_at/updated_at/deleted_at/row_version per docs/02-database.md', () => {

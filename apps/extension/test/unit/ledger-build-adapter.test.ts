@@ -131,6 +131,10 @@ describe('dist/ledger contents', () => {
       'bot.usageSet',
       'bot.budgetGet',
       'bot.budgetSet',
+      // Auto-sell: the FUTBIN lookup and the adapter's listing call.
+      'price.futbin',
+      'futbin.com',
+      'list_not_bought',
     ];
     const files = readdirSync(outDir, { recursive: true, withFileTypes: true }).filter((e) => e.isFile());
     for (const file of files) {

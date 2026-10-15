@@ -284,7 +284,7 @@ export const adapterActionResultMessageSchema = z.object({
   channel: z.literal(ADAPTER_CHANNEL),
   kind: z.literal('action_result'),
   data: z.object({
-    action: z.enum(['search', 'buy', 'readResult', 'diagnostics']),
+    action: z.enum(['search', 'buy', 'readResult', 'diagnostics', 'list']),
     requestId: z.string().min(1).optional(),
     ok: z.boolean(),
     requestedAt: z.number(),
@@ -344,6 +344,18 @@ export const adapterActRequestMessageSchema = z.object({
       action: z.literal('readResult'),
       requestId: z.string().min(1),
       tradeId: z.string().min(1),
+    }),
+    /** Automation builds: list a card on the transfer market (Nova AI's
+     * auto-sell). Only a card the adapter itself bought on this page load,
+     * named by the tradeId it was bought under: anything else is refused
+     * (`list_not_bought`). Prices are on EA's grid, start below buy-now.
+     * `main/adapter.ts`'s `asActRequest` re-checks this shape by hand. */
+    z.object({
+      action: z.literal('list'),
+      requestId: z.string().min(1),
+      tradeId: z.string().min(1),
+      startPrice: z.number().int().min(150).max(15_000_000),
+      buyNowPrice: z.number().int().min(200).max(15_000_000),
     }),
     /** Read-only: the adapter's diagnostics report (options page, "Copy
      * diagnostics"). Authenticated like every other act request, so no page
@@ -669,6 +681,13 @@ export const extBackgroundCatalogSavePayloadSchema = adapterCatalogSchema;
 export const extBackgroundCardNamesPayloadSchema = z
   .object({
     resourceIds: z.array(z.number().int().positive()).max(50),
+  })
+  .strict();
+
+export const extBackgroundFutbinPricePayloadSchema = z
+  .object({
+    resourceId: z.number().int().positive(),
+    platform: z.enum(['console', 'pc']),
   })
   .strict();
 

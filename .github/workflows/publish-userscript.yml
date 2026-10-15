@@ -1,0 +1,114 @@
+name: Publish userscript
+
+# Builds the Tampermonkey userscript and publishes it to the production VM's
+# dashboard.{DOMAIN}/userscript/ path (infra/caddy/Caddyfile), by running
+# infra/scripts/publish-userscript.sh there — the same script as a manual
+# publish. Every build gets a newer @version (scripts/build.mjs stamps it),
+# so installed scripts pick it up on Tampermonkey's next update check.
+#
+# Runs on every push to main that changes what goes into the userscript, and
+# by hand from the Actions tab. Skips with a notice, not a red run, until
+# the SSH secrets exist.
+#
+# One-time setup (repository Settings -> Secrets and variables -> Actions ->
+# Secrets): PRODUCTION_SSH_HOST, PRODUCTION_SSH_USER (one that can run
+# docker), PRODUCTION_SSH_PRIVATE_KEY, and optionally
+# PRODUCTION_SSH_KNOWN_HOSTS (`ssh-keyscan <host>` output) to pin the host
+# key. These are repository secrets: a job with no `environment:` cannot
+# read the `production` environment's.
+#
+# Optional repository variables override the defaults below:
+# USERSCRIPT_DOMAIN, USERSCRIPT_DASHBOARD_ORIGIN, ENTITLEMENT_PUBLIC_KEY (the
+# API's; public, not a secret) and CADDY_CONTAINER.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/extension/**'
+      - 'packages/shared/**'
+      - 'pnpm-lock.yaml'
+      - 'infra/scripts/publish-userscript.sh'
+      - '.github/workflows/publish-userscript.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One publish at a time, in order: a newer build must never be overwritten
+# by an older one finishing late.
+concurrency:
+  group: publish-userscript
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build & publish the Tampermonkey userscript
+    runs-on: ubuntu-latest
+    env:
+      DOMAIN: ${{ vars.USERSCRIPT_DOMAIN || '46.62.142.29.sslip.io' }}
+    steps:
+      - name: server configured?
+        id: check
+        env:
+          CONFIGURED: ${{ secrets.PRODUCTION_SSH_HOST != '' && secrets.PRODUCTION_SSH_USER != '' && secrets.PRODUCTION_SSH_PRIVATE_KEY != '' }}
+        run: |
+          echo "configured=${CONFIGURED}" >> "$GITHUB_OUTPUT"
+          if [ "${CONFIGURED}" != "true" ]; then
+            echo "::notice title=userscript publish skipped::PRODUCTION_SSH_HOST / PRODUCTION_SSH_USER / PRODUCTION_SSH_PRIVATE_KEY are not all set as repository secrets — nothing was built or published (see this workflow's header)."
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: steps.check.outputs.configured == 'true'
+      - uses: ./.github/actions/setup-pnpm
+        if: steps.check.outputs.configured == 'true'
+
+      - name: build the userscript
+        if: steps.check.outputs.configured == 'true'
+        env:
+          VITE_API_ORIGIN: https://api.${{ env.DOMAIN }}
+          VITE_DASHBOARD_ORIGIN: ${{ vars.USERSCRIPT_DASHBOARD_ORIGIN || 'https://snippingtool-eta.vercel.app' }}
+          # The API's ENTITLEMENT_PUBLIC_KEY (public). build.mjs refuses to
+          # build without a usable one; `\n` escapes are fine there and at
+          # runtime (lib/license.ts).
+          VITE_LICENSE_PUBLIC_KEY: ${{ vars.ENTITLEMENT_PUBLIC_KEY || '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAUk2M9p5W1jdM0piQEelSPNAiYXp7PMINOjazoG/06Tc=\n-----END PUBLIC KEY-----' }}
+          # Baked into @updateURL/@downloadURL, so installs keep updating
+          # from where this job publishes.
+          USERSCRIPT_DOWNLOAD_URL: https://dashboard.${{ env.DOMAIN }}/userscript/nova-trade.user.js
+        run: pnpm --filter @sl/extension build:userscript
+
+      - name: publish to the server
+        if: steps.check.outputs.configured == 'true'
+        env:
+          SSH_HOST: ${{ secrets.PRODUCTION_SSH_HOST }}
+          SSH_USER: ${{ secrets.PRODUCTION_SSH_USER }}
+          SSH_KEY: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.PRODUCTION_SSH_KNOWN_HOSTS }}
+          CADDY_CONTAINER: ${{ vars.CADDY_CONTAINER || 'sniper-ledger-prod-caddy-1' }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          opts=(-i ~/.ssh/deploy_key -o BatchMode=yes)
+          if [ -n "$SSH_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+            opts+=(-o StrictHostKeyChecking=yes)
+          else
+            opts+=(-o StrictHostKeyChecking=accept-new)
+          fi
+
+          remote="$SSH_USER@$SSH_HOST"
+          dir="/tmp/nova-userscript-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          build=apps/extension/dist/userscript
+          # shellcheck disable=SC2029 # $dir is meant to expand here, on the runner
+          ssh "${opts[@]}" "$remote" "mkdir -p '$dir'"
+          scp "${opts[@]}" "$build/nova-trade.user.js" "$build/nova-trade.meta.js" \
+            infra/scripts/publish-userscript.sh "$remote:$dir/"
+          # The script copied with the build, not the VM's checkout of it,
+          # so the publish steps always match this commit.
+          # shellcheck disable=SC2029 # $dir and $CADDY_CONTAINER expand on the runner
+          ssh "${opts[@]}" "$remote" \
+            "USERSCRIPT_BUILD_DIR='$dir' CADDY_CONTAINER='$CADDY_CONTAINER' bash '$dir/publish-userscript.sh'; s=\$?; rm -rf '$dir'; exit \$s"
+
+          version="$(grep -m1 -oE '@version[[:space:]]+[^[:space:]]+' "$build/nova-trade.user.js" | awk '{print $2}')"
+          echo "Published userscript @version ${version} to https://dashboard.${DOMAIN}/userscript/nova-trade.user.js" >> "$GITHUB_STEP_SUMMARY"

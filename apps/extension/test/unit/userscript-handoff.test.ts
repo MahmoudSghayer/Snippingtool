@@ -6,15 +6,17 @@
 // page's own window. Its own file: the holder is module state.
 //
 // Tampermonkey does not guarantee the userscript runs before the page's own
-// scripts, so the handoff fails closed unless the document is still loading
-// and has no <script> yet other than the one running the userscript itself:
-// nothing goes on <html>, and content gets no nonce.
+// scripts. The handoff goes ahead either way (refusing locked Nova AI on
+// every late load), and `handOffWasLate` says when the document was past
+// loading or already held a <script> other than the one running the
+// userscript itself.
 
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   HANDOFF_ATTRIBUTE,
   handOffNonceWithinBundle,
+  handOffWasLate,
   isSafeToHandOff,
   readHandedOffNonce,
   takeHandedOffNonce,
@@ -37,6 +39,7 @@ describe('userscript nonce handoff', () => {
     const before = new Set(Object.getOwnPropertyNames(globalThis));
     const nonce = handOffNonceWithinBundle(document);
     expect(nonce).toMatch(/^[0-9a-f]{64}$/);
+    expect(handOffWasLate()).toBe(false);
     // Nothing new on the global object for a page script to read.
     expect(Object.getOwnPropertyNames(globalThis).filter((k) => !before.has(k))).toEqual([]);
     expect((globalThis as Record<string, unknown>).__slAdapterNonce).toBeUndefined();
@@ -52,21 +55,21 @@ describe('userscript nonce handoff', () => {
     expect(readHandedOffNonce()).toBeNull();
   });
 
-  it('fails closed when a page script element already exists', () => {
+  it('still hands off when a page script element already exists, and says it was late', () => {
     setReadyState('loading');
     const pageScript = document.createElement('script');
     pageScript.textContent = '/* EA bootstrap */';
     document.head.appendChild(pageScript);
     expect(isSafeToHandOff(document)).toBe(false);
 
-    expect(handOffNonceWithinBundle(document)).toBeNull();
-    // Nothing on <html> for a page script's MutationObserver to see...
-    expect(document.documentElement.hasAttribute(HANDOFF_ATTRIBUTE)).toBe(false);
-    // ...no key for the adapter, and none for content: the channel is locked.
+    const nonce = handOffNonceWithinBundle(document);
+    expect(nonce).toMatch(/^[0-9a-f]{64}$/);
+    expect(handOffWasLate()).toBe(true);
+    // The adapter and content get the same key: the channel is open.
     let adapterNonce: string | null = null;
     takeHandedOffNonce(document, (n) => (adapterNonce = n), { lateFallback: false });
-    expect(adapterNonce).toBeNull();
-    expect(readHandedOffNonce()).toBeNull();
+    expect(adapterNonce).toBe(nonce);
+    expect(readHandedOffNonce()).toBe(nonce);
   });
 
   it("allows the script manager's own <script>, the one running the userscript", () => {
@@ -84,22 +87,26 @@ describe('userscript nonce handoff', () => {
     }
   });
 
-  it('fails closed when the document has finished loading (a late injection)', () => {
+  it('hands off after the document has finished loading (a late injection), and says so', () => {
     for (const state of ['interactive', 'complete'] as const) {
       setReadyState(state);
       expect(isSafeToHandOff(document)).toBe(false);
-      expect(handOffNonceWithinBundle(document)).toBeNull();
-      expect(document.documentElement.hasAttribute(HANDOFF_ATTRIBUTE)).toBe(false);
-      expect(readHandedOffNonce()).toBeNull();
+      const nonce = handOffNonceWithinBundle(document);
+      expect(handOffWasLate()).toBe(true);
+      expect(document.documentElement.getAttribute(HANDOFF_ATTRIBUTE)).toBe(nonce);
+      expect(readHandedOffNonce()).toBe(nonce);
+      document.documentElement.removeAttribute(HANDOFF_ATTRIBUTE);
     }
   });
 
-  it('never falls back to a global a page script could have planted', () => {
+  it('never reads a global a page script could have planted', () => {
     setReadyState('complete');
-    (globalThis as Record<string, unknown>).__slAdapterNonce = 'a'.repeat(64);
+    const planted = 'a'.repeat(64);
+    (globalThis as Record<string, unknown>).__slAdapterNonce = planted;
     try {
-      expect(handOffNonceWithinBundle(document)).toBeNull();
-      expect(readHandedOffNonce()).toBeNull();
+      const nonce = handOffNonceWithinBundle(document);
+      expect(nonce).not.toBe(planted);
+      expect(readHandedOffNonce()).toBe(nonce);
     } finally {
       delete (globalThis as Record<string, unknown>).__slAdapterNonce;
     }
