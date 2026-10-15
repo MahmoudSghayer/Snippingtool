@@ -255,7 +255,9 @@ Differences that follow from there being no extension process:
   act-channel nonce and puts it on `<html>` before injecting the adapter,
   which takes it synchronously, as `handoff.js` does in the extension
   (`lib/act-auth.ts`'s `handOffNonceWithinBundle`; content's copy stays in
-  the bundle, not on Tampermonkey's global). Content talks to the page
+  the bundle, not on Tampermonkey's global). When Tampermonkey injects
+  after page scripts have started, it still hands off, and content logs
+  that it was late. Content talks to the page
   through `unsafeWindow`, so the userscript's adapter (only) accepts act
   requests by origin rather than by `event.source`; every request, result
   and catalog is still MAC-checked.
@@ -284,9 +286,12 @@ Transfers in EA's left navigation (`ui/ea-nav.ts`) opens a full page
 the right. The in-page panel and the userscript's SL menu open it too.
 
 The bot (`engine/sniper.ts`) searches the user's saved filters in turn, buys
-every listing at or under the price cap (cheapest first), then waits a random
-delay from the user's range, with breaks every N searches and rests every N
-minutes. It ships through the same `virtual:autobuyer-loader` alias as the
+every listing at or under the price cap (cheapest first), and starts the next
+search a random delay from the user's range after the last one started (start
+to start, so EA's answer time and any buying come out of the delay rather than
+being added to it), with breaks every N searches and rests every N
+minutes. Each missed buy's log line says how long after the search it went out
+and how long EA took to answer. It ships through the same `virtual:autobuyer-loader` alias as the
 autobuyer (`loadSniper()`), so the `ledger` build never contains it, and the
 autobuyer does not buy while the bot runs.
 
@@ -327,6 +332,34 @@ it), the cooldown after each buy, and coins an hour and the buy:search
 ratio through its own governor (`botGovernorSettings`, bounded by
 `BOT_GOVERNOR_BOUNDS`). The server kill switch and adapter probe failures
 stop it whatever the settings say.
+
+**Background tabs.** The bot's waits are timed in a small dedicated worker
+(`lib/background-timer.ts`), not on the page's own timers, which Chrome
+throttles in a hidden tab (to about once a minute after five minutes), so it
+keeps its pace minimised or behind another tab. If the page's CSP refuses
+the worker, or it stops answering (a page-timer backup ends any wait it misses
+by 5 s), the waits fall back to `setTimeout`; the log says at Start which mode
+is in use. While the bot runs the page holds a shared Web Lock
+(`nova-ai-running`), which Chrome does not freeze. A tab Chrome discards to
+save memory still stops everything: add the EA web app to Chrome's "Always
+keep these sites active" list.
+
+**Auto-sell** (off by default; `BotSettings.autoSell`). After each buy the
+bot lists the card on the transfer market for an hour: at the market price
+moved by the user's EA price steps (−20 to +20), or at a fixed price. The
+market price is FUTBIN's lowest buy-now for the card on the chosen platform
+(`price.futbin`, `background/futbin.ts`; `www.futbin.com` is in the
+`ledger-auto` host permissions and the userscript's `@connect`), else the
+median Nova has recorded for it (`summary`). FUTBIN has no public API, so
+anything that doesn't read like its player-prices JSON counts as no price.
+Prices go on EA's grid (`roundToPriceStep` / `stepPrice` in `@sl/shared`),
+the starting bid one step under the buy-now. "Never sell at a loss" (on by
+default) skips a price that, after EA's 5% tax, is below what the card
+cost. Every outcome is in the log. The listing itself is the adapter's
+`list` act (`services.Item.list(item, start, buyNow, 3600)` in the
+observable shape, UNVERIFIED like the rest of it; the promise shape has
+none and answers `list_unsupported`), and the adapter only lists an item
+it bought itself on that page load (`list_not_bought` otherwise).
 
 **Snipe targets are built like EA's own search panel**: OVR range slider
 with Min/Max OVR, "Type Player Name" (with EA portraits), and Quality,

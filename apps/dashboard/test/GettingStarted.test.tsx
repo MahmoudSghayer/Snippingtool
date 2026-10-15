@@ -254,6 +254,22 @@ describe('GettingStarted', () => {
     ).not.toBeInTheDocument();
     expect(within(step(/Add a search filter/)).queryByRole('button', { name: /^Add / })).toBeNull();
   });
+
+  it('shows "Included with a pass" when the trade ledger is not in the plan', async () => {
+    mockApi({ trades: fail('FEATURE_NOT_IN_PLAN', 403) });
+    renderWithClient(<GettingStarted />);
+
+    await screen.findByRole('region', { name: 'Getting started' });
+    await waitFor(() =>
+      expect(
+        within(step(/Record your first trade/)).getByText('Included with a pass'),
+      ).toBeVisible(),
+    );
+    expect(step(/Record your first trade/)).toHaveAccessibleName(/not done/);
+    expect(
+      within(step(/Record your first trade/)).queryByText(/Couldn't check/),
+    ).not.toBeInTheDocument();
+  });
 });
 
 describe('StarterFilters', () => {

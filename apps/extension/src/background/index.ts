@@ -21,6 +21,7 @@ import {
   extBackgroundCatalogSavePayloadSchema,
   extBackgroundEngineStateSetPayloadSchema,
   extBackgroundFiltersSavePayloadSchema,
+  extBackgroundFutbinPricePayloadSchema,
   extBackgroundLicenseHeartbeatPayloadSchema,
   extBackgroundLifecycleBuyPayloadSchema,
   extBackgroundLifecyclePilePayloadSchema,
@@ -60,6 +61,7 @@ import {
   handleEngineState,
 } from './engine-lease.js';
 import { installGlobalErrorHandlers, handleErrorsReport, ensureErrorFlushAlarm, onErrorFlushAlarm } from './errors.js';
+import { handleFutbinPrice } from './futbin.js';
 import { handleEngineStateGet, handleEngineStateSet } from './governor.js';
 import { handleKillSwitchGet } from './kill-switch.js';
 import { ensureHeartbeatAlarm, handleLicenseBootstrap, handleLicenseHeartbeat, onHeartbeatAlarm, runBootstrap } from './license.js';
@@ -176,6 +178,7 @@ if (AUTOMATION_ENABLED) {
     'cards.names': (payload) => handleCardNames((payload as { resourceIds: number[] }).resourceIds),
     'catalog.get': () => handleCatalogGet(),
     'catalog.save': (payload) => handleCatalogSave(payload as never),
+    'price.futbin': (payload) => handleFutbinPrice(payload as never),
   } satisfies Record<string, Handler>);
 }
 
@@ -224,6 +227,7 @@ if (AUTOMATION_ENABLED) {
     'bot.budgetSet': extBackgroundBotBudgetSetPayloadSchema,
     'cards.names': extBackgroundCardNamesPayloadSchema,
     'catalog.save': extBackgroundCatalogSavePayloadSchema,
+    'price.futbin': extBackgroundFutbinPricePayloadSchema,
   });
 }
 
