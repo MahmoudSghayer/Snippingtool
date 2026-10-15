@@ -1,9 +1,9 @@
 // The jobs convention: every `src/jobs/*.job.ts` file default-exports a
 // JobDefinition. `src/jobs/index.ts` discovers them (no @fastify/autoload
 // here — jobs run in worker.ts, outside the Fastify instance), and
-// worker.ts wires each one to a BullMQ Queue + Worker, adding the
-// repeatable schedule (if any) once at startup (idempotent — BullMQ
-// dedupes identical repeat jobs by key).
+// worker.ts wires each one to a BullMQ Queue + Worker, upserting its
+// schedule (if any) as one job scheduler at startup (idempotent: a fixed
+// scheduler id per job).
 
 import type { Env } from '../config/env.js';
 import type { Mailer } from '../lib/mailer.js';
