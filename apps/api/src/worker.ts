@@ -1,10 +1,10 @@
 #!/usr/bin/env tsx
 // BullMQ job runner: one Queue + Worker per job definition discovered by
 // jobs/index.ts. Runs as a separate process from the HTTP server (`pnpm
-// --filter @sl/api worker` / `node dist/worker.js` in prod). Repeatable jobs
-// (those with a `schedule`) get their cron added to the queue once at
-// startup — BullMQ's repeatable-job keys are content-addressed, so
-// re-running this on every deploy does not create duplicate schedules.
+// --filter @sl/api worker` / `node dist/worker.js` in prod). A job with a
+// `schedule` gets one BullMQ job scheduler, upserted at startup under a
+// fixed id, so re-running this on every deploy updates the schedule rather
+// than adding a second one.
 
 import { createDb } from '@sl/db';
 import { Queue, Worker } from 'bullmq';
@@ -17,6 +17,40 @@ import { createMailer } from './lib/mailer.js';
 import { createRedisConnection } from './lib/redis-connection.js';
 
 import type { JobContext } from './jobs/types.js';
+
+const schedulerId = (jobName: string) => `${jobName}:scheduled`;
+
+/**
+ * Leaves the queue with exactly the job's current schedule: one job
+ * scheduler under `schedulerId`, or none for a job without a schedule.
+ *
+ * BullMQ 5 stored repeatable jobs under a hash of their options, and BullMQ 6
+ * reads those as job schedulers too, so after the upgrade each queue still
+ * holds its old schedule under that hash (and any older ones a changed cron
+ * left behind). Without removing them every scheduled job would run once
+ * per leftover schedule. Each queue belongs to one job, so anything else
+ * in it is stale.
+ */
+async function syncSchedule(
+  queue: Queue,
+  jobName: string,
+  schedule: string | undefined,
+  log: pino.Logger,
+) {
+  const keep = schedule ? schedulerId(jobName) : null;
+  for (const s of await queue.getJobSchedulers()) {
+    if (s.key === keep) continue;
+    await queue.removeJobScheduler(s.key);
+    log.info({ job: jobName, scheduler: s.key, pattern: s.pattern }, 'removed stale job schedule');
+  }
+  if (!schedule) return;
+  await queue.upsertJobScheduler(
+    schedulerId(jobName),
+    { pattern: schedule },
+    { name: jobName, data: {} },
+  );
+  log.info({ job: jobName, schedule }, 'scheduled job');
+}
 
 async function main() {
   const env = loadEnv();
@@ -45,14 +79,7 @@ async function main() {
     });
     queues.push(queue);
 
-    if (job.schedule) {
-      await queue.add(
-        job.name,
-        {},
-        { repeat: { pattern: job.schedule }, jobId: `${job.name}:scheduled` },
-      );
-      log.info({ job: job.name, schedule: job.schedule }, 'scheduled repeatable job');
-    }
+    await syncSchedule(queue, job.name, job.schedule, log);
 
     const worker = new Worker(
       job.name,
