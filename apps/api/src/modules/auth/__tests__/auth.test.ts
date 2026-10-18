@@ -8,10 +8,10 @@
 // prefix). Each test gets its own `remoteAddress` so per-IP rate limiting
 // in one test never leaks into another.
 
-import { adminUsers, users } from '@sl/db';
+import { adminUsers, sessions, users } from '@sl/db';
 import { resetDatabase } from '@sl/db/test-utils';
 import { TERMS_VERSION } from '@sl/shared';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { decodeJwt } from 'jose';
 import { authenticator } from 'otplib';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -162,11 +162,14 @@ describe('auth module', () => {
 
   // Two refreshes racing on the same token both read the row before either
   // revokes it. Only the one whose conditional revoke wins may rotate; the
-  // other is token reuse.
-  it('refresh rotation race: two concurrent refreshes with one token, exactly one succeeds', async () => {
+  // other is told so (409 AUTH_REFRESH_CONFLICT) and nothing is revoked —
+  // two tabs of one browser refreshing at once is not theft. (A second
+  // request that only arrives after the first committed is a retry inside
+  // the refresh grace: refresh-grace.test.ts.)
+  it('refresh rotation race: two concurrent refreshes with one token, one rotates and nothing is revoked', async () => {
     const ip = nextIp();
     const email = 'rotation-race@example.com';
-    await registerAndVerify(email, ip);
+    const userId = await registerAndVerify(email, ip);
     const loginRes = await app.inject({
       method: 'POST',
       url: '/api/v1/auth/login',
@@ -185,9 +188,18 @@ describe('auth module', () => {
         }),
       ),
     );
-    const codes = results.map((r) => r.statusCode).sort();
-    expect(codes).toEqual([200, 401]);
-    expect(results.find((r) => r.statusCode === 401)!.json().code).toBe('AUTH_TOKEN_REUSED');
+    const codes = results.map((r) => r.statusCode);
+    expect(codes).toContain(200);
+    expect(codes).not.toContain(401);
+    for (const res of results.filter((r) => r.statusCode !== 200)) {
+      expect(res.statusCode).toBe(409);
+      expect(res.json().code).toBe('AUTH_REFRESH_CONFLICT');
+    }
+    // The family lives on, with exactly one live session.
+    const live = await app.db.query.sessions.findMany({
+      where: and(eq(sessions.userId, userId), isNull(sessions.revokedAt)),
+    });
+    expect(live).toHaveLength(1);
   });
 
   it('refresh rotation: old refresh token is rejected after rotation, reuse revokes the family', async () => {

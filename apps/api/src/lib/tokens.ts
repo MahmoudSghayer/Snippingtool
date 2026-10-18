@@ -10,10 +10,10 @@
 //
 // Refresh token: opaque 32 random bytes, never a JWT. Only its SHA-256 hash
 // is stored (`sessions.refresh_token_hash`). Rotation: every refresh issues a
-// new opaque token and updates the row in place; if a refresh token is
-// presented that does NOT match the current hash for its family but the
-// family is still valid, that is reuse of a superseded token — the entire
-// family is revoked (docs/04-auth.md, "refresh rotation & reuse detection").
+// new opaque token in a new session row of the same family and revokes the
+// old row; presenting a superseded token again is reuse — the entire family
+// is revoked — except for the short grace below, for a retry whose first
+// answer was lost (docs/04-auth.md §3, "refresh rotation & reuse detection").
 
 import { SignJWT, jwtVerify, importPKCS8, importSPKI } from 'jose';
 
@@ -42,6 +42,13 @@ export const ACCESS_TOKEN_TTL_SECONDS = 15 * 60;
 const ACCESS_TOKEN_TTL_ADMIN = '5m';
 export const ADMIN_ACCESS_TOKEN_TTL_SECONDS = 5 * 60;
 export const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+/** How long after a refresh token was rotated presenting it again counts as
+ * a client retrying a refresh whose answer it never got (a 502 during a
+ * deploy, a dropped connection), not as theft — provided the session it
+ * rotated to has not been used since and the family is still live
+ * (modules/auth/repo.ts `reissueWithinGrace`, docs/04-auth.md §3). Outside
+ * it, reuse revokes the family as before. */
+export const REFRESH_ROTATION_GRACE_MS = 30_000;
 export const MFA_TICKET_TTL_SECONDS = 5 * 60;
 
 /** The access-token lifetime for a given role — `signAccessToken` uses this

@@ -46,9 +46,18 @@ export const AppErrors = {
     ),
   tokenExpired: () => new AppError('AUTH_TOKEN_EXPIRED', 'Token has expired.'),
   tokenInvalid: (message = 'Invalid token.') => new AppError('AUTH_TOKEN_INVALID', message),
-  tokenReused: () =>
-    new AppError('AUTH_TOKEN_REUSED', 'Refresh token reuse detected; session family revoked.'),
+  tokenReused: (details?: Record<string, unknown>) =>
+    new AppError(
+      'AUTH_TOKEN_REUSED',
+      'Refresh token reuse detected; session family revoked.',
+      details,
+    ),
   sessionRevoked: () => new AppError('AUTH_SESSION_REVOKED', 'Session has been revoked.'),
+  refreshConflict: () =>
+    new AppError(
+      'AUTH_REFRESH_CONFLICT',
+      'This refresh token was just rotated by another request. Re-read the stored refresh token and try again.',
+    ),
   deviceLimitReached: (devices: unknown) =>
     new AppError('DEVICE_LIMIT_REACHED', 'Device limit reached for your plan.', { devices }),
   deviceNotFound: () => new AppError('DEVICE_NOT_FOUND', 'Device not found.'),
