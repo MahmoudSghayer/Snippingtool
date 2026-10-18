@@ -96,10 +96,14 @@ interface StoredEngineState {
 }
 
 /** `engine.state`: what the lease holder's engine is doing, pushed with
- * every renewal. */
-export async function handleEngineState(payload: { engineState: EngineState }): Promise<{ ok: true }> {
+ * every renewal. `started`: the engine is running now and was not at the
+ * last push (or none was pushed for as long as a lease lasts), i.e. the bot
+ * or the autobuyer just started; background then re-reads the account's
+ * open trades (background/lifecycle.ts). */
+export async function handleEngineState(payload: { engineState: EngineState }): Promise<{ ok: true; started: boolean }> {
+  const before = await currentEngineState();
   await setSession(ENGINE_STATE_KEY, { engineState: payload.engineState, at: Date.now() } satisfies StoredEngineState);
-  return { ok: true };
+  return { ok: true, started: payload.engineState === 'running' && before !== 'running' };
 }
 
 /** The engine state for the heartbeat: the last one pushed, or `idle` when

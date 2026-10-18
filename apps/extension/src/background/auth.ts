@@ -10,6 +10,7 @@ import { computeFingerprint, detectBrowser, detectOs } from '../lib/fingerprint.
 import { logger } from '../lib/logger.js';
 
 import { runBootstrap } from './license.js';
+import { seedOpenTrades } from './lifecycle.js';
 
 import type { LoginResponse, MfaVerifyRequest, RegisterResponse } from '@sl/shared';
 
@@ -31,8 +32,11 @@ export async function handleAuthLogin(payload: { email: string; password: string
   if (result.status === 'ok') {
     // Bootstrap right after a successful login (docs/01-architecture.md,
     // §3.1's final step) so entitlements/settings are ready before the
-    // content script asks for them.
-    runBootstrap().catch((err) => logger.warn(`post-login bootstrap failed: ${String(err)}`, 'auth'));
+    // content script asks for them. Then the account's open trades, so the
+    // cards it bought in other browsers are followed here too.
+    runBootstrap()
+      .then(() => void seedOpenTrades(0))
+      .catch((err) => logger.warn(`post-login bootstrap failed: ${String(err)}`, 'auth'));
   }
   return result;
 }
@@ -59,7 +63,9 @@ export async function handleAuthResendVerification(payload: { email: string }): 
 export async function handleAuthMfaVerify(payload: MfaVerifyRequest): Promise<LoginResponse> {
   const result = await auth.verifyMfa(payload);
   if (result.status === 'ok') {
-    runBootstrap().catch((err) => logger.warn(`post-mfa bootstrap failed: ${String(err)}`, 'auth'));
+    runBootstrap()
+      .then(() => void seedOpenTrades(0))
+      .catch((err) => logger.warn(`post-mfa bootstrap failed: ${String(err)}`, 'auth'));
   }
   return result;
 }

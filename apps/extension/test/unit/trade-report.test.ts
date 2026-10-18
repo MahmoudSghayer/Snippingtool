@@ -1,11 +1,10 @@
 // Defect C13, part 3: a bought trade's card fields come from the listing
 // that was bought, never from whichever card the trader last searched.
 
+import { tradeIngestSchema, type TrimmedAuction } from '@sl/shared';
 import { describe, expect, it } from 'vitest';
 
 import { buildBoughtTrade } from '../../src/lib/trade-report.js';
-
-import type { TrimmedAuction } from '@sl/shared';
 
 const BOUGHT_AT = '2026-09-24T10:00:00.000Z';
 
@@ -43,5 +42,15 @@ describe('buildBoughtTrade', () => {
   it('ignores a listing for a different trade', () => {
     const { trade } = buildBoughtTrade({ tradeId: '5002', resourceId: 7, buyPrice: 500 }, listing({ rating: 91 }), BOUGHT_AT);
     expect(trade.rating).toBeNull();
+    expect(trade).not.toHaveProperty('itemId');
+  });
+
+  it("reports the card's item id with the buy, so another browser can follow the card, and passes the schema", () => {
+    const { trade } = buildBoughtTrade({ tradeId: '5001', resourceId: 50_331_700, buyPrice: 10_000 }, listing(), BOUGHT_AT);
+    expect(trade.itemId).toBe('900001');
+    expect(tradeIngestSchema.safeParse({ ...trade, boughtAt: new Date().toISOString() }).success).toBe(true);
+    // No item id on the listing: the field is left out, not sent empty.
+    const without = buildBoughtTrade({ tradeId: '5001', resourceId: 7, buyPrice: 500 }, listing({ itemId: undefined }), BOUGHT_AT).trade;
+    expect(without).not.toHaveProperty('itemId');
   });
 });

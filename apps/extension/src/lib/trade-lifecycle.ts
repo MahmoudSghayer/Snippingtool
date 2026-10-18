@@ -11,8 +11,32 @@
  *   bought -> listed(price) -> sold(price, soldAt)
  *         \                \-> expired -> listed again (a relist) -> ...
  *          \-> sold (its listing never seen: see below)
- *   listed/expired -> gone (missing from a full trade pile: sold unseen,
- *                          quick-sold, or moved to the club)
+ *   listed  -> sold, inferred (missing from a full trade pile: see below)
+ *   expired -> gone (missing from a full trade pile: quick-sold, or moved
+ *                    to the club)
+ *
+ * A listed card missing from a full trade pile sold. EA lets nobody remove
+ * a card from the transfer list while its listing is live, so a card last
+ * seen listed (not expired) that has left the pile was bought by someone:
+ * the trader cleared it from the sold items (on the console or the phone
+ * app), or every trade-pile read failed while it sold. Nova AI's auto-sell
+ * lists at buy-now, so it is recorded sold at its list price, flagged
+ * `saleSource: 'inferred'` (the server stores that, so reports can tell an
+ * estimate from a sale seen). An expired card that left the pile may have
+ * been quick-sold or sent to the club, so it stays `gone`, never reported;
+ * `goneFrom` keeps which state it left from. A `gone` record from before
+ * `goneFrom` existed cannot tell the two apart; the trader confirmed those
+ * cards sold, so `resumeUnreported` reports each such record with a list
+ * price once, as an inferred sale.
+ *
+ * Per browser, but not only this browser's buys: `seed` adds the account's
+ * open trades (`GET /api/v1/extension/open-trades`, background/lifecycle.ts)
+ * as `bought` records, so a card bought in one browser (the trader's PC)
+ * and sold while the bot runs in another (a cloud machine) still has its
+ * sale reported, on the original buy's tradeId. A record already here is
+ * never overwritten by a seed. The server learns a card's item id from its
+ * buy report; buys recorded here before buy reports carried it are re-sent
+ * once with it (`reportItemIds`), so those cards can be followed too.
  *
  * A `closed` item is a sale on any tradeId but the one the card was bought
  * on: an itemId is one card, so any other tradeId of it is one of its own
@@ -40,7 +64,17 @@
  * IndexedDB one, store/lifecycle-db.ts), so the userscript build can reuse
  * this module as-is.
  */
-import { computeTradeProfit, EA_TAX_RATE, MAX_COIN_PRICE, type LifecycleBuy, type LifecycleSessionPnl, type LifecycleStats, type Trade, type TradePileItem } from '@sl/shared';
+import {
+  computeTradeProfit,
+  EA_TAX_RATE,
+  MAX_COIN_PRICE,
+  type LifecycleBuy,
+  type LifecycleSessionPnl,
+  type LifecycleStats,
+  type OpenTrade,
+  type Trade,
+  type TradePileItem,
+} from '@sl/shared';
 
 export type LifecycleState = 'bought' | 'listed' | 'expired' | 'sold' | 'gone';
 
@@ -62,6 +96,20 @@ export interface LifecycleRecord {
   soldAt: string | null;
   /** The sale has been handed to `reportSale`. */
   saleReported: boolean;
+  /** How the sale was known: seen sold on the trade pile, or inferred (a
+   * listed card that left the pile, or an old `gone` record) at its list
+   * price. Absent on records from before it existed: observed. */
+  saleSource?: 'observed' | 'inferred';
+  /** For a `gone` record: the state it left the trade pile from. Absent on
+   * `gone` records from before it existed (see `resumeUnreported`). */
+  goneFrom?: 'listed' | 'expired';
+  /** Added by `seed` from the account's open trades (another browser's
+   * buy), not by a buy in this browser. */
+  seeded?: boolean;
+  /** The server has (or has been sent) this buy with its item id: the buy
+   * report carries it since item ids were stored, and `reportItemIds`
+   * re-sends the buys recorded before that, once. */
+  itemIdReported?: boolean;
   updatedAt: number;
 }
 
@@ -74,9 +122,9 @@ export interface LifecycleStore {
 
 export interface LifecycleDeps {
   store: LifecycleStore;
-  /** Queue the sale for `/trades/batch`, durably. Throws when it was not
-   * queued: the sale stays unreported and `resumeUnreported` sends it
-   * again. */
+  /** Queue the sale for `/trades/batch`, durably (also a buy re-sent with
+   * its item id, `reportItemIds`). Throws when it was not queued: the sale
+   * stays unreported and `resumeUnreported` sends it again. */
   reportSale: (trade: Trade) => void | Promise<void>;
   /** Where `buysWithoutItemId` is kept, so it survives a restart (an MV3
    * service worker stops whenever it is idle). In memory without one. */
@@ -136,6 +184,27 @@ function inCoinRange(price: number): boolean {
  * (docs/06-extension.md, day-one checklist). */
 function salePrice(item: TradePileItem): number {
   return item.currentBid > 0 ? item.currentBid : item.buyNowPrice;
+}
+
+/** When a sale seen (or inferred) at `at` is recorded as made: never before
+ * the purchase, since the server rejects a sale that precedes its buy and
+ * the buy's time may come from a clock slightly ahead of this one.
+ * Otherwise the time the sale was noticed, not when it happened (EA gives
+ * no sale time). */
+function soldAtFor(record: LifecycleRecord, at: number): string {
+  const boughtAt = Date.parse(record.boughtAt);
+  return new Date(Number.isFinite(boughtAt) ? Math.max(at, boughtAt) : at).toISOString();
+}
+
+/** A `gone` record from before `goneFrom` existed, with a price to report:
+ * it left the pile listed or expired, which cannot be told apart now. */
+function isLegacyGone(record: LifecycleRecord): boolean {
+  return record.state === 'gone' && record.goneFrom === undefined && record.listPrice != null && inCoinRange(record.listPrice);
+}
+
+/** Done with: a reported sale, or a card that left the pile unsold. */
+function isFinished(record: LifecycleRecord): boolean {
+  return (record.state === 'sold' && record.saleReported) || (record.state === 'gone' && !isLegacyGone(record));
 }
 
 export class TradeLifecycle {
@@ -202,16 +271,58 @@ export class TradeLifecycle {
         sellPrice: null,
         soldAt: null,
         saleReported: false,
+        // The buy report content sends alongside carries the item id.
+        itemIdReported: true,
         updatedAt: this.now(),
       });
+    });
+  }
+
+  /** Buys recorded here before buy reports carried the card's item id:
+   * each card still followed (bought, listed or expired) is reported once
+   * more as `bought`, now with its item id, so the server can list it in
+   * the account's open trades and another browser can follow it (`seed`).
+   * The server keeps a sale it already has, and every card field the
+   * report leaves out. Returns how many it queued. */
+  reportItemIds(): Promise<number> {
+    return this.serial(async () => {
+      let sent = 0;
+      for (const record of Array.from((await this.records()).values())) {
+        if (record.itemIdReported || record.seeded) continue;
+        if (record.state !== 'bought' && record.state !== 'listed' && record.state !== 'expired') continue;
+        const buy: Trade = {
+          id: crypto.randomUUID(),
+          tradeId: record.buyTradeId,
+          itemId: record.itemId,
+          resourceId: record.resourceId,
+          assetId: null,
+          rating: record.rating,
+          buyPrice: record.buyPrice,
+          sellPrice: null,
+          eaTax: EA_TAX_RATE,
+          netProfit: null,
+          status: 'bought',
+          boughtAt: record.boughtAt,
+          soldAt: null,
+        };
+        try {
+          await this.deps.reportSale(buy);
+        } catch {
+          continue; // not queued (signed out, say): tried again next time
+        }
+        await this.put({ ...record, itemIdReported: true });
+        sent++;
+      }
+      return sent;
     });
   }
 
   /** Trade-pile items the adapter read. Returns how many sales it
    * reported. Items with no recorded buy are ignored: without the buy
    * there is no trade on the server to close. With `full` (a plain GET of
-   * the whole trade pile), a listed or expired item missing from it has
-   * left the pile and becomes `gone`. */
+   * the whole trade pile), a followed item missing from it has left the
+   * pile: a listed one sold (inferred, at its list price: see the header),
+   * an expired one is `gone`. */
   observePile(items: TradePileItem[], options: { full?: boolean } = {}): Promise<number> {
     return this.serial(async () => {
       const records = await this.records();
@@ -227,8 +338,14 @@ export class TradeLifecycle {
       if (options.full) {
         const present = new Set(items.map((i) => i.itemId));
         for (const record of Array.from(records.values())) {
-          if ((record.state === 'listed' || record.state === 'expired') && !present.has(record.itemId)) {
-            await this.put({ ...record, state: 'gone', updatedAt: this.now() });
+          if ((record.state !== 'listed' && record.state !== 'expired') || present.has(record.itemId)) continue;
+          const at = this.now();
+          if (record.state === 'listed' && record.listPrice != null && inCoinRange(record.listPrice)) {
+            const sold: LifecycleRecord = { ...record, state: 'sold', sellPrice: record.listPrice, soldAt: soldAtFor(record, at), saleSource: 'inferred', saleReported: false, updatedAt: at };
+            await this.put(sold);
+            if (await this.report(sold)) reported++;
+          } else {
+            await this.put({ ...record, state: 'gone', goneFrom: record.state, updatedAt: at });
           }
         }
       }
@@ -237,18 +354,80 @@ export class TradeLifecycle {
   }
 
   /** Re-send every sale persisted as sold but never handed over (a report
-   * that threw, or a reload between the two writes). */
+   * that threw, or a reload between the two writes). First, once per
+   * record, a `gone` record from before `goneFrom` existed that has a list
+   * price becomes an inferred sale at that price, dated when it went gone:
+   * those cards sold (the trader confirmed it), and nothing else would ever
+   * report them. Once sold, a record never goes back to `gone`, so each is
+   * reported once. */
   resumeUnreported(): Promise<number> {
     return this.serial(async () => {
       let sent = 0;
-      for (const record of Array.from((await this.records()).values())) {
+      for (const found of Array.from((await this.records()).values())) {
+        let record = found;
+        if (isLegacyGone(record)) {
+          record = { ...record, state: 'sold', sellPrice: record.listPrice, soldAt: soldAtFor(record, record.updatedAt), saleSource: 'inferred', saleReported: false, updatedAt: this.now() };
+          await this.put(record);
+        }
         if (record.state === 'sold' && !record.saleReported && (await this.report(record))) sent++;
       }
       return sent;
     });
   }
 
-  /** Drop reported sales and gone items not touched for 30 days. */
+  /** The account's open trades (`GET /api/v1/extension/open-trades`): its
+   * buys still `bought` on the server, whichever browser made them. Each
+   * card not followed here starts as `bought`, on the buy's own tradeId,
+   * so its sale is reported against that trade. A record already here is
+   * kept as it is (it is as far along as this browser knows), unless it is
+   * a finished record of an earlier purchase of the same card. With
+   * `complete` (the server listed every open trade), a seeded record still
+   * `bought` whose trade is no longer open (sold elsewhere, recorded on the
+   * dashboard, or over the server's 30 days) is dropped. Returns how many
+   * records it added. */
+  seed(trades: OpenTrade[], options: { complete?: boolean } = {}): Promise<number> {
+    return this.serial(async () => {
+      const records = await this.records();
+      let added = 0;
+      for (const trade of trades) {
+        const existing = records.get(trade.itemId);
+        const rebought = existing !== undefined && existing.buyTradeId !== trade.tradeId && isFinished(existing) && Date.parse(trade.boughtAt) > Date.parse(existing.boughtAt);
+        if (existing && !rebought) continue;
+        await this.put({
+          itemId: trade.itemId,
+          buyTradeId: trade.tradeId,
+          resourceId: trade.resourceId,
+          rating: trade.rating,
+          buyPrice: trade.buyPrice,
+          boughtAt: trade.boughtAt,
+          state: 'bought',
+          listTradeId: null,
+          listPrice: null,
+          relists: 0,
+          sellPrice: null,
+          soldAt: null,
+          saleReported: false,
+          seeded: true,
+          updatedAt: this.now(),
+        });
+        added++;
+      }
+      if (options.complete) {
+        const open = new Set(trades.map((t) => t.tradeId));
+        for (const record of Array.from(records.values())) {
+          if (record.seeded && record.state === 'bought' && !open.has(record.buyTradeId)) {
+            await this.deps.store.delete(record.itemId);
+            records.delete(record.itemId);
+          }
+        }
+      }
+      return added;
+    });
+  }
+
+  /** Drop reported sales and gone items not touched for 30 days, and seeded
+   * cards bought over 30 days ago and never seen here (the server stops
+   * listing them as open then too). */
   prune(): Promise<void> {
     return this.serial(async () => {
       await this.records();
@@ -260,8 +439,9 @@ export class TradeLifecycle {
     this.lastPruneAt = this.now();
     const cutoff = this.now() - LIFECYCLE_RETENTION_MS;
     for (const record of Array.from(this.cache!.values())) {
-      const finished = record.state === 'gone' || (record.state === 'sold' && record.saleReported);
-      if (finished && record.updatedAt < cutoff) {
+      const finished = isFinished(record) && record.updatedAt < cutoff;
+      const staleSeed = record.seeded === true && record.state === 'bought' && Date.parse(record.boughtAt) < cutoff;
+      if (finished || staleSeed) {
         await this.deps.store.delete(record.itemId);
         this.cache!.delete(record.itemId);
       }
@@ -333,13 +513,17 @@ export class TradeLifecycle {
         const price = salePrice(item);
         if (!inCoinRange(price)) return null;
         const relisted = record.listTradeId !== null && record.listTradeId !== item.tradeId;
-        // Never before the purchase: the server rejects a sale that
-        // precedes its buy, and the buy's time may come from a clock
-        // slightly ahead of this one. Otherwise the time the sale was
-        // seen, not when it happened (EA gives no sale time).
-        const boughtAt = Date.parse(record.boughtAt);
-        const soldAt = new Date(Number.isFinite(boughtAt) ? Math.max(at, boughtAt) : at).toISOString();
-        return { ...record, state: 'sold', listTradeId: item.tradeId, relists: record.relists + (relisted ? 1 : 0), sellPrice: price, soldAt, saleReported: false, updatedAt: at };
+        return {
+          ...record,
+          state: 'sold',
+          listTradeId: item.tradeId,
+          relists: record.relists + (relisted ? 1 : 0),
+          sellPrice: price,
+          soldAt: soldAtFor(record, at),
+          saleSource: 'observed',
+          saleReported: false,
+          updatedAt: at,
+        };
       }
       default:
         // On the pile, not listed: nothing to record.
@@ -352,6 +536,7 @@ export class TradeLifecycle {
     const trade: Trade = {
       id: crypto.randomUUID(),
       tradeId: record.buyTradeId,
+      itemId: record.itemId,
       resourceId: record.resourceId,
       assetId: null,
       rating: record.rating,
@@ -364,6 +549,8 @@ export class TradeLifecycle {
       status: 'sold',
       boughtAt: record.boughtAt,
       soldAt: record.soldAt,
+      // Left out for a sale seen (the server's default): an estimate says so.
+      ...(record.saleSource === 'inferred' ? { saleSource: 'inferred' as const } : {}),
     };
     try {
       await this.deps.reportSale(trade);

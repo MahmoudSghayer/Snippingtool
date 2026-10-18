@@ -716,9 +716,11 @@ installed`; after the human's own search the log shows no `hook:`
      bought on is its sale, even a relist never seen active (e.g. "Relist
      all"). The tradeId it was bought on is never a sale.
    - A plain GET of `/tradepile` in which every entry was readable is the
-     whole transfer list: a listed or expired card missing from it is
-     marked gone (no longer listed value). An entry with a price outside
-     0–15,000,000 is skipped, so that response is not treated as full.
+     whole transfer list: a listed card missing from it sold (reported at
+     its list price, `saleSource: 'inferred'`), an expired one is marked
+     gone and never reported (§6, "Trade lifecycle"). An entry with a price
+     outside 0–15,000,000 is skipped, so that response is not treated as
+     full.
    - `soldAt` is when the sale was _seen_ on the pile, not when it
      happened (EA gives no sale time), clamped to be no earlier than the
      purchase.
@@ -876,8 +878,10 @@ word for word (`options/main.ts`'s `WHAT_IT_SENDS`), and the same list
   changes, errors, heartbeats.
 - **Snipe attempts**: resource/trade id, target and listed price, outcome
   (including `blocked` — what proves the governor did its job), latency.
-- **Trades**: buy/sell price and net profit, computed entirely client-side
-  by `model/prices.ts`.
+- **Trades**: each buy (its trade id, the card's resource id, rating and
+  EA item id, the price and time) and later its sale (price and time, and
+  whether it was seen or inferred: see "Trade lifecycle" below). The API
+  computes the tax and net profit itself.
 - **Filter stats**: none are sent today. Nothing in the extension produces
   them (saved filters are local only), so the filter rotation/retirement
   that would have used them was removed (P0 Task 13); the queue kind and
@@ -935,6 +939,96 @@ item's `occurredAt`/`boughtAt`/`soldAt` onto the server's clock once, when
 the item is queued, so the persisted item — and every retry of it — carries
 the corrected timestamp, and a machine whose clock runs fast loses
 nothing. The before-sending filter uses the corrected clock too.
+
+### Trade lifecycle: following a buy to its sale
+
+`lib/trade-lifecycle.ts` (run by `background/lifecycle.ts` over its own
+IndexedDB database, `store/lifecycle-db.ts`) keeps one record per card,
+keyed by EA's item id, and walks it through the trade-pile responses the
+adapter reads passively (§4 item 8). A sale goes out through the same
+`trades` queue as the buy: the buy's own `tradeId`, `status: 'sold'`,
+`sellPrice`, `soldAt`, the card's `itemId`, and `saleSource: 'inferred'`
+when the price is an estimate. The API updates that trade and computes the
+tax and net. A sale is reported once (persisted as sold before the report,
+marked reported after; `resumeUnreported` re-sends one that failed).
+
+```
+bought -> listed(price) -> sold(price)       seen closed: saleSource observed
+       \                \-> expired -> listed again (a relist) -> ...
+        \-> sold (its listing never seen)
+listed  -> sold at its list price            missing from a full trade pile:
+                                             saleSource inferred
+expired -> gone (goneFrom: 'expired')        missing from a full trade pile:
+                                             never reported
+```
+
+- **A listed card that left the trade pile sold.** EA lets nobody remove a
+  card from the transfer list while its listing is live, so a card last
+  seen listed that is missing from a full trade pile (a plain GET of
+  `/tradepile` with every entry readable) was bought: the trader cleared it
+  from the sold items on the console or the phone app, or the trade-pile
+  reads failed while it sold. Nova AI's auto-sell lists at buy-now, so it
+  is recorded sold at its list price, dated when it was found missing,
+  never before the purchase. It is flagged `inferred`, stored as
+  `trades.sale_source = 'inferred'`, and the dashboard marks its price
+  `est.`. A sale another browser later _sees_ replaces it on the server;
+  nothing else does.
+- **An expired card that left the pile stays `gone`**: it may have been
+  quick-sold or sent to the club. The record keeps `goneFrom`.
+- **Old `gone` records.** Before `goneFrom` existed, listed and expired
+  cards both became `gone` and were never reported. The trader confirmed
+  those cards sold, so the first `resumeUnreported` after the update (at the
+  first lifecycle message after the service worker starts, and on every
+  heartbeat alarm) turns each `gone` record with a list price and no
+  `goneFrom` into an inferred sale at its list price, dated when it went
+  gone, and reports it. Once sold, a record never goes back to `gone`, so
+  this happens once per record. Records are pruned 30 days after they went
+  gone, so only the last 30 days are recovered, and only in the browser
+  that holds them.
+- **Cross-browser.** The records are per browser, but the account's buys
+  are not: `GET /api/v1/extension/open-trades` returns the trades still
+  `bought` on the server that carry an item id (the buy report sends it;
+  `trades.item_id`, migration 0040), bought in the last 30 days, newest 300. `TradeLifecycle.seed` adds each card this browser has no record of
+  as `bought`, on that buy's `tradeId`, so a card bought on the trader's PC
+  and sold while the bot runs on a cloud machine is reported against the
+  original buy. A record already present is never overwritten (only a
+  finished record of an older purchase of the same card is replaced). When
+  the list is complete (`truncated: false`), a seeded card still `bought`
+  whose trade is no longer open (sold elsewhere, marked sold on the
+  dashboard) is dropped; a seeded card bought over 30 days ago and never
+  seen here is pruned. Purchase times from the server are moved onto this
+  machine's clock (`lib/clock.ts` `toLocalTime`), so the sale report sends
+  them back unchanged.
+
+  A buy reported before 0040 has no item id on the server. The browser
+  that bought it re-sends it once, as `bought` with its item id, for every
+  card it still follows (bought, listed or expired:
+  `TradeLifecycle.reportItemIds`, run with `resumeUnreported`); the server
+  fills in `item_id` and keeps a sale it already has. From then on the
+  account's other browsers can follow those cards too.
+
+  When it is read (`lib/lifecycle-seed.ts`, one request at a time, at most
+  every 15 minutes unless a caller asks for fresher; 2 minutes' wait after
+  no answer): at boot once signed in, after a sign-in, when the bot (or the
+  autobuyer) starts (`engine.state` turning `running`, unless it was read
+  in the last minute), every 15 minutes while it runs (the
+  `sl.lifecycle.seed` alarm), and before a trade-pile read when the last
+  seed is older than 15 minutes (the read waits up to 5 s for it, so the
+  pile the bot's start reloads is judged with the account's cards). Never
+  while signed out or opted out of telemetry. The time of the last seed is
+  kept in `storage.session`. The userscript runs the same code: its
+  browser shim maps the alarm to a timer and `storage.session` to its own
+  store.
+
+  **Deploy the API first**: `/trades/batch` validates strictly, and an API
+  without 0040 would reject (and the queue drop) every buy report carrying
+  `itemId`.
+
+Whatever the extension never saw sell (a card bought before this, or one
+that left the pile while no browser followed it), the trader records on
+the dashboard: "Mark as sold" on one trade (`POST /trades/:id/close`), or
+several bought trades of one card at one price (`POST /trades/mark-sold`),
+both stored as `sale_source = 'manual'`.
 
 ## 7. Crash recovery
 
