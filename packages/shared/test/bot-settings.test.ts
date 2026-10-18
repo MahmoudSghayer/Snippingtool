@@ -13,6 +13,7 @@ import {
   projectedActiveHoursPerDay,
   putBotSettingsRequestSchema,
   withRecommendedLimits,
+  withShortBurstLimits,
   type BotSettings,
 } from '../src/index.js';
 
@@ -136,6 +137,48 @@ describe('bot settings — defaults and migration', () => {
     expect(reset.safety).toEqual(DEFAULT_BOT_SETTINGS.safety);
     expect(reset.thresholds.maxBuyPrice).toBe(50_000);
     expect(reset.riskAcknowledgedAt).toBe('2026-09-24T08:00:00.000Z');
+  });
+
+  it('applies the short bursts preset, keeping targets, thresholds and auto-sell', () => {
+    const mine: BotSettings = {
+      ...probe({ delay: 2, searchesPerHour: 1_200, buysPerHour: 40 }),
+      thresholds: { ...DEFAULT_BOT_SETTINGS.thresholds, maxBuyPrice: 18_000, minProfit: 1_000 },
+      autoSell: {
+        ...DEFAULT_BOT_SETTINGS.autoSell,
+        enabled: true,
+        mode: 'fixed',
+        fixedPrice: 17_500,
+      },
+    };
+    const bursts = withShortBurstLimits(mine);
+    expect(bursts.searchDelay).toEqual({ min: 4, max: 6 });
+    expect(bursts.breaks).toEqual({
+      enabled: true,
+      searches: { min: 40, max: 60 },
+      seconds: { min: 15, max: 30 },
+    });
+    expect(bursts.rest).toEqual({
+      enabled: true,
+      afterMinutes: { min: 10, max: 15 },
+      minutes: { min: 10, max: 20 },
+    });
+    expect(bursts.safety).toEqual({
+      ...RECOMMENDED_BOT_SETTINGS.safety,
+      maxSearchesPerHour: 450,
+      maxActiveHoursPerDay: 6,
+      cooldownSeconds: 8,
+    });
+    expect(bursts.thresholds).toEqual(mine.thresholds);
+    expect(bursts.autoSell).toEqual(mine.autoSell);
+    // Valid settings, inside every engine bound.
+    expect(botSettingsSchema.parse(bursts)).toEqual(bursts);
+    expect(clampBotSettings(bursts)).toEqual(bursts);
+    // Faster than the recommended limits, but moderate: 2,700 searches a day
+    // (450 an hour for 6 hours), never under 4 s apart.
+    expect(botRiskLevel(bursts)).toMatchObject({
+      level: 'moderate',
+      projectedSearchesPerDay: 2_700,
+    });
   });
 });
 

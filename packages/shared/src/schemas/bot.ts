@@ -224,6 +224,41 @@ export function withRecommendedLimits(s: BotSettings): BotSettings {
   };
 }
 
+/** The "Short bursts" preset: fast sessions of 10-15 minutes (4-6 s between
+ * searches, a 15-30 s break every 40-60 searches), each followed by a 10-20
+ * minute rest, capped at 450 searches an hour and 6 active hours a day:
+ * about 300-450 searches an hour, under half the ~960 that got an account's
+ * market searches blocked on Oct 18. It rates moderate (4 s is the
+ * moderate minimum), so the page asks for the risk acknowledgment as for
+ * any settings above low. */
+export const SHORT_BURSTS_BOT_SETTINGS = {
+  searchDelay: { min: 4, max: 6 },
+  breaks: { enabled: true, searches: { min: 40, max: 60 }, seconds: { min: 15, max: 30 } },
+  rest: { enabled: true, afterMinutes: { min: 10, max: 15 }, minutes: { min: 10, max: 20 } },
+  safety: { maxSearchesPerHour: 450, maxActiveHoursPerDay: 6, cooldownSeconds: 8 },
+} as const;
+
+/** The "Short bursts" preset applied to `s`: its pace, breaks, rests and
+ * search limits, the recommended buy and coin limits, and the user's
+ * targets, thresholds and auto-sell kept. */
+export function withShortBurstLimits(s: BotSettings): BotSettings {
+  const B = SHORT_BURSTS_BOT_SETTINGS;
+  return {
+    ...s,
+    searchDelay: { ...B.searchDelay },
+    breaks: structuredCloneRanges(B.breaks),
+    rest: structuredCloneRanges(B.rest),
+    safety: {
+      maxSearchesPerHour: B.safety.maxSearchesPerHour,
+      maxBuysPerHour: R.safety.maxBuysPerHour,
+      maxActiveHoursPerDay: B.safety.maxActiveHoursPerDay,
+      buyToSearchRatio: R.safety.buyToSearchRatio,
+      cooldownSeconds: B.safety.cooldownSeconds,
+      maxCoinFlowPerHour: R.safety.maxCoinFlowPerHour,
+    },
+  };
+}
+
 function structuredCloneRanges<T extends Record<string, unknown>>(o: T): T {
   return JSON.parse(JSON.stringify(o)) as T;
 }
