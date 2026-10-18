@@ -300,9 +300,17 @@ message (automation builds only; never leaves the page). EA's bar wins again
 once it changes after that balance arrived (a pack bought by hand, say).
 Under the search, **Recent searches** lists the last 10
 searches the bot was started on, newest first; clicking one fills the search
-in again. It is a log, not saved filters: kept in extension storage
-(`sl.bot.recentSearches.v1`, Tampermonkey's storage in the userscript
-build), never sent anywhere.
+in again. It is a log, not saved filters, and it belongs to the account:
+`GET`/`PUT /extension/recent-searches` keep it per user, through background
+(`recentSearches.get` / `recentSearches.set`), so every browser the trader
+signs in on shows the same list (`content/recent-searches.ts`). The page
+reads it each time it opens; a start saves the list to extension storage
+(`sl.bot.recentSearches.v1`, Tampermonkey's storage in the userscript build)
+at once and to the account a moment later (debounced, never blocking the
+bot). The account's list wins whenever it can be read, and replaces the local
+copy; signed out or offline, the page shows the local copy. The first time a
+browser reaches an account with an empty list, it uploads the list it kept
+before sync existed, once (`sl.bot.recentSearches.migrated.v1`).
 
 The dash's **Sold** and **Unsold** counters and its **Transfer list** panel
 (cards on the list out of EA's 100, then how many are listed and not

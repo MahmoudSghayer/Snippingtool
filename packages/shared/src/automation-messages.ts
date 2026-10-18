@@ -35,5 +35,10 @@ export const AUTOMATION_BACKGROUND_MESSAGE_TYPES = [
    * fetches it (FUTBIN has no public API; anything unreadable is null) and
    * caches it briefly. */
   'price.futbin',
+  /** The Nova AI page's Recent searches log, as the signed-in account keeps
+   * it (`RecentSearchesResponse`, `/api/v1/extension/recent-searches`).
+   * Null while signed out or offline: content then uses its local copy. */
+  'recentSearches.get',
+  'recentSearches.set',
 ] as const;
 export type AutomationBackgroundMessageType = (typeof AUTOMATION_BACKGROUND_MESSAGE_TYPES)[number];

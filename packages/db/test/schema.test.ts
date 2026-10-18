@@ -24,6 +24,7 @@ const EXPECTED_TABLES = [
   'filter_stats',
   'risk_budget_events',
   'user_settings',
+  'user_recent_searches',
   'settings_history',
   'notifications',
   'payments',

@@ -1,9 +1,10 @@
 // The Nova AI page's recent-searches log (`ui/bot-page.ts`): every search
 // the bot is started on is listed, newest first, and clicking one fills the
 // search in again. Nothing to save or name; kept between page loads through
-// `deps.recentSearches`.
+// `deps.recentSearches` (the account's copy, test/unit/recent-searches-sync
+// covers that side), and read again each time the page opens.
 
-import { DEFAULT_BOT_SETTINGS } from '@sl/shared';
+import { DEFAULT_BOT_SETTINGS, putRecentSearchesRequestSchema } from '@sl/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Sniper } from '../../src/engine/sniper.js';
@@ -60,7 +61,7 @@ describe('parseRecentSearches', () => {
   });
 });
 
-function mount(stored: unknown = undefined) {
+function mount(stored: unknown = undefined, load: () => Promise<unknown> = async () => stored) {
   let live: LiveSearch | null = null;
   let running = false;
   const sniper = new Sniper(
@@ -97,7 +98,7 @@ function mount(stored: unknown = undefined) {
     },
     resolveNames: async () => ({}),
     getCatalog: async () => null,
-    recentSearches: { load: async () => stored, save },
+    recentSearches: { load, save },
   });
   page.open();
   shadows.restore();
@@ -114,7 +115,7 @@ function mount(stored: unknown = undefined) {
     input.dispatchEvent(new Event('change', { bubbles: true }));
   };
   const recent = () => [...root.querySelectorAll<HTMLElement>('[data-recent]')];
-  return { root, $, live: () => live, save, typePlayer, setPrice, recent };
+  return { page, root, $, live: () => live, save, typePlayer, setPrice, recent };
 }
 
 beforeEach(() => {
@@ -168,5 +169,66 @@ describe('the Recent searches log', () => {
     expect(root.querySelector('.rc-name')!.textContent).toBe('86 Frenkie de Jong, max 52000');
     recent()[0]!.click();
     expect(root.querySelector('.picked b')!.textContent).toBe('Frenkie de Jong');
+  });
+
+  it('reads the log again each time the page opens: what it reads replaces the list shown', async () => {
+    // Another browser added a search between the two opens.
+    const reads = [[entry(Date.now() - 60_000, 52_000)], [entry(Date.now() - 30_000, 50_000), entry(Date.now() - 60_000, 52_000)]];
+    let n = 0;
+    const { page, recent, root } = mount(undefined, async () => JSON.parse(JSON.stringify(reads[Math.min(n++, 1)])));
+    await vi.waitFor(() => expect(recent()).toHaveLength(1));
+
+    page.close();
+    page.open();
+    await vi.waitFor(() => expect(recent()).toHaveLength(2));
+    expect(root.querySelector('.rc-name')!.textContent).toBe('86 Frenkie de Jong, max 50000');
+  });
+
+  it('keeps a search started while the log loads on top, and saves the two together', async () => {
+    let finish: (raw: unknown) => void = () => undefined;
+    const { $, save, typePlayer, setPrice, recent } = mount(undefined, () => new Promise((resolve) => (finish = resolve)));
+    typePlayer('20801');
+    setPrice('maxBuy', '52000');
+    $('start')!.click();
+    $('start')!.click();
+    expect(save).toHaveBeenLastCalledWith([expect.objectContaining({ name: 'Player #20801, max 52,000' })]);
+
+    finish(JSON.parse(JSON.stringify([entry(Date.now() - 60_000, 48_000)])));
+    await vi.waitFor(() => expect(recent()).toHaveLength(2));
+    expect(recent()[0]!.querySelector('.rc-name')!.textContent).toBe('Player #20801, max 52,000');
+    expect(save).toHaveBeenLastCalledWith([
+      expect.objectContaining({ name: 'Player #20801, max 52,000' }),
+      expect.objectContaining({ name: '86 Frenkie de Jong, max 48000' }),
+    ]);
+  });
+
+  it('keeps the list shown when a load fails', async () => {
+    let fail = false;
+    const { page, recent } = mount(undefined, async () => {
+      if (fail) throw new Error('storage unavailable');
+      return JSON.parse(JSON.stringify([entry(Date.now() - 60_000, 52_000)]));
+    });
+    await vi.waitFor(() => expect(recent()).toHaveLength(1));
+
+    fail = true;
+    page.close();
+    page.open();
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    expect(recent()).toHaveLength(1);
+  });
+
+  it('saves entries exactly as the account accepts them (@sl/shared putRecentSearchesRequestSchema)', () => {
+    const { $, save, typePlayer, setPrice } = mount();
+    typePlayer('20801');
+    setPrice('minBuy', '1000');
+    setPrice('maxBuy', '52000');
+    $('start')!.click();
+    $('start')!.click();
+
+    const saved = JSON.parse(JSON.stringify(save.mock.lastCall![0]));
+    expect(putRecentSearchesRequestSchema.parse({ items: saved }).items).toEqual(saved);
+    // And what the page reads back from the account, too.
+    const stored = JSON.parse(JSON.stringify([entry(1, 52_000)]));
+    expect(putRecentSearchesRequestSchema.parse({ items: parseRecentSearches(stored) }).items).toEqual(stored);
   });
 });

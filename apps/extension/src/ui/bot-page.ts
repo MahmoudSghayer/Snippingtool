@@ -35,6 +35,7 @@ import {
   BOT_LIMITS,
   BOT_RISK_LABELS,
   MIN_SALE_PRICE,
+  RECENT_SEARCHES_MAX,
   RISK_ACKNOWLEDGMENT,
   SEARCH_DELAY_PRESETS,
   botRiskLevel,
@@ -93,8 +94,9 @@ export interface BotPageDeps {
   /** EA's player/club/league/nation lists, if the web app has loaded them
    * since the extension was installed (model/catalog.ts). */
   getCatalog: () => Promise<Catalog | null>;
-  /** Where the recent-searches log is kept between page loads. Without it
-   * the log lasts until the page reloads. */
+  /** Where the recent-searches log is kept between page loads (the
+   * account's copy, content/recent-searches.ts). Read again each time the
+   * page opens. Without it the log lasts until the page reloads. */
   recentSearches?: {
     load: () => Promise<unknown>;
     save: (list: RecentSearch[]) => Promise<void>;
@@ -210,8 +212,9 @@ export function saleProfit(sell: number, buy: number | null): { tax: number; net
 // ---- recent searches -------------------------------------------------------
 // Every search the user starts the bot on, newest first, so an earlier one
 // is a click away. A log, not saved filters: nothing to name or manage.
+// The account keeps it (@sl/shared `recentSearchSchema` is this shape).
 
-export const MAX_RECENT_SEARCHES = 10;
+export const MAX_RECENT_SEARCHES = RECENT_SEARCHES_MAX;
 
 export interface RecentSearch {
   /** When the bot was started on it. */
@@ -806,7 +809,10 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   // ---- recent searches ----------------------------------------------------
 
   let recent: RecentSearch[] = [];
-  let recentLoaded = false;
+  /** Bumped by each load, so only the latest one is applied. */
+  let recentLoads = 0;
+  /** Searches started while a load is in flight, kept on top of what it reads. */
+  let startedWhileLoading: RecentSearch[] | null = null;
 
   function renderRecent(): void {
     const wasOpen = root.querySelector('#recent details')?.hasAttribute('open') ?? true;
@@ -824,28 +830,41 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     $('recent').innerHTML = section('Recent searches', body, '', wasOpen);
   }
 
-  /** Picks up the log kept from earlier page loads, once. */
+  /** Picks up the log kept from earlier page loads, each time the page
+   * opens: it is the account's, so another browser (or signing in since)
+   * may have changed it. What is read replaces the list, apart from
+   * searches started while it loaded. A load that fails keeps the list. */
   function loadRecent(): void {
-    if (recentLoaded || !deps.recentSearches) return;
-    recentLoaded = true;
-    void deps.recentSearches
-      .load()
-      .catch(() => null)
-      .then((raw) => {
+    const store = deps.recentSearches;
+    if (!store) return;
+    const load = ++recentLoads;
+    const meanwhile = (startedWhileLoading ??= []);
+    void store.load().then(
+      (raw) => {
+        if (load !== recentLoads) return;
+        startedWhileLoading = null;
         // Oldest first, so each search keeps its latest run, and one
         // started while this loaded stays on top.
         let merged: RecentSearch[] = [];
-        for (const r of [...parseRecentSearches(raw), ...recent].sort((a, b) => a.at - b.at))
+        for (const r of [...parseRecentSearches(raw), ...meanwhile].sort((a, b) => a.at - b.at))
           merged = addRecentSearch(merged, r);
         recent = merged;
         renderRecent();
-      });
+        // Those were saved over a list this had not read yet: save again.
+        if (meanwhile.length > 0) void store.save(recent).catch(() => undefined);
+      },
+      () => {
+        if (load === recentLoads) startedWhileLoading = null;
+      },
+    );
   }
 
   const copyForm = (f: TargetForm): TargetForm => ({ ...f, player: f.player ? { ...f.player } : null });
 
   function rememberSearch(name: string): void {
-    recent = addRecentSearch(recent, { at: Date.now(), name, form: copyForm(form) });
+    const entry: RecentSearch = { at: Date.now(), name, form: copyForm(form) };
+    recent = addRecentSearch(recent, entry);
+    startedWhileLoading?.push(entry);
     renderRecent();
     void deps.recentSearches?.save(recent).catch(() => undefined);
   }

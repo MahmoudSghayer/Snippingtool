@@ -1,7 +1,7 @@
 // /api/v1/extension/* — bootstrap, heartbeat, telemetry, errors, version,
-// kill-switch. The MV3 background service worker's only server contact
-// points (docs/01-architecture.md, "license bootstrap + heartbeat + offline
-// grace").
+// kill-switch, and the Nova AI page's recent searches. The MV3 background
+// service worker's only server contact points (docs/01-architecture.md,
+// "license bootstrap + heartbeat + offline grace").
 
 import {
   devices,
@@ -10,6 +10,7 @@ import {
   plans,
   subscriptions,
   userActivity,
+  userRecentSearches,
   users,
 } from '@sl/db';
 import {
@@ -20,9 +21,13 @@ import {
   heartbeatRequestSchema,
   heartbeatResponseSchema,
   isPlanCode,
+  putRecentSearchesRequestSchema,
+  recentSearchSchema,
+  recentSearchesResponseSchema,
   telemetryFlushRequestSchema,
   type BootstrapResponse,
   type LicenseDto,
+  type RecentSearchesResponse,
   type SubscriptionDto,
 } from '@sl/shared';
 import { and, desc, eq, isNull } from 'drizzle-orm';
@@ -127,6 +132,25 @@ async function loadOwnEmail(fastify: FastifyInstance, userId: string): Promise<s
   // removed mid-request.
   if (!row || row.deletedAt) throw AppErrors.tokenInvalid('Account no longer exists.');
   return row.email;
+}
+
+/** Ten real entries are a few KB of JSON, and ten of the longest the schema
+ * allows, every character escaped, stay under 45 KB; anything near the
+ * 1 MiB server default is not a recent-searches list. */
+const RECENT_SEARCHES_BODY_LIMIT = 64 * 1024;
+
+/** The caller's stored list as the API returns it. An entry a later,
+ * stricter schema no longer accepts is left out rather than failing the
+ * response. */
+function toRecentSearchesResponse(
+  row: { items: unknown[]; updatedAt: Date } | undefined,
+): RecentSearchesResponse {
+  if (!row) return { items: [], updatedAt: null };
+  const items = row.items.flatMap((item) => {
+    const parsed = recentSearchSchema.safeParse(item);
+    return parsed.success ? [parsed.data] : [];
+  });
+  return { items, updatedAt: row.updatedAt.toISOString() };
 }
 
 export default fp(
@@ -312,6 +336,54 @@ export default fp(
         }));
         if (rows.length > 0) await fastify.db.insert(userActivity).values(rows);
         return { accepted: rows.length };
+      },
+    );
+
+    // The Nova AI page's Recent searches log, kept per account so every
+    // browser the trader signs in on shows the same list (the extension
+    // keeps a local copy for when this is unreachable). Read when the page
+    // opens, replaced whole after a bot start. Ungated like bootstrap: it is
+    // the user's own data whatever their plan, and keyed only on the
+    // session's user id.
+    app.get(
+      '/api/v1/extension/recent-searches',
+      {
+        onRequest: [fastify.authenticate],
+        config: { rateLimit: INGEST_RATE_LIMIT },
+        schema: { tags: ['extension'], response: { 200: recentSearchesResponseSchema } },
+      },
+      async (request): Promise<RecentSearchesResponse> => {
+        const row = await fastify.db.query.userRecentSearches.findFirst({
+          where: eq(userRecentSearches.userId, request.authUser!.id),
+        });
+        return toRecentSearchesResponse(row);
+      },
+    );
+
+    app.put(
+      '/api/v1/extension/recent-searches',
+      {
+        onRequest: [fastify.authenticate],
+        preHandler: [fastify.verifyCsrf],
+        bodyLimit: RECENT_SEARCHES_BODY_LIMIT,
+        config: { rateLimit: INGEST_RATE_LIMIT },
+        schema: {
+          tags: ['extension'],
+          body: putRecentSearchesRequestSchema,
+          response: { 200: recentSearchesResponseSchema },
+        },
+      },
+      async (request): Promise<RecentSearchesResponse> => {
+        const userId = request.authUser!.id;
+        const { items } = request.body;
+        // One row per user (user_id is unique): the first save creates it,
+        // every later one replaces the list.
+        const [row] = await fastify.db
+          .insert(userRecentSearches)
+          .values({ id: newId(), userId, items })
+          .onConflictDoUpdate({ target: userRecentSearches.userId, set: { items } })
+          .returning();
+        return toRecentSearchesResponse(row);
       },
     );
 
