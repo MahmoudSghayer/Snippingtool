@@ -1158,6 +1158,20 @@ control.
   the access token but not the refresh token, so background tries one
   refresh when it starts (`lib/auth.ts` `refreshOnStartup`) and
   `isAuthenticated()` waits for it, instead of acting signed out.
+- **Refreshing without tripping reuse detection.** The API rotates the
+  refresh token on every use and revokes the session when a superseded one
+  comes back (docs/04-auth.md §3). `lib/auth.ts` therefore refreshes under
+  the `sl-auth-refresh` Web Lock (every EA tab of the userscript build runs
+  its own background copy over shared storage), re-reads storage once it
+  holds it and uses another context's fresh tokens instead of calling the
+  API, and sends `/auth/refresh` one attempt at a time (`retries: 0`):
+  after a network error, 5xx, 429 or `409 AUTH_REFRESH_CONFLICT` it checks
+  whether storage changed before ever sending its token again, and only
+  retries with it for 12 s — inside the API's 30 s grace for exactly that
+  retry. An API that stays unreachable keeps the tokens (the caller sees it
+  unreachable); only a refusal signs out, remembering why
+  (`sl.auth.signedOut`) for `auth.status`. Without Web Locks (old
+  browsers, tests) the per-context single-flight is all there is.
 - **CSP.** `content_security_policy.extension_pages`:
   `script-src 'self'; object-src 'self'; base-uri 'none'; frame-ancestors 'none'`
   — no remote code, no plugins, no embedding.
