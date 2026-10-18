@@ -35,6 +35,7 @@ import { AssistEngine, activeFilterHandles } from '../engine/assist.js';
 import { Governor, type GovernorState } from '../engine/governor.js';
 import { rankCandidates, type ScoredOpportunity } from '../engine/ranker.js';
 import { countObservedSearches, governedSearch } from '../engine/search.js';
+import { attemptErrorCode } from '../engine/types.js';
 import { handOffWasLate, readHandedOffNonce } from '../lib/act-auth.js';
 import { createBackgroundTimer } from '../lib/background-timer.js';
 import { riskLevelChangeEvent } from '../lib/bot-safety.js';
@@ -248,7 +249,14 @@ async function main(): Promise<void> {
       },
       onCurrentSearch: (auctions) => {
         currentSearch = auctions;
-        if (engineReady) void rerank();
+        if (!engineReady) return;
+        // While the Sniping Bot runs it is the one engine buying (the
+        // autobuyer waits for it too): nothing is offered from a ranking,
+        // and no price lookups share the page with its searches and buys.
+        if (sniper?.isRunning()) {
+          rankedCandidates = [];
+          assist?.cancelPending();
+        } else void rerank();
       },
     }),
   );
@@ -256,9 +264,11 @@ async function main(): Promise<void> {
   // Every observed search response counts toward the governor's
   // buy/search ratio and actionsPerHour — the human searching in EA's own UI
   // is what keeps assist-mode buys allowed (engine/search.ts). A no-op until
-  // the bootstrap below has created a governor. The unsubscribe is kept
-  // for the page's teardown (`pagehide` below).
-  const stopCountingSearches = countObservedSearches(adapter, () => governor);
+  // the bootstrap below has created a governor, and while the Sniping Bot
+  // runs: its searches are its own governor's, and counting them here too
+  // would spend assist's hourly budget on them. The unsubscribe is kept for
+  // the page's teardown (`pagehide` below).
+  const stopCountingSearches = countObservedSearches(adapter, () => (sniper?.isRunning() ? null : governor));
 
   // The trader's own trade pile (defect C13): background's trade lifecycle
   // links each item to the buy it came from and reports its sale once
@@ -485,7 +495,9 @@ async function main(): Promise<void> {
       listedPrice: input.listedPrice,
       outcome: input.outcome,
       latencyMs: input.latencyMs,
-      errorCode: input.errorCode,
+      // Cut to what the schema takes: a longer EA error had background
+      // reject the whole item.
+      errorCode: input.errorCode == null ? null : attemptErrorCode(input.errorCode),
       occurredAt: nowIso(),
       deviceId: deviceIdCache ?? '00000000-0000-0000-0000-000000000000',
     };
@@ -771,6 +783,7 @@ async function main(): Promise<void> {
           },
           onAttempt: recordAttempt,
           onTrade: recordTrade,
+          onRiskEvent: (event) => recordRiskEvents([event]),
         },
         botSettings,
       );
@@ -890,6 +903,9 @@ async function main(): Promise<void> {
     const pulled = await send<{ active: boolean; reason?: string }>('license.killSwitchGet');
     if (pulled && pulled.active !== killSwitchActive) applyKillSwitch(pulled.active, pulled.reason);
     if (killSwitchActive) return; // nothing to rank or attempt while halted
+    // While the Sniping Bot runs nothing buys from a ranking (see
+    // `onCurrentSearch` above): no ranking, no price lookups.
+    if (sniper?.isRunning()) return;
     await rerank();
 
     // The Sniping Bot buys on its own; never let two engines buy at once —

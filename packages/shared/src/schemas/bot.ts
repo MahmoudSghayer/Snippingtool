@@ -391,6 +391,44 @@ export function projectedActiveHoursPerDay(s: BotSettings): number {
   return Math.min(24 * dutyCycle, c.safety.maxActiveHoursPerDay);
 }
 
+/** How fast the bot searches on these settings (`effectiveSearchPace`). */
+export interface SearchPace {
+  /** Searches an hour the delay alone allows: 3600 / the middle of the
+   * delay range (the bot picks a random delay in it, start to start). */
+  delayPerHour: number;
+  /** The user's max searches per hour. */
+  capPerHour: number;
+  /** What the bot runs at: the lower of the two. */
+  perHour: number;
+  /** The delay alone would go past the hourly cap: the bot pauses once it
+   * has searched that many times in an hour. */
+  capped: boolean;
+  /** When capped, the minutes of searching at the delay's pace before that
+   * pause (null otherwise). */
+  minutesToCap: number | null;
+}
+
+/**
+ * The search pace the bot actually runs at: min(max searches per hour,
+ * 3600 / delay), the delay taken at the middle of the user's range. The
+ * page shows it beside the settings, so a delay faster than the hourly cap
+ * allows reads as "pauses after N minutes", not as a speed the bot never
+ * reaches. EA's answer time can only make the real pace slower.
+ */
+export function effectiveSearchPace(s: BotSettings): SearchPace {
+  const c = clampBotSettings(s);
+  const delayPerHour = 3_600 / ((c.searchDelay.min + c.searchDelay.max) / 2);
+  const capPerHour = c.safety.maxSearchesPerHour;
+  const capped = delayPerHour > capPerHour;
+  return {
+    delayPerHour,
+    capPerHour,
+    perHour: Math.min(delayPerHour, capPerHour),
+    capped,
+    minutesToCap: capped ? (capPerHour / delayPerHour) * 60 : null,
+  };
+}
+
 /**
  * How risky the user's settings are, live. Every limit the user can raise
  * that changes how the bot looks to EA is a factor, each rated on

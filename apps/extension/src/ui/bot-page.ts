@@ -41,6 +41,7 @@ import {
   botRiskLevel,
   botSettingsSchema,
   computeTradeProfit,
+  effectiveSearchPace,
   roundToPriceStep,
   stepPrice,
   withRecommendedLimits,
@@ -313,6 +314,18 @@ function timeOfDay(at: number): string {
 
 function rangeText(r: { min: number; max: number }): string {
   return r.min === r.max ? String(r.min) : `${r.min}-${r.max}`;
+}
+
+/** The pace the bot really searches at (`effectiveSearchPace`): the
+ * delay's, or the hourly limit's when that is lower, and then how soon the
+ * limit pauses it. */
+function paceText(s: BotSettings): string {
+  const p = effectiveSearchPace(s);
+  if (!p.capped) return `About ${fmt(p.perHour)} searches an hour at this delay (your limit is ${fmt(p.capPerHour)}).`;
+  return (
+    `This delay would make about ${fmt(p.delayPerHour)} searches an hour, over your limit of ${fmt(p.capPerHour)}: ` +
+    `Nova AI pauses after about ${fmt(Math.max(1, p.minutesToCap ?? 0))} minutes of searching each hour, so it searches about ${fmt(p.perHour)} times an hour.`
+  );
 }
 
 /** "3", "2-4" or "2 - 4" -> a range; null when unparseable. */
@@ -615,6 +628,7 @@ const CSS = `
   .start:disabled { background: #4f504c; color: #787873; }
   .run-status { margin-top: 8px; min-height: 18px; color: var(--ea-muted); font-size: 13px; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .run-status.bad { color: var(--ea-warning); }
+  .run-status.wrap { white-space: normal; }
   .run-status.go { cursor: pointer; text-decoration: underline; }
 
   /* right column: the session */
@@ -975,7 +989,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
             const level = presetLevel(p);
             return `<button type="button" class="preset" data-delay="${p.key}" data-min="${p.min}" data-max="${p.max}" aria-pressed="${delayPreset === p.key}">
             <b>${p.min}-${p.max}</b><small class="tag-${level}">${esc(BOT_RISK_LABELS[level].toUpperCase())}</small></button>`;
-          }).join('')}</div>`,
+          }).join('')}</div>` +
+          `<div class="hint" id="pace" aria-live="polite"></div>`,
       ) +
       section(
         'Short breaks',
@@ -1041,7 +1056,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         ) +
           field(
             'Buys per hour',
-            'Most players bought in any hour',
+            'Most players bought in any hour. A missed buy does not count',
             stepper('s-bph', String(s.safety.maxBuysPerHour), 'per hr', 'Buys per hour'),
           ) +
           field(
@@ -1051,7 +1066,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
           ) +
           field(
             'Coins per hour',
-            'Most coins spent in any hour',
+            'Most coins spent in any hour. A missed buy does not count',
             stepper('s-flow', String(s.safety.maxCoinFlowPerHour), 'coins', 'Coins per hour', true),
           ) +
           field(
@@ -1653,6 +1668,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     $('riskbar').className = `riskbar ${risk.level}`;
     $('risk-proj').textContent = `About ${fmt(risk.projectedSearchesPerDay)} searches and ${fmt(risk.projectedBuysPerDay)} buys a day at most.`;
     $('risk-reasons').innerHTML = risk.reasons.map((r) => `<li>${esc(r)}</li>`).join('');
+    const pace = root.getElementById('pace');
+    if (pace) pace.textContent = paceText(shown());
     const ack = $('ackbox');
     const needed = ackNeeded();
     if (ack.hidden === needed) {
@@ -1877,6 +1894,10 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     if (!sniper) {
       text = deps.getUnavailableReason() ?? 'Nova AI is not available right now.';
       bad = true;
+    } else if (running && sniper.state.notice) {
+      // An hourly limit holding buying back: which, and when it frees.
+      text = sniper.state.notice;
+      bad = true;
     } else if (running) {
       const startedAt = sniper.getStats().startedAt;
       text = `Running for ${clock(startedAt ? Date.now() - startedAt : 0)}`;
@@ -1899,7 +1920,9 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     start.disabled = !sniper || (!running && ackNeeded());
     start.title = start.disabled ? text : '';
     status.textContent = text;
+    status.title = text;
     status.classList.toggle('bad', bad);
+    status.classList.toggle('wrap', running && !!sniper?.state.notice);
     // Start waits on the risk confirmation, which is on the Settings tab:
     // the line saying so takes the user there.
     status.classList.toggle('go', !running && !!sniper && ackNeeded());
@@ -2123,13 +2146,15 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     if (e.kind === 'info')
       return `<div class="log"><div class="main">${esc(e.message)}<div class="sub">${when}</div></div></div>`;
     const who = `${e.rating ?? ''} ${esc(nameOf(e.assetId ?? e.resourceId))}`.trim();
+    // How fast the bot went for it, from the listing arriving to the buy.
+    const reacted = e.reactionMs != null ? `, reacted in ${fmt(e.reactionMs)} ms` : '';
     if (e.kind === 'bought') {
       const pill =
         e.profit == null
           ? ''
           : `<span class="pill ${e.profit < 0 ? 'neg' : ''}">${e.profit >= 0 ? '+' : ''}${fmt(e.profit)}${COIN}</span>`;
       return `<div class="log bought"><div class="main"><b>${who}</b> bought for <span class="amt">${fmt(e.price ?? 0)}${COIN}</span>
-        <div class="sub">${when}${e.sellPrice != null ? `, sells for <span class="amt">${fmt(e.sellPrice)}${COIN}</span>` : ''}</div></div>${pill}</div>`;
+        <div class="sub">${when}${e.sellPrice != null ? `, sells for <span class="amt">${fmt(e.sellPrice)}${COIN}</span>` : ''}${reacted}</div></div>${pill}</div>`;
     }
     if (e.kind === 'listed') {
       return `<div class="log listed"><div class="main"><b>${who}</b> listed for <span class="amt">${fmt(e.price ?? 0)}${COIN}</span>
@@ -2137,7 +2162,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     }
     if (e.kind === 'failed') {
       return `<div class="log failed"><div class="main">${e.resourceId != null ? `<b>${who}</b> missed at <span class="amt">${fmt(e.price ?? 0)}${COIN}</span>` : esc(e.message)}
-        <div class="sub">${when}${e.resourceId != null ? `, ${esc(e.message)}` : ''}</div></div></div>`;
+        <div class="sub">${when}${e.resourceId != null ? `, ${esc(e.message)}` : ''}${reacted}</div></div></div>`;
     }
     return `<div class="log blocked"><div class="main">${e.resourceId != null ? `<b>${who}</b> ` : ''}${esc(e.message)}<div class="sub">${when}</div></div></div>`;
   }
@@ -2192,7 +2217,10 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     phase.textContent =
       state?.phase === 'stopped' && state.stopDetail
         ? `Stopped: ${state.stopDetail}`
-        : PHASE_LABEL[state?.phase ?? 'idle'];
+        : running && state?.notice
+          ? 'Buying paused'
+          : PHASE_LABEL[state?.phase ?? 'idle'];
+    phase.title = running ? (state?.notice ?? '') : '';
     phase.className = `chip ${running ? 'running' : state?.phase === 'stopped' ? 'stopped' : ''}`;
     renderRunbar();
     $<HTMLButtonElement>('reset').disabled = !sniper || running;

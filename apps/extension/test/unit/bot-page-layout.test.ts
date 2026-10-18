@@ -6,7 +6,7 @@
 import { DEFAULT_BOT_SETTINGS, botRiskLevel, type BotSettings } from '@sl/shared';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
-import { Sniper } from '../../src/engine/sniper.js';
+import { Sniper, type SniperLogEntry, type SniperState } from '../../src/engine/sniper.js';
 import { createBotPage } from '../../src/ui/bot-page.js';
 
 import { captureShadowRoots, trustTestEvents, untrustedEvents } from './ui-test-helpers.js';
@@ -74,7 +74,7 @@ function mount(initial: BotSettings = DEFAULT_BOT_SETTINGS) {
     vi.advanceTimersByTime(1_000);
   };
   const tab = () => $('settings')!.dataset.tab;
-  return { root, $, click, type, tab, sniper, saved: () => stored };
+  return { root, $, click, type, tab, sniper, page, saved: () => stored };
 }
 
 it('switches between the search and the settings with the tab row', () => {
@@ -152,4 +152,45 @@ it('leaves the status line alone when Start is ready', () => {
   const { click, tab } = mount();
   click('#run-status');
   expect(tab()).toBe('search');
+});
+
+it('shows the pace the bot searches at, and when the hourly limit will pause it', () => {
+  const { $, type } = mount();
+  // The recommended 8-12 s is 360 searches an hour, over the 250 limit.
+  expect($('pace')!.textContent).toBe(
+    'This delay would make about 360 searches an hour, over your limit of 250: Nova AI pauses after about 42 minutes of searching each hour, so it searches about 250 times an hour.',
+  );
+  type('delay', '20');
+  expect($('pace')!.textContent).toBe('About 180 searches an hour at this delay (your limit is 250).');
+});
+
+it('says which hourly limit holds buying back, and when it frees', () => {
+  const { $, sniper, page } = mount();
+  const notice = 'Buying paused: coin-flow limit (412,000 of 500,000 coins in the last hour) — resumes about 02:14';
+  const state: SniperState = { phase: 'blocked', phaseEndsAt: Date.now() + 60_000, stopReason: null, stopDetail: null, notice };
+  vi.spyOn(sniper, 'state', 'get').mockReturnValue(state);
+  vi.spyOn(sniper, 'isRunning').mockReturnValue(true);
+  page.refresh();
+  vi.advanceTimersByTime(100);
+  const status = $('run-status')!;
+  expect(status.textContent).toBe(notice);
+  expect(status.classList.contains('bad')).toBe(true);
+  expect(status.classList.contains('wrap')).toBe(true);
+  expect($('phase')!.textContent).toBe('Buying paused');
+  expect($('phase')!.title).toBe(notice);
+});
+
+it('shows how fast the bot went for a listing it bought or missed', () => {
+  const { $, sniper, page } = mount();
+  const at = Date.now();
+  const log: SniperLogEntry[] = [
+    { id: 2, at, kind: 'failed', resourceId: 100, assetId: 100, rating: 85, price: 8_000, reactionMs: 7, message: 'someone else got it first' },
+    { id: 1, at, kind: 'bought', resourceId: 100, assetId: 100, rating: 85, price: 8_000, sellPrice: null, profit: null, reactionMs: 1_042, message: 'bought' },
+  ];
+  vi.spyOn(sniper, 'getLog').mockReturnValue(log);
+  page.refresh();
+  vi.advanceTimersByTime(100);
+  const text = $('log')!.textContent!.replace(/\s+/g, ' ');
+  expect(text).toContain('someone else got it first, reacted in 7 ms');
+  expect(text).toContain('reacted in 1,042 ms');
 });

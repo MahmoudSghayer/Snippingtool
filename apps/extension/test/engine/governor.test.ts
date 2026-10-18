@@ -383,6 +383,115 @@ describe('Governor.refund: an action that never reached EA', () => {
   });
 });
 
+describe('Governor.releaseSpend: a buy EA saw and turned down', () => {
+  it('gives back the coins and the buy, but keeps the action EA saw', () => {
+    const { gov } = governorAt(START, { buyToSearchRatio: 1 });
+    gov.allow({ kind: 'search' });
+    const decision = gov.allow({ kind: 'buy', coins: 5_000 });
+    gov.releaseSpend(decision);
+    const snap = gov.snapshot();
+    expect(snap.coinFlowLastHour).toBe(0);
+    expect(snap.sessionCoinsSpent).toBe(0);
+    expect(gov.serialize().buyCount).toBe(0);
+    // actionsPerHour, the ban-risk backstop, still counts the request.
+    expect(snap.actionsLastHour).toBe(2);
+  });
+
+  it('releases once only, never after a refund, and ignores searches and denials', () => {
+    const { gov } = governorAt(START, { buyToSearchRatio: 1 });
+    const search = gov.allow({ kind: 'search' });
+    gov.allow({ kind: 'search' });
+    const buy = gov.allow({ kind: 'buy', coins: 100 });
+    gov.releaseSpend(search);
+    expect(gov.serialize().searchCount).toBe(2);
+    gov.refund(buy);
+    gov.releaseSpend(buy);
+    expect(gov.serialize().buyCount).toBe(0);
+    expect(gov.snapshot().actionsLastHour).toBe(2);
+
+    const again = gov.allow({ kind: 'buy', coins: 100 });
+    gov.releaseSpend(again);
+    gov.releaseSpend(again);
+    gov.refund(again);
+    expect(gov.snapshot()).toMatchObject({ actionsLastHour: 3, coinFlowLastHour: 0 });
+  });
+});
+
+describe('Governor — rolling ratio counts (ratioCounts, the Sniping Bot)', () => {
+  function rolling(ratio: number, counts: { searches: number; buys: number }) {
+    return new Governor(
+      { ...settings, actionsPerHour: CEILING.actionsPerHour, buyToSearchRatio: ratio, maxCoinFlowPerHour: 1_000_000 },
+      { now: () => START, ratioCounts: () => counts },
+    );
+  }
+
+  it('lets the first buy of a cold start through: searches count as at least ceil(1 / ratio)', () => {
+    const counts = { searches: 1, buys: 0 };
+    const gov = rolling(0.35, counts);
+    // 1 / max(1, 3) = 0.33, within 0.35.
+    expect(gov.allow({ kind: 'buy', coins: 100 }).allowed).toBe(true);
+    counts.buys = 1;
+    const second = gov.allow({ kind: 'buy', coins: 100 });
+    expect(second).toMatchObject({ allowed: false, reason: 'buy_search_ratio' });
+    expect(second.events).toEqual([{ kind: 'buy_search_ratio', value: 2 / 3, threshold: 0.35 }]);
+    expect(gov.ratioAllowsBuy()).toBe(false);
+  });
+
+  it('rolls with the caller\'s hour, whatever the session counted', () => {
+    const counts = { searches: 6, buys: 1 };
+    const gov = rolling(0.35, counts);
+    // The session's own counts (no search at all) would refuse this buy; the
+    // caller's hour holds six searches and one buy: (1 + 1) / 6 = 0.33.
+    expect(gov.ratioAllowsBuy()).toBe(true);
+    expect(gov.allow({ kind: 'buy', coins: 100 }).allowed).toBe(true);
+    // Older buys leave the caller's hour, and the ratio has room again.
+    counts.buys = 3;
+    expect(gov.ratioAllowsBuy()).toBe(false);
+    counts.buys = 0;
+    expect(gov.ratioAllowsBuy()).toBe(true);
+    expect(gov.snapshot().buyToSearchRatio).toBe(0);
+  });
+
+  it('without them, keeps the session counts (assist mode): no cold-start allowance', () => {
+    const { gov } = governorAt(START, { buyToSearchRatio: 0.35 });
+    gov.allow({ kind: 'search' });
+    expect(gov.allow({ kind: 'buy', coins: 100 }).reason).toBe('buy_search_ratio');
+  });
+});
+
+describe('Governor — when a full window frees', () => {
+  it('coinFlowFreesAt: now when the buy fits, else when enough of the hour\'s spend ages out, null when it never can', () => {
+    const { gov, setNow } = governorAt(START, { buyToSearchRatio: 1, actionsPerHour: CEILING.actionsPerHour });
+    expect(gov.coinFlowFreesAt(4_000)).toBe(START);
+    gov.allow({ kind: 'search' });
+    gov.allow({ kind: 'buy', coins: 4_000 });
+    setNow(START + 60_000);
+    gov.allow({ kind: 'search' });
+    gov.allow({ kind: 'buy', coins: 4_000 });
+    // 8,000 of 10,000 spent: 2,000 fits now, 3,000 once the first buy ages out,
+    // 7,000 once both have.
+    expect(gov.coinFlowFreesAt(2_000)).toBe(START + 60_000);
+    expect(gov.coinFlowFreesAt(3_000)).toBe(START + 3_600_000);
+    expect(gov.coinFlowFreesAt(7_000)).toBe(START + 60_000 + 3_600_000);
+    expect(gov.coinFlowFreesAt(10_001)).toBeNull();
+  });
+
+  it('actionsFreeAt: now when an action fits, else when the window has room again (and any cooldown is over)', () => {
+    const { gov, setNow } = governorAt(START, { actionsPerHour: 3, cooldownSeconds: 30 });
+    expect(gov.actionsFreeAt()).toBe(START);
+    gov.allow({ kind: 'search' });
+    setNow(START + 1_000);
+    gov.allow({ kind: 'search' });
+    setNow(START + 2_000);
+    gov.allow({ kind: 'search' });
+    expect(gov.actionsFreeAt()).toBe(START + 3_600_000);
+    // A hard stop's cooldown that ends later wins.
+    setNow(START + 3_590_000);
+    expect(gov.allow({ kind: 'search' }).reason).toBe('hard_stop');
+    expect(gov.actionsFreeAt()).toBe(START + 3_590_000 + 30_000);
+  });
+});
+
 describe('Governor — max coins per snipe (budgets.maxCoinsPerSnipe)', () => {
   it('refuses a buy above the per-snipe cap and allows one at it', () => {
     const { gov } = governorAt(START, { buyToSearchRatio: 1, actionsPerHour: CEILING.actionsPerHour, maxCoinFlowPerHour: 1_000_000 });

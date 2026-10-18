@@ -348,18 +348,36 @@ minutes. Nothing after a buy holds the bot up: the buy counts at once, its
 sell price and profit fill in when their lookup answers, and auto-sell's
 listing (a FUTBIN lookup and EA's listing call) runs on its own while the
 bot goes on to the next listing and search; only the user's own "Pause
-after a buy" (Safety, 10 s by default, 0 for none) waits. With a minimum
-profit set, a buy waits at most 300 ms for its estimate (unknown profit is
-allowed). A missed buy's log line gives the reason in plain words
-(`missReason`: "someone else got it first" for EA's 403 / 461 / 478, "not
-enough coins", a verification, EA limiting requests), never EA's wording or
-the timings, which stay in the attempt telemetry. EA answers a search it was just asked, word for
-word, from its cache, so each search steps its min buy-now price one notch up
-EA's price grid (`searchMinBuy`): from the filter's own min (or none) up to
-40% of the way to the max price (1,000 coins over the min with no max price),
-then over again. Every search in a cycle is one EA was not just asked, and
-only listings far under the max price are left out, by some searches of each
-cycle. It ships through the same `virtual:autobuyer-loader` alias as the
+after a buy" (Safety, 10 s by default, 0 for none) waits, and after it the
+rest of that search's listings are left (they are that pause old): the next
+search looks again. A listing the bot can buy is bought the moment it
+reaches content (its `auctions` or `listings_buyable` message), without
+waiting for the search's own signed answer: the adapter checks every buy
+against the listing it saw itself (`priceCheck`: price, card, expiry), so
+an `auctions` message, which any page script could post, can never make
+it buy anything else. Each bought or missed buy's log line gives the
+bot's reaction time (listing in to buy out). The minimum-profit check never
+waits on the network: the sale price is `plannedSalePrice`, the price
+auto-sell lists at (the user's own sell price when set, else the market
+price), less EA's 5% tax; a market price counts only once its lookup has
+answered (looked up at Start for the search's player and after every search
+for its listings' cards, 20 at most, reused for 2 minutes and decisive for
+10), and an unknown one is allowed. A missed buy's log line gives the
+reason in plain words (`missReason`: "someone else got it first" for EA's
+403 / 461 / 478, "not enough coins", a verification, EA limiting requests),
+never EA's wording or the timings, which stay in the attempt telemetry: its
+outcome there is `too_slow` for EA's 403 / 461 / 478 and a listing already
+gone, `error` for 429 and 5xx (512, 521), `failed` otherwise
+(`missOutcome`), its `errorCode` cut to the schema's 80 characters. EA
+answers a search it was just asked, word for word, from its cache, so each
+search steps its max buy-now price one notch down EA's price grid from the
+price cap (`searchMaxBuy`), up to five steps and 10% of the cap under it
+(never to the filter's own min), then over again; with no cap it steps down
+from EA's highest buy-now price. Every search in a cycle is one EA was not
+just asked, the cheapest listings are in every one, and only the dearest few
+steps under the cap are left out, by some searches of each cycle (earlier
+builds stepped the min price up instead, which hid the cheapest listings).
+It ships through the same `virtual:autobuyer-loader` alias as the
 autobuyer (`loadSniper()`), so the `ledger` build never contains it, and the
 autobuyer does not buy while the bot runs.
 
@@ -400,6 +418,35 @@ it), the cooldown after each buy, and coins an hour and the buy:search
 ratio through its own governor (`botGovernorSettings`, bounded by
 `BOT_GOVERNOR_BOUNDS`). The server kill switch and adapter probe failures
 stop it whatever the settings say.
+
+Buys an hour, coins an hour and the buy:search ratio count buys that
+bought: a buy EA turned down (a lost race, a signed refusal) gives its coins
+and its place back (`Governor.releaseSpend`; an unsigned or timed-out
+answer stays charged until EA's signed late answer settles it). The
+governor's actions an hour (max searches + max buys) still counts every
+request EA saw, the ban-risk backstop. The ratio runs on the bot's own
+rolling one-hour search and buy windows (`ratioCounts`), counting a cold
+start as at least ceil(1 / ratio) searches, so the first buy of a start is
+allowed and the ratio never banks a long history. While one of these holds
+buying back, the page says which, with the numbers and when it frees
+("Buying paused: coin-flow limit (412,000 of 500,000 coins in the last
+hour) — resumes about 02:14", `SniperState.notice`, under Start and as the
+header chip's title); it is reported once when it starts (one `riskEvents`
+item, `coin_flow`, `actions_per_hour` or `buy_search_ratio`, with its value
+and threshold) and as one `blocked` attempt per search at most, and the rest
+of that search's listings are left. While buys an hour, the coin flow or the
+governor's actions an hour are full the bot does not search at all: it
+sleeps until the window frees (a minute at a time, re-checking), and that
+time does not count toward the active hours a day. The ratio does not stop
+searching: more searches are what lower it. The Settings tab shows the pace
+the bot really searches at under the search delay (`effectiveSearchPace`:
+min(max searches an hour, 3600 / the middle of the delay range)), and when
+the hourly limit will pause a faster delay.
+
+While the bot runs, content leaves the assist side alone: no ranking and no
+`summary` lookups on its searches or on the engine tick, and its searches
+do not count against the shared assist governor (`countObservedSearches`
+gets no governor); the bot's own governor counts them.
 
 **Background tabs.** The bot's waits are timed in a small dedicated worker
 (`lib/background-timer.ts`), not on the page's own timers, which Chrome

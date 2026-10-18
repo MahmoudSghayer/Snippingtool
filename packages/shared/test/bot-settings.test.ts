@@ -8,6 +8,7 @@ import {
   botRiskLevel,
   botSettingsSchema,
   clampBotSettings,
+  effectiveSearchPace,
   projectedActiveHoursPerDay,
   withRecommendedLimits,
   type BotSettings,
@@ -324,5 +325,46 @@ describe('bot settings — auto-sell', () => {
       autoSell: { ...DEFAULT_BOT_SETTINGS.autoSell, enabled: true, steps: 2 },
     };
     expect(withRecommendedLimits(mine).autoSell).toEqual(mine.autoSell);
+  });
+});
+
+describe('effectiveSearchPace', () => {
+  it("is the lower of the delay's pace (at the middle of its range) and the hourly limit", () => {
+    // The recommended 8-12 s: a search every 10 s on average, 360 an hour,
+    // over the 250 limit.
+    expect(effectiveSearchPace(DEFAULT_BOT_SETTINGS)).toMatchObject({
+      delayPerHour: 360,
+      capPerHour: 250,
+      perHour: 250,
+      capped: true,
+    });
+    const slow = effectiveSearchPace({
+      ...DEFAULT_BOT_SETTINGS,
+      searchDelay: { min: 20, max: 20 },
+    });
+    expect(slow).toEqual({
+      delayPerHour: 180,
+      capPerHour: 250,
+      perHour: 180,
+      capped: false,
+      minutesToCap: null,
+    });
+  });
+
+  it('says how soon the hourly limit pauses a faster delay', () => {
+    // 2 s between searches is 1,800 an hour: 250 of them take 8⅓ minutes.
+    const fast = effectiveSearchPace({ ...DEFAULT_BOT_SETTINGS, searchDelay: { min: 2, max: 2 } });
+    expect(fast).toMatchObject({ delayPerHour: 1_800, perHour: 250, capped: true });
+    expect(fast.minutesToCap).toBeCloseTo(250 / 30, 6);
+  });
+
+  it('runs on the clamped settings', () => {
+    const p = effectiveSearchPace({
+      ...DEFAULT_BOT_SETTINGS,
+      searchDelay: { min: 0, max: 0 },
+      safety: { ...DEFAULT_BOT_SETTINGS.safety, maxSearchesPerHour: 1e9 },
+    });
+    expect(p.delayPerHour).toBe(3_600 / BOT_LIMITS.searchDelaySeconds.min);
+    expect(p.capPerHour).toBe(BOT_LIMITS.maxSearchesPerHour.max);
   });
 });

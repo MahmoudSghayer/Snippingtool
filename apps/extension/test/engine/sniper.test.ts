@@ -14,7 +14,16 @@ import {
 } from '@sl/shared';
 import { describe, expect, it, vi } from 'vitest';
 
-import { Sniper, missReason, searchMinBuy, type SniperDeps, type SniperFilter } from '../../src/engine/sniper.js';
+import {
+  Sniper,
+  missOutcome,
+  missReason,
+  plannedSalePrice,
+  searchMaxBuy,
+  type SniperDeps,
+  type SniperFilter,
+} from '../../src/engine/sniper.js';
+import { attemptErrorCode, type AttemptInput } from '../../src/engine/types.js';
 import { ACT_ERROR } from '../../src/lib/act-auth.js';
 
 import type { ActionOutcome } from '../../src/content/adapter-client.js';
@@ -51,7 +60,8 @@ interface Harness {
   buyCards: unknown[];
   /** Each auto-sell listing: [tradeId, startPrice, buyNowPrice]. */
   lists: [string, number, number][];
-  waits: { phase: string; ms: number }[];
+  /** Each sleep: the phase, how long, and the page's notice meanwhile. */
+  waits: { phase: string; ms: number; notice: string | null }[];
   killSwitch: { active: boolean };
   probe: (ok: boolean) => void;
   done: () => Promise<void>;
@@ -73,6 +83,12 @@ function setup(opts: {
   timingMode?: () => 'worker' | 'page';
   /** How long each search takes EA to answer, on the test clock. */
   searchTakesMs?: number;
+  /** How long after its listings the search's own answer comes back (the
+   * clock moves on as soon as the listings are out). */
+  answerLagMs?: number;
+  /** Holds the `n`th search's own answer (1 first) back until it settles;
+   * that search's upgrades (`upgrades`) come with the answer. */
+  holdAnswer?: (n: number) => Promise<void> | undefined;
   /** Replaces the fixed `sellPrice` lookup. */
   estimateSellPrice?: (resourceId: number) => Promise<number | null>;
   /** Auto-sell's market price (FUTBIN, else Nova). Omitted = none. */
@@ -93,6 +109,10 @@ function setup(opts: {
   exclusive?: () => boolean;
   /** The clock's start (to continue another harness's clock). */
   startAt?: number;
+  /** Each attempt the bot reports (telemetry `sniping`). */
+  onAttempt?: SniperDeps['onAttempt'];
+  /** Each risk event the bot reports (telemetry `riskEvents`). */
+  onRiskEvent?: SniperDeps['onRiskEvent'];
 }): Harness {
   // Ratio 1 so a buy on the very first search is allowed; the ratio itself
   // is the governor's concern and is covered in governor.test.ts. No
@@ -117,7 +137,7 @@ function setup(opts: {
   const buys: string[] = [];
   const buyCards: unknown[] = [];
   const lists: [string, number, number][] = [];
-  const waits: { phase: string; ms: number }[] = [];
+  const waits: { phase: string; ms: number; notice: string | null }[] = [];
   const killSwitch = { active: false };
   const results = opts.results ?? [[]];
   let finished!: () => void;
@@ -131,8 +151,12 @@ function setup(opts: {
         clock.t += opts.searchTakesMs ?? 0;
         const batch = results[Math.min(searches.length - 1, results.length - 1)]!;
         for (const cb of auctionsListeners) cb(batch);
+        const n = searches.length;
+        clock.t += opts.answerLagMs ?? 0;
+        const held = opts.holdAnswer?.(n);
+        if (held) await held;
         if (opts.upgrades) {
-          const ids = opts.upgrades[Math.min(searches.length - 1, opts.upgrades.length - 1)]!;
+          const ids = opts.upgrades[Math.min(n - 1, opts.upgrades.length - 1)]!;
           for (const cb of buyableListeners) cb(ids);
         }
         return { ok: true, latencyMs: 5 };
@@ -178,6 +202,8 @@ function setup(opts: {
     ...(opts.timingMode ? { timingMode: opts.timingMode } : {}),
     ...(opts.entitled ? { entitled: opts.entitled } : {}),
     ...(opts.exclusive ? { exclusive: opts.exclusive } : {}),
+    ...(opts.onAttempt ? { onAttempt: opts.onAttempt } : {}),
+    ...(opts.onRiskEvent ? { onRiskEvent: opts.onRiskEvent } : {}),
     killSwitch: () => ({
       active: killSwitch.active,
       reason: killSwitch.active ? 'test kill switch' : undefined,
@@ -188,7 +214,7 @@ function setup(opts: {
     now: () => clock.t,
     random: () => 0,
     sleep: async (ms) => {
-      waits.push({ phase: sniper.state.phase, ms });
+      waits.push({ phase: sniper.state.phase, ms, notice: sniper.state.notice });
       clock.t += ms;
       // Stop at the first wait after the last wanted search, so that
       // search's buys have all run.
@@ -284,7 +310,7 @@ describe('Sniper — search and buy', () => {
     expect(h.buys).toEqual(['t-b']);
   });
 
-  it('asks EA something new every search: the min buy-now price steps up the grid, the rest stays as set', async () => {
+  it('asks EA something new every search: the max buy-now price steps down the grid, the rest stays as set', async () => {
     const h = setup({
       filters: [{ id: 'f1', name: 'Target', filter: { resourceId: 100, maxPrice: 2_200, minRating: 84 } }],
       results: [[], [], []],
@@ -292,10 +318,11 @@ describe('Sniper — search and buy', () => {
     });
     h.sniper.start();
     await h.done();
+    // Never a min price: the cheapest listings are in every search.
     expect(h.searches).toEqual([
       { resourceId: 100, maxPrice: 2_200, minRating: 84 },
-      { resourceId: 100, maxPrice: 2_200, minRating: 84, minPrice: 150 },
-      { resourceId: 100, maxPrice: 2_200, minRating: 84, minPrice: 200 },
+      { resourceId: 100, maxPrice: 2_100, minRating: 84 },
+      { resourceId: 100, maxPrice: 2_000, minRating: 84 },
     ]);
   });
 
@@ -345,7 +372,9 @@ describe('Sniper — search and buy', () => {
     });
     h.sniper.start();
     await h.done();
-    expect((h.searches as { minPrice?: number }[]).map((f) => f.minPrice)).toEqual([undefined, 1_000, 150, 1_100]);
+    const sent = h.searches as { minPrice?: number; maxPrice?: number }[];
+    expect(sent.map((f) => f.maxPrice)).toEqual([2_200, 2_000, 2_100, 1_900]);
+    expect(sent.map((f) => f.minPrice)).toEqual([undefined, 1_000, undefined, 1_000]);
   });
 
   it('skips a listing whose known profit is below the minimum, but buys unknown-profit ones', async () => {
@@ -598,7 +627,7 @@ describe('Sniper — the user\'s limits', () => {
     );
   });
 
-  it('keeps buys inside max buys per hour', async () => {
+  it('keeps buys inside max buys per hour, and stops searching until the hour has room', async () => {
     const h = setup({
       settings: { ...quick, safety: safety({ maxBuysPerHour: 2 }) },
       results: [[auction('t-a', 7_000)], [auction('t-b', 8_000)], [auction('t-c', 9_000)]],
@@ -606,9 +635,16 @@ describe('Sniper — the user\'s limits', () => {
     });
     h.sniper.start();
     await h.done();
-    expect(h.searches).toHaveLength(3);
-    expect(h.buys).toEqual(['t-a', 't-b']);
-    expect(h.sniper.getLog().some((e) => e.message.startsWith('Buy skipped'))).toBe(true);
+    expect(h.buys).toEqual(['t-a', 't-b', 't-c']);
+    // The third search waited for the first buy (made on the first search)
+    // to leave the hour: no search went out while it could buy nothing. It
+    // slept a minute at a time, checking again in between.
+    expect(h.searchTimes[2]! - h.searchTimes[0]!).toBeGreaterThanOrEqual(3_600_000);
+    const paused = h.waits.filter((w) => w.phase === 'blocked');
+    expect(paused.length).toBeGreaterThan(50);
+    expect(Math.max(...paused.map((w) => w.ms))).toBe(60_000);
+    expect(h.sniper.getLog().filter((e) => e.message.startsWith('Buying paused: buy limit (2 of 2 buys in the last hour)'))).toHaveLength(1);
+    expect(h.sniper.getLog().some((e) => e.message.startsWith('Buying resumed'))).toBe(true);
   });
 
   it('waits the cooldown after every buy', async () => {
@@ -920,7 +956,9 @@ describe('Sniper — hourly budgets survive Stop/Start and a page reload', () =>
     second.sniper.start();
     await second.done();
     expect(second.buys).toEqual([]);
-    expect(second.sniper.getLog().some((e) => e.message.includes('coin flow'))).toBe(true);
+    expect(
+      second.sniper.getLog().some((e) => e.message.startsWith('Buying paused: coin-flow limit (9,000 of 10,000 coins in the last hour)')),
+    ).toBe(true);
   });
 });
 
@@ -949,8 +987,15 @@ describe('Sniper — a Stop before the saved budget loads', () => {
   });
 });
 
-describe('Sniper — the buy:search ratio does not bank a long history', () => {
-  it('starts its counts over once the last hour holds no action', async () => {
+describe('Sniper — the buy:search ratio rolls with the hour', () => {
+  const ratio = (patch: Partial<BotSettings['safety']> = {}): Partial<BotSettings> => ({
+    searchDelay: { min: 1, max: 1 },
+    breaks: { ...DEFAULT_BOT_SETTINGS.breaks, enabled: false },
+    rest: { ...DEFAULT_BOT_SETTINGS.rest, enabled: false },
+    safety: { ...DEFAULT_BOT_SETTINGS.safety, buyToSearchRatio: 0.35, cooldownSeconds: 0, ...patch },
+  });
+
+  it('does not bank a long history: searches older than an hour let no burst of buys through', async () => {
     const start = 10_000_000;
     const budgetStore = {
       value: {
@@ -967,10 +1012,52 @@ describe('Sniper — the buy:search ratio does not bank a long history', () => {
         buyTimes: [],
       } as BotBudgetState | null,
     };
-    const h = setup({ maxSearches: 1, budgetStore, startAt: start });
+    const h = setup({
+      settings: ratio(),
+      results: [[auction('t-1', 1_000), auction('t-2', 1_100), auction('t-3', 1_200)]],
+      maxSearches: 1,
+      budgetStore,
+      startAt: start,
+    });
     h.sniper.start();
     await h.done();
-    expect(budgetStore.value!.governor.searchCount).toBe(1);
+    // One search in the hour: one buy (the cold start's), not three.
+    expect(h.buys).toEqual(['t-1']);
+  });
+
+  it('lets the first buy through on a cold start, then keeps to the ratio as searches come', async () => {
+    const attempts: AttemptInput[] = [];
+    const risk: unknown[] = [];
+    const h = setup({
+      settings: ratio(),
+      // A match on every search, two on the first.
+      results: [[auction('t-1', 1_000), auction('t-2', 1_100)], [auction('t-3', 1_000)], [auction('t-4', 1_000)], [auction('t-5', 1_000)]],
+      maxSearches: 4,
+      onAttempt: (a) => void attempts.push(a),
+      onRiskEvent: (e) => void risk.push(e),
+    });
+    h.sniper.start();
+    await h.done();
+    // 0.35 a search: the first buy (counted against three searches), then
+    // the next once (1 + 1) / searches <= 0.35, which takes six searches.
+    expect(h.buys).toEqual(['t-1']);
+    // Reported once when it started (it held on every later search), with one
+    // blocked attempt per search at most.
+    expect(risk).toEqual([{ kind: 'buy_search_ratio', value: 2 / 3, threshold: 0.35 }]);
+    expect(attempts.filter((a) => a.outcome === 'blocked').map((a) => a.errorCode)).toEqual([
+      'buy_search_ratio',
+      'buy_search_ratio',
+      'buy_search_ratio',
+      'buy_search_ratio',
+    ]);
+    expect(h.sniper.state.notice).toBeNull(); // stopped: no notice
+    const paused = h.sniper.getLog().filter((e) => e.message.startsWith('Buying paused: buys-per-search limit'));
+    expect(paused).toHaveLength(1);
+    expect(paused[0]!.message).toBe(
+      'Buying paused: buys-per-search limit (1 buy for 1 search in the last hour, your limit is 0.35 a search) — resumes after about 5 more searches',
+    );
+    // The bot kept searching: more searches are what lower the ratio.
+    expect(h.searches).toHaveLength(4);
   });
 });
 
@@ -1084,9 +1171,11 @@ describe('Sniper — the saved budget could not be read (finding A)', () => {
     });
     h.sniper.start();
     await done;
-    // The one buy the hour allows was already spent before this page.
-    expect(h.buys).toEqual([]);
-    expect(budgetStore.value!.buyTimes).toEqual([start - 50_000]);
+    // The one buy the hour allows was already spent before this page: the
+    // bot searched only once that buy had left the hour.
+    expect(h.searchTimes[0]! - (start - 50_000)).toBeGreaterThanOrEqual(3_600_000);
+    expect(h.sniper.getLog().some((e) => e.message.startsWith('Buying paused: buy limit (1 of 1 buy in the last hour)'))).toBe(true);
+    expect(h.buys).toEqual(['t-a']);
   });
 });
 
@@ -1121,6 +1210,7 @@ describe('Sniper — two EA tabs, one set of hourly budgets (multi-tab)', () => 
     a.sniper.start();
     await a.done();
     expect(a.buys).toEqual(['t-a1', 't-a2']);
+    const aBoughtAt = budgetStore.value!.buyTimes[0]!;
 
     // Tab B starts again, in the same hour: it must not buy two more.
     b.clock.t = a.clock.t;
@@ -1134,8 +1224,9 @@ describe('Sniper — two EA tabs, one set of hourly budgets (multi-tab)', () => 
     });
     b.sniper.start();
     await stopped;
-    expect(b.buys).toEqual([]);
-    expect(b.sniper.getLog().some((e) => e.message.includes('2 buys in the last hour'))).toBe(true);
+    // It searched (and bought) only once tab A's buys had left the hour.
+    expect(b.searchTimes.at(-1)! - aBoughtAt).toBeGreaterThanOrEqual(3_600_000);
+    expect(b.sniper.getLog().some((e) => e.message.includes('2 of 2 buys in the last hour'))).toBe(true);
   });
 
   it('will not start, or keep running, in a tab without the engine lease', async () => {
@@ -1455,24 +1546,350 @@ describe('Sniper — says at Start whether it keeps searching in a background ta
   });
 });
 
-describe('searchMinBuy', () => {
-  it('steps from no minimum up to 40% of the max price, then starts over', () => {
-    const cycle = Array.from({ length: 17 }, (_, i) => searchMinBuy(i, undefined, 2_200));
-    // 40% of 2,200 is 880: 150 to 850 in 50s, after the plain search.
-    expect(cycle).toEqual([undefined, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600, 650, 700, 750, 800, 850, undefined]);
+describe('searchMaxBuy', () => {
+  it('steps the max buy-now price down from the cap, five steps at most, then starts over', () => {
+    expect(Array.from({ length: 7 }, (_, i) => searchMaxBuy(i, undefined, 16_000))).toEqual([
+      16_000, 15_750, 15_500, 15_250, 15_000, 14_750, 16_000,
+    ]);
   });
 
-  it("starts from the filter's own minimum and keeps to EA's grid", () => {
-    // 40% of the way from 1,000 to 2,000 is 1,400; 100s above 1,000.
-    expect(Array.from({ length: 6 }, (_, i) => searchMinBuy(i, 1_000, 2_000))).toEqual([1_000, 1_100, 1_200, 1_300, 1_400, 1_000]);
-    // No room to step: always the filter's own.
-    expect([0, 1, 2].map((i) => searchMinBuy(i, 2_100, 2_200))).toEqual([2_100, 2_100, 2_100]);
+  it("keeps within 10% of the cap after the first step, on EA's grid, and never above the cap", () => {
+    expect(Array.from({ length: 4 }, (_, i) => searchMaxBuy(i, undefined, 1_000))).toEqual([1_000, 950, 900, 1_000]);
+    expect(Array.from({ length: 3 }, (_, i) => searchMaxBuy(i, undefined, 300))).toEqual([300, 250, 300]);
+    // An off-grid cap is searched as set, then stepped along the grid under it.
+    expect(Array.from({ length: 3 }, (_, i) => searchMaxBuy(i, undefined, 16_100))).toEqual([16_100, 15_750, 15_500]);
   });
 
-  it('steps up to 1,000 coins over the minimum when there is no max price', () => {
-    const cycle = Array.from({ length: 20 }, (_, i) => searchMinBuy(i, undefined, null));
-    expect(cycle[1]).toBe(150);
-    expect(cycle[18]).toBe(1_000);
-    expect(cycle[19]).toBeUndefined();
+  it("never steps to the filter's own min or under EA's lowest buy-now price", () => {
+    expect([0, 1, 2].map((i) => searchMaxBuy(i, 2_100, 2_200))).toEqual([2_200, 2_200, 2_200]);
+    expect([0, 1].map((i) => searchMaxBuy(i, undefined, 200))).toEqual([200, 200]);
+  });
+
+  it("with no cap, steps down from EA's highest buy-now price, leaving nothing out", () => {
+    expect(Array.from({ length: 7 }, (_, i) => searchMaxBuy(i, undefined, null))).toEqual([
+      undefined,
+      15_000_000,
+      14_999_000,
+      14_998_000,
+      14_997_000,
+      14_996_000,
+      undefined,
+    ]);
+  });
+});
+
+describe('Sniper — the hourly budgets count buys that bought', () => {
+  const quick = (patch: Partial<BotSettings['safety']>): Partial<BotSettings> => ({
+    searchDelay: { min: 1, max: 1 },
+    breaks: { ...DEFAULT_BOT_SETTINGS.breaks, enabled: false },
+    rest: { ...DEFAULT_BOT_SETTINGS.rest, enabled: false },
+    safety: { ...DEFAULT_BOT_SETTINGS.safety, buyToSearchRatio: 1, cooldownSeconds: 0, ...patch },
+  });
+  const lostRace: ActionOutcome = {
+    ok: false,
+    error: 'bid reported success: false (status 403)',
+    signed: true,
+    latencyMs: 150,
+  };
+
+  it('a buy EA turned down uses none of the buys per hour, the coin flow or the ratio, and still counts as an action', async () => {
+    const budgetStore = { value: null as BotBudgetState | null };
+    const h = setup({
+      settings: quick({ maxBuysPerHour: 1, maxCoinFlowPerHour: 10_000 }),
+      results: [[auction('t-lost', 9_000), auction('t-won', 9_500)]],
+      buyResult: (id) => (id === 't-lost' ? lostRace : { ok: true, signed: true, latencyMs: 600 }),
+      maxSearches: 1,
+      budgetStore,
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.buys).toEqual(['t-lost', 't-won']);
+    expect(budgetStore.value!.buyTimes).toHaveLength(1);
+    expect(budgetStore.value!.governor.coinFlow.map((c) => c.coins)).toEqual([9_500]);
+    // The search and both buy requests: what EA saw, the ban-risk backstop.
+    expect(h.sniper.getGovernor()!.snapshot().actionsLastHour).toBe(3);
+  });
+
+  it("a buy that timed out stays charged until EA's signed late answer says it did not buy", async () => {
+    let settleLate!: (o: ActionOutcome) => void;
+    const late = new Promise<ActionOutcome>((r) => (settleLate = r));
+    const budgetStore = { value: null as BotBudgetState | null };
+    const h = setup({
+      settings: quick({}),
+      results: [[auction('t-slow', 8_000)]],
+      buyResult: () => ({ ok: false, error: ACT_ERROR.timeoutUnknown, signed: true, latencyMs: 15_000, late }),
+      maxSearches: 1,
+      budgetStore,
+    });
+    h.sniper.start();
+    await h.done();
+    expect(budgetStore.value!.buyTimes).toHaveLength(1);
+    expect(budgetStore.value!.governor.coinFlow.map((c) => c.coins)).toEqual([8_000]);
+    settleLate({ ok: false, signed: true, latencyMs: 20_000 });
+    await vi.waitFor(() => expect(budgetStore.value!.buyTimes).toEqual([]));
+    expect(budgetStore.value!.governor.coinFlow).toEqual([]);
+  });
+
+  it('a spent coin flow: one log line, one risk event, one blocked attempt per search, and no search until it frees', async () => {
+    const attempts: AttemptInput[] = [];
+    const risk: unknown[] = [];
+    const h = setup({
+      settings: quick({ maxCoinFlowPerHour: 20_000 }),
+      results: [
+        [auction('t-a', 9_000)],
+        [auction('t-b', 9_000)],
+        [auction('t-c', 9_000), auction('t-d', 9_000), auction('t-e', 9_000)],
+      ],
+      maxSearches: 4,
+      onAttempt: (a) => void attempts.push(a),
+      onRiskEvent: (e) => void risk.push(e),
+    });
+    h.sniper.start();
+    await h.done();
+    const firstBuyAt = h.searchTimes[0]!;
+    // 18,000 spent: the third search's 9,000 would make 27,000 of 20,000.
+    // Its other listings cost as much: not tried, not reported.
+    const blocked = attempts.filter((a) => a.outcome === 'blocked');
+    expect(blocked.map((a) => [a.tradeId, a.errorCode])).toEqual([
+      ['t-c', 'coin_flow'],
+      // After the pause: one more buy fit, then the next did not.
+      ['t-d', 'coin_flow'],
+    ]);
+    expect(risk).toEqual([
+      { kind: 'coin_flow', value: 27_000, threshold: 20_000 },
+      { kind: 'coin_flow', value: 27_000, threshold: 20_000 },
+    ]);
+    // No search went out until the first buy had left the hour.
+    expect(h.searches).toHaveLength(4);
+    expect(h.searchTimes[3]! - firstBuyAt).toBeGreaterThanOrEqual(3_600_000);
+    expect(h.buys).toEqual(['t-a', 't-b', 't-c']);
+    const resumes = new Date(firstBuyAt + 3_600_000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const message = `Buying paused: coin-flow limit (18,000 of 20,000 coins in the last hour) — resumes about ${resumes}`;
+    // One line each time it started (the log is newest first).
+    const lines = h.sniper.getLog().filter((e) => e.message.startsWith('Buying paused: coin-flow limit'));
+    expect(lines).toHaveLength(2);
+    expect(lines.at(-1)!.message).toBe(message);
+    // The page showed it the whole time it waited.
+    const paused = h.waits.filter((w) => w.phase === 'blocked');
+    expect(paused.length).toBeGreaterThan(0);
+    for (const w of paused) expect(w.notice).toBe(message);
+    expect(h.sniper.getLog().filter((e) => e.message.startsWith('Buying resumed'))).toHaveLength(1);
+    expect(h.sniper.state.notice).toBeNull();
+  });
+
+  it('buys per hour running out mid-search: one blocked attempt, one risk event, and the rest of that search left', async () => {
+    const attempts: AttemptInput[] = [];
+    const risk: unknown[] = [];
+    const h = setup({
+      settings: quick({ maxBuysPerHour: 1 }),
+      results: [[], [auction('t-a', 1_000), auction('t-b', 1_100), auction('t-c', 1_200)]],
+      maxSearches: 2,
+      onAttempt: (a) => void attempts.push(a),
+      onRiskEvent: (e) => void risk.push(e),
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.buys).toEqual(['t-a']);
+    expect(attempts.filter((a) => a.outcome === 'blocked').map((a) => [a.tradeId, a.errorCode])).toEqual([
+      ['t-b', 'buys_per_hour'],
+    ]);
+    expect(risk).toEqual([{ kind: 'actions_per_hour', value: 2, threshold: 1 }]);
+    const waiting = h.waits.find((w) => w.phase === 'waiting' && w.notice);
+    expect(waiting?.notice).toMatch(/^Buying paused: buy limit \(1 of 1 buy in the last hour\) — resumes about \d{1,2}:\d{2}/);
+  });
+
+  it('a pause for an hourly budget does not count toward the active hours a day', async () => {
+    const h = setup({
+      settings: quick({ maxBuysPerHour: 1, maxActiveHoursPerDay: 1 }),
+      results: [[auction('t-a', 1_000)], []],
+      maxSearches: 2,
+    });
+    h.sniper.start();
+    await h.done();
+    // An hour paused for the buy limit, then the second search: not stopped
+    // for the day, which an hour of active time would have done.
+    expect(h.searches).toHaveLength(2);
+    expect(h.searchTimes[1]! - h.searchTimes[0]!).toBeGreaterThanOrEqual(3_600_000);
+    expect(h.sniper.state.stopReason).toBe('manual');
+    expect(h.sniper.getActiveMsToday()).toBeLessThan(60_000);
+  });
+
+  it("the governor's actions per hour (lost races count there): sleeps until the window has room, reported once", async () => {
+    const risk: unknown[] = [];
+    const h = setup({
+      // 3 searches + 1 buy an hour: the governor's backstop is 4 actions.
+      settings: quick({ maxSearchesPerHour: 3, maxBuysPerHour: 1 }),
+      results: [[auction('t-1', 1_000), auction('t-2', 1_100)], [auction('t-3', 1_000)]],
+      buyResult: () => lostRace,
+      maxSearches: 3,
+      onRiskEvent: (e) => void risk.push(e),
+    });
+    h.sniper.start();
+    await h.done();
+    // Search, two lost races, search: the third buy request would be the fifth action.
+    expect(h.buys.slice(0, 2)).toEqual(['t-1', 't-2']);
+    expect(risk).toEqual([{ kind: 'actions_per_hour', value: 5, threshold: 4 }]);
+    expect(h.searchTimes[2]! - h.searchTimes[0]!).toBeGreaterThanOrEqual(3_600_000);
+    const paused = h.sniper.getLog().filter((e) => e.message.startsWith('Paused: safety limit of 4 searches and buys an hour (4 in the last hour)'));
+    expect(paused).toHaveLength(1);
+  });
+});
+
+describe('Sniper — a pause after a buy leaves the rest of that search', () => {
+  it('buys the cheapest, waits its pause, then searches again instead of buying what is now stale', async () => {
+    const h = setup({
+      settings: { safety: { ...DEFAULT_BOT_SETTINGS.safety, buyToSearchRatio: 1, cooldownSeconds: 10 } },
+      results: [[], [auction('t-a', 8_000), auction('t-b', 9_000)], []],
+      maxSearches: 3,
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.buys).toEqual(['t-a']);
+    expect(h.searches).toHaveLength(3);
+  });
+});
+
+describe('Sniper — the minimum profit, checked without waiting', () => {
+  it("uses the user's fixed sell price less EA's 5% tax, with no lookup at all", async () => {
+    const estimateSellPrice = vi.fn(async () => 30_000);
+    const h = setup({
+      settings: { autoSell: { ...DEFAULT_BOT_SETTINGS.autoSell, mode: 'fixed', fixedPrice: 17_000 } },
+      filters: [{ id: 'f1', name: 'Target', filter: { resourceId: 100, maxPrice: 20_000 } }],
+      results: [[auction('t-thin', 16_000), auction('t-ok', 15_000)]],
+      estimateSellPrice,
+      maxSearches: 1,
+    });
+    h.sniper.start();
+    await h.done();
+    // 17,000 less 5% is 16,150: 150 over a 16,000 buy, under the default 1,000.
+    expect(h.buys).toEqual(['t-ok']);
+    expect(
+      h.sniper
+        .getLog()
+        .some((e) => e.message === 'skipped at 16,000 coins: estimated profit 150 coins is under your minimum profit (1,000 coins)'),
+    ).toBe(true);
+    expect(h.sniper.getLog().find((e) => e.kind === 'bought')).toMatchObject({ sellPrice: 17_000, profit: 1_150 });
+    expect(estimateSellPrice).not.toHaveBeenCalled();
+  });
+
+  it("looks the target card's market price up at Start, before the first search", () => {
+    const estimateSellPrice = vi.fn(async () => 20_000);
+    const h = setup({ estimateSellPrice });
+    h.sniper.start();
+    expect(estimateSellPrice).toHaveBeenCalledWith(100);
+    expect(h.searches).toHaveLength(0);
+    h.sniper.stop();
+  });
+
+  it('a lookup still out lets the buy go (unknown profit), and the next search checks against its answer', async () => {
+    let answer!: (price: number | null) => void;
+    const lookup = new Promise<number | null>((r) => (answer = r));
+    const estimateSellPrice = vi.fn(() => lookup);
+    const h = setup({
+      settings: { thresholds: { ...DEFAULT_BOT_SETTINGS.thresholds, minProfit: 15_000 } },
+      // No player in the search: nothing to look up at Start.
+      filters: [{ id: 'f1', name: 'Gold', filter: { minRating: 80, maxPrice: 10_000 } }],
+      results: [[auction('t-a', 8_000)], [auction('t-b', 8_000)]],
+      estimateSellPrice,
+      // The price is known only once the first buy has gone out.
+      buyResult: (id) => {
+        if (id === 't-a') answer(20_000);
+        return { ok: true, signed: true, latencyMs: 5 };
+      },
+      maxSearches: 2,
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.buys).toEqual(['t-a']);
+    expect(
+      h.sniper
+        .getLog()
+        .some((e) => e.message === 'skipped at 8,000 coins: estimated profit 11,000 coins is under your minimum profit (15,000 coins)'),
+    ).toBe(true);
+    expect(estimateSellPrice.mock.calls).toEqual([[100]]);
+  });
+
+  it('plannedSalePrice: the fixed price on the grid, else the market price, stepped when auto-sell lists', () => {
+    const a = DEFAULT_BOT_SETTINGS.autoSell;
+    expect(plannedSalePrice({ ...a, mode: 'fixed', fixedPrice: 15_100 }, 20_000)).toBe(15_000);
+    expect(plannedSalePrice({ ...a, mode: 'market', enabled: true, steps: -2 }, 20_000)).toBe(19_500);
+    expect(plannedSalePrice({ ...a, mode: 'market', enabled: false, steps: -2 }, 20_000)).toBe(20_000);
+    expect(plannedSalePrice({ ...a, mode: 'market' }, null)).toBeNull();
+  });
+});
+
+describe('Sniper — buys as soon as the listings arrive', () => {
+  it("buys before the search's own answer is back, and logs how fast it reacted", async () => {
+    let answer!: () => void;
+    const held = new Promise<void>((r) => (answer = r));
+    const h = setup({ results: [[auction('t-a', 8_000)]], answerLagMs: 40, holdAnswer: () => held, maxSearches: 1 });
+    h.sniper.start();
+    await vi.waitFor(() => expect(h.buys).toEqual(['t-a']));
+    // The search has not answered yet: nothing recorded for it.
+    expect(h.sniper.getSearchResults()).toHaveLength(0);
+    answer();
+    await h.done();
+    expect(h.sniper.getSearchResults()[0]!.matches.map((m) => m.tradeId)).toEqual(['t-a']);
+    // The listings arrived, then the buy went out once the clock had moved 40 ms.
+    expect(h.sniper.getLog().find((e) => e.kind === 'bought')?.reactionMs).toBe(40);
+  });
+
+  it('then buys what the answer itself makes buyable, never anything twice', async () => {
+    let answer!: () => void;
+    const held = new Promise<void>((r) => (answer = r));
+    const h = setup({
+      results: [[], [auction('t-now', 8_000), auction('t-later', 7_000, { buyable: false })]],
+      upgrades: [[], ['t-later']],
+      holdAnswer: (n) => (n === 2 ? held : undefined),
+      maxSearches: 2,
+    });
+    h.sniper.start();
+    await vi.waitFor(() => expect(h.buys).toEqual(['t-now']));
+    answer();
+    await h.done();
+    expect(h.buys).toEqual(['t-now', 't-later']);
+  });
+});
+
+describe('Sniper — how a missed buy is reported', () => {
+  it('too_slow for a lost race or a gone listing, error when EA limits requests, failed otherwise; errorCode within the schema', async () => {
+    const attempts: AttemptInput[] = [];
+    const long = `bid failed: ${'x'.repeat(200)}`;
+    const answers: Record<string, ActionOutcome> = {
+      't-403': { ok: false, error: 'bid reported success: false (status 403)', signed: true, latencyMs: 120 },
+      't-512': { ok: false, error: 'bid reported success: false (status 512)', signed: true, latencyMs: 300 },
+      't-long': { ok: false, error: long, signed: true, latencyMs: 400 },
+      't-gone': { ok: false, error: ACT_ERROR.listingUnknown, signed: true, latencyMs: 1 },
+    };
+    const h = setup({
+      results: [[auction('t-403', 1_000), auction('t-512', 1_100), auction('t-long', 1_200), auction('t-gone', 1_300)]],
+      buyResult: (id) => answers[id]!,
+      maxSearches: 1,
+      onAttempt: (a) => void attempts.push(a),
+    });
+    h.sniper.start();
+    await h.done();
+    expect(attempts.map((a) => [a.tradeId, a.outcome, a.errorCode])).toEqual([
+      ['t-403', 'too_slow', 'bid reported success: false (status 403)'],
+      ['t-512', 'error', 'bid reported success: false (status 512)'],
+      ['t-long', 'failed', long.slice(0, 80)],
+      ['t-gone', 'too_slow', ACT_ERROR.listingUnknown],
+    ]);
+    expect(h.sniper.getStats().failures).toBe(4);
+  });
+
+  it('missOutcome and attemptErrorCode', () => {
+    expect(missOutcome('bid reported success: false (status 461)')).toBe('too_slow');
+    expect(missOutcome('bid reported success: false (status 478)')).toBe('too_slow');
+    expect(missOutcome('bid reported success: false (status 429)')).toBe('error');
+    expect(missOutcome('bid reported success: false (status 521)')).toBe('error');
+    expect(missOutcome('bid reported success: false (status 500)')).toBe('error');
+    expect(missOutcome('bid reported success: false (status 470)')).toBe('failed');
+    expect(missOutcome('bid reported success: false (status 426)')).toBe('failed');
+    expect(missOutcome(ACT_ERROR.priceMismatch)).toBe('failed');
+    expect(missOutcome(undefined)).toBe('failed');
+    expect(attemptErrorCode('')).toBe('unknown_error');
+    expect(attemptErrorCode(undefined)).toBe('unknown_error');
+    expect(attemptErrorCode('y'.repeat(81))).toHaveLength(80);
   });
 });
