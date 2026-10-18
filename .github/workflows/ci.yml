@@ -44,15 +44,16 @@ jobs:
 
   # -------------------------------------------------------------------------
   # Everything that needs no external service: packages/shared,
-  # packages/ui, apps/extension (jsdom + fake-indexeddb). apps/api and
-  # packages/db need Postgres/Redis — see their own jobs below.
+  # packages/ui, apps/extension (jsdom + fake-indexeddb), apps/dashboard
+  # (jsdom, API mocked). apps/api and packages/db need Postgres/Redis — see
+  # their own jobs below.
   unit-tests:
-    name: Unit tests (shared / ui / extension)
+    name: Unit tests (shared / ui / extension / dashboard)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/setup-pnpm
-      - run: pnpm exec turbo run test --filter=@sl/shared --filter=@sl/ui --filter=@sl/extension
+      - run: pnpm exec turbo run test --filter=@sl/shared --filter=@sl/ui --filter=@sl/extension --filter=@sl/dashboard
 
   # -------------------------------------------------------------------------
   db-migration-test:

@@ -151,7 +151,7 @@ PR as a build-still-works gate, independent of the release pipeline.
 ## 4. CI/CD
 
 `.github/workflows/ci.yml` (every PR + push to `main`): `lint`,
-`typecheck`, `unit-tests` (shared/ui/extension, no external services),
+`typecheck`, `unit-tests` (shared/ui/extension/dashboard, no external services),
 `db-migration-test` (fresh Postgres, migrate → status → re-migrate
 idempotently, seed twice, `@sl/db`'s own schema/partition/trigger/view test
 suite), `api-integration-tests` (Postgres 16 + Redis 7 services, real
