@@ -238,7 +238,7 @@ describe('trades list, totals and export (/api/v1/trades*)', () => {
     expect(res.headers['content-type']).toContain('text/csv');
     const lines = res.body.trim().split(/\r\n/);
     expect(lines[0]).toBe(
-      'tradeId,card,resourceId,rating,status,buyPrice,sellPrice,eaTax,netProfit,boughtAt,soldAt',
+      'tradeId,card,resourceId,rating,status,buyPrice,sellPrice,eaTax,netProfit,boughtAt,soldAt,saleSource',
     );
     expect(lines).toHaveLength(2);
     expect(lines[1]).toContain(`"'=HYPERLINK(""http://evil"")"`);

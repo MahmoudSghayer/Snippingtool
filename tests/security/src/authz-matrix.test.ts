@@ -272,6 +272,8 @@ describe('authz matrix: admin routes × admin roles', () => {
 const TODAY = new Date().toISOString().slice(0, 10);
 const PLAN_GATED_ROUTES: Array<{ path: string; feature: FeatureKey }> = [
   { path: '/api/v1/trades', feature: 'ledger.recorder' },
+  { path: '/api/v1/trades/sell-price?resourceId=158023', feature: 'ledger.recorder' },
+  { path: '/api/v1/extension/open-trades', feature: 'ledger.recorder' },
   { path: `/api/v1/profits?from=${TODAY}&to=${TODAY}`, feature: 'ledger.recorder' },
   { path: '/api/v1/filters', feature: 'assist.filter_rotation' },
   { path: '/api/v1/risk-events', feature: 'assist.risk_meter' },

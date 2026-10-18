@@ -168,6 +168,7 @@ describe('extension API client vs. apps/api/openapi/openapi.json (defect #4 regr
     ['POST /api/v1/activity/batch'],
     ['POST /api/v1/sniping/attempts'],
     ['POST /api/v1/trades/batch'],
+    ['GET /api/v1/extension/open-trades'],
     ['POST /api/v1/filters/stats'],
     ['POST /api/v1/risk-events'],
   ])('the extension client actually calls %s somewhere', (key) => {

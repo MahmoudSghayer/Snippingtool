@@ -592,22 +592,25 @@ warrant it at MVP scale) — a plain table with a BRIN index on `occurred_at`.
 Individual buy→sell trades, computed and reported by the user's own
 extension. Financial record: `user_id` **RESTRICT**.
 
-| Column                                            | Type                                                      | Notes                                               |
-| ------------------------------------------------- | --------------------------------------------------------- | --------------------------------------------------- |
-| `id`                                              | uuid PK                                                   |                                                     |
-| `user_id`                                         | uuid FK, **RESTRICT**                                     |                                                     |
-| `trade_id`                                        | text                                                      | extension-generated id, unique per user (live rows) |
-| `resource_id`, `asset_id`                         | text                                                      |                                                     |
-| `rating`                                          | smallint, 0–99                                            |                                                     |
-| `buy_price`, `sell_price`, `ea_tax`, `net_profit` | integer, ≥ 0 (except `net_profit`, which can be negative) | coins                                               |
-| `status`                                          | `trade_status`                                            | bought/listed/sold/expired/unsold                   |
-| `bought_at`, `sold_at`                            | —                                                         | `sold_at >= bought_at`                              |
-| soft-delete + audit                               | —                                                         | standard, no `created_by`/`updated_by`              |
+| Column                                            | Type                                                      | Notes                                                                                                                                                                                                                                                        |
+| ------------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `id`                                              | uuid PK                                                   |                                                                                                                                                                                                                                                              |
+| `user_id`                                         | uuid FK, **RESTRICT**                                     |                                                                                                                                                                                                                                                              |
+| `trade_id`                                        | text                                                      | extension-generated id, unique per user (live rows)                                                                                                                                                                                                          |
+| `item_id`                                         | text, nullable, 1–64 chars                                | EA's id for the card, constant across relists (0040): links a sale to its buy across browsers (`GET /extension/open-trades`). NULL for buys reported before 0040 or without one                                                                              |
+| `resource_id`, `asset_id`                         | text                                                      |                                                                                                                                                                                                                                                              |
+| `rating`                                          | smallint, 0–99                                            |                                                                                                                                                                                                                                                              |
+| `buy_price`, `sell_price`, `ea_tax`, `net_profit` | integer, ≥ 0 (except `net_profit`, which can be negative) | coins                                                                                                                                                                                                                                                        |
+| `status`                                          | `trade_status`                                            | bought/listed/sold/expired/unsold                                                                                                                                                                                                                            |
+| `sale_source`                                     | `trade_sale_source`, nullable                             | how a sale's price is known (0040): `observed` (seen sold on the trade pile), `inferred` (a listed card that left the pile unseen, at its list price: an estimate), `manual` (recorded on the dashboard). NULL while unsold and for sales stored before 0040 |
+| `bought_at`, `sold_at`                            | —                                                         | `sold_at >= bought_at`                                                                                                                                                                                                                                       |
+| soft-delete + audit                               | —                                                         | standard, no `created_by`/`updated_by`                                                                                                                                                                                                                       |
 
 **Indexes:** partial unique `(user_id, trade_id)`; partial btree `user_id`,
 `resource_id`, `status`; partial `(user_id, sold_at) WHERE sold_at IS NOT
 NULL`; partial `(user_id, bought_at desc, id)` (0033) for the trade list's
-`(bought_at, id)` keyset cursor. `POST /trades/batch` is one `INSERT … ON
+`(bought_at, id)` keyset cursor; partial `(user_id, item_id) WHERE item_id IS
+NOT NULL` (0040) for finding a user's trade by the card. `POST /trades/batch` is one `INSERT … ON
 CONFLICT (user_id, trade_id) WHERE deleted_at IS NULL DO UPDATE`, in one
 transaction with its profit rollup.
 
@@ -615,7 +618,7 @@ transaction with its profit rollup.
 
 Daily per-user rollup (upsert on `(user_id, day)`), written by
 `apps/api/src/lib/analytics/rollup.ts`. Every ingest route (`POST
-/trades/batch`, `POST /trades/:id/close`, `POST /sniping/attempts`)
+/trades/batch`, `POST /trades/:id/close`, `POST /trades/mark-sold`, `POST /sniping/attempts`)
 recomputes the days its write touched in the same request, so the dashboard
 never shows stale figures; the `profits.rollup` job sweeps today hourly as a
 self-healing backstop. Coins spent and snipes land on the day of the
@@ -912,6 +915,7 @@ production`.
 | `search_activity_filter_hash_idx`, `saved_filters_user_filter_hash_unique_live`    | Correlating a live search back to a saved filter for the ranker.                                                                                                                   |
 | `sniping_activity_trade_id_idx`                                                    | Joining a snipe attempt to the `trades` row it became.                                                                                                                             |
 | `trades_user_id_trade_id_unique_live`                                              | Idempotent upsert from the extension (same `trade_id` reported twice is a no-op/update, not a duplicate).                                                                          |
+| `trades_user_id_item_id_idx`                                                       | A user's trade for a card (EA item id, 0040), partial on `item_id IS NOT NULL`: matching a sale to its buy by the card.                                                            |
 | `profits_user_id_day_unique`                                                       | The rollup's upsert target (ingest routes and the hourly job alike).                                                                                                               |
 | `filter_stats_coins_per_hour_idx`                                                  | Ranker "best filters right now" queries and admin filter-performance leaderboards.                                                                                                 |
 | `coupon_redemptions_coupon_user_unique`                                            | Enforces "one redemption per coupon per user" and doubles as the existence check before applying a coupon.                                                                         |

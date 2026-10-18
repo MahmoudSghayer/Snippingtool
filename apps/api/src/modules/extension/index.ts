@@ -1,5 +1,6 @@
 // /api/v1/extension/* — bootstrap, heartbeat, telemetry, errors, version,
-// kill-switch, and the Nova AI page's recent searches. The MV3 background
+// kill-switch, the Nova AI page's recent searches and bot settings, and the
+// open trades every browser's trade lifecycle follows. The MV3 background
 // service worker's only server contact points (docs/01-architecture.md,
 // "license bootstrap + heartbeat + offline grace").
 
@@ -9,6 +10,7 @@ import {
   licenses,
   plans,
   subscriptions,
+  trades,
   userActivity,
   userBotSettings,
   userRecentSearches,
@@ -24,6 +26,10 @@ import {
   heartbeatRequestSchema,
   heartbeatResponseSchema,
   isPlanCode,
+  OPEN_TRADES_MAX,
+  OPEN_TRADES_WINDOW_DAYS,
+  openTradeSchema,
+  openTradesResponseSchema,
   putBotSettingsRequestSchema,
   putRecentSearchesRequestSchema,
   recentSearchSchema,
@@ -32,10 +38,12 @@ import {
   type BootstrapResponse,
   type BotSettingsSyncResponse,
   type LicenseDto,
+  type OpenTrade,
+  type OpenTradesResponse,
   type RecentSearchesResponse,
   type SubscriptionDto,
 } from '@sl/shared';
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq, gte, isNotNull, isNull } from 'drizzle-orm';
 import fp from 'fastify-plugin';
 import { z } from 'zod';
 
@@ -488,6 +496,58 @@ export default fp(
           .onConflictDoUpdate({ target: userBotSettings.userId, set: { settings } })
           .returning();
         return toBotSettingsResponse(row);
+      },
+    );
+
+    // The caller's trades still `bought` that carry EA's item id, newest
+    // first: each browser's trade lifecycle (apps/extension/src/lib/
+    // trade-lifecycle.ts) follows these cards too, so a card bought in one
+    // browser and sold while the bot runs in another still has its sale
+    // reported, on the original buy's tradeId. Read on bot start, at boot
+    // and every ~15 minutes while the bot runs. Plan-gated like
+    // `/trades/batch`, whose sale reports this feeds.
+    app.get(
+      '/api/v1/extension/open-trades',
+      {
+        onRequest: [fastify.requireFeature('ledger.recorder')],
+        config: { rateLimit: INGEST_RATE_LIMIT },
+        schema: { tags: ['extension'], response: { 200: openTradesResponseSchema } },
+      },
+      async (request): Promise<OpenTradesResponse> => {
+        const since = new Date(Date.now() - OPEN_TRADES_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+        const rows = await fastify.db
+          .select({
+            tradeId: trades.tradeId,
+            itemId: trades.itemId,
+            resourceId: trades.resourceId,
+            rating: trades.rating,
+            buyPrice: trades.buyPrice,
+            boughtAt: trades.boughtAt,
+          })
+          .from(trades)
+          .where(
+            and(
+              eq(trades.userId, request.authUser!.id),
+              eq(trades.status, 'bought'),
+              isNull(trades.deletedAt),
+              isNotNull(trades.itemId),
+              gte(trades.boughtAt, since),
+            ),
+          )
+          .orderBy(desc(trades.boughtAt), desc(trades.id))
+          .limit(OPEN_TRADES_MAX + 1);
+        // Every stored value came through the ingest bounds, but a row that
+        // somehow does not fit is left out rather than failing the response.
+        const items: OpenTrade[] = [];
+        for (const row of rows.slice(0, OPEN_TRADES_MAX)) {
+          const parsed = openTradeSchema.safeParse({
+            ...row,
+            resourceId: Number(row.resourceId),
+            boughtAt: row.boughtAt?.toISOString(),
+          });
+          if (parsed.success) items.push(parsed.data);
+        }
+        return { items, truncated: rows.length > OPEN_TRADES_MAX };
       },
     );
 

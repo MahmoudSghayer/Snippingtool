@@ -202,6 +202,69 @@ describe("IDOR: user A cannot read or mutate user B's own-scoped resources", () 
     expect(itemsA.find((t) => t.tradeId === 'idor-trade-1')).toBeTruthy();
   });
 
+  it("trades: B can neither mark A's bought trade sold nor see it among their open trades", async () => {
+    const reportRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/trades/batch',
+      headers: bearer(userA.accessToken),
+      payload: {
+        trades: [
+          {
+            id: '01900000-0000-7000-8000-000000000002',
+            tradeId: 'idor-open-1',
+            itemId: '900001',
+            resourceId: 111,
+            assetId: null,
+            rating: 83,
+            buyPrice: 1000,
+            sellPrice: null,
+            eaTax: 0.05,
+            netProfit: null,
+            status: 'bought',
+            boughtAt: new Date(Date.now() - 60_000).toISOString(),
+            soldAt: null,
+          },
+        ],
+      },
+    });
+    expect(reportRes.statusCode).toBe(200);
+    const listA = await app.inject({
+      method: 'GET',
+      url: '/api/v1/trades',
+      headers: bearer(userA.accessToken),
+    });
+    const [tradeA] = (listA.json() as { items: Array<{ id: string }> }).items;
+
+    const markRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/trades/mark-sold',
+      headers: bearer(userB.accessToken),
+      payload: { ids: [tradeA!.id], sellPrice: 5000 },
+    });
+    expect(markRes.statusCode).toBe(200);
+    // Reads exactly like an id that does not exist.
+    expect(markRes.json()).toEqual({
+      updated: [],
+      skipped: [{ id: tradeA!.id, reason: 'not_found' }],
+    });
+
+    const openB = await app.inject({
+      method: 'GET',
+      url: '/api/v1/extension/open-trades',
+      headers: bearer(userB.accessToken),
+    });
+    expect(openB.json()).toEqual({ items: [], truncated: false });
+
+    const openA = await app.inject({
+      method: 'GET',
+      url: '/api/v1/extension/open-trades',
+      headers: bearer(userA.accessToken),
+    });
+    expect((openA.json() as { items: Array<{ tradeId: string }> }).items).toEqual([
+      expect.objectContaining({ tradeId: 'idor-open-1', itemId: '900001' }),
+    ]);
+  });
+
   it('a non-existent id 404s the same way a real-but-foreign one does (no existence oracle)', async () => {
     const res = await app.inject({
       method: 'DELETE',
