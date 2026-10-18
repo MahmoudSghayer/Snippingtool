@@ -91,6 +91,45 @@ describe('page -> content message validation', () => {
     expect(client.probeStatus).toBeNull();
   });
 
+  it('hands EA errors to onEaError, and drops malformed ones', async () => {
+    const cb = vi.fn();
+    client.onEaError(cb);
+    deliver({ channel: ADAPTER_CHANNEL, kind: 'ea_error', data: { status: 429, category: 'slow_down', endpoint: 'market', seenAt: 1 } });
+    deliver({ channel: ADAPTER_CHANNEL, kind: 'ea_error', data: { status: '429', category: 'rate_limited', endpoint: 'market', seenAt: 1 } });
+    deliver({ channel: ADAPTER_CHANNEL, kind: 'ea_error', data: { status: 429, category: 'rate_limited', endpoint: 'watchlist', seenAt: 1 } });
+    await flush();
+    expect(cb).not.toHaveBeenCalled();
+    const error = { status: 401, category: 'session_ended', endpoint: 'pile', seenAt: 2 };
+    deliver({ channel: ADAPTER_CHANNEL, kind: 'ea_error', data: error });
+    await flush();
+    expect(cb).toHaveBeenCalledWith(error);
+  });
+
+  it('says which response changed shape: the trade pile, or (when an older adapter does not say) the market', async () => {
+    const cb = vi.fn();
+    client.onShape(cb);
+    deliver({ channel: ADAPTER_CHANNEL, kind: 'shape', data: { seen: 1, parsed: 0, failed: 1, reason: 'trade pile: x', endpoint: 'pile' } });
+    deliver({ channel: ADAPTER_CHANNEL, kind: 'shape', data: { seen: 1, parsed: 0, failed: 2, reason: 'no auctionInfo array in response' } });
+    await flush();
+    expect(cb.mock.calls).toEqual([
+      ['trade pile: x', 'pile'],
+      ['no auctionInfo array in response', 'market'],
+    ]);
+  });
+
+  it('hands heartbeats to onHeartbeat, and stops after dispose', async () => {
+    const cb = vi.fn();
+    client.onHeartbeat(cb);
+    deliver({ channel: ADAPTER_CHANNEL, kind: 'heartbeat', data: {} });
+    deliver({ channel: ADAPTER_CHANNEL, kind: 'heartbeat', data: { at: 5 } });
+    await flush();
+    expect(cb).toHaveBeenCalledTimes(1);
+    client.dispose();
+    deliver({ channel: ADAPTER_CHANNEL, kind: 'heartbeat', data: { at: 6 } });
+    await flush();
+    expect(cb).toHaveBeenCalledTimes(1);
+  });
+
   it('ignores messages from another source', async () => {
     const cb = vi.fn();
     client.onProbe(cb);

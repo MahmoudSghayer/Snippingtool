@@ -38,6 +38,7 @@ import { countObservedSearches, governedSearch } from '../engine/search.js';
 import { handOffWasLate, readHandedOffNonce } from '../lib/act-auth.js';
 import { createBackgroundTimer } from '../lib/background-timer.js';
 import { riskLevelChangeEvent } from '../lib/bot-safety.js';
+import { createLogThrottle, droppedSuffix } from '../lib/log-throttle.js';
 import { logger } from '../lib/logger.js';
 import { PILE_MIN_GAP_MS, createPileRefresher } from '../lib/pile-refresh.js';
 import { singleFlight } from '../lib/single-flight.js';
@@ -65,6 +66,7 @@ import type { Catalog } from '../model/catalog.js';
 import type { PriceSummary } from '../model/prices.js';
 import type {
   ActivityEvent,
+  AdapterEaError,
   BotBudgetState,
   BotDailyUsage,
   BotSettings,
@@ -87,6 +89,17 @@ const STATE_PERSIST_MS = 5000;
 const AUTOBUYER_TICK_MS = 8000;
 const WATCHDOG_MS = 15000;
 const WATCHDOG_STALE_MS = 60000;
+/** The watchdog's allowance in a hidden tab, where Chrome runs both worlds'
+ * timers about once a minute (content/watchdog.ts). */
+const WATCHDOG_HIDDEN_STALE_MS = 5 * 60_000;
+/** At most one log line (so one server error report, lib/errors.ts) per
+ * kind of EA error or shape change in this long: while EA rate-limits the
+ * account, the same error comes back on every search. */
+const ADAPTER_WARN_GAP_MS = 10 * 60_000;
+/** A failing probe this soon after the page loaded only means EA's web app
+ * has not built its service layer yet (it does after login); the adapter
+ * reports the real verdict once it passes, or after 10 minutes. */
+const PROBE_STARTUP_GRACE_MS = 2 * 60_000;
 /** How often a running Sniping Bot re-reads the entitlement (background's
  * cached `license.bootstrap`, refreshed by its heartbeat), so a plan that
  * loses the bot stops it mid-session. */
@@ -266,19 +279,55 @@ async function main(): Promise<void> {
   });
 
   let probeOk = true;
+  // Reported once per failure, not on every act call that re-runs the
+  // probe, and not while the web app is still starting: an adapter injected
+  // after the page began loading (a late userscript) can report its very
+  // first probe, from before EA built its service layer, to a content
+  // script that is already listening.
+  const bootedAt = Date.now();
+  let probePassedOnce = false;
+  let probeFailureReported: string | null = null;
   adapter.onProbe((status) => {
     probeOk = status.ok;
-    if (!status.ok) {
-      logger.error(`bundle probe failed: ${status.reason}`, 'adapter.probe');
-      void send('telemetry.enqueue', {
-        kind: 'activity',
-        items: [{ type: 'error', occurredAt: nowIso(), metadata: { code: 'ADAPTER_PROBE_FAILED', message: status.reason ?? 'unknown', context: 'adapter.probe' } }] satisfies ActivityEvent[],
-      });
+    if (status.ok) {
+      probePassedOnce = true;
+      probeFailureReported = null;
+      return;
     }
+    const reason = status.reason ?? 'unknown';
+    if (reason === probeFailureReported) return;
+    if (!probePassedOnce && Date.now() - bootedAt < PROBE_STARTUP_GRACE_MS) {
+      logger.info(`bundle probe not passing yet (EA's web app may still be starting): ${reason}`, 'adapter.probe');
+      return;
+    }
+    probeFailureReported = reason;
+    logger.error(`bundle probe failed: ${reason}`, 'adapter.probe');
+    void send('telemetry.enqueue', {
+      kind: 'activity',
+      items: [{ type: 'error', occurredAt: nowIso(), metadata: { code: 'ADAPTER_PROBE_FAILED', message: reason, context: 'adapter.probe' } }] satisfies ActivityEvent[],
+    });
   });
 
-  adapter.onShape((reason) => {
-    logger.warn(`market payload shape changed: ${reason}`, 'adapter.shape');
+  const throttleAdapterWarning = createLogThrottle(ADAPTER_WARN_GAP_MS);
+  adapter.onShape((reason, endpoint) => {
+    const dropped = throttleAdapterWarning(`shape:${endpoint}:${reason}`);
+    if (dropped === null) return;
+    // The trade pile only feeds the transfer list counts and the sale
+    // tracking: nothing stops for it.
+    if (endpoint === 'pile') logger.warn(`trade pile payload shape changed (nothing stops for it): ${reason.replace(/^trade pile: /, '')}${droppedSuffix(dropped)}`, 'adapter.shape');
+    else logger.warn(`market payload shape changed: ${reason}${droppedSuffix(dropped)}`, 'adapter.shape');
+  });
+
+  // EA's own errors, as the adapter filed them (main/adapter.ts): never a
+  // shape change. The Sniping Bot reacts to them itself (engine/sniper.ts).
+  adapter.onEaError((error) => {
+    const dropped = throttleAdapterWarning(`ea:${error.endpoint}:${error.category}`);
+    if (dropped === null) return;
+    const line = `EA answered HTTP ${error.status} to a ${EA_ENDPOINT_WORDS[error.endpoint]} (${error.category})${droppedSuffix(dropped)}`;
+    // A refusal (someone else's buy got there first, say) is everyday
+    // sniping, not a problem with the extension.
+    if (error.category === 'rejected') logger.info(line, 'adapter.ea');
+    else logger.warn(line, 'adapter.ea');
   });
 
   // engineHealthState()/engineHealthMessage() (a live status string for the
@@ -692,6 +741,7 @@ async function main(): Promise<void> {
             onBuyable: adapter.onBuyable,
             onProbe: adapter.onProbe,
             onShape: adapter.onShape,
+            onEaError: adapter.onEaError,
           },
           sleep: timer.sleep,
           timingMode: timer.mode,
@@ -895,13 +945,20 @@ async function main(): Promise<void> {
 
   // ---- watchdog: notice a MAIN-world adapter that has gone quiet ----------
   //
-  // Once per stall (content/watchdog.ts), not every 15 s while it lasts.
+  // The adapter's heartbeat keeps it fed while nothing else happens; a
+  // background tab's throttled timers, a few quiet checks or a recent
+  // warning do not set it off (content/watchdog.ts).
   const watchdog = createWatchdog({
     staleMs: WATCHDOG_STALE_MS,
-    warn: () => logger.warn('adapter has not reported a probe result recently — possible MAIN-world stall', 'watchdog'),
+    hiddenStaleMs: WATCHDOG_HIDDEN_STALE_MS,
+    checkMs: WATCHDOG_MS,
+    isHidden: () => document.visibilityState === 'hidden',
+    warn: (quietMs) =>
+      logger.warn(`adapter has not reported a probe result or heartbeat for ${Math.round(quietMs / 1000)} s — possible MAIN-world stall`, 'watchdog'),
     recovered: () => logger.info('adapter is reporting again', 'watchdog'),
   });
   adapter.onProbe(() => watchdog.seen());
+  adapter.onHeartbeat(() => watchdog.seen());
   setInterval(() => watchdog.check(), WATCHDOG_MS);
 
   // Keeps `deviceId` fresh for attempt/trade/risk-event reporting above.
@@ -910,6 +967,14 @@ async function main(): Promise<void> {
   const bootstrapForDevice = authStatus?.authenticated ? await send<BootstrapResponse>('license.bootstrap') : null;
   deviceIdCache = bootstrapForDevice?.deviceId ?? deviceIdCache;
 }
+
+/** What an EA error's request was for, in a log line. */
+const EA_ENDPOINT_WORDS: Record<AdapterEaError['endpoint'], string> = {
+  market: 'market search',
+  pile: 'transfer list request',
+  bid: 'buy',
+  other: 'request',
+};
 
 /** Shown on the Nova AI page when no act-channel nonce was handed off. */
 const NO_ACT_CHANNEL_REASON =

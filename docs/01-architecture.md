@@ -382,7 +382,9 @@ sequenceDiagram
 
 This is the same "break loudly" contract milestone 1 already has for the
 passive observation path (`kind: 'shape'`), extended to cover the `act`
-surface before M2/M3 are allowed to use it at all.
+surface before M2/M3 are allowed to use it at all. EA's own errors (an
+expired session, a captcha, a rate limit, an outage) are not a shape
+change: the adapter reports them as `kind: 'ea_error'`, by category.
 
 ### 3.6 Admin action → audit log
 

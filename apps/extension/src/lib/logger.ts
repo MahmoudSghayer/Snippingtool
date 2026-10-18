@@ -12,13 +12,17 @@ export interface LogEntry {
   message: string;
   context?: string;
   at: number;
+  /** Increases by one with every entry, for the life of the page (or
+   * worker): what tells `lib/errors.ts` which entries it already sent. */
+  seq: number;
 }
 
 const MAX_ENTRIES = 500;
 let buffer: LogEntry[] = [];
+let lastSeq = 0;
 
 function push(level: LogLevel, message: string, context?: string): void {
-  buffer.push({ level, message, context, at: Date.now() });
+  buffer.push({ level, message, context, at: Date.now(), seq: ++lastSeq });
   if (buffer.length > MAX_ENTRIES) buffer.shift();
   if (level === 'error' || level === 'warn') {
     // eslint-disable-next-line no-console -- the whole point of warn/error is visibility

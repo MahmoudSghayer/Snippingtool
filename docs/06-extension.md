@@ -261,7 +261,10 @@ Differences that follow from there being no extension process:
   (`lib/act-auth.ts`'s `handOffNonceWithinBundle`; content's copy stays in
   the bundle, not on Tampermonkey's global). When Tampermonkey injects
   after page scripts have started, it still hands off, and content logs
-  that it was late. Content talks to the page
+  once per page load that it was late. Nothing else breaks: the adapter
+  re-reports its probe as soon as the web app's service layer turns up
+  (and content does not report a failing probe from before the web app
+  started); only market calls made before the injection go unseen. Content talks to the page
   through `unsafeWindow`, so the userscript's adapter (only) accepts act
   requests by origin rather than by `event.source`; every request, result
   and catalog is still MAC-checked.
@@ -621,12 +624,15 @@ installed`; after the human's own search the log shows no `hook:`
    means EA took over 12 s, and a following `late buy answer` line says
    how it went. Several of those mean the limit is too short.
 8. **Trade pile (profit capture, lib/trade-lifecycle.ts).** All assumed:
-   - The paths `/ut/game/<title>/tradepile` (a missing list there is a
-     shape change), `/item` and `/auctionhouse/relist` (only logged).
+   - The paths `/ut/game/<title>/tradepile` (a successful answer with no
+     list there is a trade-pile shape change, which stops nothing; an error
+     status, EA's `{ code, reason }` envelope or an empty answer is an
+     `ea_error`), `/item` and `/auctionhouse/relist` (only logged).
      `/watchlist` and `/trade/status` are deliberately not read: they show
      auctions the trader won or bought as `closed` at the price paid, which
      is a purchase, and was once misread as a sale.
-   - The envelope `auctionInfo` (or `itemData`); the item id at
+   - The envelope `auctionInfo` (also read: `data.auctionInfo`, `items`,
+     `data.items`, a bare list, and an item move's `itemData`); the item id at
      `itemData.id` (an entity's `id`), and the same id on a market
      listing's `itemData`.
    - `tradeState` of `active`, `closed` (sold) or `expired`, null or absent
@@ -904,10 +910,15 @@ M1 recording never depends on any of this: the engine bindings are declared
 before the adapter callbacks are registered, and a failed account-gated
 M2/M3 bootstrap is logged, not allowed to abort the page's recorder.
 
-The **watchdog** is a second `setInterval` that tracks the timestamp of the
-last `probe` message received from the MAIN-world adapter; if none has
-arrived in 60 seconds, it logs a warning (surfaced through the same
-`lib/logger.ts` ring buffer the options page's log export reads). Because a
+The **watchdog** (`content/watchdog.ts`) is a second `setInterval` that
+tracks the last `probe` or `heartbeat` message from the MAIN-world adapter
+(the adapter sends a heartbeat every 20 seconds, whatever the page does).
+It warns (surfaced through the same `lib/logger.ts` ring buffer the options
+page's log export reads) only after three checks in a row found the adapter
+quiet for over 60 seconds — five minutes in a hidden tab, where Chrome
+runs timers about once a minute — ignores a check that itself ran late
+(throttled, frozen or asleep) and the first check after the tab is shown or
+hidden, and warns at most once per stall and once every ten minutes. Because a
 genuine full-page navigation re-injects both content scripts fresh (Chrome's
 normal behaviour for `content_scripts`, not something this extension has to
 implement), the watchdog's practical role is detecting an in-page SPA
@@ -938,7 +949,8 @@ itself.
 
 `lib/logger.ts` keeps a 500-entry ring buffer (`debug`/`info`/`warn`/
 `error`); `warn`/`error` entries also echo to the console. `lib/errors.ts`
-flushes only `warn`/`error` entries to `POST /extension/errors`
+flushes only `warn`/`error` entries, each one once (oldest first, up to
+100 per flush), to `POST /extension/errors`
 (`extensionErrorReportSchema`, `@sl/shared`) — `message`/`stack`/`context`
 only, capped and truncated per the schema, never anything the user typed.
 `background/index.ts` installs global `error`/`unhandledrejection` handlers

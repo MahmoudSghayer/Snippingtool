@@ -40,6 +40,8 @@ function fakeAdapter(clock: { now: number }) {
     diagnostics: vi.fn(async () => ({ ok: false, latencyMs: 0 })),
     onProbe: () => () => undefined,
     onShape: () => () => undefined,
+    onEaError: () => () => undefined,
+    onHeartbeat: () => () => undefined,
     onBuyable: () => () => undefined,
     onCatalog: () => () => undefined,
     requestCatalog: () => undefined,

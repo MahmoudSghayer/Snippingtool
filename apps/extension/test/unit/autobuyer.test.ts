@@ -36,12 +36,12 @@ function opportunity(overrides: Partial<ScoredOpportunity> = {}): ScoredOpportun
 
 interface FakeAdapterHandle {
   adapter: AdapterClient;
-  emitShape: (reason: string) => void;
+  emitShape: (reason: string, endpoint?: 'market' | 'pile') => void;
   emitProbe: (status: ProbeStatus) => void;
 }
 
 function fakeAdapter(buyImpl: AdapterClient['buy'] = async () => ({ ok: true, latencyMs: 5 })): FakeAdapterHandle {
-  let shapeCb: ((reason: string) => void) | undefined;
+  let shapeCb: ((reason: string, endpoint: 'market' | 'pile') => void) | undefined;
   let probeCb: ((status: ProbeStatus) => void) | undefined;
 
   const adapter: AdapterClient = {
@@ -65,6 +65,8 @@ function fakeAdapter(buyImpl: AdapterClient['buy'] = async () => ({ ok: true, la
         shapeCb = undefined;
       };
     },
+    onEaError: () => () => undefined,
+    onHeartbeat: () => () => undefined,
     onBuyable: () => () => undefined,
     onTradePile: () => () => undefined,
     onAuctions: () => () => undefined,
@@ -75,7 +77,7 @@ function fakeAdapter(buyImpl: AdapterClient['buy'] = async () => ({ ok: true, la
 
   return {
     adapter,
-    emitShape: (reason) => shapeCb?.(reason),
+    emitShape: (reason, endpoint = 'market') => shapeCb?.(reason, endpoint),
     emitProbe: (status) => probeCb?.(status),
   };
 }
@@ -138,6 +140,14 @@ describe('Autobuyer: stops on shape mismatch', () => {
     const successes = await autobuyer.runCycle([opportunity()]);
     expect(successes).toBe(0);
     expect(autobuyer.isRunning()).toBe(false);
+  });
+
+  it('a trade-pile shape change does not stop it: the pile says nothing about the market', () => {
+    const governor = new Governor(SETTINGS, { now: () => 0 });
+    const { adapter, emitShape } = fakeAdapter();
+    const autobuyer = new Autobuyer({ governor, adapter, onAttempt: vi.fn(), onTrade: vi.fn() });
+    emitShape('trade pile: no auctionInfo / itemData list in response', 'pile');
+    expect(autobuyer.isStopped()).toBe(false);
   });
 });
 

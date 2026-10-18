@@ -338,6 +338,7 @@ const PHASE_LABEL: Record<SniperPhase, string> = {
   break: 'On a break',
   rest: 'Resting',
   blocked: 'Paused by your limits',
+  backoff: 'EA asked to slow down',
   stopped: 'Stopped',
 };
 

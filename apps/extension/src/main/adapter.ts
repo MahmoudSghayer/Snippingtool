@@ -34,16 +34,20 @@
  *
  * When EA reshuffles their bundle, this is the one file that breaks — and it
  * is written to break LOUDLY. Passive observation reports every market call
- * it sees and every one it successfully parsed (`kind: 'shape'` on a
- * mismatch, unchanged from milestone 1). The act surface additionally runs a
- * *bundle probe* before it will do anything at all — see below.
+ * it sees and every one it successfully parsed (`kind: 'shape'` when a
+ * successful answer's JSON no longer fits). An EA *error* — any status
+ * outside 2xx, EA's error envelope, an empty answer — is not a shape change
+ * and goes out as `kind: 'ea_error'` with what kind of error it is (an
+ * expired session, a captcha, a rate limit...). The act surface
+ * additionally runs a *bundle probe* before it will do anything at all —
+ * see below.
  */
 // `ADAPTER_CHANNEL` comes from the zod-free `adapter-channel.js` subpath, not
 // the `@sl/shared` barrel — this file runs in the page's MAIN world on every
 // matching load, so it deliberately avoids pulling `zod` and every schema in
 // `ext-messages.ts` along with it just for one string constant (see
 // packages/shared/src/adapter-channel.ts).
-import { ADAPTER_CHANNEL } from '@sl/shared/adapter-channel.js';
+import { ADAPTER_CHANNEL, eaErrorCategory } from '@sl/shared/adapter-channel.js';
 
 import { ACT_ERROR, canonicalActMessage, canonicalize, createActSigner, takeHandedOffNonce, type ActSigner } from '../lib/act-auth.js';
 import { scrubText } from '../lib/redact.js';
@@ -51,12 +55,12 @@ import { scrubText } from '../lib/redact.js';
 import { createCatalogBuilder } from './catalog-builder.js';
 import { createAdapterLog, describeKeys } from './diagnostics.js';
 import { normaliseListing, normaliseListings, normalisePileItems, type NormalisedListing } from './ea-listing.js';
-import { TimeoutUnknownError, describeError, extractListingArray } from './ea-response.js';
+import { TimeoutUnknownError, describeError, errorEnvelopeStatus, extractListingArray, isOkStatus } from './ea-response.js';
 import { createSearchHook } from './search-hook.js';
 import { selectShape, type ServiceShape, type ShapeName, type ShapeSelection } from './shapes.js';
 
 import type { Catalog } from '../model/catalog.js';
-import type { AdapterDiagnostics, FilterCriteria, TradePileItem, TrimmedAuction } from '@sl/shared';
+import type { AdapterDiagnostics, EaErrorCategory, EaErrorEndpoint, FilterCriteria, TradePileItem, TrimmedAuction } from '@sl/shared';
 
 /** The userscript build injects this file into the page itself; see the
  * act channel listener at the bottom for the one thing that changes. */
@@ -100,7 +104,9 @@ const URLCtor = URL;
 const mapGet = Map.prototype.get;
 const mapSet = Map.prototype.set;
 const mapDelete = Map.prototype.delete;
-const mapClear = Map.prototype.clear;
+const mapKeys = Map.prototype.keys;
+const mapSize = protoGetter(Map.prototype, 'size')!;
+const mapIteratorNext = (Object.getPrototypeOf(new Map().keys()) as Iterator<unknown>).next;
 const setHas = Set.prototype.has;
 const setAdd = Set.prototype.add;
 const promiseThen = Promise.prototype.then;
@@ -190,10 +196,11 @@ const EA_HOST = /(^|\.)ea\.com$/i;
 // never seen). Every one of these paths is an assumption until the market
 // opens (docs/06-extension.md, day-one checklist), and all of them sit
 // behind the same https + EA host check as the market. `/tradepile` is
-// expected to carry a list of auctions: one that does not is a shape
-// change, reported like a market one. The item-move and relist responses
-// may well carry no auction at all, so for those an unreadable body is
-// only logged. Deliberately NOT `/watchlist` or `/trade/status`: those
+// expected to carry a list of auctions: a successful answer that does not
+// is reported as a trade-pile shape change (which stops nothing), an error
+// answer as an EA error. The item-move and relist responses may well carry
+// no auction at all, so for those an unreadable body is only logged.
+// Deliberately NOT `/watchlist` or `/trade/status`: those
 // show auctions the trader bid on or bought, and a won auction reads as
 // `closed` at the price paid, which is a purchase, not a sale.
 const PILE_PATH = /\/ut\/game\/[^/]+\/(tradepile|auctionhouse\/relist|item)\/?$/i;
@@ -206,7 +213,9 @@ const stats = { seen: 0, parsed: 0, failed: 0 };
 
 function post(kind: 'ready', data: { channel: string }): void;
 function post(kind: 'probe', data: { ok: boolean; checkedAt: number; reason?: string; shape?: ShapeName; actReady: boolean }): void;
-function post(kind: 'shape', data: { seen: number; parsed: number; failed: number; reason: string }): void;
+function post(kind: 'shape', data: { seen: number; parsed: number; failed: number; reason: string; endpoint: 'market' | 'pile' }): void;
+function post(kind: 'ea_error', data: { status: number; category: EaErrorCategory; endpoint: EaErrorEndpoint; seenAt: number }): void;
+function post(kind: 'heartbeat', data: { at: number }): void;
 function post(kind: 'listings_buyable', data: { tradeIds: string[] }): void;
 function post(kind: 'tradepile', data: { url: string; seenAt: number; items: TradePileItem[]; full?: boolean }): void;
 function post(
@@ -298,6 +307,13 @@ function noteCredits(payload: unknown): void {
   );
 }
 
+/** What the last probe posted said (ok and shape, or the failure), so the
+ * periodic recheck at the bottom posts again only when that changes. */
+let lastPostedProbe: string | null = null;
+function probeKey(result: ProbeResult): string {
+  return result.ok ? `ok:${result.shape}` : `failed:${result.reason}`;
+}
+
 function runProbeAndReport(): { result: ProbeResult; selection: ShapeSelection } {
   const outcome = probe();
   const result = outcome.result;
@@ -306,6 +322,7 @@ function runProbeAndReport(): { result: ProbeResult; selection: ShapeSelection }
   // hint: a call that then times out is reported as adapter_unauthenticated
   // (not retried) rather than as a plain timeout (content/adapter-client.ts).
   post('probe', { ...result, checkedAt: Date.now(), actReady: signer !== null });
+  lastPostedProbe = probeKey(result);
   return outcome;
 }
 
@@ -464,10 +481,11 @@ let lastPileResponse: { path: string; at: number; value: unknown } | null = null
  * Keyed per tradeId rather than "the latest response only": assist ranks
  * candidates from every response seen in the last few minutes
  * (content/index.ts's `tracked`), and a listing's buy-now price is fixed
- * for its lifetime (a relist gets a new tradeId). Bounded: past the cap it
- * starts over, which at worst turns one buy into a `listing_unknown` refusal
- * until the next search. Read and written only through the captured Map
- * methods.
+ * for its lifetime (a relist gets a new tradeId). Bounded: past the cap the
+ * listing sighted longest ago goes (`setNewest`). It used to start over,
+ * which wiped the current search's listings along with the stale ones and
+ * turned its buys into `listing_unknown` refusals. Read and written only
+ * through the captured Map methods.
  */
 interface SeenListing {
   buyNow: number;
@@ -487,16 +505,21 @@ interface SeenListing {
 }
 const MAX_REMEMBERED_LISTINGS = 5000;
 const lastSeenListings = new Map<string, SeenListing>();
-let rememberedListings = 0;
+
+/** Puts `key` in `map` as its newest entry (a Map keeps insertion order,
+ * so a key seen again moves to the back), then drops the oldest entry once
+ * there are more than `max`: the least recently seen goes first, never the
+ * whole map. */
+function setNewest<V>(map: Map<string, V>, key: string, value: V, max: number): void {
+  apply(mapDelete, map, [key]);
+  apply(mapSet, map, [key, value]);
+  if ((apply(mapSize, map, []) as number) <= max) return;
+  const oldest = apply(mapIteratorNext, apply(mapKeys, map, []), []) as IteratorResult<string>;
+  if (!oldest.done) apply(mapDelete, map, [oldest.value]);
+}
 
 function rememberListing(a: TrimmedAuction, entity: unknown): SeenListing {
   const previous = apply(mapGet, lastSeenListings, [a.tradeId]) as SeenListing | undefined;
-  if (!previous) {
-    if (++rememberedListings > MAX_REMEMBERED_LISTINGS) {
-      apply(mapClear, lastSeenListings, []);
-      rememberedListings = 1;
-    }
-  }
   // A passive sighting after an act search keeps the entity, and the card
   // ids it gave: it is still the same listing (a relist gets a new tradeId).
   const keep = entity ?? previous?.entity;
@@ -506,7 +529,7 @@ function rememberListing(a: TrimmedAuction, entity: unknown): SeenListing {
     keep === undefined
       ? { buyNow: a.buyNow, resourceIds, assetIds, expiresAt: a.expiresAt }
       : { buyNow: a.buyNow, resourceIds, assetIds, expiresAt: a.expiresAt, entity: keep };
-  apply(mapSet, lastSeenListings, [a.tradeId, seen]);
+  setNewest(lastSeenListings, a.tradeId, seen, MAX_REMEMBERED_LISTINGS);
   return seen;
 }
 
@@ -589,9 +612,11 @@ function entitiesByTradeId(entries: unknown[]): Map<string, unknown> {
   return entities;
 }
 
-function handleBody(url: string, body: unknown, actIssued: boolean): void {
+function handleBody(url: string, path: string, body: unknown, actIssued: boolean, status: number | null): void {
   if (typeof body !== 'string' || body.length === 0) {
-    shapeFailure('empty body');
+    // EA answering with nothing is an EA error (the status, when it could
+    // be read, was a success), not its payload changing shape.
+    eaError('market', status ?? 0, path, 'empty answer');
     return;
   }
 
@@ -599,7 +624,7 @@ function handleBody(url: string, body: unknown, actIssued: boolean): void {
   try {
     payload = parseJson(body);
   } catch {
-    shapeFailure('response was not JSON');
+    shapeFailure('market', 'response was not JSON');
     return;
   }
 
@@ -607,8 +632,12 @@ function handleBody(url: string, body: unknown, actIssued: boolean): void {
   noteCredits(payload);
   const auctionInfo = (payload as Record<string, unknown> | null)?.auctionInfo;
   if (!payload || !Array.isArray(auctionInfo)) {
+    // EA's error envelope (`{ code, reason }`) under a success status is
+    // still EA saying no.
+    const envelope = errorEnvelopeStatus(payload);
+    if (envelope !== null) return eaError('market', envelope, path, 'error envelope');
     // A market call with no auctionInfo is how a payload change first shows up.
-    shapeFailure('no auctionInfo array in response');
+    shapeFailure('market', 'no auctionInfo array in response');
     return;
   }
 
@@ -617,39 +646,68 @@ function handleBody(url: string, body: unknown, actIssued: boolean): void {
     listings = normaliseListings(auctionInfo, skippedEntries('passive'));
   } catch (err) {
     // Entries there, none readable: the same payload change, one level down.
-    shapeFailure(err instanceof Error ? err.message : String(err));
+    shapeFailure('market', err instanceof Error ? err.message : String(err));
     return;
   }
   emitListings(String(url).split('?')[0] ?? url, listings, { kind: 'passive', actIssued });
 }
 
+/** The item list in a trade-pile answer, wherever its envelope keeps it:
+ * `auctionInfo` (the trade pile, a relist), the `items` / `data.*`
+ * envelopes search answers also come in (main/ea-response.ts), a bare
+ * list, or `itemData` (an item move). `auctions`: whether it is a list of
+ * auctions — only those can be a whole transfer list, never an item move's
+ * `itemData`. All of them assumed envelopes (docs/06-extension.md). */
+function pileList(payload: unknown): { list: unknown[]; auctions: boolean } | null {
+  if (Array.isArray(payload)) return { list: payload, auctions: true };
+  const r = payload as Record<string, unknown>;
+  const data = r.data !== null && typeof r.data === 'object' ? (r.data as Record<string, unknown>) : null;
+  const auctionLists = [r.auctionInfo, data?.auctionInfo, r.items, data?.items];
+  for (let i = 0; i < auctionLists.length; i++) if (Array.isArray(auctionLists[i])) return { list: auctionLists[i] as unknown[], auctions: true };
+  if (Array.isArray(r.itemData)) return { list: r.itemData, auctions: false };
+  if (data && Array.isArray(data.itemData)) return { list: data.itemData, auctions: false };
+  return null;
+}
+
 /** A trade-pile response: its items go out as one `tradepile` message
- * (never `auctions`: this is not a search, and nothing is counted). */
-function handlePileBody(path: string, body: unknown, method: string): void {
-  const loud = FULL_PILE_PATH.test(path);
+ * (never `auctions`: this is not a search, and nothing is counted). What
+ * it cannot read never stops anything: content reports a trade-pile shape
+ * change, but no engine stops for it (it only feeds the transfer list
+ * counts and the trade lifecycle). */
+function handlePileBody(path: string, body: unknown, method: string, status: number | null): void {
+  const whole = FULL_PILE_PATH.test(path);
   const failure = (reason: string): void => {
-    if (loud) shapeFailure(`trade pile: ${reason}`);
-    else adapterLog.add(`passive: trade pile ${path.replace(/^.*\/ut\/game\/[^/]+/, '')}: ${reason}`);
+    if (whole) shapeFailure('pile', `trade pile: ${reason}`);
+    else adapterLog.add(`passive: trade pile ${shortPath(path)}: ${reason}`);
   };
+  if (typeof body !== 'string' || body.length === 0) {
+    // The trade pile answering with nothing is EA's error, not a new shape.
+    // A relist or an item move may well answer with nothing at all.
+    if (whole) return eaError('pile', status ?? 0, path, 'empty answer');
+    return failure('empty answer');
+  }
   let payload: unknown;
   try {
-    payload = typeof body === 'string' && body.length > 0 ? parseJson(body) : undefined;
+    payload = parseJson(body);
   } catch {
     payload = undefined;
   }
-  const r = payload !== null && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;
-  if (!r) return failure('response was not a JSON object');
-  lastPileResponse = { path, at: now(), value: r };
-  noteCredits(r);
-  // `auctionInfo` (tradepile, watchlist, trade status) or `itemData` (an
-  // item move): both assumed envelopes.
-  const list = Array.isArray(r.auctionInfo) ? r.auctionInfo : Array.isArray(r.itemData) ? r.itemData : null;
-  if (!list) return failure('no auctionInfo / itemData list in response');
+  if (payload === null || typeof payload !== 'object') return failure('response was not a JSON object');
+  lastPileResponse = { path, at: now(), value: payload };
+  noteCredits(payload);
+  const found = pileList(payload);
+  if (!found) {
+    const envelope = errorEnvelopeStatus(payload);
+    if (envelope !== null) return eaError('pile', envelope, path, 'error envelope');
+    // Key names only (never values), so the next report says what came instead.
+    const keys = Object.keys(payload).slice(0, 12).join(', ') || 'none';
+    return failure(`no auctionInfo / itemData list in response (keys: ${keys})`);
+  }
   let items: TradePileItem[];
   let skipped = 0;
   const logSkipped = skippedEntries('trade pile');
   try {
-    items = normalisePileItems(list, (count) => {
+    items = normalisePileItems(found.list, (count) => {
       skipped = count;
       logSkipped(count);
     });
@@ -662,14 +720,42 @@ function handlePileBody(path: string, body: unknown, method: string): void {
   // empty, since an empty full pile is news too.
   // And only when every entry was read: an unreadable one might be a
   // followed card, which would then be wrongly retired.
-  const full = loud && method.toUpperCase() === 'GET' && Array.isArray(r.auctionInfo) && skipped === 0;
+  const full = whole && method.toUpperCase() === 'GET' && found.auctions && skipped === 0;
   if (items.length > 0 || full) post('tradepile', { url: path, seenAt: now(), items, full });
 }
 
-function shapeFailure(reason: string): void {
+/** A 2xx EA answer whose JSON really changed shape. */
+function shapeFailure(endpoint: 'market' | 'pile', reason: string): void {
   stats.failed++;
   adapterLog.add(`passive: ${reason}`);
-  post('shape', { ...stats, reason });
+  post('shape', { ...stats, reason, endpoint });
+}
+
+/** The last EA error line written to the adapter's log: a run of the same
+ * error (EA rate limiting every search) is logged once, not 50 times over
+ * everything else in the 50-line log. */
+let lastEaErrorLine = '';
+
+/** An EA error on a response the page itself received: any status outside
+ * 2xx, EA's error envelope, or an answer with nothing in it. Posted as
+ * `ea_error` with what kind of error it is (`eaErrorCategory`, in
+ * packages/shared/src/adapter-channel.ts), never as a shape change: EA
+ * saying no (an expired session, a captcha, too many requests, an outage)
+ * is not its payload changing, and reporting it as one stopped the Sniping
+ * Bot on the first error with a misleading "no auctionInfo" reason. */
+function eaError(endpoint: 'market' | 'pile' | 'bid', status: number, path: string, note?: string): void {
+  const category: EaErrorCategory = isOkStatus(status) ? 'other' : eaErrorCategory(status);
+  const line = `passive: ${endpoint} ${shortPath(path)} answered HTTP ${status} (${category}${note ? `, ${note}` : ''})`;
+  if (line !== lastEaErrorLine) {
+    lastEaErrorLine = line;
+    adapterLog.add(line);
+  }
+  post('ea_error', { status, category, endpoint, seenAt: now() });
+}
+
+/** A UTAS path without its `/ut/game/<title>` prefix, for log lines. */
+function shortPath(path: string): string {
+  return path.replace(/^.*\/ut\/game\/[^/]+/, '');
 }
 
 /** What an EA response is: the market, the trader's own trade pile, a buy
@@ -697,11 +783,22 @@ function pathOf(url: string): string {
   }
 }
 
-/** Route one response body the network really delivered. */
-function handleResponse(kind: 'market' | 'pile' | 'bid', url: string, body: unknown, actIssued: boolean, method: string): void {
-  if (kind === 'market') handleBody(url, body, actIssued);
-  else if (kind === 'pile') handlePileBody(pathOf(url), body, method);
+/** Route one response body the network really delivered. `status` is its
+ * HTTP status, or null when it could not be read: then the body alone
+ * decides, as before statuses were read. */
+function handleResponse(kind: 'market' | 'pile' | 'bid', url: string, body: unknown, actIssued: boolean, method: string, status: number | null): void {
+  const path = pathOf(url);
+  // An error status is EA's error, whatever its body holds: never parsed
+  // as a payload, and never a shape change.
+  if (status !== null && !isOkStatus(status)) return eaError(kind, status, path);
+  if (kind === 'market') handleBody(url, path, body, actIssued, status);
+  else if (kind === 'pile') handlePileBody(path, body, method, status);
   else handleBidBody(body);
+}
+
+/** An HTTP status as read through a captured getter, or null. */
+function statusOf(value: unknown): number | null {
+  return typeof value === 'number' && isInteger(value) ? value : null;
 }
 
 /** A buy's answer: only its coin balance is read. */
@@ -724,6 +821,7 @@ const xhrResponseURL = protoGetter(proto, 'responseURL');
 const xhrResponseType = protoGetter(proto, 'responseType');
 const xhrResponseText = protoGetter(proto, 'responseText');
 const xhrResponse = protoGetter(proto, 'response');
+const xhrStatus = protoGetter(proto, 'status');
 function readXhr(getter: ((this: unknown) => unknown) | undefined, xhr: XMLHttpRequest): unknown {
   return getter ? apply(getter, xhr, []) : undefined;
 }
@@ -755,13 +853,20 @@ proto.send = function (this: XMLHttpRequest & { __ledgerUrl?: string; __ledgerMe
           if (!event.isTrusted) return;
           const finalUrl = readXhr(xhrResponseURL, this);
           if (xhrResponseURL && classify(finalUrl) !== kind) return;
+          const url = this.__ledgerUrl as string;
+          const method = this.__ledgerMethod ?? 'GET';
+          const status = statusOf(readXhr(xhrStatus, this));
           const type = readXhr(xhrResponseType, this);
           if (type === '' || type === 'text') {
-            handleResponse(kind, this.__ledgerUrl as string, readXhr(xhrResponseText, this), actIssued, this.__ledgerMethod ?? 'GET');
-          } else if (type === 'json' && readXhr(xhrResponse, this)) {
-            handleResponse(kind, this.__ledgerUrl as string, stringifyJson(readXhr(xhrResponse, this)), actIssued, this.__ledgerMethod ?? 'GET');
+            handleResponse(kind, url, readXhr(xhrResponseText, this), actIssued, method, status);
+          } else if (type === 'json') {
+            // null: an empty (or unparseable) body, filed by its status.
+            const json = readXhr(xhrResponse, this);
+            handleResponse(kind, url, json == null ? '' : stringifyJson(json), actIssued, method, status);
+          } else if (status !== null && !isOkStatus(status)) {
+            eaError(kind, status, pathOf(url));
           } else if (kind === 'market') {
-            shapeFailure('unreadable responseType: ' + type);
+            shapeFailure('market', 'unreadable responseType: ' + type);
           }
         } catch {
           stats.failed++;
@@ -779,6 +884,7 @@ proto.send = function (this: XMLHttpRequest & { __ledgerUrl?: string; __ledgerMe
 const nativeFetch = window.fetch;
 const ResponseProto = typeof Response === 'function' ? Response.prototype : undefined;
 const responseUrl = protoGetter(ResponseProto, 'url');
+const responseStatus = protoGetter(ResponseProto, 'status');
 const responseClone = ResponseProto?.clone;
 const responseText = ResponseProto?.text;
 if (typeof nativeFetch === 'function' && responseClone && responseText) {
@@ -812,9 +918,10 @@ if (typeof nativeFetch === 'function' && responseClone && responseText) {
           // recorded (fail closed).
           const finalUrl = responseUrl ? apply(responseUrl, res, []) : '';
           if (classify(finalUrl) !== kind) return;
+          const status = statusOf(responseStatus ? apply(responseStatus, res, []) : undefined);
           const body = apply(responseText, apply(responseClone, res, []) as Response, []) as Promise<string>;
           apply(promiseThen, body, [
-            (text: string) => handleResponse(kind, url, text, actIssued, method),
+            (text: string) => handleResponse(kind, url, text, actIssued, method, status),
             () => {
               stats.failed++;
             },
@@ -969,15 +1076,11 @@ const MAX_BOUGHT_ITEMS = 500;
  * bought under: the only things `actList` will ever put on the market, so
  * no request, signed or not, can list anything else in the user's club. */
 const boughtItems = new Map<string, unknown>();
-let boughtCount = 0;
 
 function rememberBought(tradeId: string, entity: unknown): void {
   if (entity === undefined) return;
-  if (++boughtCount > MAX_BOUGHT_ITEMS) {
-    apply(mapClear, boughtItems, []);
-    boughtCount = 1;
-  }
-  apply(mapSet, boughtItems, [tradeId, entity]);
+  // Past the cap the oldest buy goes, not every one still waiting to list.
+  setNewest(boughtItems, tradeId, entity, MAX_BOUGHT_ITEMS);
 }
 
 async function actList(requestId: string, tradeId: string, startPrice: number, buyNowPrice: number): Promise<void> {
@@ -1181,15 +1284,57 @@ window.addEventListener('message', (event: MessageEvent) => {
   void handleActRequest(data, msg.mac);
 });
 
+// A userscript manager may inject this file after the web app's own scripts
+// have started (lib/act-auth.ts's `isSafeToHandOff`). Nothing breaks: the
+// probe below, and the recheck after it, pick the service layer up
+// whenever it is (or becomes) there. Only the market calls made before now
+// went unseen. Noted once, for the diagnostics report.
+if (document.readyState !== 'loading' || servicesRoot() !== undefined) {
+  adapterLog.add(`adapter started after the web app (document ${document.readyState}, services ${servicesRoot() === undefined ? 'not yet built' : 'already built'})`);
+}
+
 post('ready', { channel: ADAPTER_CHANNEL });
 runProbeAndReport();
+
+/** How often the adapter says it is alive (`heartbeat`, for content's
+ * watchdog: content/watchdog.ts), whatever the page is doing. */
+const HEARTBEAT_MS = 20_000;
+let lastHeartbeatAt = -Infinity;
+/** Set once the startup poll below has reported the probe. */
+let startupProbeReported = false;
+/** A failing outcome the recheck saw once and has not reported yet. */
+let unconfirmedProbe: string | null = null;
+
 // `window.services` appears some time after document_start, and the page
 // may rebuild it; the probe installs the search hook whenever it runs, and
 // this keeps checking between act calls so the human's first searches are
 // seen too. A few property reads every couple of seconds.
 setTimer(function recheck() {
   try {
-    ensureSearchHook(selectShape(servicesRoot()));
+    const { result } = probe();
+    const key = probeKey(result);
+    // Once the startup report is out, a probe whose outcome changed is
+    // reported rather than left for the next act call: a service layer that
+    // turned up late (a late injection, a slow login) reaches content at
+    // once, and one that went away (a bundle swap) on the next recheck too —
+    // a failure only when it is still failing then, so a page rebuilding
+    // `window.services` never stops the bot.
+    if (!startupProbeReported || key === lastPostedProbe) unconfirmedProbe = null;
+    else if (result.ok || unconfirmedProbe === key) {
+      unconfirmedProbe = null;
+      runProbeAndReport();
+    } else unconfirmedProbe = key;
+  } catch {
+    /* never break the page */
+  }
+  try {
+    // By the clock, not by counting ticks: a background tab runs this
+    // timer far less often than asked.
+    const t = now();
+    if (t - lastHeartbeatAt >= HEARTBEAT_MS) {
+      lastHeartbeatAt = t;
+      post('heartbeat', { at: t });
+    }
   } catch {
     /* never break the page */
   }
@@ -1204,7 +1349,6 @@ setTimer(function recheck() {
 const STARTUP_POLL_MS = 2_000;
 const STARTUP_GIVE_UP_MS = 10 * 60_000;
 const startedAt = now();
-let startupProbeReported = false;
 const startup = setInterval(() => {
   try {
     const expired = now() - startedAt > STARTUP_GIVE_UP_MS;

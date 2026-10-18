@@ -51,6 +51,7 @@ import {
   botGovernorSettings,
   botRiskLevel,
   clampBotSettings,
+  eaErrorCategory,
   roundToPriceStep,
   stepPrice,
 } from '@sl/shared';
@@ -62,6 +63,7 @@ import { Governor } from './governor.js';
 import type { AttemptInput, TradeInput } from './types.js';
 import type { AdapterClient } from '../content/adapter-client.js';
 import type {
+  AdapterEaError,
   BotBudgetState,
   BotDailyUsage,
   BotSettings,
@@ -210,6 +212,8 @@ export type SniperPhase =
   | 'break'
   | 'rest'
   | 'blocked'
+  /** EA is rate limiting or erroring: waiting before the next search. */
+  | 'backoff'
   | 'stopped';
 
 export type SniperStopReason =
@@ -226,7 +230,9 @@ export type SniperStopReason =
   | 'not_entitled'
   | 'other_tab'
   | 'budget_unavailable'
-  | 'search_failing';
+  | 'search_failing'
+  | 'ea_session_ended'
+  | 'ea_verification';
 
 export interface SniperLogEntry {
   id: number;
@@ -288,7 +294,8 @@ export interface SniperState {
 }
 
 export interface SniperDeps {
-  adapter: Pick<AdapterClient, 'search' | 'buy' | 'list' | 'onAuctions' | 'onBuyable' | 'onProbe' | 'onShape'>;
+  adapter: Pick<AdapterClient, 'search' | 'buy' | 'list' | 'onAuctions' | 'onBuyable' | 'onProbe' | 'onShape'> &
+    Partial<Pick<AdapterClient, 'onEaError'>>;
   getFilters: () => SniperFilter[];
   /** What a card sells for on the market now, or null if unknown. Used
    * where the user set no sell price of their own. */
@@ -341,6 +348,11 @@ function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
     signal.addEventListener('abort', done);
   });
 }
+
+/** The first wait after an EA rate limit or server error, and the longest
+ * it doubles to (`Sniper.onEaError`). */
+const EA_BACKOFF_FIRST_MS = 5_000;
+const EA_BACKOFF_MAX_MS = 120_000;
 
 function emptyStats(): SniperStats {
   return {
@@ -411,9 +423,68 @@ export class Sniper {
       if (!status.ok && this.isRunning())
         this.stop('probe_failure', status.reason ?? 'EA app check failed');
     });
-    deps.adapter.onShape((reason) => {
-      if (this.isRunning()) this.stop('shape_mismatch', reason);
+    deps.adapter.onShape((reason, endpoint) => {
+      // The trade pile only feeds the transfer list counts and the sale
+      // tracking: a change there never stops the bot.
+      if (endpoint !== 'pile' && this.isRunning()) this.stop('shape_mismatch', reason);
     });
+    // EA's own errors, which the adapter files by kind (main/adapter.ts):
+    // never a shape change. A clean market answer means EA answers again.
+    deps.adapter.onEaError?.((error) => this.onEaError(error));
+    deps.adapter.onAuctions(() => {
+      this.eaBackoff.stepMs = 0;
+    });
+  }
+
+  // ---- EA errors ------------------------------------------------------------
+
+  /** EA rate limiting or erroring: the next search waits until `until`.
+   * The wait doubles with each such error, from 5 s up to 2 minutes, and
+   * starts over after a clean market answer. `at`: when the last one came,
+   * which excuses the failed search it caused (`eaExcused`). */
+  private eaBackoff = { stepMs: 0, until: 0, at: -Infinity };
+
+  /** What the bot does about an EA error. An expired session or a captcha
+   * stops it, saying what to do; a rate limit or an outage makes it wait,
+   * longer each time, and never stops it. A refusal (a buy someone else got
+   * first) is that buy's own business, and the trade pile — read only for
+   * the transfer list counts and the sale tracking — never stops or slows
+   * it, whatever EA answers there. */
+  private onEaError(error: AdapterEaError): void {
+    if (!this.isRunning() || error.endpoint === 'pile' || error.endpoint === 'other') return;
+    if (error.category === 'session_ended') return this.stop('ea_session_ended');
+    if (error.category === 'verification') return this.stop('ea_verification');
+    if (error.category !== 'rate_limited' && error.category !== 'server_error') return;
+    const now = this.now();
+    const stepMs = this.eaBackoff.stepMs > 0 ? Math.min(this.eaBackoff.stepMs * 2, EA_BACKOFF_MAX_MS) : EA_BACKOFF_FIRST_MS;
+    this.eaBackoff = { stepMs, until: Math.max(this.eaBackoff.until, now + stepMs), at: now };
+    const what = error.category === 'rate_limited' ? 'EA is limiting requests' : 'EA had a server error';
+    this.addLog({ kind: 'blocked', message: `${what} (HTTP ${error.status}): waiting ${Math.round(stepMs / 1000)} s before the next search` });
+    this.deps.onChange();
+  }
+
+  /** Waits out an EA backoff before the next search. True when it waited:
+   * the loop then starts over, re-checking every limit. */
+  private async waitOutEaBackoff(signal: AbortSignal): Promise<boolean> {
+    const ms = this.eaBackoff.until - this.now();
+    if (ms <= 0) return false;
+    await this.wait('backoff', ms, signal);
+    return true;
+  }
+
+  /** Whether a search that failed (`error`, started at `startedAt`) was EA
+   * rate limiting or erroring: it backs off instead of counting toward
+   * MAX_SEARCH_FAILURES_IN_A_ROW, so EA slowing the bot down never stops
+   * it. Normally the adapter's `ea_error` came first; failing that, EA's
+   * status in the error text starts the backoff here. */
+  private eaExcused(error: string, startedAt: number): boolean {
+    if (this.eaBackoff.at >= startedAt) return true;
+    const status = Number(/status (\d{3})/.exec(error)?.[1]);
+    if (!Number.isInteger(status)) return false;
+    const category = eaErrorCategory(status);
+    if (category !== 'rate_limited' && category !== 'server_error') return false;
+    this.onEaError({ status, category, endpoint: 'market', seenAt: this.now() });
+    return true;
   }
 
   // ---- public surface ---------------------------------------------------
@@ -620,7 +691,7 @@ export class Sniper {
       this.stats.searches++;
       searchesSinceBreak++;
       if (!found.ok) {
-        failuresInRow++;
+        if (!this.eaExcused(found.error, startedAt)) failuresInRow++;
         this.addLog({ kind: 'failed', message: `Search "${target.name}" failed: ${found.error}` });
         if (failuresInRow >= MAX_SEARCH_FAILURES_IN_A_ROW) return this.stop('search_failing');
       } else {
@@ -643,6 +714,7 @@ export class Sniper {
    * it waited out a limit, so the loop starts over. */
   private async searchGate(signal: AbortSignal): Promise<'go' | 'wait' | 'stopped'> {
     if (this.applyKillSwitch() || this.applyEntitlement() || this.applyExclusive()) return 'stopped';
+    if (await this.waitOutEaBackoff(signal)) return signal.aborted ? 'stopped' : 'wait';
     const searchWait = this.windowWait(this.searchTimes, this.settings.safety.maxSearchesPerHour);
     if (searchWait > 0) {
       this.addLog({
@@ -1260,4 +1332,6 @@ const STOP_MESSAGES: Record<SniperStopReason, string> = {
   budget_unavailable:
     'the saved hourly limits could not be read (the extension may be restarting) — try Start again in a moment',
   search_failing: 'searches keep failing',
+  ea_session_ended: 'Your EA session ended — log in to the web app again',
+  ea_verification: 'EA wants a verification (captcha) — solve it in the web app, then Start again',
 };

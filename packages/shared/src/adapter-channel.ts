@@ -39,3 +39,41 @@ export function isEaAssetUrl(url: unknown): boolean {
   const host = parsed.hostname.toLowerCase();
   return EA_ASSET_DOMAINS.some((d) => host === d || host.endsWith(`.${d}`));
 }
+
+/**
+ * How the adapter files an EA HTTP error it saw on a market, trade-pile or
+ * buy response (apps/extension `main/adapter.ts`, the `ea_error` message),
+ * so each engine can react the right way: `session_ended` (401: log in to
+ * the web app again), `verification` (458: EA's captcha), `rate_limited`
+ * (429, 512, 521: slow down), `server_error` (any other 5xx), `rejected`
+ * (any other 4xx — 403, 461, 478 and the like: someone else's buy landed
+ * first, not enough coins...), `other` (an empty answer, or a status
+ * outside 4xx/5xx). Zod-free, like the channel name, for the MAIN world.
+ */
+export const EA_ERROR_CATEGORIES = [
+  'session_ended',
+  'verification',
+  'rate_limited',
+  'server_error',
+  'rejected',
+  'other',
+] as const;
+export type EaErrorCategory = (typeof EA_ERROR_CATEGORIES)[number];
+
+/** What an EA error's request was for: a market search, the trade pile (or
+ * a relist or item move), a buy, or anything else. */
+export const EA_ERROR_ENDPOINTS = ['market', 'pile', 'bid', 'other'] as const;
+export type EaErrorEndpoint = (typeof EA_ERROR_ENDPOINTS)[number];
+
+/** The category of an EA HTTP error status (`EA_ERROR_CATEGORIES`). EA's own
+ * codes, as traders report them: 401 an expired session, 458 a verification
+ * (captcha), 429 / 512 / 521 too many requests — 512 and 521 sit in the 5xx
+ * range but are rate limits, not outages. */
+export function eaErrorCategory(status: number): EaErrorCategory {
+  if (status === 401) return 'session_ended';
+  if (status === 458) return 'verification';
+  if (status === 429 || status === 512 || status === 521) return 'rate_limited';
+  if (status >= 500 && status <= 599) return 'server_error';
+  if (status >= 400 && status <= 499) return 'rejected';
+  return 'other';
+}
