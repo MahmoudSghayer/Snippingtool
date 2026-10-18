@@ -149,6 +149,48 @@ describe('extension module: bootstrap/heartbeat + activity batch idempotency', (
     expect(hb.body).not.toContain('heartbeat@example.com');
   });
 
+  // The admin Overview's "Extension versions" donut and the System page's
+  // version chart read extension_installs; bootstrap and heartbeat are the
+  // only calls every install (extension or userscript) makes.
+  it('bootstrap records the install (keyed by device id) and a heartbeat after an upgrade updates the same row', async () => {
+    const accessToken = await registerLoginVerified(app, 'installs@example.com', '198.51.100.14');
+    const bootstrap = await app.inject({
+      method: 'POST',
+      url: '/api/v1/extension/bootstrap',
+      headers: { authorization: `Bearer ${accessToken}` },
+      payload: { device, extensionVersion: '0.1.0.202610100000', buildTarget: 'ledger-auto' },
+    });
+    expect(bootstrap.statusCode).toBe(200);
+    const { deviceId, userId } = bootstrap.json();
+
+    const afterBootstrap = await app.db.query.extensionInstalls.findMany();
+    expect(afterBootstrap).toEqual([
+      expect.objectContaining({
+        installId: deviceId,
+        userId,
+        version: '0.1.0.202610100000',
+        browser: 'chrome',
+        uninstalledAt: null,
+      }),
+    ]);
+
+    const hb = await app.inject({
+      method: 'POST',
+      url: '/api/v1/extension/heartbeat',
+      headers: { authorization: `Bearer ${accessToken}` },
+      payload: { deviceId, extensionVersion: '0.1.0.202610180706', engineState: 'idle' },
+    });
+    expect(hb.statusCode).toBe(200);
+
+    const afterUpgrade = await app.db.query.extensionInstalls.findMany();
+    expect(afterUpgrade).toHaveLength(1);
+    expect(afterUpgrade[0]).toMatchObject({
+      installId: deviceId,
+      version: '0.1.0.202610180706',
+      browser: 'chrome',
+    });
+  });
+
   it('activity batch ingest is idempotent for a byte-identical retried event', async () => {
     const accessToken = await registerLoginVerified(app, 'activity@example.com', '198.51.100.12');
 

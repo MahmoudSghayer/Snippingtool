@@ -700,10 +700,12 @@ export interface paths {
                                 /** Format: date */
                                 cohortWeek: string;
                                 cohortSize: number;
+                                eligibleD7: number;
+                                eligibleD30: number;
                                 retainedD7: number;
                                 retainedD30: number;
-                                retentionD7: number;
-                                retentionD30: number;
+                                retentionD7: number | null;
+                                retentionD30: number | null;
                             }[];
                             extensionInstalls: {
                                 total: number;
@@ -2777,11 +2779,12 @@ export interface paths {
                                     delayed: number;
                                 };
                             };
-                            wsOnlineUsers: number;
+                            wsOnlineUsers: number | null;
                             extensionVersions: {
                                 [key: string]: number;
                             };
-                            errorRateLast5Min: number;
+                            errorRateLast5Min: number | null;
+                            degraded: string[];
                         };
                     };
                 };

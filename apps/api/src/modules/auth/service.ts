@@ -3,7 +3,7 @@
 // easy to unit-test in isolation; modules/auth/index.ts wires these to
 // routes.
 
-import { devices, users, type Database, type User } from '@sl/db';
+import { devices, userActivity, users, type Database, type User } from '@sl/db';
 import {
   TERMS_VERSION,
   type DeviceFingerprint,
@@ -200,6 +200,7 @@ export async function completeLogin(
   device: DeviceFingerprint,
   ip: string | null,
   userAgent: string | null,
+  options: { mfaUsed?: boolean } = {},
 ): Promise<Extract<LoginResponse, { status: 'ok' }>> {
   const { id: deviceId } = await findOrRegisterDevice(ctx.db, user.id, device, ip);
   const entitlements = await ctx.entitlements.getEntitlements(user.id);
@@ -250,12 +251,45 @@ export async function completeLogin(
       .catch((err) => ctx.log?.warn({ err }, 'ip-activity monitoring failed (non-fatal)'));
   }
 
+  await recordLoginActivity(ctx, {
+    userId: user.id,
+    deviceId,
+    ip,
+    mfaUsed: options.mfaUsed ?? false,
+  });
+
   return {
     status: 'ok',
     accessToken,
     refreshToken: refresh.token,
     expiresIn: accessTokenTtlSeconds(user.role),
   };
+}
+
+/**
+ * The `login` row `/admin/activity/logins` lists (and the activity series'
+ * `logins` count reads). Written here, server-side, for every completed
+ * sign-in (dashboard and extension alike, with or without 2FA): nothing
+ * else records one, and the extension never sends a `login` activity event,
+ * since it is the API that knows a sign-in succeeded. Best-effort: a failed
+ * insert is logged and never fails the login it describes.
+ */
+async function recordLoginActivity(
+  ctx: AuthContext,
+  login: { userId: string; deviceId: string; ip: string | null; mfaUsed: boolean },
+): Promise<void> {
+  try {
+    await ctx.db.insert(userActivity).values({
+      id: newId(),
+      userId: login.userId,
+      deviceId: login.deviceId,
+      type: 'login',
+      ip: login.ip,
+      metadata: { mfaUsed: login.mfaUsed },
+    });
+  } catch (err) {
+    ctx.log?.warn({ err }, 'login activity row failed (non-fatal)');
+  }
 }
 
 export async function login(
@@ -379,7 +413,9 @@ export async function mfaVerify(
   await maybeReencryptTotpSecret(ctx, user.id, secretBlob);
 
   await ctx.redis.del(verifyTicketKey(input.mfaTicket), attemptsKey);
-  return completeLogin(ctx, user, pending.device, pending.ip, pending.userAgent);
+  return completeLogin(ctx, user, pending.device, pending.ip, pending.userAgent, {
+    mfaUsed: true,
+  });
 }
 
 /** See `reencryptTotpSecret` in lib/crypto.ts. Best-effort — never blocks or
@@ -697,6 +733,7 @@ export async function confirmTotpEnrollment(
           pending2.device,
           pending2.ip,
           pending2.userAgent,
+          { mfaUsed: true },
         );
         return {
           tokens: {

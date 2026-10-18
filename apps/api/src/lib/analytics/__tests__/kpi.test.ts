@@ -8,6 +8,7 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { reseedPlans } from '../../../test/reseed-reference-data.js';
+import { LIVE_INSTALL_WINDOW_DAYS } from '../../extension-installs.js';
 import { newId } from '../../ids.js';
 import {
   getChurn,
@@ -283,45 +284,121 @@ describe('lib/analytics/kpi', () => {
     void from;
   });
 
-  it('getRetentionCohorts: D7/D30 retention by signup week, exact-day activity match', async () => {
+  it('getRetentionCohorts: unbounded D7/D30 retention by signup week (any activity on or after day N)', async () => {
     // 2024-01-01 is a Monday.
     const week = '2024-01-01';
     const u1CreatedAt = new Date('2024-01-01T10:00:00Z');
     const u2CreatedAt = new Date('2024-01-03T08:00:00Z');
     const u3CreatedAt = new Date('2024-01-01T10:00:00Z');
+    const u4CreatedAt = new Date('2024-01-02T12:00:00Z');
 
     const u1 = await createUser(db, 'retention-1@example.com', u1CreatedAt);
     const u2 = await createUser(db, 'retention-2@example.com', u2CreatedAt);
     const u3 = await createUser(db, 'retention-3@example.com', u3CreatedAt);
+    const u4 = await createUser(db, 'retention-4@example.com', u4CreatedAt);
 
-    // u1: active exactly on day+7 and day+30 -> retained both.
+    const DAY = 86_400_000;
     await db.insert(userActivity).values([
+      // u1: back on day 9 (not day 7 itself) and on day 45 -> retained at
+      // both D7 and D30 under the "on or after" rule.
       {
         id: newId(),
         userId: u1,
         type: 'heartbeat',
-        occurredAt: new Date(u1CreatedAt.getTime() + 7 * 86_400_000 + 5 * 3_600_000),
+        occurredAt: new Date(u1CreatedAt.getTime() + 9 * DAY),
       },
       {
         id: newId(),
         userId: u1,
         type: 'heartbeat',
-        occurredAt: new Date(u1CreatedAt.getTime() + 30 * 86_400_000 + 2 * 3_600_000),
+        occurredAt: new Date(u1CreatedAt.getTime() + 45 * DAY),
+      },
+      // u2: active on day 10 only -> D7 yes, D30 no.
+      {
+        id: newId(),
+        userId: u2,
+        type: 'login',
+        occurredAt: new Date(u2CreatedAt.getTime() + 10 * DAY),
+      },
+      // u3: active only on signup day and day 6 -> neither.
+      {
+        id: newId(),
+        userId: u3,
+        type: 'heartbeat',
+        occurredAt: new Date(u3CreatedAt.getTime() + 3_600_000),
+      },
+      {
+        id: newId(),
+        userId: u3,
+        type: 'heartbeat',
+        occurredAt: new Date(u3CreatedAt.getTime() + 6 * DAY),
       },
     ]);
-    // u2, u3: no activity at all -> not retained.
+    // u4: no activity at all -> not retained.
 
-    const cohorts = await getRetentionCohorts(db, { from: '2024-01-01', to: '2024-01-07' });
+    // Long after the cohort: every member is eligible at D7 and D30.
+    const cohorts = await getRetentionCohorts(
+      db,
+      { from: '2024-01-01', to: '2024-01-07' },
+      new Date('2024-06-01T00:00:00Z'),
+    );
     expect(cohorts).toHaveLength(1);
     const cohort = cohorts[0]!;
     expect(cohort.cohortWeek).toBe(week);
-    expect(cohort.cohortSize).toBe(3);
-    expect(cohort.retainedD7).toBe(1);
-    expect(cohort.retainedD30).toBe(1);
-    expect(cohort.retentionD7).toBeCloseTo(1 / 3, 10);
-    expect(cohort.retentionD30).toBeCloseTo(1 / 3, 10);
-    void u2;
-    void u3;
+    expect(cohort.cohortSize).toBe(4);
+    expect(cohort.eligibleD7).toBe(4);
+    expect(cohort.eligibleD30).toBe(4);
+    expect(cohort.retainedD7).toBe(2); // u1, u2
+    expect(cohort.retainedD30).toBe(1); // u1
+    expect(cohort.retentionD7).toBeCloseTo(2 / 4, 10);
+    expect(cohort.retentionD30).toBeCloseTo(1 / 4, 10);
+    void u4;
+  });
+
+  it('getRetentionCohorts: null (not 0) for a cohort too young to measure; partial cohorts count only members old enough', async () => {
+    const DAY = 86_400_000;
+    const now = new Date('2024-03-20T12:00:00Z'); // a Wednesday
+    // Week of 2024-03-18: signed up 2 days ago -> nobody has reached day 7.
+    const young = await createUser(db, 'young@example.com', new Date(now.getTime() - 2 * DAY));
+    // Week of 2024-03-11: one member 9 days old (eligible at D7), one 5 days
+    // old (not yet) — and nobody has reached D30.
+    const oldEnough = await createUser(
+      db,
+      'nine-days@example.com',
+      new Date(now.getTime() - 9 * DAY),
+    );
+    await createUser(db, 'five-days@example.com', new Date(now.getTime() - 5 * DAY));
+
+    await db.insert(userActivity).values([
+      { id: newId(), userId: young, type: 'heartbeat', occurredAt: new Date(now.getTime() - DAY) },
+      {
+        id: newId(),
+        userId: oldEnough,
+        type: 'heartbeat',
+        occurredAt: new Date(now.getTime() - DAY),
+      },
+    ]);
+
+    const cohorts = await getRetentionCohorts(db, { from: '2024-03-01', to: '2024-03-20' }, now);
+    expect(cohorts.map((c) => c.cohortWeek)).toEqual(['2024-03-11', '2024-03-18']);
+
+    const [partial, tooYoung] = cohorts;
+    expect(partial).toMatchObject({
+      cohortSize: 2,
+      eligibleD7: 1,
+      retainedD7: 1,
+      retentionD7: 1,
+      eligibleD30: 0,
+      retainedD30: 0,
+      retentionD30: null,
+    });
+    expect(tooYoung).toMatchObject({
+      cohortSize: 1,
+      eligibleD7: 0,
+      retentionD7: null,
+      eligibleD30: 0,
+      retentionD30: null,
+    });
   });
 
   it('getExtensionInstalls / getVersionDistribution: only live (not-uninstalled) installs count', async () => {
@@ -344,5 +421,43 @@ describe('lib/analytics/kpi', () => {
 
     const versions = await getVersionDistribution(db);
     expect(versions).toEqual({ '1.2.0': 2, '1.1.0': 1 });
+  });
+
+  it('getExtensionInstalls / getVersionDistribution: an install not seen for LIVE_INSTALL_WINDOW_DAYS drops out', async () => {
+    const now = new Date('2026-10-18T12:00:00Z');
+    const daysAgo = (d: number) => new Date(now.getTime() - d * 86_400_000);
+    await db.insert(extensionInstalls).values([
+      {
+        id: newId(),
+        installId: 'fresh',
+        version: '0.1.0.2',
+        browser: 'chrome',
+        firstSeen: daysAgo(40),
+        lastSeen: daysAgo(1),
+      },
+      {
+        id: newId(),
+        installId: 'edge-of-window',
+        version: '0.1.0.2',
+        browser: 'edge',
+        firstSeen: daysAgo(40),
+        lastSeen: daysAgo(LIVE_INSTALL_WINDOW_DAYS - 1),
+      },
+      // Last reported before the window: a browser that stopped using it.
+      {
+        id: newId(),
+        installId: 'gone',
+        version: '0.1.0.1',
+        browser: 'chrome',
+        firstSeen: daysAgo(60),
+        lastSeen: daysAgo(LIVE_INSTALL_WINDOW_DAYS + 1),
+      },
+    ]);
+
+    expect(await getVersionDistribution(db, now)).toEqual({ '0.1.0.2': 2 });
+    expect(await getExtensionInstalls(db, now)).toEqual({
+      total: 2,
+      byBrowser: { chrome: 1, edge: 1 },
+    });
   });
 });

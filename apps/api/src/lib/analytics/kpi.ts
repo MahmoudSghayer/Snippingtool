@@ -1,9 +1,9 @@
 // Platform-wide KPI overview: total/active/online users, revenue, MRR/ARR,
-// trial->paid conversion, D7/D30 cohort retention, churn, extension
-// installs and version distribution. Every formula here is the single
-// source of truth for docs/08-analytics.md's "KPI formulas" table — read
-// that doc alongside this file for the plain-English description of each
-// one. Pure functions over Drizzle + (for online users) the existing WS
+// trial->paid conversion, D7/D30 cohort retention (unbounded), churn,
+// extension installs and version distribution. Every formula here is the
+// single source of truth for docs/08-analytics.md's "KPI formulas" table —
+// read that doc alongside this file for the plain-English description of
+// each one. Pure functions over Drizzle + (for online users) the existing WS
 // presence Redis helper; no mutation, no interpolated `sql` templates.
 
 import {
@@ -17,9 +17,23 @@ import {
   vMrr,
   type Database,
 } from '@sl/db';
-import { and, count, countDistinct, eq, gte, inArray, isNull, lt, lte, ne, sum } from 'drizzle-orm';
+import {
+  and,
+  count,
+  countDistinct,
+  eq,
+  gte,
+  inArray,
+  isNull,
+  lt,
+  lte,
+  max,
+  ne,
+  sum,
+} from 'drizzle-orm';
 
 import { countOnline } from '../../ws/presence.js';
+import { liveExtensionInstallsWhere } from '../extension-installs.js';
 
 import { endOfDayUtc, formatDayUtc, parseDayUtc, weekBucketKey } from './dates.js';
 
@@ -204,21 +218,43 @@ export async function getChurn(db: Database, params: KpiRangeParams): Promise<Ch
 export interface RetentionCohort {
   cohortWeek: string;
   cohortSize: number;
+  /** Cohort members whose signup is at least 7 / 30 days before now — the
+   * only ones who could have come back by then, and the rate's
+   * denominator. */
+  eligibleD7: number;
+  eligibleD30: number;
   retainedD7: number;
   retainedD30: number;
-  retentionD7: number;
-  retentionD30: number;
+  /** `retained / eligible`; `null` while no member of the cohort is old
+   * enough to be measured (a cohort too young is "not known yet", not 0%). */
+  retentionD7: number | null;
+  retentionD30: number | null;
 }
 
 /**
- * D7/D30 retention by signup week: for every ISO week (Monday-anchored,
- * UTC) whose users signed up within [from, to], the fraction of that
- * cohort with at least one `user_activity` row on the exact calendar day
- * `signup_day + 7` (D7) / `signup_day + 30` (D30).
+ * D7/D30 retention by signup week, **unbounded** ("on or after day N"): for
+ * every ISO week (Monday-anchored, UTC) whose users signed up within
+ * [from, to], a member is *retained at DN* when they have at least one
+ * `user_activity` row (heartbeat, login, settings change, error report, …)
+ * at or after `created_at + N × 24h`.
+ *
+ * Unbounded rather than exact-day ("active on day N itself") because the
+ * user base is small: one trader who skips the game on exactly day 7 but
+ * plays on day 8 is retained, which is what the chart is for, and a cohort
+ * of a handful of users no longer reads as a flat 0% line.
+ *
+ * Only members who are at least N days old *now* count (`eligibleDN`, the
+ * denominator); a cohort with none yet reports `retentionDN = null` rather
+ * than 0, so a young cohort shows as "not measurable yet", not "lost".
+ *
+ * One grouped query (each member's latest activity) instead of loading
+ * every activity row: "any activity at or after T" is "latest activity
+ * >= T".
  */
 export async function getRetentionCohorts(
   db: Database,
   params: KpiRangeParams,
+  now: Date = new Date(),
 ): Promise<RetentionCohort[]> {
   const cohortUsers = await db.query.users.findMany({
     where: and(
@@ -230,16 +266,28 @@ export async function getRetentionCohorts(
   });
   if (cohortUsers.length === 0) return [];
 
-  const userIds = cohortUsers.map((u) => u.id);
-  const activityRows = await db.query.userActivity.findMany({
-    where: inArray(userActivity.userId, userIds),
-    columns: { userId: true, occurredAt: true },
-  });
-  const activityByUser = new Map<string, Date[]>();
-  for (const a of activityRows) {
-    const list = activityByUser.get(a.userId) ?? [];
-    list.push(a.occurredAt);
-    activityByUser.set(a.userId, list);
+  const earliestSignup = cohortUsers.reduce(
+    (min, u) => Math.min(min, u.createdAt.getTime()),
+    Number.POSITIVE_INFINITY,
+  );
+  const lastActivityRows = await db
+    .select({ userId: userActivity.userId, lastActiveAt: max(userActivity.occurredAt) })
+    .from(userActivity)
+    .where(
+      and(
+        inArray(
+          userActivity.userId,
+          cohortUsers.map((u) => u.id),
+        ),
+        // No member can be retained by activity before their own day 7, so
+        // older rows (and partitions) are never read.
+        gte(userActivity.occurredAt, new Date(earliestSignup + 7 * DAY_MS)),
+      ),
+    )
+    .groupBy(userActivity.userId);
+  const lastActiveByUser = new Map<string, number>();
+  for (const r of lastActivityRows) {
+    if (r.lastActiveAt) lastActiveByUser.set(r.userId, r.lastActiveAt.getTime());
   }
 
   const byWeek = new Map<string, Array<{ id: string; createdAt: Date }>>();
@@ -250,55 +298,73 @@ export async function getRetentionCohorts(
     byWeek.set(week, list);
   }
 
+  const nowMs = now.getTime();
   const results: RetentionCohort[] = [];
   for (const [week, cohort] of [...byWeek.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-    let retainedD7 = 0;
-    let retainedD30 = 0;
+    const d7 = { eligible: 0, retained: 0 };
+    const d30 = { eligible: 0, retained: 0 };
     for (const u of cohort) {
-      const activities = activityByUser.get(u.id) ?? [];
-      const d7Start = u.createdAt.getTime() + 7 * DAY_MS;
-      const d30Start = u.createdAt.getTime() + 30 * DAY_MS;
-      if (activities.some((t) => t.getTime() >= d7Start && t.getTime() < d7Start + DAY_MS))
-        retainedD7++;
-      if (activities.some((t) => t.getTime() >= d30Start && t.getTime() < d30Start + DAY_MS))
-        retainedD30++;
+      const lastActive = lastActiveByUser.get(u.id);
+      for (const [days, tally] of [
+        [7, d7],
+        [30, d30],
+      ] as const) {
+        const dayN = u.createdAt.getTime() + days * DAY_MS;
+        if (dayN > nowMs) continue;
+        tally.eligible++;
+        if (lastActive !== undefined && lastActive >= dayN) tally.retained++;
+      }
     }
     results.push({
       cohortWeek: week,
       cohortSize: cohort.length,
-      retainedD7,
-      retainedD30,
-      retentionD7: cohort.length > 0 ? retainedD7 / cohort.length : 0,
-      retentionD30: cohort.length > 0 ? retainedD30 / cohort.length : 0,
+      eligibleD7: d7.eligible,
+      eligibleD30: d30.eligible,
+      retainedD7: d7.retained,
+      retainedD30: d30.retained,
+      retentionD7: d7.eligible > 0 ? d7.retained / d7.eligible : null,
+      retentionD30: d30.eligible > 0 ? d30.retained / d30.eligible : null,
     });
   }
   return results;
 }
 
-/** Live (not-uninstalled) extension installs, total and by browser. */
+/** Live extension installs (not uninstalled, seen within the last
+ * `LIVE_INSTALL_WINDOW_DAYS` — lib/extension-installs.ts), total and by
+ * browser. Rows are written by `/extension/bootstrap` and `/heartbeat`. */
 export async function getExtensionInstalls(
   db: Database,
+  now: Date = new Date(),
 ): Promise<{ total: number; byBrowser: Record<string, number> }> {
-  const rows = await db.query.extensionInstalls.findMany({
-    where: isNull(extensionInstalls.uninstalledAt),
-    columns: { browser: true },
-  });
+  const rows = await db
+    .select({ browser: extensionInstalls.browser, n: count() })
+    .from(extensionInstalls)
+    .where(liveExtensionInstallsWhere(now))
+    .groupBy(extensionInstalls.browser);
   const byBrowser: Record<string, number> = {};
+  let total = 0;
   for (const r of rows) {
     const b = r.browser ?? 'unknown';
-    byBrowser[b] = (byBrowser[b] ?? 0) + 1;
+    byBrowser[b] = (byBrowser[b] ?? 0) + r.n;
+    total += r.n;
   }
-  return { total: rows.length, byBrowser };
+  return { total, byBrowser };
 }
 
-/** Version distribution across live (not-uninstalled) extension installs. */
-export async function getVersionDistribution(db: Database): Promise<Record<string, number>> {
-  const rows = await db.query.extensionInstalls.findMany({
-    where: isNull(extensionInstalls.uninstalledAt),
-    columns: { version: true },
-  });
+/** Version distribution across the same live install set. An install that
+ * upgraded is counted once, under its current version (one row per
+ * install, see lib/extension-installs.ts). */
+export async function getVersionDistribution(
+  db: Database,
+  now: Date = new Date(),
+): Promise<Record<string, number>> {
+  const rows = await db
+    .select({ version: extensionInstalls.version, n: count() })
+    .from(extensionInstalls)
+    .where(liveExtensionInstallsWhere(now))
+    .groupBy(extensionInstalls.version);
   const dist: Record<string, number> = {};
-  for (const r of rows) dist[r.version] = (dist[r.version] ?? 0) + 1;
+  for (const r of rows) dist[r.version] = r.n;
   return dist;
 }
 

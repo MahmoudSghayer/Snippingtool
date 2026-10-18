@@ -1,7 +1,7 @@
 export interface ChartTooltipProps {
   active?: boolean;
   label?: string | number;
-  payload?: { name?: string; value?: number; color?: string }[];
+  payload?: { name?: string; value?: number | null; color?: string }[];
   valueFormatter?: (value: number) => string;
 }
 
@@ -18,9 +18,10 @@ export function ChartTooltip({ active, label, payload, valueFormatter }: ChartTo
             <span className="size-2 rounded-full" style={{ backgroundColor: entry.color }} />
             <span className="text-(--sl-fg-muted)">{entry.name}</span>
             <span className="ml-auto font-mono tabular-nums text-(--sl-fg)">
+              {/* A null point (no value for this bucket) reads as a dash, not blank. */}
               {typeof entry.value === 'number' && valueFormatter
                 ? valueFormatter(entry.value)
-                : entry.value}
+                : (entry.value ?? '—')}
             </span>
           </div>
         ))}

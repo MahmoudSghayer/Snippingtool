@@ -95,14 +95,19 @@ export const kpiOverviewSchema = z.object({
     churned: z.number().int().min(0),
     rate: z.number().min(0).max(1),
   }),
+  /** Unbounded D7/D30 retention per signup week (docs/08-analytics.md):
+   * `retentionDN = retainedDN / eligibleDN`, `null` while no member of the
+   * cohort is N days old yet. */
   retention: z.array(
     z.object({
       cohortWeek: z.string().date(),
       cohortSize: z.number().int().min(0),
+      eligibleD7: z.number().int().min(0),
+      eligibleD30: z.number().int().min(0),
       retainedD7: z.number().int().min(0),
       retainedD30: z.number().int().min(0),
-      retentionD7: z.number().min(0).max(1),
-      retentionD30: z.number().min(0).max(1),
+      retentionD7: z.number().min(0).max(1).nullable(),
+      retentionD30: z.number().min(0).max(1).nullable(),
     }),
   ),
   extensionInstalls: z.object({

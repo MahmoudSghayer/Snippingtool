@@ -9,7 +9,7 @@ import {
   StatTile,
   type DateRange,
 } from '@sl/ui';
-import { ChartLegend, DonutChart, LineChart, seriesColor, seriesLegendItems } from '@sl/ui/charts';
+import { BarChart, ChartLegend, DonutChart, seriesColor, seriesLegendItems } from '@sl/ui/charts';
 import { useQuery } from '@tanstack/react-query';
 import { Activity, AlertTriangle, DollarSign, TrendingUp, Users } from 'lucide-react';
 import { useState } from 'react';
@@ -45,11 +45,15 @@ export function OverviewPage() {
     { key: 'd30', label: 'D30 retention %', colorIndex: 1 },
   ];
 
+  // `null` = no member of that signup week is 7 (30) days old yet: the bar
+  // is left out rather than drawn at 0%.
+  const toPercent = (rate: number | null) => (rate === null ? null : Math.round(rate * 1000) / 10);
   const retentionData = (overview?.retention ?? []).map((r) => ({
     bucket: r.cohortWeek,
-    d7: Math.round(r.retentionD7 * 1000) / 10,
-    d30: Math.round(r.retentionD30 * 1000) / 10,
+    d7: toPercent(r.retentionD7),
+    d30: toPercent(r.retentionD30),
   }));
+  const retentionMeasurable = retentionData.some((r) => r.d7 !== null || r.d30 !== null);
 
   const versionData = Object.entries(overview?.versionDistribution ?? {}).map(
     ([key, value], i) => ({
@@ -109,7 +113,7 @@ export function OverviewPage() {
           icon={<Activity className="size-4" />}
         />
         <StatTile
-          label="Errors (1m)"
+          label="Extension errors (1m)"
           value={tick?.errorsLastMinute ?? '—'}
           icon={<AlertTriangle className="size-4" />}
           invertDeltaTone
@@ -119,21 +123,30 @@ export function OverviewPage() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <ChartCard
           title="Retention"
-          description="7-day and 30-day cohort retention."
+          description="Share of each signup week active again 7 / 30 days or more after signing up."
           className="lg:col-span-2"
           legend={<ChartLegend items={seriesLegendItems(retentionSeries)} />}
           isLoading={overviewQuery.isLoading}
-          isEmpty={!overviewQuery.isLoading && !overviewQuery.isError && retentionData.length === 0}
+          isEmpty={!overviewQuery.isLoading && (overviewQuery.isError || !retentionMeasurable)}
           emptyMessage={
-            overviewQuery.isError ? "Couldn't load overview analytics." : 'No cohort data yet.'
+            overviewQuery.isError
+              ? "Couldn't load overview analytics."
+              : retentionData.length === 0
+                ? 'No sign-ups in this range.'
+                : 'Sign-ups in this range are under 7 days old: retention is not measurable yet.'
           }
         >
-          <LineChart data={retentionData} xKey="bucket" series={retentionSeries} />
+          <BarChart
+            data={retentionData}
+            xKey="bucket"
+            series={retentionSeries}
+            valueFormatter={(v) => `${v}%`}
+          />
         </ChartCard>
 
         <ChartCard
           title="Extension versions"
-          description="Active-device version distribution."
+          description="Installs that reported in over the last 14 days, by version."
           legend={
             <ChartLegend
               items={versionData.map((d) => ({

@@ -11,6 +11,10 @@ name: Production ops
 #                build, migrate, restart, health check)
 #   admin-login  set the (single) admin account's password, unlock it and
 #                clear its 2FA
+#   admin-panels what the admin dashboard's Overview/Activity/System pages
+#                are drawn from (row counts, latest timestamps, versions) and
+#                the API's failed /api/v1/admin/ requests; aggregates only,
+#                changes nothing
 #
 # This repository and its logs are public: never pass a password here. For
 # admin-login, `password_hash` takes the new password's argon2id hash, e.g.
@@ -22,7 +26,7 @@ on:
       action:
         description: What to do
         type: choice
-        options: [diagnose, deploy, admin-login, account, session-report, ea-probe]
+        options: [diagnose, deploy, admin-login, account, session-report, ea-probe, admin-panels]
         required: true
       commit:
         description: "deploy: commit on main to deploy (empty = this run's commit)"
