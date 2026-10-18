@@ -1,9 +1,13 @@
 // /api/v1/admin/activity/* — activity monitoring: logins, searches, snipes,
 // errors, devices, IPs. Date range + cursor on every list.
+// /api/v1/admin/bot-performance — the Nova AI bot's speed, race results and
+// where its time goes over a range (lib/analytics/bot-performance.ts).
 
 import { devices, ipActivity, searchActivity, snipingActivity, userActivity } from '@sl/db';
 import {
   adminActivityDevicesSummarySchema,
+  adminBotPerformanceQuerySchema,
+  adminBotPerformanceResponseSchema,
   adminErrorActivityRowSchema,
   adminFilterChangeActivityRowSchema,
   adminIpActivityRowSchema,
@@ -11,11 +15,13 @@ import {
   adminSearchActivityRowSchema,
   adminSnipeActivityRowSchema,
   paginatedResponseSchema,
+  resolveBotPerformanceRange,
 } from '@sl/shared';
 import { and, desc, eq, gte, lte, lt } from 'drizzle-orm';
 import fp from 'fastify-plugin';
 import { z } from 'zod';
 
+import { getBotPerformance } from '../../lib/analytics/bot-performance.js';
 import { decodeCursor, encodeCursor } from '../../lib/pagination.js';
 
 import type { FastifyInstance } from 'fastify';
@@ -268,6 +274,23 @@ export default fp(
           requestCount: r.requestCount,
           flagged: r.flagged,
         }));
+      },
+    );
+
+    // Defaults to the last 24 hours; at most BOT_PERFORMANCE_MAX_RANGE_DAYS.
+    app.get(
+      '/api/v1/admin/bot-performance',
+      {
+        onRequest: [gate],
+        schema: {
+          tags: ['admin'],
+          querystring: adminBotPerformanceQuerySchema,
+          response: { 200: adminBotPerformanceResponseSchema },
+        },
+      },
+      async (request) => {
+        const { from, to } = resolveBotPerformanceRange(request.query);
+        return getBotPerformance(fastify.db, { from, to, userId: request.query.userId });
       },
     );
   },

@@ -19,4 +19,9 @@ describe('StatTile', () => {
     const delta = screen.getByText('+50%');
     expect(delta.className).toContain('sl-negative');
   });
+
+  it('explains the number in a hint under the value', () => {
+    render(<StatTile label="Win rate" value="50%" hint="Races won out of races decided." />);
+    expect(screen.getByText('Races won out of races decided.')).toBeInTheDocument();
+  });
 });

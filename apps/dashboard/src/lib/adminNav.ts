@@ -11,6 +11,7 @@ export const ADMIN_NAV_PERMISSIONS = {
   'admin-users': ['users.read'],
   'admin-profits': ['analytics.read'],
   'admin-activity': ['analytics.read'],
+  'admin-performance': ['analytics.read'],
   'admin-system': ['system.read'],
   'admin-audit': ['audit.read'],
   // The page shows both plan-mix analytics and (deliverable 2) the live

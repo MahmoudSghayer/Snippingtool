@@ -209,6 +209,16 @@ const adminActivityRoute = createRoute({
   beforeLoad: () => requireAdminNavPermission('admin-activity'),
 });
 
+const adminPerformanceRoute = createRoute({
+  getParentRoute: () => adminLayoutRoute,
+  path: '/performance',
+  component: lazyRouteComponent(
+    () => import('@/pages/admin/BotPerformancePage.js'),
+    'BotPerformancePage',
+  ),
+  beforeLoad: () => requireAdminNavPermission('admin-performance'),
+});
+
 const adminSystemRoute = createRoute({
   getParentRoute: () => adminLayoutRoute,
   path: '/system',
@@ -315,6 +325,7 @@ export const routeTree = rootRoute.addChildren([
         adminUsersRoute,
         adminProfitsRoute,
         adminActivityRoute,
+        adminPerformanceRoute,
         adminSystemRoute,
         adminAuditRoute,
         adminSubscriptionsRoute,
@@ -367,6 +378,7 @@ const PAGE_TITLES: [string, string][] = [
   ['/admin/users', 'Admin · Users'],
   ['/admin/profits', 'Admin · Profits'],
   ['/admin/activity', 'Admin · Activity'],
+  ['/admin/performance', 'Admin · Bot performance'],
   ['/admin/system', 'Admin · System'],
   ['/admin/audit', 'Admin · Audit log'],
   ['/admin/subscriptions', 'Admin · Subscriptions'],

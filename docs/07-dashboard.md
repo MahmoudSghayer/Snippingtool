@@ -30,9 +30,10 @@ analytics pages' charts.
 ```
 /login, /register, /verify-email, /forgot-password, /reset-password   (public)
 /dashboard, /trades, /analytics, /subscriptions, /settings            (any authenticated user)
-/admin, /admin/users, /admin/profits, /admin/activity, /admin/system,
-/admin/audit, /admin/subscriptions, /admin/coupons, /admin/plans,
-/admin/flags, /admin/bans, /admin/feature-toggles, /admin/config       (role: admin)
+/admin, /admin/users, /admin/profits, /admin/activity,
+/admin/performance, /admin/system, /admin/audit, /admin/subscriptions,
+/admin/coupons, /admin/plans, /admin/flags, /admin/bans,
+/admin/feature-toggles, /admin/config                                  (role: admin)
 /dev/components                                                        (dev build only)
 ```
 
@@ -73,6 +74,7 @@ Admin pages and the endpoints/permissions they exercise (full detail in
 | `/admin/users`           | `GET/POST/PATCH /admin/users`, `.../suspend`, `.../unsuspend`, `.../reset-password`, `.../force-logout`, `GET/POST /admin/bans`, `.../lift`, `GET /admin/flags`, `POST /admin/subscriptions/{userId}/activate`, `.../grant-lifetime` | `users.read`/`.write`/`.create`/`.suspend`/`.reset_password`/`.force_logout`             |
 | `/admin/profits`         | `GET /admin/analytics/profits`, `.../profits/leaderboard`                                                                                                                                                                            | `analytics.read`                                                                         |
 | `/admin/activity`        | `GET /admin/activity/{logins,searches,snipes,errors,devices,ips}`                                                                                                                                                                    | `analytics.read`                                                                         |
+| `/admin/performance`     | `GET /admin/bot-performance`                                                                                                                                                                                                         | `analytics.read`                                                                         |
 | `/admin/system`          | `GET /admin/system/health`                                                                                                                                                                                                           | `system.read`                                                                            |
 | `/admin/audit`           | `GET /admin/audit`                                                                                                                                                                                                                   | `audit.read`                                                                             |
 | `/admin/subscriptions`   | `GET /admin/analytics/subscriptions`                                                                                                                                                                                                 | `analytics.read`                                                                         |
@@ -82,6 +84,21 @@ Admin pages and the endpoints/permissions they exercise (full detail in
 | `/admin/bans`            | `GET/POST /admin/bans`, `POST .../{id}/lift`                                                                                                                                                                                         | `users.suspend`/`.ban`                                                                   |
 | `/admin/feature-toggles` | `GET /admin/toggles`, `PATCH .../{key}`                                                                                                                                                                                              | `feature_toggles.write`                                                                  |
 | `/admin/config`          | `GET /admin/config`, `PUT .../{key}`                                                                                                                                                                                                 | `system.read` / `config.write`                                                           |
+
+**Bot performance (`/admin/performance`)**: the Nova AI bot's numbers the
+ops `session-report` used to be pulled for, from `GET /admin/bot-performance`.
+Controls: whose bot (**Me**, the default, is the signed-in admin's own user
+id from the auth store; **All users**; **One user** takes a pasted user id)
+and the range (**Last 24 h**, the default, refreshed every minute; or the
+shared `DateRangePicker` with its 7d/30d presets and a custom range, cut to
+the API's 31-day cap). It shows six stat tiles with a one-line plain-words
+hint each (win rate, searches/min, search time, reaction time, buy round
+trip, lost races), a "Won vs lost" p50/p90 table per timing, "Where the time
+goes" (share of the running time in the search delay, EA backoff, limits,
+breaks, the pause after a buy, and the rest), hourly `AreaChart`s of search
+pace and races won/lost, and an hourly table of the hours with activity. A
+range with no attempts and no pace reports shows an empty state instead.
+Covered by `test/AdminBotPerformancePage.test.tsx`.
 
 **Creating an account (`/admin/users`)**: the page header's "Create
 account" button is rendered only when the caller holds `users.create`
@@ -283,7 +300,9 @@ actions, loading/empty/error states), `Modal`, `Drawer`, `Toast` (sonner),
 `Tooltip`, `DropdownMenu`, `Skeleton`, `EmptyState`, `PageHeader`,
 `Sidebar`, `KpiGrid`, `ChartCard` + `LineChart`/`AreaChart`/`BarChart`/
 `DonutChart`/`Sparkline` (Recharts, one shared palette + `ChartTooltip`),
-`DateRangePicker` (7d/30d/90d/custom presets), `DiffViewer` (audit log
+`DateRangePicker` (7d/30d/90d/custom presets; a page can offer a subset
+with `presets`, and override the selected button with `activePreset`, e.g.
+`null` while its own "Last 24 h" control is active), `DiffViewer` (audit log
 before/after), `CopyField` (license keys, TOTP secrets). Formatters
 (`lib/format.ts`): `formatCoins`, `formatCoinsCompact`, `formatPercent`,
 `formatCurrencyFromCents`, `formatSignedPercent`, `formatDate`,
@@ -295,7 +314,7 @@ visual QA — the substitute for a full Storybook instance.
 ## 8. Testing
 
 - **Unit/component** (`packages/ui/test/*.test.tsx`, `apps/dashboard/test/*.test.{ts,tsx}`,
-  Vitest + Testing Library): `Button`, `StatTile`, `DiffViewer` in
+  Vitest + Testing Library): `Button`, `StatTile`, `DiffViewer`, `DateRangePicker` in
   `packages/ui`; `authStore` (session transitions, including the
   known-permission-gap fallback — §11), `apiClient` (CSRF header
   attachment, 401 → unauthorized-handler wiring, auth-exempt paths), and

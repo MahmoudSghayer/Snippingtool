@@ -245,3 +245,146 @@ export const adminIpActivityRowSchema = z.object({
   flagged: z.boolean(),
 });
 export type AdminIpActivityRow = z.infer<typeof adminIpActivityRowSchema>;
+
+// ---------------------------------------------------------------------------
+// Admin bot performance — `GET /admin/bot-performance`: how fast the Nova AI
+// bot searches and reacts, whether it wins the race for listings, and where
+// its time goes, over a time range (the dashboard's `/admin/performance`).
+// Two sources: `sniping_activity` (one row per buy attempt, with
+// `search_ms`/`reaction_ms`/`latency_ms`) and the bot pace on `heartbeat`
+// rows (`botPaceSchema` above). Formulas in docs/08-analytics.md.
+//
+// Outcomes: won = `success`; lost = `failed` or `too_slow` (someone else's
+// buy landed first); `blocked` = the bot's own limits held it back (no buy
+// was sent, so it never counts toward timings); `error` = EA 429/5xx;
+// `attempted` = timed out with an unknown result.
+// ---------------------------------------------------------------------------
+
+/** The range a query covers when it gives none: the last 24 hours. */
+export const BOT_PERFORMANCE_DEFAULT_RANGE_MS = 24 * 3_600_000;
+/** The longest range one request may cover. */
+export const BOT_PERFORMANCE_MAX_RANGE_DAYS = 31;
+
+/** The instants a bot-performance query covers, both ends inclusive: `to`
+ * defaults to now, `from` to 24 hours before `to`. */
+export function resolveBotPerformanceRange(
+  query: { from?: string; to?: string },
+  now: Date = new Date(),
+): { from: Date; to: Date } {
+  const to = query.to ? new Date(query.to) : now;
+  const from = query.from
+    ? new Date(query.from)
+    : new Date(to.getTime() - BOT_PERFORMANCE_DEFAULT_RANGE_MS);
+  return { from, to };
+}
+
+export const adminBotPerformanceQuerySchema = z
+  .object({
+    from: z.string().datetime().optional(),
+    to: z.string().datetime().optional(),
+    /** One user's bot. Omit for every user. */
+    userId: z.string().guid().optional(),
+  })
+  .strict()
+  .superRefine((query, ctx) => {
+    const { from, to } = resolveBotPerformanceRange(query);
+    if (from.getTime() > to.getTime()) {
+      ctx.addIssue({ code: 'custom', path: ['from'], message: 'from must not be after to' });
+    } else if (to.getTime() - from.getTime() > BOT_PERFORMANCE_MAX_RANGE_DAYS * 86_400_000) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['from'],
+        message: `The range can cover at most ${BOT_PERFORMANCE_MAX_RANGE_DAYS} days`,
+      });
+    }
+  });
+export type AdminBotPerformanceQuery = z.infer<typeof adminBotPerformanceQuerySchema>;
+
+const botMs = z.number().int().min(0).nullable();
+const botCount = z.number().int().min(0);
+const botShare = z.number().min(0).max(1);
+
+/** Median and 90th percentile of one timing, in ms; null with no sample. */
+export const botTimingPercentilesSchema = z.object({ p50: botMs, p90: botMs });
+export type BotTimingPercentiles = z.infer<typeof botTimingPercentilesSchema>;
+
+/** The three timings of a buy attempt, over one group of attempts. */
+export const botAttemptTimingsSchema = z.object({
+  /** Attempts in the group. */
+  attempts: botCount,
+  /** `search_ms`: the search being sent to the listing arriving. */
+  search: botTimingPercentilesSchema,
+  /** `reaction_ms`: the listing arriving to the bot sending its buy. */
+  reaction: botTimingPercentilesSchema,
+  /** `latency_ms`: the buy request's round trip to EA. */
+  buy: botTimingPercentilesSchema,
+});
+export type BotAttemptTimings = z.infer<typeof botAttemptTimingsSchema>;
+
+/** One UTC hour of the range. Every hour is present, zero-filled. */
+export const adminBotPerformanceHourSchema = z.object({
+  /** Start of the hour (UTC). */
+  hour: z.string().datetime(),
+  /** Searches the bot reported in its pace this hour. */
+  searches: botCount,
+  /** searches × 60000 / reported running time; null without pace reports. */
+  searchesPerMinute: z.number().min(0).nullable(),
+  attempts: botCount,
+  won: botCount,
+  lost: botCount,
+  /** Medians over the hour's non-blocked attempts. */
+  searchP50: botMs,
+  reactionP50: botMs,
+  buyP50: botMs,
+});
+export type AdminBotPerformanceHour = z.infer<typeof adminBotPerformanceHourSchema>;
+
+export const adminBotPerformanceResponseSchema = z.object({
+  /** The range covered (inclusive), after defaults. */
+  from: z.string().datetime(),
+  to: z.string().datetime(),
+  /** The one user covered, or null for every user. */
+  userId: z.string().guid().nullable(),
+  summary: z.object({
+    /** Every buy attempt in the range, whatever its outcome. */
+    attempts: botCount,
+    won: botCount,
+    lost: botCount,
+    blocked: botCount,
+    errors: botCount,
+    /** Timed out with an unknown result (`attempted`). */
+    unknown: botCount,
+    /** won / (won + lost); null when neither happened. */
+    winRate: botShare.nullable(),
+    /** From the bot pace: searches sent, those with listings, failed ones. */
+    searches: botCount,
+    searchesWithResults: botCount,
+    failedSearches: botCount,
+    /** searches × 60000 / runningMs; null without pace reports. */
+    searchesPerMinute: z.number().min(0).nullable(),
+    /** The bot's running time its pace reports cover (sum of `windowMs`). */
+    runningMs: botCount,
+  }),
+  /** Over non-blocked attempts: all of them, the won ones, the lost ones. */
+  timings: z.object({
+    overall: botAttemptTimingsSchema,
+    won: botAttemptTimingsSchema,
+    lost: botAttemptTimingsSchema,
+  }),
+  /** Share of the reported running time in each kind of wait: the search
+   * delay, an EA backoff, a limit holding the bot back, a break or rest,
+   * the pause after a buy; `other` is the rest (searching, waiting for EA's
+   * answers, buying). Null without pace reports. */
+  timeSplit: z
+    .object({
+      delay: botShare,
+      backoff: botShare,
+      limit: botShare,
+      break: botShare,
+      cooldown: botShare,
+      other: botShare,
+    })
+    .nullable(),
+  hourly: z.array(adminBotPerformanceHourSchema),
+});
+export type AdminBotPerformanceResponse = z.infer<typeof adminBotPerformanceResponseSchema>;

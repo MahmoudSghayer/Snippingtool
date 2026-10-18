@@ -18,6 +18,7 @@ import {
   Server,
   Sliders,
   Ticket,
+  Timer,
   Users as UsersIcon,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
@@ -62,6 +63,14 @@ const ROUTES: PaletteRoute[] = [
     href: '/admin/activity',
     icon: <Gauge className="size-4" />,
     adminOnly: true,
+  },
+  {
+    key: 'admin-performance',
+    label: 'Admin · Bot performance',
+    href: '/admin/performance',
+    icon: <Timer className="size-4" />,
+    adminOnly: true,
+    keywords: 'bot speed search reaction win rate snipe',
   },
   {
     key: 'admin-system',

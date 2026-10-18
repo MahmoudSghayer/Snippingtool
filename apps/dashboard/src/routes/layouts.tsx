@@ -20,6 +20,7 @@ import {
   Shield,
   Sliders,
   Ticket,
+  Timer,
   UserRound,
   Users as UsersIcon,
 } from 'lucide-react';
@@ -86,6 +87,12 @@ const adminNav = [
     label: 'Activity',
     href: '/admin/activity',
     icon: <Activity className="size-4" />,
+  },
+  {
+    key: 'admin-performance',
+    label: 'Bot performance',
+    href: '/admin/performance',
+    icon: <Timer className="size-4" />,
   },
   {
     key: 'admin-system',
