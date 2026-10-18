@@ -301,12 +301,20 @@ SELECT kind, count(*) AS n, min(value) AS min_value, max(value) AS max_value,
  WHERE user_id = :'uid' AND occurred_at > now() - make_interval(hours => :hours)
  GROUP BY 1 ORDER BY 2 DESC;
 \echo '== other bot events (user_activity: errors, settings changes, other)'
-SELECT type, coalesce(metadata->>'event', metadata->>'kind', metadata->>'reason', '-') AS what,
-       count(*) AS n
+SELECT type, left(metadata::text, 160) AS what, count(*) AS n,
+       to_char(min(occurred_at) AT TIME ZONE :'tz', 'Mon DD HH24:MI') AS first,
+       to_char(max(occurred_at) AT TIME ZONE :'tz', 'Mon DD HH24:MI') AS last
   FROM user_activity
  WHERE user_id = :'uid' AND occurred_at > now() - make_interval(hours => :hours)
    AND type IN ('error', 'settings_change', 'other', 'kill_switch_triggered')
  GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 25;
+\echo '== buy attempts per resource, by outcome and error code'
+SELECT s.resource_id, s.outcome, coalesce(s.error_code, '-') AS error_code, count(*) AS n,
+       percentile_cont(0.5) WITHIN GROUP (ORDER BY s.latency_ms)::int AS p50_ms,
+       round(avg(s.target_price)) AS avg_target, round(avg(s.listed_price)) AS avg_listed
+  FROM sniping_activity s
+ WHERE s.user_id = :'uid' AND s.occurred_at > now() - make_interval(hours => :hours)
+ GROUP BY 1, 2, 3 ORDER BY 4 DESC LIMIT 25;
 \echo '== whole window, every player (top 15 by attempts)'
 SELECT coalesce(c.player, s.resource_id) AS player, count(*) AS attempts,
        count(*) FILTER (WHERE s.outcome = 'success') AS won,
