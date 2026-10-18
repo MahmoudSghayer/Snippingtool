@@ -17,8 +17,9 @@ import { Database, RefreshCw, Server, Wifi } from 'lucide-react';
 import { api } from '@/api/client.js';
 
 /** `/admin/system` — API/DB/queue/WS/extension health, version distribution,
- * error rate, manual refresh. `GET /admin/system/health` composes all of it
- * in one call. */
+ * API 5xx count, manual refresh. `GET /admin/system/health` composes all of
+ * it in one call; a check that fails or times out is listed in `degraded`
+ * and only its own tile/table is empty. */
 export function SystemPage() {
   const healthQuery = useQuery({
     queryKey: ['admin', 'system', 'health'],
@@ -80,12 +81,19 @@ export function SystemPage() {
           value={health?.wsOnlineUsers ?? '—'}
           icon={<Wifi className="size-4" />}
         />
+        {/* A count of API 5xx responses (Redis minute buckets), not a rate. */}
         <StatTile
-          label="Error rate (5m)"
-          value={health ? `${(health.errorRateLast5Min * 100).toFixed(2)}%` : '—'}
+          label="API 5xx errors (5m)"
+          value={health?.errorRateLast5Min ?? '—'}
           invertDeltaTone
         />
       </KpiGrid>
+
+      {health && health.degraded.length > 0 && (
+        <p className="text-xs text-risk-mid" role="status">
+          Some checks didn&apos;t answer in time and show no data: {health.degraded.join(', ')}.
+        </p>
+      )}
 
       <Card>
         <CardHeader>
@@ -157,13 +165,17 @@ export function SystemPage() {
 
       <ChartCard
         title="Extension version distribution"
+        description="Installs that reported in over the last 14 days, by version."
         isLoading={healthQuery.isLoading}
         isEmpty={!healthQuery.isLoading && versionData.length === 0}
+        emptyMessage={
+          healthQuery.isError ? "Couldn't load system health." : 'No installs reported recently.'
+        }
       >
         <BarChart
           data={versionData}
           xKey="bucket"
-          series={[{ key: 'count', label: 'Active devices', colorIndex: 0 }]}
+          series={[{ key: 'count', label: 'Installs', colorIndex: 0 }]}
         />
       </ChartCard>
     </div>

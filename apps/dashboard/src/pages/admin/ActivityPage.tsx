@@ -83,6 +83,17 @@ const errorColumns: ColumnDef<AdminErrorActivityRow, unknown>[] = [
       <span className="text-xs text-ink-2">{String(row.original.metadata.message ?? '—')}</span>
     ),
   },
+  {
+    // Set on every report from POST /extension/errors (which carries no
+    // `code`, so that column is usually empty for them).
+    id: 'version',
+    header: 'Version',
+    cell: ({ row }) => (
+      <span className="font-mono text-xs">
+        {String(row.original.metadata.extensionVersion ?? '—')}
+      </span>
+    ),
+  },
 ];
 
 const searchColumns: ColumnDef<AdminSearchActivityRow, unknown>[] = [
@@ -208,6 +219,7 @@ function ActivityTab<Row extends { id: string }>({
   range,
   columns,
   emptyTitle,
+  emptyDescription,
 }: {
   path:
     | '/api/v1/admin/activity/logins'
@@ -218,6 +230,7 @@ function ActivityTab<Row extends { id: string }>({
   range: DateRange;
   columns: ColumnDef<Row, unknown>[];
   emptyTitle: string;
+  emptyDescription?: string;
 }) {
   const query = useActivity<typeof path, Row>(path, range);
   return (
@@ -230,6 +243,7 @@ function ActivityTab<Row extends { id: string }>({
           isError={query.isError}
           onRetry={() => void query.refetch()}
           emptyTitle={emptyTitle}
+          emptyDescription={emptyDescription}
           getRowId={(row) => row.id}
         />
       </CardContent>
@@ -300,6 +314,7 @@ export function ActivityPage() {
             range={range}
             columns={loginColumns}
             emptyTitle="No logins in this range"
+            emptyDescription="Recorded for every completed sign-in, dashboard or extension. A session kept alive by token refresh is not a new sign-in."
           />
         </TabsContent>
         <TabsContent value="searches">
@@ -316,6 +331,7 @@ export function ActivityPage() {
             range={range}
             columns={filterChangeColumns}
             emptyTitle="No filter changes in this range"
+            emptyDescription="The extension reports one when a trader picks a saved filter in the assist layer. The Nova AI bot's own searches are under Searches."
           />
         </TabsContent>
         <TabsContent value="snipes">
