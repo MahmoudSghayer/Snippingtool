@@ -29,7 +29,17 @@ on:
       action:
         description: What to do
         type: choice
-        options: [diagnose, deploy, admin-login, account, session-report, trader-report, ea-probe, admin-panels]
+        options:
+          [
+            diagnose,
+            deploy,
+            admin-login,
+            account,
+            session-report,
+            trader-report,
+            ea-probe,
+            admin-panels,
+          ]
         required: true
       commit:
         description: "deploy: commit on main to deploy (empty = this run's commit)"
