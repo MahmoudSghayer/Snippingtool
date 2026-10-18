@@ -77,6 +77,15 @@ export function toServerTime(iso: string): string {
   return new Date(at + offsetMs).toISOString();
 }
 
+/** The reverse: a server-clock ISO timestamp (a trade's `boughtAt` from
+ * `/extension/open-trades`) moved onto the local clock, so that once it is
+ * queued again (`toServerTime`) it goes back as the server gave it. */
+export function toLocalTime(iso: string): string {
+  const at = Date.parse(iso);
+  if (!Number.isFinite(at) || offsetMs === 0) return iso;
+  return new Date(at - offsetMs).toISOString();
+}
+
 /** Only for tests. */
 export function resetClockForTests(): void {
   offsetMs = 0;

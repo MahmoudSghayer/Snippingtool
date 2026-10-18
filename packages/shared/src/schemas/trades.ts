@@ -10,6 +10,26 @@ import { timeZoneSchema } from './timezone.js';
 export const TRADE_STATUSES = ['bought', 'listed', 'sold', 'expired', 'unsold'] as const;
 export type TradeStatus = (typeof TRADE_STATUSES)[number];
 
+/** How a sold trade's price is known (`trades.sale_source`, migration
+ * 0040):
+ * - `observed`: the extension saw the listing sold on the trade pile.
+ * - `inferred`: an estimate. A listed card left the trade pile without its
+ *   sale being seen, and EA lets nobody remove a card while its listing is
+ *   live, so it sold, at its buy-now price (apps/extension/src/lib/
+ *   trade-lifecycle.ts).
+ * - `manual`: the trader recorded it on the dashboard.
+ * `null` while a trade is unsold, and for sales stored before 0040. */
+export const SALE_SOURCES = ['observed', 'inferred', 'manual'] as const;
+export type SaleSource = (typeof SALE_SOURCES)[number];
+/** What the extension may claim for a sale it reports: never `manual`. */
+export const REPORTED_SALE_SOURCES = ['observed', 'inferred'] as const;
+
+/** EA's id for the card itself (`itemData.id`): unlike the listing's
+ * `tradeId` it survives the purchase and every relist, so it links a sale
+ * to its buy (the extension's trade lifecycle keys on it). Bounded like
+ * `tradeId`. */
+export const tradeItemIdSchema = z.string().min(1).max(64);
+
 /** EA's transfer-market tax on every sale, as a fraction of the sale price.
  * The API is the source of truth for profit figures: it applies this rate
  * itself on every sold trade it stores (see `computeTradeProfit`), so a
@@ -45,6 +65,10 @@ export const tradeSchema = z
   .object({
     id: z.string().guid(),
     tradeId: z.string().min(1).max(64),
+    /** The card's own id, on the buy report and on the sale report. Absent
+     * from reports by older extensions, and when the bought listing carried
+     * none. */
+    itemId: tradeItemIdSchema.optional(),
     resourceId: z.number().int().positive(),
     assetId: z.number().int().positive().nullable(),
     rating: z.number().int().min(0).max(99).nullable(),
@@ -55,6 +79,10 @@ export const tradeSchema = z
     status: z.enum(TRADE_STATUSES),
     boughtAt: z.string().datetime(),
     soldAt: z.string().datetime().nullable(),
+    /** See `SALE_SOURCES`. The API's trades carry it (null when unsold or
+     * stored before it existed); a report leaves it out for an observed
+     * sale. */
+    saleSource: z.enum(SALE_SOURCES).nullable().optional(),
   })
   .strict();
 export type Trade = z.infer<typeof tradeSchema>;
@@ -108,6 +136,9 @@ export const tradeIngestSchema = tradeSchema.extend({
   sellPrice: coinPriceSchema.nullable(),
   boughtAt: tradeTimestampSchema,
   soldAt: tradeTimestampSchema.nullable(),
+  // A sold report is `observed` unless it says `inferred`; only the
+  // dashboard records a `manual` sale.
+  saleSource: z.enum(REPORTED_SALE_SOURCES).optional(),
 });
 
 export const reportTradesRequestSchema = z
@@ -134,6 +165,85 @@ export const closeTradeRequestSchema = z
   })
   .strict();
 export type CloseTradeRequest = z.infer<typeof closeTradeRequestSchema>;
+
+/** Most trades `POST /trades/mark-sold` takes at once. */
+export const MARK_SOLD_MAX_TRADES = 100;
+
+/** `POST /trades/mark-sold` — the dashboard's bulk "Mark as sold": several
+ * of the caller's `bought` trades of one card, sold at one price. Same
+ * price rules as `/close`; `soldAt` defaults to now. */
+export const markTradesSoldRequestSchema = z
+  .object({
+    ids: z.array(z.string().guid()).min(1).max(MARK_SOLD_MAX_TRADES),
+    sellPrice: z.number().int().min(MIN_SALE_PRICE).max(MAX_COIN_PRICE),
+    soldAt: tradeTimestampSchema.optional(),
+  })
+  .strict();
+export type MarkTradesSoldRequest = z.infer<typeof markTradesSoldRequestSchema>;
+
+/** Why a requested trade was left as it was: not one of the caller's
+ * trades (or no such trade), no longer `bought` (sold meanwhile, say), or
+ * bought after the given sale time. */
+export const MARK_SOLD_SKIP_REASONS = ['not_found', 'not_bought', 'sold_before_bought'] as const;
+export type MarkSoldSkipReason = (typeof MARK_SOLD_SKIP_REASONS)[number];
+
+export const markTradesSoldResponseSchema = z.object({
+  updated: z.array(tradeSchema),
+  skipped: z.array(z.object({ id: z.string().guid(), reason: z.enum(MARK_SOLD_SKIP_REASONS) })),
+});
+export type MarkTradesSoldResponse = z.infer<typeof markTradesSoldResponseSchema>;
+
+/** How many of the trader's latest sales of a card
+ * `GET /trades/sell-price` averages. */
+export const SELL_PRICE_SAMPLE = 20;
+
+/** `GET /trades/sell-price?resourceId=` — the bulk dialog's default price. */
+export const tradeSellPriceQuerySchema = z
+  .object({ resourceId: z.coerce.number().int().positive() })
+  .strict();
+export type TradeSellPriceQuery = z.infer<typeof tradeSellPriceQuerySchema>;
+
+/** The caller's average sell price over their latest `SELL_PRICE_SAMPLE`
+ * sales of the card (at least `MIN_SALE_PRICE` each: a quick sell is not a
+ * market price), whole coins; `null` with no such sale. */
+export const tradeSellPriceSchema = z.object({
+  resourceId: z.number().int().positive(),
+  averageSellPrice: z.number().int().nullable(),
+  sales: z.number().int().min(0),
+});
+export type TradeSellPrice = z.infer<typeof tradeSellPriceSchema>;
+
+/** How far back `GET /extension/open-trades` looks, and the most trades it
+ * returns (the newest). */
+export const OPEN_TRADES_WINDOW_DAYS = 30;
+export const OPEN_TRADES_MAX = 300;
+
+/** One of the caller's trades still `bought` that carries an item id: what
+ * a browser needs to follow the card (apps/extension/src/lib/
+ * trade-lifecycle.ts) and report its sale on this same `tradeId`, whichever
+ * browser bought it. */
+export const openTradeSchema = z
+  .object({
+    tradeId: z.string().min(1).max(64),
+    itemId: tradeItemIdSchema,
+    resourceId: z.number().int().positive(),
+    rating: z.number().int().min(0).max(99).nullable(),
+    buyPrice: z.number().int().min(1).max(MAX_COIN_PRICE),
+    boughtAt: z.string().datetime(),
+  })
+  .strict();
+export type OpenTrade = z.infer<typeof openTradeSchema>;
+
+/** `GET /extension/open-trades`: the caller's `bought` trades with an item
+ * id, bought in the last `OPEN_TRADES_WINDOW_DAYS` days, newest first, at
+ * most `OPEN_TRADES_MAX`. `truncated`: more matched than were returned. */
+export const openTradesResponseSchema = z
+  .object({
+    items: z.array(openTradeSchema).max(OPEN_TRADES_MAX),
+    truncated: z.boolean(),
+  })
+  .strict();
+export type OpenTradesResponse = z.infer<typeof openTradesResponseSchema>;
 
 /** Daily rollup, `profits` table — `apps/api`'s `profits.rollup` job
  * (hourly) computes this from `trades` and `sniping_activity`; the dashboard

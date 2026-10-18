@@ -5349,6 +5349,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/extension/open-trades": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: {
+                                tradeId: string;
+                                itemId: string;
+                                resourceId: number;
+                                rating: number | null;
+                                buyPrice: number;
+                                /** Format: date-time */
+                                boughtAt: string;
+                            }[];
+                            truncated: boolean;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/extension/version": {
         parameters: {
             query?: never;
@@ -7620,6 +7666,7 @@ export interface paths {
                             /** Format: uuid */
                             id: string;
                             tradeId: string;
+                            itemId?: string;
                             resourceId: number;
                             assetId: number | null;
                             rating: number | null;
@@ -7632,6 +7679,8 @@ export interface paths {
                             /** Format: date-time */
                             boughtAt: string;
                             soldAt: string | null;
+                            /** @enum {string} */
+                            saleSource?: "observed" | "inferred";
                         }[];
                     };
                 };
@@ -7694,6 +7743,7 @@ export interface paths {
                             /** Format: uuid */
                             id: string;
                             tradeId: string;
+                            itemId?: string;
                             resourceId: number;
                             assetId: number | null;
                             rating: number | null;
@@ -7706,11 +7756,123 @@ export interface paths {
                             /** Format: date-time */
                             boughtAt: string;
                             soldAt: string | null;
+                            saleSource?: ("observed" | "inferred" | "manual") | null;
                         };
                     };
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/trades/mark-sold": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        ids: string[];
+                        sellPrice: number;
+                        /** Format: date-time */
+                        soldAt?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            updated: {
+                                /** Format: uuid */
+                                id: string;
+                                tradeId: string;
+                                itemId?: string;
+                                resourceId: number;
+                                assetId: number | null;
+                                rating: number | null;
+                                buyPrice: number;
+                                sellPrice: number | null;
+                                eaTax: number;
+                                netProfit: number | null;
+                                /** @enum {string} */
+                                status: "bought" | "listed" | "sold" | "expired" | "unsold";
+                                /** Format: date-time */
+                                boughtAt: string;
+                                soldAt: string | null;
+                                saleSource?: ("observed" | "inferred" | "manual") | null;
+                            }[];
+                            skipped: {
+                                /** Format: uuid */
+                                id: string;
+                                /** @enum {string} */
+                                reason: "not_found" | "not_bought" | "sold_before_bought";
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/trades/sell-price": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query: {
+                    resourceId: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            resourceId: number;
+                            averageSellPrice: number | null;
+                            sales: number;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -7752,6 +7914,7 @@ export interface paths {
                                 /** Format: uuid */
                                 id: string;
                                 tradeId: string;
+                                itemId?: string;
                                 resourceId: number;
                                 assetId: number | null;
                                 rating: number | null;
@@ -7764,6 +7927,7 @@ export interface paths {
                                 /** Format: date-time */
                                 boughtAt: string;
                                 soldAt: string | null;
+                                saleSource?: ("observed" | "inferred" | "manual") | null;
                                 cardName: string | null;
                             }[];
                             nextCursor: string | null;

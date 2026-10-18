@@ -1,6 +1,8 @@
 // /api/v1/trades — batch upsert from the extension, a cursor-paginated list
 // for the dashboard (with its totals and CSV export over the same filters),
-// and `POST /trades/:id/close` for recording a sale.
+// and the trader's own sale records: `POST /trades/:id/close` for one trade,
+// `POST /trades/mark-sold` for several bought trades of one card at one
+// price, with `GET /trades/sell-price` for that dialog's default price.
 //
 // The API owns the profit maths. Whatever a client sends for `eaTax` and
 // `netProfit`, a stored trade's tax and net are recomputed here from its
@@ -14,6 +16,10 @@ import { cards, trades, type Database } from '@sl/db';
 import {
   closeTradeRequestSchema,
   computeTradeProfit,
+  markTradesSoldRequestSchema,
+  markTradesSoldResponseSchema,
+  type MarkTradesSoldResponse,
+  MIN_SALE_PRICE,
   paginatedResponseSchema,
   reportTradesRequestSchema,
   type ReportTradesRequest,
@@ -23,22 +29,41 @@ import {
   type TradeListItem,
   tradeListQuerySchema,
   tradeSchema,
+  tradeSellPriceQuerySchema,
+  tradeSellPriceSchema,
+  type TradeSellPrice,
   tradeTotalsSchema,
   type Trade,
+  SELL_PRICE_SAMPLE,
 } from '@sl/shared';
-import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  or,
+  sql,
+  type SQL,
+} from 'drizzle-orm';
 import fp from 'fastify-plugin';
 import { z } from 'zod';
 
 import { csvStream } from '../../lib/analytics/csv.js';
 import { rollupProfitsForUserDays, utcDay } from '../../lib/analytics/rollup.js';
+import { recordAudit } from '../../lib/audit.js';
 import { CURRENT_FC_TITLE } from '../../lib/collectors/resolver.js';
 import { AppErrors } from '../../lib/errors.js';
 import { newId } from '../../lib/ids.js';
 import { decodeCursor, encodeCursor } from '../../lib/pagination.js';
 import { INGEST_RATE_LIMIT } from '../../lib/rate-limit-tiers.js';
 
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 
 type TradeRow = typeof trades.$inferSelect;
@@ -92,20 +117,32 @@ const TERMINAL_STATUSES: ReadonlySet<TradeRow['status']> = new Set(['sold', 'exp
 function batchValues(t: ReportTradesRequest['trades'][number], existing: TradeRow | undefined) {
   const buySide = {
     tradeId: t.tradeId,
+    // What a report leaves out never erases what is stored: a sale reported
+    // by a browser that only learned of the card from
+    // /extension/open-trades, or by an older extension, carries no asset id
+    // (and maybe no item id or rating) of its own.
+    itemId: t.itemId ?? existing?.itemId ?? null,
     resourceId: String(t.resourceId),
-    assetId: t.assetId != null ? String(t.assetId) : null,
-    rating: t.rating,
+    assetId: t.assetId != null ? String(t.assetId) : (existing?.assetId ?? null),
+    rating: t.rating ?? existing?.rating ?? null,
     buyPrice: t.buyPrice,
     boughtAt: new Date(t.boughtAt),
   };
+  // A sale the extension reports is one it saw, unless it says it inferred
+  // it (a listed card that left the trade pile unseen).
+  const saleSource = t.status === 'sold' ? (t.saleSource ?? 'observed') : null;
 
   // A stored sale also stands against a later `sold` report: the
   // dashboard's /close is the trader's own word on the price, and the
   // extension's report (seen on the trade pile) must not overwrite it. An
   // identical re-send changes nothing either way; `expired`/`unsold` can
-  // still move to `sold`.
+  // still move to `sold`. The one exception is an inferred sale (an
+  // estimate at the list price), which a sale another browser saw replaces.
+  const observedOverInferred =
+    existing?.status === 'sold' && existing.saleSource === 'inferred' && saleSource === 'observed';
   if (
     existing &&
+    !observedOverInferred &&
     TERMINAL_STATUSES.has(existing.status) &&
     (existing.status === 'sold' || !TERMINAL_STATUSES.has(t.status))
   ) {
@@ -125,6 +162,7 @@ function batchValues(t: ReportTradesRequest['trades'][number], existing: TradeRo
       status: existing.status,
       sellPrice: existing.sellPrice,
       soldAt: existing.soldAt,
+      saleSource: existing.saleSource,
       ...profitColumns(t.buyPrice, existing.sellPrice),
     };
   }
@@ -134,8 +172,54 @@ function batchValues(t: ReportTradesRequest['trades'][number], existing: TradeRo
     status: t.status,
     sellPrice: t.sellPrice,
     soldAt: t.soldAt ? new Date(t.soldAt) : null,
+    saleSource,
     ...profitColumns(t.buyPrice, t.sellPrice),
   };
+}
+
+/** Records the trader's own sale of `row` (`/close`, `/mark-sold`): status
+ * `sold`, the price and time they gave, `sale_source = 'manual'`, and the
+ * tax and net the batch path computes too (`profitColumns`). Audited like
+ * every other change a user makes to their own records. The caller holds
+ * the user's trade lock and rolls the days up. */
+async function recordManualSale(
+  tx: Database,
+  request: FastifyRequest,
+  row: TradeRow,
+  sellPrice: number,
+  soldAt: Date,
+): Promise<TradeRow> {
+  const [updated] = await tx
+    .update(trades)
+    .set({
+      status: 'sold',
+      sellPrice,
+      soldAt,
+      saleSource: 'manual',
+      ...profitColumns(row.buyPrice ?? 0, sellPrice),
+    })
+    .where(eq(trades.id, row.id))
+    .returning();
+  const snapshot = (t: TradeRow) => ({
+    status: t.status,
+    sellPrice: t.sellPrice,
+    soldAt: t.soldAt?.toISOString() ?? null,
+    netProfit: t.netProfit,
+    saleSource: t.saleSource,
+  });
+  await recordAudit({
+    db: tx,
+    actor: { type: 'user', id: row.userId },
+    action: 'trade.marked_sold',
+    entityType: 'trade',
+    entityId: row.id,
+    before: snapshot(row),
+    after: snapshot(updated!),
+    ip: request.ip,
+    userAgent: request.headers['user-agent'] ?? null,
+    requestId: request.id,
+  });
+  return updated!;
 }
 
 /** The instant a calendar day starts in `tz` (`'2026-09-10'` in
@@ -195,6 +279,7 @@ function toTradeDto(t: TradeRow): Trade {
     status: t.status,
     boughtAt: t.boughtAt ? t.boughtAt.toISOString() : new Date(0).toISOString(),
     soldAt: t.soldAt ? t.soldAt.toISOString() : null,
+    saleSource: t.saleSource,
   };
 }
 
@@ -323,23 +408,119 @@ export default fp(
               boughtAt: existing.boughtAt.toISOString(),
             });
 
-          const [updated] = await tx
-            .update(trades)
-            .set({
-              status: 'sold',
-              sellPrice: request.body.sellPrice,
-              soldAt,
-              ...profitColumns(existing.buyPrice ?? 0, request.body.sellPrice),
-            })
-            .where(eq(trades.id, existing.id))
-            .returning();
-
+          const updated = await recordManualSale(
+            tx,
+            request,
+            existing,
+            request.body.sellPrice,
+            soldAt,
+          );
           await rollupProfitsForUserDays(
             tx,
-            touchedDays(updated!).map((day) => ({ userId, day })),
+            touchedDays(updated).map((day) => ({ userId, day })),
           );
-          return toTradeDto(updated!);
+          return toTradeDto(updated);
         });
+      },
+    );
+
+    // The dashboard's bulk "Mark as sold": several of the caller's trades of
+    // one card that the extension never saw sell (sold from another device,
+    // or cleared from the transfer list before it looked), at one price.
+    // Only `bought` trades move; anything else asked for is left alone and
+    // named in `skipped`, so a sale the extension reported meanwhile is
+    // never overwritten. Another user's trade reads as not found.
+    app.post(
+      '/api/v1/trades/mark-sold',
+      {
+        onRequest: [fastify.requireFeature('ledger.recorder')],
+        preHandler: [fastify.verifyCsrf],
+        schema: {
+          tags: ['trades'],
+          body: markTradesSoldRequestSchema,
+          response: { 200: markTradesSoldResponseSchema },
+        },
+      },
+      async (request): Promise<MarkTradesSoldResponse> => {
+        const userId = request.authUser!.id;
+        const ids = [...new Set(request.body.ids)];
+        const soldAt = request.body.soldAt ? new Date(request.body.soldAt) : new Date();
+        return fastify.db.transaction(async (tx) => {
+          await lockUserTrades(tx, userId);
+          const rows = await tx.query.trades.findMany({
+            where: and(
+              inArray(trades.id, ids),
+              eq(trades.userId, userId),
+              isNull(trades.deletedAt),
+            ),
+          });
+          const byId = new Map(rows.map((r) => [r.id, r]));
+
+          const skipped: MarkTradesSoldResponse['skipped'] = [];
+          const toSell: TradeRow[] = [];
+          for (const id of ids) {
+            const row = byId.get(id);
+            if (!row) skipped.push({ id, reason: 'not_found' });
+            else if (row.status !== 'bought') skipped.push({ id, reason: 'not_bought' });
+            else if (row.boughtAt && soldAt < row.boughtAt)
+              skipped.push({ id, reason: 'sold_before_bought' });
+            else toSell.push(row);
+          }
+          // One price is one card's price.
+          if (new Set(toSell.map((r) => r.resourceId)).size > 1)
+            throw AppErrors.validation(
+              'Mark one card at a time: these trades are for different cards.',
+            );
+
+          const updated: Trade[] = [];
+          const affected: { userId: string; day: string }[] = [];
+          for (const row of toSell) {
+            const after = await recordManualSale(tx, request, row, request.body.sellPrice, soldAt);
+            for (const day of touchedDays(after)) affected.push({ userId, day });
+            updated.push(toTradeDto(after));
+          }
+          await rollupProfitsForUserDays(tx, affected);
+          return { updated, skipped };
+        });
+      },
+    );
+
+    // The bulk dialog's default price: the caller's average over their
+    // latest sales of the card. A quick sell (under EA's 200-coin Buy Now
+    // floor) is not a market price and is left out.
+    app.get(
+      '/api/v1/trades/sell-price',
+      {
+        onRequest: [fastify.requireFeature('ledger.recorder')],
+        schema: {
+          tags: ['trades'],
+          querystring: tradeSellPriceQuerySchema,
+          response: { 200: tradeSellPriceSchema },
+        },
+      },
+      async (request): Promise<TradeSellPrice> => {
+        const { resourceId } = request.query;
+        const rows = await fastify.db
+          .select({ sellPrice: trades.sellPrice })
+          .from(trades)
+          .where(
+            and(
+              eq(trades.userId, request.authUser!.id),
+              eq(trades.resourceId, String(resourceId)),
+              eq(trades.status, 'sold'),
+              isNull(trades.deletedAt),
+              isNotNull(trades.soldAt),
+              gte(trades.sellPrice, MIN_SALE_PRICE),
+            ),
+          )
+          .orderBy(desc(trades.soldAt), desc(trades.id))
+          .limit(SELL_PRICE_SAMPLE);
+        const prices = rows.map((r) => r.sellPrice ?? 0);
+        const averageSellPrice =
+          prices.length > 0
+            ? Math.round(prices.reduce((sum, p) => sum + p, 0) / prices.length)
+            : null;
+        return { resourceId, averageSellPrice, sales: prices.length };
       },
     );
 
@@ -482,6 +663,8 @@ export default fp(
                 netProfit: t.netProfit,
                 boughtAt: row.trade.boughtAt?.toISOString() ?? null,
                 soldAt: t.soldAt,
+                // `inferred` marks an estimated sale price.
+                saleSource: row.trade.saleSource,
               };
             }
             const last = page.at(-1)?.trade;
@@ -508,6 +691,7 @@ export default fp(
               { key: 'netProfit', header: 'netProfit' },
               { key: 'boughtAt', header: 'boughtAt' },
               { key: 'soldAt', header: 'soldAt' },
+              { key: 'saleSource', header: 'saleSource' },
             ],
             rows(),
           ),

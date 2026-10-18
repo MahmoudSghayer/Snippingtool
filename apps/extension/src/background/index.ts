@@ -68,12 +68,17 @@ import { handleEngineStateGet, handleEngineStateSet } from './governor.js';
 import { handleKillSwitchGet } from './kill-switch.js';
 import { ensureHeartbeatAlarm, handleLicenseBootstrap, handleLicenseHeartbeat, onHeartbeatAlarm, runBootstrap } from './license.js';
 import {
+  BOT_START_SEED_MAX_AGE_MS,
+  ensureLifecycleSeedAlarm,
   handleLifecycleBuy,
   handleLifecyclePile,
   handleLifecycleSessionPnl,
   handleLifecycleStats,
   handleLifecycleTodayPnl,
+  LIFECYCLE_SEED_ALARM,
+  onLifecycleSeedAlarm,
   retryUnreportedSales,
+  seedOpenTrades,
 } from './lifecycle.js';
 import { handleRecentSearchesGet, handleRecentSearchesSet } from './recent-searches.js';
 import {
@@ -166,7 +171,13 @@ const handlers: Record<string, Handler> = {
   // background/engine-lease.ts), and the popup's "New session".
   'engine.lockAcquire': (payload) => handleEngineLockAcquire(payload as never),
   'engine.lockRelease': (payload) => handleEngineLockRelease(payload as never),
-  'engine.state': (payload) => handleEngineState(payload as never),
+  'engine.state': async (payload) => {
+    const result = await handleEngineState(payload as never);
+    // The bot (or the autobuyer) just started: follow the cards the account
+    // bought in other browsers too (background/lifecycle.ts).
+    if (result.started) void seedOpenTrades(BOT_START_SEED_MAX_AGE_MS);
+    return result;
+  },
   'engine.resetSession': () => handleEngineResetSession(),
 
 };
@@ -284,12 +295,14 @@ browser.alarms.onAlarm.addListener((alarm) => {
   }
   else if (alarm.name === 'sl.telemetry.flush') void onFlushAlarm();
   else if (alarm.name === 'sl.errors.flush') void onErrorFlushAlarm();
+  else if (alarm.name === LIFECYCLE_SEED_ALARM) void onLifecycleSeedAlarm();
 });
 
 function startAlarms(): void {
   ensureHeartbeatAlarm();
   ensureFlushAlarm();
   ensureErrorFlushAlarm();
+  ensureLifecycleSeedAlarm();
 }
 
 installGlobalErrorHandlers();
@@ -307,4 +320,8 @@ startAlarms();
 // account that is still signed in.
 refreshOnStartup()
   .then(() => runBootstrap())
+  // Then, signed in, the account's open trades: cards bought in another
+  // browser are followed here too (background/lifecycle.ts). A no-op when
+  // signed out, or when this browser session read them in the last 15 min.
+  .then(() => void seedOpenTrades())
   .catch((err) => logger.warn(`startup bootstrap failed: ${String(err)}`, 'background'));

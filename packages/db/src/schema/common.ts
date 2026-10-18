@@ -148,6 +148,9 @@ export const tradeStatusEnum = pgEnum('trade_status', [
   'unsold',
 ]);
 
+/** How a sold trade's price is known (migrations/0040). */
+export const tradeSaleSourceEnum = pgEnum('trade_sale_source', ['observed', 'inferred', 'manual']);
+
 export const riskEventKindEnum = pgEnum('risk_event_kind', [
   'actions_per_hour',
   'session_length',

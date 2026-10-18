@@ -1,6 +1,6 @@
-// Matches migrations/0012_trading.sql, 0013_filters.sql.
+// Matches migrations/0012_trading.sql, 0013_filters.sql, 0033 and 0040.
 
-import { isNull, relations } from 'drizzle-orm';
+import { and, isNotNull, isNull, relations } from 'drizzle-orm';
 import {
   bigint,
   boolean,
@@ -22,6 +22,7 @@ import {
   idPk,
   rowVersion,
   timestamptz,
+  tradeSaleSourceEnum,
   tradeStatusEnum,
   updatedAt,
 } from './common.js';
@@ -36,6 +37,8 @@ export const trades = pgTable(
       .references(() => users.id, { onDelete: 'restrict' }),
 
     tradeId: text('trade_id').notNull(),
+    /** EA's id for the card itself, constant across relists (0040). */
+    itemId: text('item_id'),
     resourceId: text('resource_id').notNull(),
     assetId: text('asset_id'),
     rating: smallint('rating'),
@@ -46,6 +49,8 @@ export const trades = pgTable(
     netProfit: integer('net_profit'),
 
     status: tradeStatusEnum('status').notNull().default('bought'),
+    /** observed | inferred | manual once sold; null before (0040). */
+    saleSource: tradeSaleSourceEnum('sale_source'),
     boughtAt: timestamptz('bought_at'),
     soldAt: timestamptz('sold_at'),
 
@@ -65,6 +70,9 @@ export const trades = pgTable(
     index('trades_user_id_bought_at_idx')
       .on(t.userId, t.boughtAt.desc(), t.id)
       .where(isNull(t.deletedAt)),
+    index('trades_user_id_item_id_idx')
+      .on(t.userId, t.itemId)
+      .where(and(isNull(t.deletedAt), isNotNull(t.itemId))!),
   ],
 );
 

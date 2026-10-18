@@ -21,9 +21,14 @@ export function buildBoughtTrade(
   const bought = listing && listing.tradeId === input.tradeId ? listing : undefined;
   const resourceId = bought && bought.resourceId > 0 ? bought.resourceId : input.resourceId;
   const rating = bought && Number.isInteger(bought.rating) && bought.rating >= 0 && bought.rating <= 99 ? bought.rating : null;
+  const itemId = bought?.itemId ?? null;
   const trade: Trade = {
     id: crypto.randomUUID(),
     tradeId: input.tradeId,
+    // The card's own id, stored on the server's trade: another browser
+    // signed in to the account follows the card by it
+    // (`GET /api/v1/extension/open-trades`) and reports its sale.
+    ...(itemId ? { itemId } : {}),
     resourceId,
     assetId: bought && Number.isInteger(bought.assetId) && bought.assetId > 0 ? bought.assetId : null,
     rating,
@@ -38,6 +43,6 @@ export function buildBoughtTrade(
   };
   // `itemId: null` when the listing carried none: the buy cannot be
   // followed, and background counts it for the diagnostics report.
-  const lifecycle: LifecycleBuy = { itemId: bought?.itemId ?? null, tradeId: input.tradeId, resourceId, rating, buyPrice: input.buyPrice, boughtAt };
+  const lifecycle: LifecycleBuy = { itemId, tradeId: input.tradeId, resourceId, rating, buyPrice: input.buyPrice, boughtAt };
   return { trade, lifecycle };
 }
