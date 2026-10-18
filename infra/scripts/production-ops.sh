@@ -22,6 +22,9 @@
 #                           its email, clear 2FA, make it a super_admin, and clear
 #                           the login rate limits. The email itself is never
 #                           sent or printed.
+#   OPS_ACTION=ea-probe     where EA's transfer market server is (addresses,
+#                           Google Cloud region) and how long reaching it
+#                           takes from this server; changes nothing
 set -euo pipefail
 
 ACTION="${OPS_ACTION:?set OPS_ACTION}"
@@ -331,6 +334,70 @@ SQL
     # gzip first: the operator copies the ciphertext out of the log by hand.
     echo "data (gzip): $(gzip -9c "$work/report.txt" |
       openssl enc -aes-256-cbc -pbkdf2 -salt -pass "file:$work/key" | base64 -w0)"
+    ;;
+
+  ea-probe)
+    # Where EA's transfer market server is, to choose where to run the bot:
+    # what its name resolves to (also as seen from other parts of the world,
+    # in case EA answers each region differently), which Google Cloud region
+    # each address is in (Google's published ranges), and how long reaching
+    # it takes from this server. Public facts only: this server's own
+    # address is never printed.
+    host=utas.mob.v4.prd.futc-ext.gcp.ea.com
+    work="$(mktemp -d)"
+    trap 'rm -rf "$work"' EXIT
+    echo "== $host, from this server"
+    getent ahosts "$host" | awk '{print $1}' | sort -u | tee "$work/ips" || true
+    echo
+    echo "== as resolved for clients elsewhere (Google DNS, client subnet)"
+    for where in 'US East=3.80.0.0/24' 'US West=13.56.0.0/24' 'Frankfurt=18.184.0.0/24' \
+      'London=18.130.0.0/24' 'UAE=94.200.0.0/24' 'Saudi Arabia=37.224.0.0/24' 'Singapore=13.228.0.0/24'; do
+      answer="$(curl -fsS --max-time 10 \
+        "https://dns.google/resolve?name=$host&type=A&edns_client_subnet=${where#*=}" 2>/dev/null |
+        grep -oE '"data": ?"[^"]+"' | sed -E 's/"data": ?"//; s/"$//' | tr '\n' ' ' || true)"
+      printf '%-13s %s\n' "${where%%=*}:" "${answer:-no answer}"
+      tr ' ' '\n' <<<"$answer" | grep -E '^[0-9.]+$' >>"$work/ips" || true
+    done
+    echo
+    echo "== Google Cloud region of each address (gstatic.com/ipranges)"
+    if curl -fsS --max-time 20 https://www.gstatic.com/ipranges/cloud.json -o "$work/cloud.json" &&
+      curl -fsS --max-time 20 https://www.gstatic.com/ipranges/goog.json -o "$work/goog.json" &&
+      command -v python3 >/dev/null; then
+      mapfile -t ips < <(sort -u "$work/ips" | grep -E '^[0-9a-f.:]+$' || true)
+      python3 - "$work/cloud.json" "$work/goog.json" ${ips[@]+"${ips[@]}"} <<'PY'
+import ipaddress, json, sys
+
+def prefixes(path):
+    for p in json.load(open(path))["prefixes"]:
+        net = p.get("ipv4Prefix") or p.get("ipv6Prefix")
+        yield ipaddress.ip_network(net), p.get("scope"), p.get("service")
+
+cloud = list(prefixes(sys.argv[1]))
+goog = [n for n, _, _ in prefixes(sys.argv[2])]
+for raw in sys.argv[3:]:
+    ip = ipaddress.ip_address(raw)
+    hits = [f"{scope} ({net}, {svc})" for net, scope, svc in cloud if ip.version == net.version and ip in net]
+    if hits:
+        print(f"{raw}: Google Cloud {', '.join(hits)}")
+    elif any(ip.version == n.version and ip in n for n in goog):
+        print(f"{raw}: Google's own network (global load balancer edge): no single region")
+    else:
+        print(f"{raw}: not a Google address")
+PY
+    else
+      echo "could not fetch Google's IP ranges (or no python3 here)"
+    fi
+    echo
+    echo "== reaching it from this server (5 tries; seconds from the start of each request)"
+    for _ in 1 2 3 4 5; do
+      curl -s -o /dev/null --max-time 10 \
+        -w 'dns %{time_namelookup}  tcp %{time_connect}  tls %{time_appconnect}  first byte %{time_starttransfer}  (HTTP %{http_code})\n' \
+        "https://$host/ut/game/fc26/" || echo 'failed'
+    done
+    echo
+    echo "== what answers (selected response headers)"
+    curl -sI --max-time 10 "https://$host/ut/game/fc26/" |
+      grep -iE '^(HTTP/|server:|via:|alt-svc:|x-envoy-upstream-service-time:|x-served-by:|x-region:|x-gcp-region:)' || true
     ;;
 
   *)

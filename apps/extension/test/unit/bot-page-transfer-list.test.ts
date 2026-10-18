@@ -116,7 +116,7 @@ describe('the Sold / Unsold counters and the Transfer list panel', () => {
       unsold: '2',
       total: '37',
       bar: '37%',
-      sub: '28 listed · 2 not listed',
+      sub: '28 listed · 5 sold · 2 unsold · 2 not listed',
     });
     expect(waiting()).toBe(false);
     for (const id of ['d-sold', 'd-unsold', 'd-tl-big'])
@@ -135,8 +135,19 @@ describe('the Sold / Unsold counters and the Transfer list panel', () => {
       unsold: '2',
       total: '37',
       bar: '37%',
-      sub: '27 listed · 2 not listed',
+      sub: '27 listed · 6 sold · 2 unsold · 2 not listed',
     });
+    page.close();
+  });
+
+  it('show every card on the list in the breakdown, so it adds up to the total', () => {
+    // Production: "4 /100" over "0 listed · 0 not listed", the four being
+    // sold cards waiting to be cleared.
+    const list = createTransferListTracker();
+    list.update([...cards(1, 3, 'closed'), ...cards(10, 1, 'expired')], true);
+    const { page, shown } = mount(() => list.summary());
+    page.open();
+    expect(shown()).toMatchObject({ total: '4', sub: '0 listed · 3 sold · 1 unsold · 0 not listed' });
     page.close();
   });
 
@@ -174,7 +185,7 @@ describe('the Sold / Unsold counters and the Transfer list panel', () => {
     list.update([card('1', 'expired')], false);
     vi.advanceTimersByTime(1_000);
     expect(observer.takeRecords().length).toBeGreaterThan(0);
-    expect(shown()).toMatchObject({ unsold: '1', total: '4', sub: '3 listed · 0 not listed' });
+    expect(shown()).toMatchObject({ unsold: '1', total: '4', sub: '3 listed · 1 unsold · 0 not listed' });
     observer.disconnect();
     page.close();
   });

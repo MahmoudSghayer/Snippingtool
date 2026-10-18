@@ -22,7 +22,7 @@ on:
       action:
         description: What to do
         type: choice
-        options: [diagnose, deploy, admin-login, account, session-report]
+        options: [diagnose, deploy, admin-login, account, session-report, ea-probe]
         required: true
       commit:
         description: "deploy: commit on main to deploy (empty = this run's commit)"
