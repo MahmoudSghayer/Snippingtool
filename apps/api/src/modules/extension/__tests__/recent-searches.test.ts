@@ -14,7 +14,7 @@ import { INGEST_RATE_LIMIT } from '../../../lib/rate-limit-tiers.js';
 import type { FastifyInstance } from 'fastify';
 
 const URL = '/api/v1/extension/recent-searches';
-const PASSWORD = 'correcthorsebattery12';
+const TEST_PW = 'correcthorsebattery12';
 
 function device(fingerprint: string) {
   return {
@@ -46,7 +46,7 @@ async function signIn(app: FastifyInstance, email: string, ip: string) {
     method: 'POST',
     url: '/api/v1/auth/register',
     remoteAddress: ip,
-    payload: { email, password: PASSWORD, device: device(fp), acceptTerms: true },
+    payload: { email, password: TEST_PW, device: device(fp), acceptTerms: true },
   });
   const token = decodeURIComponent(
     app.mailer.sentEmails.at(-1)!.html.match(/token=([A-Za-z0-9_-]+)/)![1]!,
@@ -61,7 +61,7 @@ async function signIn(app: FastifyInstance, email: string, ip: string) {
     method: 'POST',
     url: '/api/v1/auth/login',
     remoteAddress: ip,
-    payload: { email, password: PASSWORD, device: device(fp) },
+    payload: { email, password: TEST_PW, device: device(fp) },
   });
   return {
     accessToken: login.json().accessToken as string,
