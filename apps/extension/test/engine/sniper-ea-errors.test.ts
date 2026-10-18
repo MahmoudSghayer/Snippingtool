@@ -2,10 +2,17 @@
 // the adapter now reports as `ea_error` messages instead of "market
 // payload shape changed" (main/adapter.ts). Production: one EA error ended
 // the session with a misleading "no auctionInfo array in response" reason.
-// Now an expired session or a captcha stops the bot saying what to do, a
-// rate limit or an outage makes it back off (5 s, 10 s, 20 s ... up to 2
-// minutes, starting over after a clean search) and never stops it, and
-// nothing EA says about the trade pile stops or slows it.
+// Now an expired session or a captcha stops the bot saying what to do, an
+// outage makes it back off (5 s, 10 s, 20 s ... up to 2 minutes, starting
+// over after a clean search) and never stops it, and nothing EA says about
+// the trade pile stops or slows it.
+//
+// A rate limit (429 / 512 / 521) backs off the same way, then slows the bot
+// down for 15 minutes; three in 10 minutes make it rest (15 min, then 30),
+// and a third round within two hours stops it. Production, Oct 18: the bot
+// went back to full speed after every clean search, ran into EA's limit
+// again and again at ~960 searches an hour, and EA blocked the account's
+// market searches.
 //
 // The adapter posts the `ea_error` before the failed search's own (signed,
 // so asynchronously delivered) result, and this fake does the same.
@@ -44,6 +51,8 @@ function setup(script: (n: number) => SearchScript, opts: { maxSearches: number 
     searchDelay: { min: 1, max: 1 },
     breaks: { ...DEFAULT_BOT_SETTINGS.breaks, enabled: false },
     rest: { ...DEFAULT_BOT_SETTINGS.rest, enabled: false },
+    // Out of the way: the slow-down test runs hundreds of searches.
+    safety: { ...DEFAULT_BOT_SETTINGS.safety, maxSearchesPerHour: 7_200 },
   };
   const clock = { t: 1_000_000 };
   const searchTimes: number[] = [];
@@ -133,8 +142,8 @@ describe('Sniper — EA errors', () => {
     });
   });
 
-  it('backs off 5 s, 10 s, 20 s ... up to 2 minutes while EA rate-limits, and never stops for it', async () => {
-    const h = setup(() => ({ eaErrors: [RATE_LIMITED], outcome: FAILED }), { maxSearches: 9 });
+  it('backs off 5 s, 10 s, 20 s ... up to 2 minutes while EA has server errors, and never stops for it', async () => {
+    const h = setup(() => ({ eaErrors: [{ status: 503, category: 'server_error', endpoint: 'market' }], outcome: FAILED }), { maxSearches: 9 });
     h.sniper.start();
     await h.done();
     // Nine failed searches in a row: well past the five that stop the bot
@@ -143,16 +152,58 @@ describe('Sniper — EA errors', () => {
     expect(h.sniper.state.stopReason).toBe('manual');
     expect(h.gaps()).toEqual([5, 10, 20, 40, 80, 120, 120, 120]);
     expect(h.phases).toContain('backoff');
-    expect(h.log()).toContain('EA is limiting requests (HTTP 429): waiting 5 s before the next search');
   });
 
-  it('starts the backoff over after a clean search', async () => {
-    const h = setup((n) => (n === 4 ? {} : { eaErrors: [RATE_LIMITED], outcome: FAILED }), { maxSearches: 7 });
+  it('starts the backoff over after a clean search following a server error', async () => {
+    const SERVER_ERROR = { status: 503, category: 'server_error', endpoint: 'market' } as const;
+    const h = setup((n) => (n === 4 ? {} : { eaErrors: [SERVER_ERROR], outcome: FAILED }), { maxSearches: 7 });
     h.sniper.start();
     await h.done();
     // 5 s, 10 s, 20 s, then search 4 is clean: the normal 1 s delay, and
     // the next error waits 5 s again.
     expect(h.gaps()).toEqual([5, 10, 20, 1, 5, 10]);
+  });
+
+  it('rests after three rate limits in 10 minutes (15 min, then 30), and stops at the third round', async () => {
+    const h = setup(() => ({ eaErrors: [RATE_LIMITED], outcome: FAILED }), { maxSearches: 20 });
+    h.sniper.start();
+    await h.done();
+    expect(h.gaps()).toEqual([5, 10, 900, 5, 10, 1800, 5, 10]);
+    expect(h.sniper.state).toMatchObject({
+      stopReason: 'ea_rate_limited',
+      stopDetail: expect.stringContaining('your account is likely soft banned'),
+    });
+    expect(h.log()).toEqual(
+      expect.arrayContaining([
+        'EA says too many requests (error 429): waiting 5 s before the next search',
+        "Searching at half your normal speed for the next 15 minutes so EA's limit can reset",
+        'EA limited your searches 3 times in 10 minutes (error 429): resting 15 min to protect your account, then searching at a third of your normal speed',
+        'EA limited your searches 3 times in 10 minutes (error 429): resting 30 min to protect your account, then searching at a third of your normal speed',
+      ]),
+    );
+  });
+
+  it('searches twice as slow for 15 minutes after a rate limit, then at full speed again', async () => {
+    // Search 1 is limited at 0 s: a 5 s wait, then 2 s instead of 1 s
+    // between searches until 15 minutes after the wait (905 s, search 452).
+    // Search 453 is limited again: EA was quiet for long enough, so the wait
+    // starts over at 5 s and no rest is due.
+    const h = setup((n) => (n === 1 || n === 453 ? { eaErrors: [RATE_LIMITED], outcome: FAILED } : {}), { maxSearches: 455 });
+    h.sniper.start();
+    await h.done();
+    const gaps = h.gaps();
+    expect(gaps.slice(0, 3)).toEqual([5, 2, 2]);
+    expect(gaps.slice(449, 454)).toEqual([2, 2, 1, 5, 2]);
+    expect(h.sniper.state.stopReason).toBe('manual');
+  });
+
+  it('does not reset the backoff or the rest count on a clean search while slowed down', async () => {
+    const h = setup((n) => (n === 3 ? {} : { eaErrors: [RATE_LIMITED], outcome: FAILED }), { maxSearches: 5 });
+    h.sniper.start();
+    await h.done();
+    // 5 s, 10 s, a clean search (2 s: slowed down), and the third limit in
+    // 10 minutes rests 15 minutes.
+    expect(h.gaps()).toEqual([5, 10, 2, 900]);
   });
 
   it('backs off on EA server errors too, and on a rate-limited buy', async () => {
@@ -168,7 +219,7 @@ describe('Sniper — EA errors', () => {
     h.sniper.start();
     await h.done();
     expect(h.gaps()).toEqual([5, 10]);
-    expect(h.log()).toContain('EA had a server error (HTTP 503): waiting 5 s before the next search');
+    expect(h.log()).toContain("EA's servers had a problem (error 503): waiting 5 s before the next search");
   });
 
   it('stops buying the rest of a search once EA rate-limits a buy', async () => {
@@ -187,7 +238,8 @@ describe('Sniper — EA errors', () => {
     h.sniper.start();
     await h.done();
     expect(h.searchTimes).toHaveLength(7);
-    expect(h.gaps()).toEqual([5, 10, 20, 40, 80, 120]);
+    expect(h.gaps()).toEqual([5, 10, 900, 5, 10, 1800]);
+    expect(h.log()).toContain('EA is temporarily limiting your searches (error 521): waiting 5 s before the next search');
   });
 
   it('still stops after five failed searches in a row that were not EA slowing it down', async () => {
