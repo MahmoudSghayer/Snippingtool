@@ -196,6 +196,12 @@ const EXPECTED: ExpectedFk[] = [
     onDelete: 'CASCADE',
     doc: 'one row per user',
   },
+  {
+    table: 'user_bot_settings',
+    column: 'user_id',
+    onDelete: 'CASCADE',
+    doc: 'one row per user',
+  },
   { table: 'settings_history', column: 'user_id', onDelete: 'CASCADE', doc: 'pure child of users' },
   { table: 'settings_history', column: 'changed_by', onDelete: 'SET NULL', doc: 'optional actor' },
   { table: 'notifications', column: 'user_id', onDelete: 'CASCADE', doc: 'pure child of users' },

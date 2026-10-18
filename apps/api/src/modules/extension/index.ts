@@ -10,10 +10,13 @@ import {
   plans,
   subscriptions,
   userActivity,
+  userBotSettings,
   userRecentSearches,
   users,
 } from '@sl/db';
 import {
+  botSettingsSchema,
+  botSettingsSyncResponseSchema,
   bootstrapRequestSchema,
   bootstrapResponseSchema,
   extensionErrorReportSchema,
@@ -21,11 +24,13 @@ import {
   heartbeatRequestSchema,
   heartbeatResponseSchema,
   isPlanCode,
+  putBotSettingsRequestSchema,
   putRecentSearchesRequestSchema,
   recentSearchSchema,
   recentSearchesResponseSchema,
   telemetryFlushRequestSchema,
   type BootstrapResponse,
+  type BotSettingsSyncResponse,
   type LicenseDto,
   type RecentSearchesResponse,
   type SubscriptionDto,
@@ -151,6 +156,21 @@ function toRecentSearchesResponse(
     return parsed.success ? [parsed.data] : [];
   });
   return { items, updatedAt: row.updatedAt.toISOString() };
+}
+
+/** A bot settings document is about 1 KB of JSON; anything near the 1 MiB
+ * server default is not one. */
+const BOT_SETTINGS_BODY_LIMIT = 32 * 1024;
+
+/** The caller's stored bot settings as the API returns them. A document a
+ * later schema no longer accepts reads as none rather than failing the
+ * response: the extension then keeps its local copy. */
+function toBotSettingsResponse(
+  row: { settings: Record<string, unknown>; updatedAt: Date } | undefined,
+): BotSettingsSyncResponse {
+  if (!row) return { settings: null, updatedAt: null };
+  const parsed = botSettingsSchema.safeParse(row.settings);
+  return { settings: parsed.success ? parsed.data : null, updatedAt: row.updatedAt.toISOString() };
 }
 
 export default fp(
@@ -384,6 +404,53 @@ export default fp(
           .onConflictDoUpdate({ target: userRecentSearches.userId, set: { items } })
           .returning();
         return toRecentSearchesResponse(row);
+      },
+    );
+
+    // The Nova AI bot's settings, kept per account so every browser the
+    // trader signs in on starts with the ones they chose (the extension
+    // keeps a local copy for when this is unreachable). Read when the bot
+    // page loads them, replaced whole on every save. Ungated like
+    // recent-searches: the user's own data whatever their plan.
+    app.get(
+      '/api/v1/extension/bot-settings',
+      {
+        onRequest: [fastify.authenticate],
+        config: { rateLimit: INGEST_RATE_LIMIT },
+        schema: { tags: ['extension'], response: { 200: botSettingsSyncResponseSchema } },
+      },
+      async (request): Promise<BotSettingsSyncResponse> => {
+        const row = await fastify.db.query.userBotSettings.findFirst({
+          where: eq(userBotSettings.userId, request.authUser!.id),
+        });
+        return toBotSettingsResponse(row);
+      },
+    );
+
+    app.put(
+      '/api/v1/extension/bot-settings',
+      {
+        onRequest: [fastify.authenticate],
+        preHandler: [fastify.verifyCsrf],
+        bodyLimit: BOT_SETTINGS_BODY_LIMIT,
+        config: { rateLimit: INGEST_RATE_LIMIT },
+        schema: {
+          tags: ['extension'],
+          body: putBotSettingsRequestSchema,
+          response: { 200: botSettingsSyncResponseSchema },
+        },
+      },
+      async (request): Promise<BotSettingsSyncResponse> => {
+        const userId = request.authUser!.id;
+        const { settings } = request.body;
+        // One row per user (user_id is unique): the first save creates it,
+        // every later one replaces the document.
+        const [row] = await fastify.db
+          .insert(userBotSettings)
+          .values({ id: newId(), userId, settings })
+          .onConflictDoUpdate({ target: userBotSettings.userId, set: { settings } })
+          .returning();
+        return toBotSettingsResponse(row);
       },
     );
 

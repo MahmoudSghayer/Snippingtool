@@ -315,6 +315,21 @@ copy; signed out or offline, the page shows the local copy. The first time a
 browser reaches an account with an empty list, it uploads the list it kept
 before sync existed, once (`sl.bot.recentSearches.migrated.v1`).
 
+The bot's **settings** (search delay, breaks, rest, thresholds, auto-sell,
+safety limits) follow the account the same way, inside background's own
+`bot.settingsGet` / `bot.settingsSet` (`background/bot.ts`,
+`GET`/`PUT /extension/bot-settings`), so a browser the trader signs in on
+(another PC, a cloud machine) starts with the settings they chose. A save
+goes to extension storage (`sl.bot.settings.v1`) at once and to the account
+1.5 s after the last one in a burst; until that upload lands, a pending mark
+(`sl.bot.settings.pending.v1`) makes the next load send the local copy up
+instead of taking the account's older one (a save made offline is never
+lost). Otherwise the account's settings win whenever they can be read and
+replace the local copy; an account that has none gets this browser's; an
+account that cannot be asked (signed out, offline, refused) leaves the local
+copy in use and is never overwritten from it. The bot's hourly budgets and
+daily usage stay per browser.
+
 The dash's **Sold** and **Unsold** counters and its **Transfer list** panel
 (cards on the list out of EA's 100, then how many are listed and not
 listed) are counted from the trade-pile responses EA's own page already

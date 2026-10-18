@@ -33,6 +33,8 @@ const PROTECTED_ROUTES: Array<{
   { method: 'POST', path: '/api/v1/extension/heartbeat' },
   { method: 'GET', path: '/api/v1/extension/recent-searches' },
   { method: 'PUT', path: '/api/v1/extension/recent-searches' },
+  { method: 'GET', path: '/api/v1/extension/bot-settings' },
+  { method: 'PUT', path: '/api/v1/extension/bot-settings' },
   { method: 'POST', path: '/api/v1/auth/logout-all' },
   { method: 'POST', path: '/api/v1/auth/device/register' },
   { method: 'POST', path: '/api/v1/ws/ticket' },

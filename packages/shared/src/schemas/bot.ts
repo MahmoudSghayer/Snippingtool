@@ -191,6 +191,20 @@ export type BotSettings = z.infer<typeof botSettingsSchema>;
 
 export const DEFAULT_BOT_SETTINGS: BotSettings = botSettingsSchema.parse({});
 
+/** `PUT /extension/bot-settings` — replaces the account's bot settings, so
+ * every browser the trader signs in on starts with the ones they chose. */
+export const putBotSettingsRequestSchema = z.object({ settings: botSettingsSchema }).strict();
+export type PutBotSettingsRequest = z.infer<typeof putBotSettingsRequestSchema>;
+
+/** The account's bot settings. Both null until its first save; `settings`
+ * also null when what is stored no longer parses (the extension then keeps
+ * its local copy). */
+export const botSettingsSyncResponseSchema = z.object({
+  settings: botSettingsSchema.nullable(),
+  updatedAt: z.string().datetime().nullable(),
+});
+export type BotSettingsSyncResponse = z.infer<typeof botSettingsSyncResponseSchema>;
+
 /** The recommended limits applied to `s`, keeping the user's targets and
  * thresholds. What "Reset to recommended" does. */
 export function withRecommendedLimits(s: BotSettings): BotSettings {

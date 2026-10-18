@@ -7,9 +7,11 @@ import {
   botGovernorSettings,
   botRiskLevel,
   botSettingsSchema,
+  botSettingsSyncResponseSchema,
   clampBotSettings,
   effectiveSearchPace,
   projectedActiveHoursPerDay,
+  putBotSettingsRequestSchema,
   withRecommendedLimits,
   type BotSettings,
 } from '../src/index.js';
@@ -366,5 +368,28 @@ describe('effectiveSearchPace', () => {
     });
     expect(p.delayPerHour).toBe(3_600 / BOT_LIMITS.searchDelaySeconds.min);
     expect(p.capPerHour).toBe(BOT_LIMITS.maxSearchesPerHour.max);
+  });
+});
+
+describe('bot settings sync schemas (/extension/bot-settings)', () => {
+  it('a PUT carries one whole settings document, held to the bot limits, and nothing else', () => {
+    expect(putBotSettingsRequestSchema.safeParse({ settings: DEFAULT_BOT_SETTINGS }).success).toBe(
+      true,
+    );
+    expect(putBotSettingsRequestSchema.safeParse({}).success).toBe(false);
+    expect(
+      putBotSettingsRequestSchema.safeParse({ settings: DEFAULT_BOT_SETTINGS, extra: 1 }).success,
+    ).toBe(false);
+    const tooFast = { ...DEFAULT_BOT_SETTINGS, searchDelay: { min: 0.1, max: 1 } };
+    expect(putBotSettingsRequestSchema.safeParse({ settings: tooFast }).success).toBe(false);
+  });
+
+  it('the answer may hold no settings yet', () => {
+    expect(botSettingsSyncResponseSchema.parse({ settings: null, updatedAt: null })).toEqual({
+      settings: null,
+      updatedAt: null,
+    });
+    const saved = { settings: DEFAULT_BOT_SETTINGS, updatedAt: '2026-10-18T07:00:00.000Z' };
+    expect(botSettingsSyncResponseSchema.parse(saved)).toEqual(saved);
   });
 });

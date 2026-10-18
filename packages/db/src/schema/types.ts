@@ -28,6 +28,7 @@ import {
   type settingsHistory,
   type notifications,
   type userRecentSearches,
+  type userBotSettings,
 } from './settings.js';
 import { type plans, type subscriptions, type licenses } from './subscriptions.js';
 import {
@@ -106,6 +107,8 @@ export type SettingsHistoryEntry = InferSelectModel<typeof settingsHistory>;
 export type NewSettingsHistoryEntry = InferInsertModel<typeof settingsHistory>;
 export type UserRecentSearches = InferSelectModel<typeof userRecentSearches>;
 export type NewUserRecentSearches = InferInsertModel<typeof userRecentSearches>;
+export type UserBotSettings = InferSelectModel<typeof userBotSettings>;
+export type NewUserBotSettings = InferInsertModel<typeof userBotSettings>;
 export type Notification = InferSelectModel<typeof notifications>;
 export type NewNotification = InferInsertModel<typeof notifications>;
 

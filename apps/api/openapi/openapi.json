@@ -12365,6 +12365,992 @@
         }
       }
     },
+    "/api/v1/extension/bot-settings": {
+      "get": {
+        "tags": [
+          "extension"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "settings": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "safetyMode": {},
+                            "customRiskAcknowledgedAt": {},
+                            "riskAcknowledgedAt": {
+                              "default": null,
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "format": "date-time",
+                                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "searchDelay": {
+                              "type": "object",
+                              "properties": {
+                                "min": {
+                                  "type": "number",
+                                  "minimum": 0.5,
+                                  "maximum": 600
+                                },
+                                "max": {
+                                  "type": "number",
+                                  "minimum": 0.5,
+                                  "maximum": 600
+                                }
+                              },
+                              "required": [
+                                "min",
+                                "max"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "breaks": {
+                              "type": "object",
+                              "properties": {
+                                "enabled": {
+                                  "type": "boolean"
+                                },
+                                "searches": {
+                                  "type": "object",
+                                  "properties": {
+                                    "min": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 10000
+                                    },
+                                    "max": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 10000
+                                    }
+                                  },
+                                  "required": [
+                                    "min",
+                                    "max"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "seconds": {
+                                  "type": "object",
+                                  "properties": {
+                                    "min": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 3600
+                                    },
+                                    "max": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 3600
+                                    }
+                                  },
+                                  "required": [
+                                    "min",
+                                    "max"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "enabled",
+                                "searches",
+                                "seconds"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "rest": {
+                              "type": "object",
+                              "properties": {
+                                "enabled": {
+                                  "type": "boolean"
+                                },
+                                "afterMinutes": {
+                                  "type": "object",
+                                  "properties": {
+                                    "min": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 1440
+                                    },
+                                    "max": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 1440
+                                    }
+                                  },
+                                  "required": [
+                                    "min",
+                                    "max"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "minutes": {
+                                  "type": "object",
+                                  "properties": {
+                                    "min": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 1440
+                                    },
+                                    "max": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 1440
+                                    }
+                                  },
+                                  "required": [
+                                    "min",
+                                    "max"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "enabled",
+                                "afterMinutes",
+                                "minutes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "thresholds": {
+                              "type": "object",
+                              "properties": {
+                                "maxBuyPrice": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 15000000
+                                },
+                                "minProfit": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 15000000
+                                },
+                                "stopAfterPurchases": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 100000
+                                },
+                                "sessionCoinBudget": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 1000000000
+                                }
+                              },
+                              "required": [
+                                "maxBuyPrice",
+                                "minProfit",
+                                "stopAfterPurchases",
+                                "sessionCoinBudget"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "autoSell": {
+                              "type": "object",
+                              "properties": {
+                                "enabled": {
+                                  "type": "boolean"
+                                },
+                                "mode": {
+                                  "type": "string",
+                                  "enum": [
+                                    "market",
+                                    "fixed"
+                                  ]
+                                },
+                                "steps": {
+                                  "type": "integer",
+                                  "minimum": -20,
+                                  "maximum": 20
+                                },
+                                "fixedPrice": {
+                                  "type": "integer",
+                                  "minimum": 200,
+                                  "maximum": 15000000
+                                },
+                                "platform": {
+                                  "type": "string",
+                                  "enum": [
+                                    "console",
+                                    "pc"
+                                  ]
+                                },
+                                "noLoss": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "enabled",
+                                "mode",
+                                "steps",
+                                "fixedPrice",
+                                "platform",
+                                "noLoss"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "safety": {
+                              "type": "object",
+                              "properties": {
+                                "maxSearchesPerHour": {
+                                  "default": 250,
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 7200
+                                },
+                                "maxBuysPerHour": {
+                                  "default": 15,
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 1000
+                                },
+                                "maxActiveHoursPerDay": {
+                                  "default": 6,
+                                  "type": "number",
+                                  "minimum": 1,
+                                  "maximum": 24
+                                },
+                                "buyToSearchRatio": {
+                                  "default": 0.35,
+                                  "type": "number",
+                                  "minimum": 0.01,
+                                  "maximum": 1
+                                },
+                                "cooldownSeconds": {
+                                  "default": 10,
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 3600
+                                },
+                                "maxCoinFlowPerHour": {
+                                  "default": 500000,
+                                  "type": "integer",
+                                  "minimum": 1000,
+                                  "maximum": 1000000000
+                                },
+                                "actionsPerHour": {},
+                                "sessionLengthMinutes": {}
+                              },
+                              "required": [
+                                "maxSearchesPerHour",
+                                "maxBuysPerHour",
+                                "maxActiveHoursPerDay",
+                                "buyToSearchRatio",
+                                "cooldownSeconds",
+                                "maxCoinFlowPerHour"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "riskAcknowledgedAt",
+                            "searchDelay",
+                            "breaks",
+                            "rest",
+                            "thresholds",
+                            "autoSell",
+                            "safety"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "updatedAt": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "settings",
+                    "updatedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "extension"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "settings": {
+                    "type": "object",
+                    "properties": {
+                      "safetyMode": {},
+                      "customRiskAcknowledgedAt": {},
+                      "riskAcknowledgedAt": {
+                        "default": null,
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "searchDelay": {
+                        "default": {
+                          "min": 8,
+                          "max": 12
+                        },
+                        "type": "object",
+                        "properties": {
+                          "min": {
+                            "type": "number",
+                            "minimum": 0.5,
+                            "maximum": 600
+                          },
+                          "max": {
+                            "type": "number",
+                            "minimum": 0.5,
+                            "maximum": 600
+                          }
+                        },
+                        "required": [
+                          "min",
+                          "max"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "breaks": {
+                        "default": {
+                          "enabled": true,
+                          "searches": {
+                            "min": 15,
+                            "max": 15
+                          },
+                          "seconds": {
+                            "min": 10,
+                            "max": 10
+                          }
+                        },
+                        "type": "object",
+                        "properties": {
+                          "enabled": {
+                            "type": "boolean"
+                          },
+                          "searches": {
+                            "type": "object",
+                            "properties": {
+                              "min": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 10000
+                              },
+                              "max": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 10000
+                              }
+                            },
+                            "required": [
+                              "min",
+                              "max"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "seconds": {
+                            "type": "object",
+                            "properties": {
+                              "min": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 3600
+                              },
+                              "max": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 3600
+                              }
+                            },
+                            "required": [
+                              "min",
+                              "max"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "enabled",
+                          "searches",
+                          "seconds"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "rest": {
+                        "default": {
+                          "enabled": true,
+                          "afterMinutes": {
+                            "min": 60,
+                            "max": 60
+                          },
+                          "minutes": {
+                            "min": 20,
+                            "max": 20
+                          }
+                        },
+                        "type": "object",
+                        "properties": {
+                          "enabled": {
+                            "type": "boolean"
+                          },
+                          "afterMinutes": {
+                            "type": "object",
+                            "properties": {
+                              "min": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 1440
+                              },
+                              "max": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 1440
+                              }
+                            },
+                            "required": [
+                              "min",
+                              "max"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "minutes": {
+                            "type": "object",
+                            "properties": {
+                              "min": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 1440
+                              },
+                              "max": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 1440
+                              }
+                            },
+                            "required": [
+                              "min",
+                              "max"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "enabled",
+                          "afterMinutes",
+                          "minutes"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "thresholds": {
+                        "default": {
+                          "maxBuyPrice": 0,
+                          "minProfit": 1000,
+                          "stopAfterPurchases": 0,
+                          "sessionCoinBudget": 0
+                        },
+                        "type": "object",
+                        "properties": {
+                          "maxBuyPrice": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 15000000
+                          },
+                          "minProfit": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 15000000
+                          },
+                          "stopAfterPurchases": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 100000
+                          },
+                          "sessionCoinBudget": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000000000
+                          }
+                        },
+                        "required": [
+                          "maxBuyPrice",
+                          "minProfit",
+                          "stopAfterPurchases",
+                          "sessionCoinBudget"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "autoSell": {
+                        "default": {
+                          "enabled": false,
+                          "mode": "market",
+                          "steps": 0,
+                          "fixedPrice": 10000,
+                          "platform": "console",
+                          "noLoss": true
+                        },
+                        "type": "object",
+                        "properties": {
+                          "enabled": {
+                            "type": "boolean"
+                          },
+                          "mode": {
+                            "type": "string",
+                            "enum": [
+                              "market",
+                              "fixed"
+                            ]
+                          },
+                          "steps": {
+                            "type": "integer",
+                            "minimum": -20,
+                            "maximum": 20
+                          },
+                          "fixedPrice": {
+                            "type": "integer",
+                            "minimum": 200,
+                            "maximum": 15000000
+                          },
+                          "platform": {
+                            "type": "string",
+                            "enum": [
+                              "console",
+                              "pc"
+                            ]
+                          },
+                          "noLoss": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "enabled",
+                          "mode",
+                          "steps",
+                          "fixedPrice",
+                          "platform",
+                          "noLoss"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "safety": {
+                        "default": {},
+                        "type": "object",
+                        "properties": {
+                          "maxSearchesPerHour": {
+                            "default": 250,
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 7200
+                          },
+                          "maxBuysPerHour": {
+                            "default": 15,
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 1000
+                          },
+                          "maxActiveHoursPerDay": {
+                            "default": 6,
+                            "type": "number",
+                            "minimum": 1,
+                            "maximum": 24
+                          },
+                          "buyToSearchRatio": {
+                            "default": 0.35,
+                            "type": "number",
+                            "minimum": 0.01,
+                            "maximum": 1
+                          },
+                          "cooldownSeconds": {
+                            "default": 10,
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 3600
+                          },
+                          "maxCoinFlowPerHour": {
+                            "default": 500000,
+                            "type": "integer",
+                            "minimum": 1000,
+                            "maximum": 1000000000
+                          },
+                          "actionsPerHour": {},
+                          "sessionLengthMinutes": {}
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "settings"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "settings": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "safetyMode": {},
+                            "customRiskAcknowledgedAt": {},
+                            "riskAcknowledgedAt": {
+                              "default": null,
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "format": "date-time",
+                                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "searchDelay": {
+                              "type": "object",
+                              "properties": {
+                                "min": {
+                                  "type": "number",
+                                  "minimum": 0.5,
+                                  "maximum": 600
+                                },
+                                "max": {
+                                  "type": "number",
+                                  "minimum": 0.5,
+                                  "maximum": 600
+                                }
+                              },
+                              "required": [
+                                "min",
+                                "max"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "breaks": {
+                              "type": "object",
+                              "properties": {
+                                "enabled": {
+                                  "type": "boolean"
+                                },
+                                "searches": {
+                                  "type": "object",
+                                  "properties": {
+                                    "min": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 10000
+                                    },
+                                    "max": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 10000
+                                    }
+                                  },
+                                  "required": [
+                                    "min",
+                                    "max"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "seconds": {
+                                  "type": "object",
+                                  "properties": {
+                                    "min": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 3600
+                                    },
+                                    "max": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 3600
+                                    }
+                                  },
+                                  "required": [
+                                    "min",
+                                    "max"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "enabled",
+                                "searches",
+                                "seconds"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "rest": {
+                              "type": "object",
+                              "properties": {
+                                "enabled": {
+                                  "type": "boolean"
+                                },
+                                "afterMinutes": {
+                                  "type": "object",
+                                  "properties": {
+                                    "min": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 1440
+                                    },
+                                    "max": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 1440
+                                    }
+                                  },
+                                  "required": [
+                                    "min",
+                                    "max"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "minutes": {
+                                  "type": "object",
+                                  "properties": {
+                                    "min": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 1440
+                                    },
+                                    "max": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 1440
+                                    }
+                                  },
+                                  "required": [
+                                    "min",
+                                    "max"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "enabled",
+                                "afterMinutes",
+                                "minutes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "thresholds": {
+                              "type": "object",
+                              "properties": {
+                                "maxBuyPrice": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 15000000
+                                },
+                                "minProfit": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 15000000
+                                },
+                                "stopAfterPurchases": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 100000
+                                },
+                                "sessionCoinBudget": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 1000000000
+                                }
+                              },
+                              "required": [
+                                "maxBuyPrice",
+                                "minProfit",
+                                "stopAfterPurchases",
+                                "sessionCoinBudget"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "autoSell": {
+                              "type": "object",
+                              "properties": {
+                                "enabled": {
+                                  "type": "boolean"
+                                },
+                                "mode": {
+                                  "type": "string",
+                                  "enum": [
+                                    "market",
+                                    "fixed"
+                                  ]
+                                },
+                                "steps": {
+                                  "type": "integer",
+                                  "minimum": -20,
+                                  "maximum": 20
+                                },
+                                "fixedPrice": {
+                                  "type": "integer",
+                                  "minimum": 200,
+                                  "maximum": 15000000
+                                },
+                                "platform": {
+                                  "type": "string",
+                                  "enum": [
+                                    "console",
+                                    "pc"
+                                  ]
+                                },
+                                "noLoss": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "enabled",
+                                "mode",
+                                "steps",
+                                "fixedPrice",
+                                "platform",
+                                "noLoss"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "safety": {
+                              "type": "object",
+                              "properties": {
+                                "maxSearchesPerHour": {
+                                  "default": 250,
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 7200
+                                },
+                                "maxBuysPerHour": {
+                                  "default": 15,
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 1000
+                                },
+                                "maxActiveHoursPerDay": {
+                                  "default": 6,
+                                  "type": "number",
+                                  "minimum": 1,
+                                  "maximum": 24
+                                },
+                                "buyToSearchRatio": {
+                                  "default": 0.35,
+                                  "type": "number",
+                                  "minimum": 0.01,
+                                  "maximum": 1
+                                },
+                                "cooldownSeconds": {
+                                  "default": 10,
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 3600
+                                },
+                                "maxCoinFlowPerHour": {
+                                  "default": 500000,
+                                  "type": "integer",
+                                  "minimum": 1000,
+                                  "maximum": 1000000000
+                                },
+                                "actionsPerHour": {},
+                                "sessionLengthMinutes": {}
+                              },
+                              "required": [
+                                "maxSearchesPerHour",
+                                "maxBuysPerHour",
+                                "maxActiveHoursPerDay",
+                                "buyToSearchRatio",
+                                "cooldownSeconds",
+                                "maxCoinFlowPerHour"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "riskAcknowledgedAt",
+                            "searchDelay",
+                            "breaks",
+                            "rest",
+                            "thresholds",
+                            "autoSell",
+                            "safety"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "updatedAt": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "settings",
+                    "updatedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/extension/version": {
       "get": {
         "tags": [

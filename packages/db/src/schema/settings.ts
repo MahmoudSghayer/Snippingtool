@@ -1,5 +1,5 @@
 // Matches migrations/0015_settings.sql, 0016_notifications.sql,
-// 0037_user_recent_searches.sql.
+// 0037_user_recent_searches.sql, 0039_user_bot_settings.sql.
 
 import { isNull, relations } from 'drizzle-orm';
 import { index, integer, jsonb, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
@@ -53,6 +53,28 @@ export const userRecentSearches = pgTable('user_recent_searches', {
 
 export const userRecentSearchesRelations = relations(userRecentSearches, ({ one }) => ({
   user: one(users, { fields: [userRecentSearches.userId], references: [users.id] }),
+}));
+
+// ---------------------------------------------------------------------------
+
+/** The Nova AI bot's settings, replaced whole by `PUT /extension/bot-settings`
+ * (settings: @sl/shared `BotSettings`). 0039_user_bot_settings.sql. */
+export const userBotSettings = pgTable('user_bot_settings', {
+  id: idPk(),
+  userId: uuid('user_id')
+    .notNull()
+    .unique()
+    .references(() => users.id, { onDelete: 'cascade' }),
+
+  settings: jsonb('settings').notNull().$type<Record<string, unknown>>(),
+
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+  rowVersion: rowVersion(),
+});
+
+export const userBotSettingsRelations = relations(userBotSettings, ({ one }) => ({
+  user: one(users, { fields: [userBotSettings.userId], references: [users.id] }),
 }));
 
 // ---------------------------------------------------------------------------
