@@ -14,6 +14,12 @@ import { and, eq, isNull } from 'drizzle-orm';
 
 import { newId } from '../../lib/ids.js';
 
+/** A Drizzle transaction handle (what `db.transaction(cb)` passes `cb`). */
+type Transaction = Parameters<Parameters<Database['transaction']>[0]>[0];
+type Executor = Database | Transaction;
+
+export type SessionRow = typeof sessions.$inferSelect;
+
 export async function findUserByEmail(db: Database, email: string): Promise<User | undefined> {
   return db.query.users.findFirst({ where: and(eq(users.email, email), isNull(users.deletedAt)) });
 }
@@ -67,7 +73,7 @@ export async function consumePasswordReset(db: Database, id: string): Promise<vo
 }
 
 export async function createSession(
-  db: Database,
+  db: Executor,
   params: {
     userId: string;
     deviceId: string | null;
@@ -100,6 +106,12 @@ export async function findSessionById(db: Database, id: string) {
   return db.query.sessions.findFirst({ where: eq(sessions.id, id) });
 }
 
+/** `revoked_reason` of a row whose token was rotated by a refresh. */
+export const ROTATED = 'rotated';
+/** `revoked_reason` of a row `reissueWithinGrace` replaced. Never eligible
+ * for the grace itself: presenting such a token is always reuse. */
+export const RETRY_SUPERSEDED = 'retry_superseded';
+
 /**
  * Refresh rotation: the previous session row is revoked (reason 'rotated'),
  * never reused in place — a *new* row is inserted with the new hash, same
@@ -113,7 +125,12 @@ export async function findSessionById(db: Database, id: string) {
  *
  * The revoke is conditional (`revoked_at IS NULL`): two refreshes racing on
  * the same token both read it as live, but only one UPDATE can match. The
- * loser gets `null` back and must treat its token as reused.
+ * loser gets `null` back (service.ts `refresh` answers it
+ * `AUTH_REFRESH_CONFLICT`, revoking nothing).
+ *
+ * The revoke and the insert are one transaction, so nobody ever sees the
+ * family with its old head revoked and no new head yet: `reissueWithinGrace`
+ * below reads "no live row" as "this family was revoked".
  */
 export async function rotateSession(
   db: Database,
@@ -128,20 +145,105 @@ export async function rotateSession(
   newRefreshTokenHash: string,
   expiresAt: Date,
 ): Promise<string | null> {
-  const [revoked] = await db
-    .update(sessions)
-    .set({ revokedAt: new Date(), revokedReason: 'rotated' })
-    .where(and(eq(sessions.id, previous.id), isNull(sessions.revokedAt)))
-    .returning({ id: sessions.id });
-  if (!revoked) return null;
-  return createSession(db, {
-    userId: previous.userId,
-    deviceId: previous.deviceId,
-    refreshTokenHash: newRefreshTokenHash,
-    familyId: previous.familyId,
-    ip: previous.ip,
-    userAgent: previous.userAgent,
-    expiresAt,
+  return db.transaction(async (tx) => {
+    const [revoked] = await tx
+      .update(sessions)
+      .set({ revokedAt: new Date(), revokedReason: ROTATED })
+      .where(and(eq(sessions.id, previous.id), isNull(sessions.revokedAt)))
+      .returning({ id: sessions.id });
+    if (!revoked) return null;
+    return createSession(tx, {
+      userId: previous.userId,
+      deviceId: previous.deviceId,
+      refreshTokenHash: newRefreshTokenHash,
+      familyId: previous.familyId,
+      ip: previous.ip,
+      userAgent: previous.userAgent,
+      expiresAt,
+    });
+  });
+}
+
+export type GraceReissue =
+  | { kind: 'reissued'; sessionId: string }
+  /** Not a benign retry: the caller treats it as reuse. */
+  | { kind: 'not_eligible' }
+  /** Another request changed the family's head meanwhile; nothing was
+   * written. */
+  | { kind: 'conflict' };
+
+/**
+ * The refresh grace (docs/04-auth.md §3): `presented` is a session row whose
+ * token was rotated moments ago, presented again — what a client does when
+ * the answer to its first refresh was lost (a 502 during a deploy, a dropped
+ * connection). The server only keeps token hashes, so it cannot hand back
+ * the successor it already issued; instead the successor is retired
+ * (`retry_superseded`) and a new row is minted in the same family, with the
+ * new token's hash. The family still has exactly one live row.
+ *
+ * Eligible only when all of these hold, read fresh inside the transaction:
+ *  - `presented` was revoked as `rotated` (not by a logout, a password
+ *    change, an admin, a ban or reuse detection: every family- or user-wide
+ *    revocation overwrites the reason on every row, so a revoked family
+ *    never reads as `rotated`), and no more than `graceMs` ago;
+ *  - the family has exactly one live, unexpired row (its head): no live
+ *    row means the family was revoked, and it is never revived;
+ *  - every row revoked since `presented` was rotated was retired by this
+ *    function, never rotated: the head is `presented`'s own successor (or a
+ *    re-issue of it), which nobody has used to refresh. A successor that was
+ *    used proves the first answer arrived, so `presented` is being replayed.
+ *    (Timestamps compare with `>=`: a tie reads as "used", the strict side.)
+ * The head's retirement is conditional on it still being live, so of two
+ * concurrent retries only one re-issues; the other gets `conflict`.
+ */
+export async function reissueWithinGrace(
+  db: Database,
+  presented: SessionRow,
+  newRefreshTokenHash: string,
+  expiresAt: Date,
+  now: Date,
+  graceMs: number,
+): Promise<GraceReissue> {
+  return db.transaction(async (tx): Promise<GraceReissue> => {
+    const family = await tx
+      .select()
+      .from(sessions)
+      .where(eq(sessions.familyId, presented.familyId));
+    const self = family.find((row) => row.id === presented.id);
+    const rotatedAt = self?.revokedAt;
+    if (!self || !rotatedAt || self.revokedReason !== ROTATED) return { kind: 'not_eligible' };
+    if (now.getTime() - rotatedAt.getTime() > graceMs) return { kind: 'not_eligible' };
+
+    const live = family.filter((row) => row.revokedAt === null);
+    const head = live.length === 1 ? live[0] : undefined;
+    if (!head || head.expiresAt.getTime() <= now.getTime()) return { kind: 'not_eligible' };
+
+    const usedSince = family.some(
+      (row) =>
+        row.id !== self.id &&
+        row.revokedAt !== null &&
+        row.revokedAt.getTime() >= rotatedAt.getTime() &&
+        row.revokedReason !== RETRY_SUPERSEDED,
+    );
+    if (usedSince) return { kind: 'not_eligible' };
+
+    const [retired] = await tx
+      .update(sessions)
+      .set({ revokedAt: now, revokedReason: RETRY_SUPERSEDED })
+      .where(and(eq(sessions.id, head.id), isNull(sessions.revokedAt)))
+      .returning({ id: sessions.id });
+    if (!retired) return { kind: 'conflict' };
+
+    const sessionId = await createSession(tx, {
+      userId: head.userId,
+      deviceId: head.deviceId,
+      refreshTokenHash: newRefreshTokenHash,
+      familyId: head.familyId,
+      ip: head.ip,
+      userAgent: head.userAgent,
+      expiresAt,
+    });
+    return { kind: 'reissued', sessionId };
   });
 }
 

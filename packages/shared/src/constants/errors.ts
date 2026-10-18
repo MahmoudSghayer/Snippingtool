@@ -14,6 +14,7 @@ export const ERROR_CODES = [
   'AUTH_TOKEN_INVALID',
   'AUTH_TOKEN_REUSED',
   'AUTH_SESSION_REVOKED',
+  'AUTH_REFRESH_CONFLICT',
   // Devices / licensing
   'DEVICE_LIMIT_REACHED',
   'DEVICE_NOT_FOUND',
@@ -57,6 +58,11 @@ export const ERROR_STATUS: Readonly<Record<ErrorCode, number>> = {
   AUTH_TOKEN_INVALID: 401,
   AUTH_TOKEN_REUSED: 401,
   AUTH_SESSION_REVOKED: 401,
+  // Two refreshes presented the same refresh token at the same moment and
+  // the other one rotated it: nothing was revoked. The client re-reads its
+  // stored refresh token (the other request's answer may have saved a new
+  // one) and, if it is unchanged, tries again (apps/api `refresh`).
+  AUTH_REFRESH_CONFLICT: 409,
   DEVICE_LIMIT_REACHED: 409,
   DEVICE_NOT_FOUND: 404,
   LICENSE_INVALID: 402,

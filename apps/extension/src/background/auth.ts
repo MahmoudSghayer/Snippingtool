@@ -15,7 +15,15 @@ import { seedOpenTrades } from './lifecycle.js';
 import type { LoginResponse, MfaVerifyRequest, RegisterResponse } from '@sl/shared';
 
 export interface AuthStatus {
+  /** An access token this browser session. */
   authenticated: boolean;
+  /** Signed in at all: an access token or a stored refresh token. False
+   * once a refresh was refused (the session ended) or the user signed out;
+   * true while the account merely cannot be reached. */
+  hasAccount: boolean;
+  /** Why the extension was last signed out, when it is (`hasAccount`
+   * false) and it knows. */
+  signedOutReason?: auth.SignedOutReason;
 }
 
 const EXTENSION_VERSION = import.meta.env.VITE_EXTENSION_VERSION;
@@ -75,5 +83,9 @@ export async function handleAuthLogout(payload: { allDevices?: boolean } = {}): 
 }
 
 export async function handleAuthStatus(): Promise<AuthStatus> {
-  return { authenticated: await auth.isAuthenticated() };
+  const authenticated = await auth.isAuthenticated();
+  const hasAccount = authenticated || (await auth.hasAccount());
+  if (hasAccount) return { authenticated, hasAccount };
+  const signedOut = await auth.lastSignOut();
+  return signedOut ? { authenticated, hasAccount, signedOutReason: signedOut.reason } : { authenticated, hasAccount };
 }

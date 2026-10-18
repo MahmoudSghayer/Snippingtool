@@ -26,7 +26,11 @@ describe('lib/auth.ts: one token refresh at startup', () => {
   async function restartedBrowserWithRefreshToken() {
     const storage = await import('../../src/lib/storage.js');
     await storage.setLocal('sl.refreshTokenEnc', await storage.encryptString('a-valid-refresh-token'));
-    return import('../../src/lib/auth.js');
+    const auth = await import('../../src/lib/auth.js');
+    // An unreachable API is retried for a while (lib/auth.ts doRefresh):
+    // not for 20 s here.
+    auth.setRefreshRetryForTests({ budgetMs: 50, delay: () => 5 });
+    return auth;
   }
 
   it('refreshes once, and the extension is signed in again', async () => {

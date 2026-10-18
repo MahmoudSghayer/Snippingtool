@@ -111,14 +111,22 @@ via a plain unique index instead of scanning). **30 day** lifetime
 1. Looks up the session by the presented token's hash.
 2. If found and `revoked_at IS NOT NULL` → **reuse detected**: the entire
    `family_id` is revoked (every session sharing it), and the caller gets
-   `401 AUTH_TOKEN_REUSED`.
+   `401 AUTH_TOKEN_REUSED` — unless it is a retry inside the refresh grace
+   (below). A token whose session ended because the password changed says
+   so in the refusal (`details: { reason: 'password_changed' }`), so the
+   extension can tell its user why it was signed out; no other revocation
+   reason is disclosed.
 3. If found, not revoked, and expired → `401 AUTH_TOKEN_EXPIRED`.
 4. Otherwise: the _old_ session row is marked `revoked_at`/`revoked_reason =
 'rotated'`, and a **new** session row is inserted (new id, new
-   `refresh_token_hash`, same `family_id`/`user_id`/`device_id`). A fresh
-   access token is signed with the new session's id as `sid`. The revoke is
-   conditional (`WHERE revoked_at IS NULL`), so of two refreshes racing on
-   one token only one rotates; the other is treated as reuse (step 2).
+   `refresh_token_hash`, same `family_id`/`user_id`/`device_id`), in one
+   transaction. A fresh access token is signed with the new session's id as
+   `sid`. The revoke is conditional (`WHERE revoked_at IS NULL`), so of two
+   refreshes racing on one token only one rotates; the other gets
+   `409 AUTH_REFRESH_CONFLICT` and nothing is revoked (two tabs of one
+   browser refreshing at once is not theft). The client re-reads its stored
+   refresh token — the winner's answer may have saved a new one — and, if
+   it is unchanged, tries again, which lands in the grace below.
 
 ```mermaid
 sequenceDiagram
@@ -145,6 +153,57 @@ rotation — indistinguishable from "never existed" — instead of "found, but
 already revoked", which is what actually triggers the family-wide
 revocation. The insert-new-row approach is what makes reuse detectable at
 all.
+
+### Refresh grace: a retry whose answer was lost
+
+Reuse detection used to sign people out for no fault of theirs: a refresh
+reaches the API and rotates the token, but the answer never arrives (a 502
+while the API restarts during a deploy, a dropped connection), so the
+client retries with the token it still holds — now superseded — and the
+whole family is revoked. The extension's Nova AI bot then stopped
+mid-session.
+
+So a token rotated **at most `REFRESH_ROTATION_GRACE_MS` (30 s) ago** is
+handled by `repo.reissueWithinGrace` instead of being revoked on sight. It
+gets the same expiry, User-Agent/device binding, account-status and ban
+checks as a live token, and is a benign retry only when, read fresh inside
+one transaction:
+
+- its row was revoked as `rotated` — not by a logout, a password change,
+  an admin, a ban or reuse detection. Every user- or family-wide revocation
+  overwrites `revoked_reason` on every row of the family, so a revoked
+  family never reads as `rotated`;
+- the family has exactly one live, unexpired row, its head. No live row
+  means the family was revoked, and **a revoked family is never revived**;
+- every row revoked since it was rotated was retired by the grace itself,
+  never rotated: the head is its own successor (or a re-issue of it), which
+  nobody has refreshed with. A used successor proves the first answer
+  arrived, so the old token is being replayed: reuse, family revoked.
+
+**What the retry gets.** The API keeps only token hashes, so it cannot hand
+back the successor it already issued. It retires that successor
+(`revoked_reason = 'retry_superseded'`) and mints a new pair in the same
+family; the family still has one live row. The retirement is conditional
+on the head still being live, so of two concurrent retries one re-issues
+and the other gets `409 AUTH_REFRESH_CONFLICT`.
+
+**Why it is safe.** The grace never yields two live tokens in one family,
+and theft is still detected, at most one refresh later:
+
+- An attacker replaying a stolen, superseded token inside the window
+  retires the legitimate client's token. That token is `retry_superseded`,
+  which is never eligible for the grace, so the legitimate client's next
+  refresh is reuse and revokes the family, the attacker's token included.
+  (Replaying first, before the legitimate client refreshes, was always
+  possible; the window does not widen what a thief can do.)
+- A replay after the legitimate client used its successor, or more than
+  30 s after the rotation, is reuse exactly as before.
+- Logout, password change/reset, admin force-logout or suspension, bans,
+  session/device revocation and reuse detection all leave the family with
+  no live row, so a retry finds nothing to re-issue.
+
+`409 AUTH_REFRESH_CONFLICT` is never a sign-out: the client keeps its
+tokens, re-reads storage, and retries.
 
 ## 4. Lockout and rate limiting
 

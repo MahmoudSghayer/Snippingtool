@@ -103,6 +103,9 @@ function setup(opts: {
   budgetStore?: { value: BotBudgetState | null };
   /** Whether the plan includes the bot, asked before every action. */
   entitled?: () => boolean;
+  /** Why the account cannot be confirmed (null: it can), asked before
+   * every action, ahead of `entitled`. */
+  account?: SniperDeps['account'];
   /** Replaces the budget store's load (a service worker that died). */
   loadBudget?: () => Promise<BotBudgetState | null>;
   /** Whether this tab holds the engine lease, asked before every action. */
@@ -201,6 +204,7 @@ function setup(opts: {
     ...(opts.marketPrice ? { marketPrice: opts.marketPrice } : {}),
     ...(opts.timingMode ? { timingMode: opts.timingMode } : {}),
     ...(opts.entitled ? { entitled: opts.entitled } : {}),
+    ...(opts.account ? { account: opts.account } : {}),
     ...(opts.exclusive ? { exclusive: opts.exclusive } : {}),
     ...(opts.onAttempt ? { onAttempt: opts.onAttempt } : {}),
     ...(opts.onRiskEvent ? { onRiskEvent: opts.onRiskEvent } : {}),
@@ -1090,6 +1094,87 @@ describe('Sniper — the plan must still include the bot', () => {
     h.sniper.start();
     expect(h.sniper.isRunning()).toBe(false);
     expect(h.sniper.state.stopReason).toBe('not_entitled');
+  });
+});
+
+describe('Sniper — a session that ends is not a plan problem', () => {
+  const quick = {
+    searchDelay: { min: 1, max: 1 },
+    breaks: { ...DEFAULT_BOT_SETTINGS.breaks, enabled: false },
+    rest: { ...DEFAULT_BOT_SETTINGS.rest, enabled: false },
+  };
+
+  it('stops as signed out, with the reason given, when the session ends mid-session', async () => {
+    // Signed out after the second search. The features went with the
+    // session (content empties them), but the stop says what happened.
+    let searchesSoFar = () => 0;
+    const signedOut = () => searchesSoFar() >= 2;
+    const h = setup({
+      settings: quick,
+      results: [[], [auction('t-a', 8_000)]],
+      entitled: () => !signedOut(),
+      account: () =>
+        signedOut()
+          ? { reason: 'signed_out', detail: 'signed out of Nova Trade because the password changed — sign in again to restart' }
+          : null,
+    });
+    searchesSoFar = () => h.searches.length;
+    h.sniper.start();
+    await h.done();
+    expect(h.sniper.state.stopReason).toBe('signed_out');
+    expect(h.sniper.state.stopDetail).toBe('signed out of Nova Trade because the password changed — sign in again to restart');
+    expect(h.sniper.state.stopDetail).not.toContain('plan');
+    // Checked before the buy the second search found.
+    expect(h.searches).toHaveLength(2);
+    expect(h.buys).toEqual([]);
+  });
+
+  it('says plainly that it is signed out when no reason is given', async () => {
+    let searchesSoFar = () => 0;
+    const h = setup({
+      settings: quick,
+      results: [[]],
+      account: () => (searchesSoFar() >= 1 ? { reason: 'signed_out' } : null),
+    });
+    searchesSoFar = () => h.searches.length;
+    h.sniper.start();
+    await h.done();
+    expect(h.sniper.state.stopReason).toBe('signed_out');
+    expect(h.sniper.state.stopDetail).toBe('signed out of Nova Trade — sign in again to restart');
+  });
+
+  it('will not start while signed out, and says so rather than blaming the plan', () => {
+    const h = setup({ entitled: () => false, account: () => ({ reason: 'signed_out' }) });
+    h.sniper.start();
+    expect(h.sniper.isRunning()).toBe(false);
+    expect(h.sniper.state.stopReason).toBe('signed_out');
+    expect(h.sniper.state.stopDetail).toBe('signed out of Nova Trade — sign in again to restart');
+  });
+
+  it('stops as unreachable when the account stays unconfirmed', async () => {
+    let searchesSoFar = () => 0;
+    const h = setup({
+      settings: quick,
+      results: [[]],
+      entitled: () => searchesSoFar() < 1,
+      account: () => (searchesSoFar() >= 1 ? { reason: 'account_unreachable' } : null),
+    });
+    searchesSoFar = () => h.searches.length;
+    h.sniper.start();
+    await h.done();
+    expect(h.sniper.state.stopReason).toBe('account_unreachable');
+    expect(h.sniper.state.stopDetail).toMatch(/could not confirm your account/);
+  });
+
+  it('starts again once the account is confirmed', () => {
+    let issue: ReturnType<NonNullable<SniperDeps['account']>> = { reason: 'signed_out' };
+    const h = setup({ account: () => issue, maxSearches: 1 });
+    h.sniper.start();
+    expect(h.sniper.state.stopReason).toBe('signed_out');
+    issue = null;
+    h.sniper.start();
+    expect(h.sniper.isRunning()).toBe(true);
+    h.sniper.stop();
   });
 });
 

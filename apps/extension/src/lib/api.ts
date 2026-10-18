@@ -17,17 +17,22 @@ export { ApiError, API_ORIGIN, NetworkError } from './http.js';
 export async function apiFetch(path: string, init: RequestInit = {}, opts: RetryFetchOptions = {}): Promise<Response> {
   let refreshedOnce = false;
   for (;;) {
+    // The access token the last attempt carried: the one a 401 refused.
+    let sentToken: string | null = null;
     const res = await retryFetch(path, init, {
       ...opts,
       authorize: async (headers) => {
         const token = await getValidAccessToken();
+        sentToken = token;
         if (token) headers.set('authorization', `Bearer ${token}`);
       },
     });
 
     if (res.status === 401 && !refreshedOnce) {
       refreshedOnce = true;
-      const refreshed = await handleUnauthorized();
+      // Rejects when the API cannot be reached to refresh (tokens kept):
+      // the caller sees an unreachable API, not a refusal.
+      const refreshed = await handleUnauthorized(sentToken);
       if (refreshed) continue; // retry once, immediately, with the fresh token
     }
     return res;

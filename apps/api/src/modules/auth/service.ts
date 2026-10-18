@@ -34,6 +34,7 @@ import {
 } from '../../lib/lockout.js';
 import {
   MFA_TICKET_TTL_SECONDS,
+  REFRESH_ROTATION_GRACE_MS,
   REFRESH_TOKEN_TTL_MS,
   accessTokenTtlSeconds,
   generateFamilyId,
@@ -467,11 +468,18 @@ export async function refresh(
   const session = await repo.findSessionByRefreshHash(ctx.db, hash);
   if (!session) throw AppErrors.tokenInvalid('Invalid refresh token.');
 
-  if (session.revokedAt) {
+  // A token rotated moments ago may be a client retrying a refresh whose
+  // answer it never got: `repo.reissueWithinGrace` below decides, after the
+  // same expiry/binding/ban checks a live token gets. Anything else already
+  // revoked is reuse.
+  const retryOfRotated =
+    session.revokedAt !== null &&
+    session.revokedReason === repo.ROTATED &&
+    Date.now() - session.revokedAt.getTime() <= REFRESH_ROTATION_GRACE_MS;
+  if (session.revokedAt && !retryOfRotated) {
     // Reuse of an already-revoked (superseded or explicitly logged-out)
     // refresh token: treat as compromise, revoke the whole family.
-    await repo.revokeSessionFamily(ctx.db, session.familyId, 'token_reuse_detected');
-    throw AppErrors.tokenReused();
+    return rejectAsReuse(ctx, session);
   }
 
   if (session.expiresAt.getTime() < Date.now()) {
@@ -518,24 +526,46 @@ export async function refresh(
     throw AppErrors.forbidden('This account, device, or network has been banned.');
 
   const newRefresh = generateRefreshToken();
-  const newSessionId = await repo.rotateSession(
-    ctx.db,
-    {
-      id: session.id,
-      userId: session.userId,
-      deviceId: session.deviceId,
-      familyId: session.familyId,
-      ip: session.ip,
-      userAgent: session.userAgent,
-    },
-    newRefresh.hash,
-    new Date(Date.now() + REFRESH_TOKEN_TTL_MS),
-  );
-  if (!newSessionId) {
-    // A concurrent refresh with the same token rotated it first: two
-    // holders of one refresh token is exactly what reuse detection is for.
-    await repo.revokeSessionFamily(ctx.db, session.familyId, 'token_reuse_detected');
-    throw AppErrors.tokenReused();
+  const expiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_MS);
+  let newSessionId: string;
+  if (retryOfRotated) {
+    const outcome = await repo.reissueWithinGrace(
+      ctx.db,
+      session,
+      newRefresh.hash,
+      expiresAt,
+      new Date(),
+      REFRESH_ROTATION_GRACE_MS,
+    );
+    if (outcome.kind === 'conflict') throw AppErrors.refreshConflict();
+    if (outcome.kind === 'not_eligible') return rejectAsReuse(ctx, session);
+    newSessionId = outcome.sessionId;
+  } else {
+    const rotated = await repo.rotateSession(
+      ctx.db,
+      {
+        id: session.id,
+        userId: session.userId,
+        deviceId: session.deviceId,
+        familyId: session.familyId,
+        ip: session.ip,
+        userAgent: session.userAgent,
+      },
+      newRefresh.hash,
+      expiresAt,
+    );
+    if (!rotated) {
+      // Another request revoked this token between the read above and the
+      // rotation. A concurrent refresh with the same token (two tabs, or a
+      // retry overlapping its own first attempt) is answered 409, revoking
+      // nothing: the client re-reads its stored token, and a retry with
+      // this one inside the grace window is handled above. Revoked for any
+      // other reason, it is reuse as before.
+      const now = await repo.findSessionById(ctx.db, session.id);
+      if (now?.revokedReason === repo.ROTATED) throw AppErrors.refreshConflict();
+      return rejectAsReuse(ctx, now ?? session);
+    }
+    newSessionId = rotated;
   }
 
   const entitlements = await ctx.entitlements.getEntitlements(user.id);
@@ -556,6 +586,20 @@ export async function refresh(
     refreshToken: newRefresh.token,
     expiresIn: accessTokenTtlSeconds(user.role),
   };
+}
+
+/** Reuse detection's answer: revoke the whole family and refuse. A token
+ * whose session ended because the password changed says so
+ * (`details.reason`), so a client can tell its user why it was signed out;
+ * no other revocation reason is disclosed. */
+async function rejectAsReuse(
+  ctx: AuthContext,
+  session: { familyId: string; revokedReason: string | null },
+): Promise<never> {
+  await repo.revokeSessionFamily(ctx.db, session.familyId, 'token_reuse_detected');
+  throw AppErrors.tokenReused(
+    session.revokedReason === 'password_changed' ? { reason: 'password_changed' } : undefined,
+  );
 }
 
 export async function logout(ctx: AuthContext, refreshToken: string | undefined): Promise<void> {
