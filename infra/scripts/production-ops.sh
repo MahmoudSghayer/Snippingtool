@@ -193,6 +193,136 @@ SQL
     echo "now: $(report)"
     ;;
 
+  session-report)
+    # A user's recent Nova AI session (buy attempts, failures and their
+    # speed, trades, profit), optionally for one player. The report holds
+    # the user's own trading data and these logs are public, so it is
+    # printed only encrypted to REPORT_PUBKEY_B64 (a PEM public key whose
+    # private half never leaves the operator): an RSA-OAEP-wrapped random
+    # key, then the report under AES-256-CBC with that key.
+    sha="${EMAIL_SHA:?set EMAIL_SHA}"
+    [[ "$sha" =~ ^[0-9a-f]{64}$ ]] || { echo 'EMAIL_SHA is not a sha256' >&2; exit 1; }
+    hours="${REPORT_HOURS:-36}"
+    [[ "$hours" =~ ^[0-9]{1,4}$ ]] || { echo 'REPORT_HOURS must be a number' >&2; exit 1; }
+    player="${REPORT_PLAYER:-}"
+    [[ "$player" =~ ^[A-Za-z0-9\ .-]{0,40}$ ]] || { echo 'REPORT_PLAYER has odd characters' >&2; exit 1; }
+    command -v openssl >/dev/null || { echo 'openssl is not installed on the server' >&2; exit 1; }
+    work="$(mktemp -d)"
+    trap 'rm -rf "$work"' EXIT
+    printf '%s' "${REPORT_PUBKEY_B64:?set REPORT_PUBKEY_B64}" | base64 -d >"$work/pub.pem"
+    openssl pkey -pubin -in "$work/pub.pem" -noout 2>/dev/null ||
+      { echo 'REPORT_PUBKEY_B64 is not a public key' >&2; exit 1; }
+    openssl rand -hex 32 >"$work/key"
+    pg="$(container postgres)"
+    [ -n "$pg" ] || { echo "no running postgres container in $project" >&2; exit 1; }
+    docker exec -i -e EMAIL_SHA="$sha" -e HOURS="$hours" -e PLAYER="$player" "$pg" sh -c \
+      'psql -X -q -v ON_ERROR_STOP=1 -P pager=off -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v email_sha="$EMAIL_SHA" -v hours="$HOURS" -v player="$PLAYER"' \
+      >"$work/report.txt" 2>&1 <<'SQL' || true
+\pset footer off
+SELECT id AS uid, timezone AS tz FROM users
+ WHERE encode(sha256(convert_to(lower(email::text), 'UTF8')), 'hex') = :'email_sha' \gset
+\echo 'window: last' :hours 'hours, times in' :tz ', player filter:' :'player'
+CREATE TEMP TABLE pc AS
+  SELECT DISTINCT resource_id, coalesce(common_name, name) AS player, rating, card_version
+    FROM cards
+   WHERE :'player' <> ''
+     AND (name ILIKE '%' || :'player' || '%' OR common_name ILIKE '%' || :'player' || '%');
+CREATE TEMP TABLE sa AS
+  SELECT s.* FROM sniping_activity s
+   WHERE s.user_id = :'uid' AND s.occurred_at > now() - make_interval(hours => :hours)
+     AND (:'player' = '' OR s.resource_id IN (SELECT resource_id FROM pc));
+\echo
+\echo '== cards matching the player'
+SELECT * FROM pc ORDER BY rating DESC NULLS LAST;
+\echo '== buy attempts by outcome (latency = ms from seeing the listing to EA answering the buy)'
+SELECT outcome, count(*) AS n,
+       percentile_cont(0.5) WITHIN GROUP (ORDER BY latency_ms)::int AS p50_ms,
+       percentile_cont(0.9) WITHIN GROUP (ORDER BY latency_ms)::int AS p90_ms,
+       min(latency_ms) AS min_ms, max(latency_ms) AS max_ms,
+       round(avg(target_price)) AS avg_target, round(avg(listed_price)) AS avg_listed
+  FROM sa GROUP BY 1 ORDER BY 2 DESC;
+\echo '== failure reasons'
+SELECT outcome, coalesce(error_code, '-') AS error_code, count(*) AS n
+  FROM sa WHERE outcome <> 'success' GROUP BY 1, 2 ORDER BY 3 DESC;
+\echo '== buy attempts by hour'
+SELECT to_char(date_trunc('hour', occurred_at AT TIME ZONE :'tz'), 'Mon DD HH24:00') AS hour,
+       count(*) AS attempts, count(*) FILTER (WHERE outcome = 'success') AS won,
+       count(*) FILTER (WHERE outcome IN ('failed', 'too_slow')) AS lost,
+       percentile_cont(0.5) WITHIN GROUP (ORDER BY latency_ms)::int AS p50_ms
+  FROM sa GROUP BY 1 ORDER BY 1;
+\echo '== latency of won vs lost buys (ms buckets)'
+SELECT CASE WHEN latency_ms IS NULL THEN 'unknown'
+            WHEN latency_ms < 150 THEN 'a <150' WHEN latency_ms < 300 THEN 'b 150-299'
+            WHEN latency_ms < 500 THEN 'c 300-499' WHEN latency_ms < 1000 THEN 'd 500-999'
+            ELSE 'e 1000+' END AS bucket,
+       count(*) FILTER (WHERE outcome = 'success') AS won,
+       count(*) FILTER (WHERE outcome IN ('failed', 'too_slow')) AS lost
+  FROM sa GROUP BY 1 ORDER BY 1;
+\echo '== searches'
+WITH s AS (
+  SELECT occurred_at, results_count, floor_price,
+         extract(epoch FROM occurred_at - lag(occurred_at) OVER (ORDER BY occurred_at)) AS gap_s
+    FROM search_activity
+   WHERE user_id = :'uid' AND occurred_at > now() - make_interval(hours => :hours)
+     AND (:'player' = '' OR resource_id IN (SELECT resource_id FROM pc) OR resource_id IS NULL))
+SELECT count(*) AS searches,
+       count(*) FILTER (WHERE results_count > 0) AS with_results,
+       round(avg(results_count), 2) AS avg_results,
+       round((percentile_cont(0.5) WITHIN GROUP (ORDER BY gap_s))::numeric, 2) AS median_gap_s,
+       round(avg(floor_price)) AS avg_floor
+  FROM s;
+\echo '== trades'
+SELECT to_char(t.bought_at AT TIME ZONE :'tz', 'Mon DD HH24:MI') AS bought, t.buy_price,
+       t.status, t.sell_price, to_char(t.sold_at AT TIME ZONE :'tz', 'Mon DD HH24:MI') AS sold,
+       t.ea_tax, t.net_profit, coalesce(pc.player, t.resource_id) AS player
+  FROM trades t LEFT JOIN pc ON pc.resource_id = t.resource_id
+ WHERE t.user_id = :'uid' AND t.deleted_at IS NULL
+   AND (t.bought_at > now() - make_interval(hours => :hours)
+        OR t.sold_at > now() - make_interval(hours => :hours))
+   AND (:'player' = '' OR t.resource_id IN (SELECT resource_id FROM pc))
+ ORDER BY t.bought_at;
+\echo '== trade totals'
+SELECT count(*) AS bought, count(*) FILTER (WHERE t.status = 'sold') AS sold,
+       count(*) FILTER (WHERE t.status IN ('bought', 'listed')) AS still_held,
+       sum(t.buy_price) AS spent,
+       sum(t.sell_price) FILTER (WHERE t.status = 'sold') AS revenue,
+       sum(t.net_profit) FILTER (WHERE t.status = 'sold') AS net_profit
+  FROM trades t
+ WHERE t.user_id = :'uid' AND t.deleted_at IS NULL
+   AND (t.bought_at > now() - make_interval(hours => :hours)
+        OR t.sold_at > now() - make_interval(hours => :hours))
+   AND (:'player' = '' OR t.resource_id IN (SELECT resource_id FROM pc));
+\echo '== safety governor (risk_budget_events: the bot holding itself back)'
+SELECT kind, count(*) AS n, min(value) AS min_value, max(value) AS max_value,
+       max(threshold) AS threshold,
+       to_char(min(occurred_at) AT TIME ZONE :'tz', 'Mon DD HH24:MI') AS first,
+       to_char(max(occurred_at) AT TIME ZONE :'tz', 'Mon DD HH24:MI') AS last
+  FROM risk_budget_events
+ WHERE user_id = :'uid' AND occurred_at > now() - make_interval(hours => :hours)
+ GROUP BY 1 ORDER BY 2 DESC;
+\echo '== other bot events (user_activity: errors, settings changes, other)'
+SELECT type, coalesce(metadata->>'event', metadata->>'kind', metadata->>'reason', '-') AS what,
+       count(*) AS n
+  FROM user_activity
+ WHERE user_id = :'uid' AND occurred_at > now() - make_interval(hours => :hours)
+   AND type IN ('error', 'settings_change', 'other', 'kill_switch_triggered')
+ GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 25;
+\echo '== whole window, every player (top 15 by attempts)'
+SELECT coalesce(c.player, s.resource_id) AS player, count(*) AS attempts,
+       count(*) FILTER (WHERE s.outcome = 'success') AS won,
+       percentile_cont(0.5) WITHIN GROUP (ORDER BY s.latency_ms)::int AS p50_ms
+  FROM sniping_activity s
+  LEFT JOIN LATERAL (SELECT coalesce(common_name, name) AS player FROM cards
+                      WHERE cards.resource_id = s.resource_id LIMIT 1) c ON true
+ WHERE s.user_id = :'uid' AND s.occurred_at > now() - make_interval(hours => :hours)
+ GROUP BY 1 ORDER BY 2 DESC LIMIT 15;
+SQL
+    echo "encrypted report ($(wc -l <"$work/report.txt") lines)"
+    echo "key: $(openssl pkeyutl -encrypt -pubin -inkey "$work/pub.pem" \
+      -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -in "$work/key" | base64 -w0)"
+    echo "data: $(openssl enc -aes-256-cbc -pbkdf2 -salt -pass "file:$work/key" -in "$work/report.txt" | base64 -w0)"
+    ;;
+
   *)
     echo "unknown OPS_ACTION: $ACTION" >&2
     exit 1
