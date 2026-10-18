@@ -25,6 +25,12 @@
 #   OPS_ACTION=ea-probe     where EA's transfer market server is (addresses,
 #                           Google Cloud region) and how long reaching it
 #                           takes from this server; changes nothing
+#   OPS_ACTION=admin-panels the data behind the admin dashboard's Overview,
+#                           Activity and System pages (row counts, latest
+#                           timestamps, versions) and the API's failed
+#                           /api/v1/admin/ requests; counts and versions
+#                           only, never an email, IP or user id; changes
+#                           nothing
 set -euo pipefail
 
 ACTION="${OPS_ACTION:?set OPS_ACTION}"
@@ -428,6 +434,125 @@ PY
     echo "== what answers (selected response headers)"
     curl -sI --max-time 10 "https://$host/ut/game/fc26/" |
       grep -iE '^(HTTP/|server:|via:|alt-svc:|x-envoy-upstream-service-time:|x-served-by:|x-region:|x-gcp-region:)' || true
+    ;;
+
+  admin-panels)
+    # What the admin dashboard's Overview (versions donut, retention, live
+    # tiles), Activity tabs and System page are drawn from, to check them
+    # after a deploy. Aggregates only: counts, versions, latest timestamps.
+    # No email, IP, user id or device id is selected or printed, and the
+    # log section below scrubs ids, emails and addresses from what it shows.
+    psql_prod <<'SQL'
+\echo '== users'
+SELECT 'users: ' || count(*) FILTER (WHERE deleted_at IS NULL)
+    || ' (deleted ' || count(deleted_at) || ', admins ' || count(*) FILTER (WHERE role = 'admin')
+    || '), signups last 7d ' || count(*) FILTER (WHERE created_at > now() - interval '7 days')
+    || ', newest signup ' || coalesce(to_char(max(created_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI "UTC"'), '-')
+  FROM users;
+\echo '== user_activity by type, last 7 days (count, latest occurred_at, latest received)'
+SELECT type || ': ' || count(*)
+    || ', latest ' || to_char(max(occurred_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI "UTC"')
+    || ', received ' || to_char(max(created_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI "UTC"')
+  FROM user_activity
+ WHERE occurred_at > now() - interval '7 days'
+ GROUP BY type ORDER BY count(*) DESC;
+SELECT 'heartbeats carrying bot pace, last 7d: ' || count(*)
+  FROM user_activity
+ WHERE occurred_at > now() - interval '7 days' AND type = 'heartbeat' AND metadata ? 'bot';
+\echo '== sniping_activity (buy attempts) by outcome, last 7 days'
+SELECT outcome || ': ' || count(*)
+    || ', latest ' || to_char(max(occurred_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI "UTC"')
+  FROM sniping_activity
+ WHERE occurred_at > now() - interval '7 days'
+ GROUP BY outcome ORDER BY count(*) DESC;
+SELECT 'received in the last minute (the live tile): ' || count(*)
+  FROM sniping_activity
+ WHERE occurred_at > now() - interval '10 minutes' AND created_at > now() - interval '1 minute';
+\echo '== search_activity, last 7 days'
+SELECT 'searches: ' || count(*) || ' (with listings ' || count(*) FILTER (WHERE results_count > 0)
+    || '), latest ' || coalesce(to_char(max(occurred_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI "UTC"'), '-')
+  FROM search_activity
+ WHERE occurred_at > now() - interval '7 days';
+\echo '== devices by status'
+SELECT status || CASE WHEN deleted_at IS NULL THEN '' ELSE ' (deleted)' END || ': ' || count(*)
+    || ', latest seen ' || coalesce(to_char(max(last_seen_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI "UTC"'), '-')
+  FROM devices
+ GROUP BY status, deleted_at IS NULL ORDER BY count(*) DESC;
+\echo '== active devices by extension_version (none = a dashboard sign-in)'
+SELECT coalesce(extension_version, 'none') || ': ' || count(*)
+  FROM devices
+ WHERE status = 'active' AND deleted_at IS NULL
+ GROUP BY extension_version ORDER BY count(*) DESC LIMIT 25;
+\echo '== extension_installs (Overview donut / System chart: live = seen in the last 14 days)'
+SELECT 'rows: ' || count(*) || ', live ' || count(*) FILTER (WHERE uninstalled_at IS NULL AND last_seen > now() - interval '14 days')
+    || ', latest seen ' || coalesce(to_char(max(last_seen) AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI "UTC"'), '-')
+  FROM extension_installs;
+SELECT version || ' (' || coalesce(browser, 'unknown') || '): ' || count(*)
+  FROM extension_installs
+ WHERE uninstalled_at IS NULL AND last_seen > now() - interval '14 days'
+ GROUP BY version, browser ORDER BY count(*) DESC LIMIT 25;
+\echo '== ip_activity'
+SELECT 'rows: ' || count(*) || ' (flagged ' || count(*) FILTER (WHERE flagged) || '), latest seen '
+    || coalesce(to_char(max(last_seen) AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI "UTC"'), '-')
+  FROM ip_activity;
+SQL
+    api="$(container api)"
+    if [ -z "$api" ]; then
+      echo "no running api container in $project"
+      exit 0
+    fi
+    # One pass over the API's JSON log lines: Fastify logs the method and
+    # URL on "incoming request" and the status on "request completed", tied
+    # by reqId. Query strings are dropped; ids, emails and IPv4 addresses
+    # are replaced before anything is printed.
+    scrub() {
+      sed -E -e 's/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/<id>/g' \
+        -e 's/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/<email>/g' \
+        -e 's/\b([0-9]{1,3}\.){3}[0-9]{1,3}\b/<ip>/g' \
+        -e 's/\b[0-9a-fA-F]{1,4}(:[0-9a-fA-F]{0,4}){4,7}\b/<ip>/g' | cut -c1-300
+    }
+    work="$(mktemp -d)"
+    trap 'rm -rf "$work"' EXIT
+    docker logs --timestamps --since 24h "$api" 2>&1 | tail -n 100000 | awk '
+      function str(line, key,    re) {
+        re = "\"" key "\":\"[^\"]*\""
+        if (!match(line, re)) return ""
+        return substr(line, RSTART + length(key) + 4, RLENGTH - length(key) - 5)
+      }
+      function num(line, key,    re) {
+        re = "\"" key "\":[0-9.]+"
+        if (!match(line, re)) return ""
+        return substr(line, RSTART + length(key) + 3, RLENGTH - length(key) - 3)
+      }
+      {
+        id = str($0, "reqId")
+        if (index($0, "\"msg\":\"incoming request\"")) {
+          url = str($0, "url")
+          sub(/\?.*/, "", url)
+          if (index(url, "/api/v1/admin/") == 1) path[id] = str($0, "method") " " url
+          next
+        }
+        if (index($0, "\"msg\":\"request completed\"")) {
+          if (id in path) {
+            status = num($0, "statusCode")
+            summary[status " " path[id]]++
+            if (status + 0 >= 400)
+              print "FAIL " substr($1, 1, 19) "Z " status " " path[id] " " int(num($0, "responseTime")) "ms"
+            delete path[id]
+          }
+          next
+        }
+        level = num($0, "level")
+        if (level + 0 >= 50)
+          print "ERROR " substr($1, 1, 19) "Z level=" level " " ((id in path) ? path[id] " " : "") \
+            "type=" str($0, "type") " code=" str($0, "code") " msg=" str($0, "msg")
+      }
+      END { for (k in summary) print "COUNT " summary[k] " x " k }
+    ' | scrub >"$work/api.txt" || true
+    echo '== API responses to /api/v1/admin/ requests, last 24h (count x status method path)'
+    grep '^COUNT ' "$work/api.txt" | cut -c7- | sort -k5,5 -k3,3 | head -n 60 || true
+    echo '== failed /api/v1/admin/ requests (>= 400) and error log lines, last 24h, newest 200'
+    grep -E '^(FAIL|ERROR) ' "$work/api.txt" | tail -n 200 || true
     ;;
 
   *)
