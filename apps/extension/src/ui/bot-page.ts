@@ -2011,7 +2011,18 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     // The bar stops at a full list, even if a count kept up from partial
     // responses runs over (a card that left the list unseen).
     $('d-tl-bar').style.width = `${s ? Math.min(100, (s.total / TRANSFER_LIST_SIZE) * 100) : 0}%`;
-    setText($('d-tl-sub'), s ? `${fmt(s.listed)} listed · ${fmt(s.unlisted)} not listed` : '');
+    setText($('d-tl-sub'), s ? transferListBreakdown(s) : '');
+  }
+
+  /** What the cards on the list are, adding up to its total: listed and
+   * not listed always, sold and unsold (sitting there until cleared) when
+   * there are any. */
+  function transferListBreakdown(s: TransferListSummary): string {
+    const parts = [`${fmt(s.listed)} listed`];
+    if (s.sold > 0) parts.push(`${fmt(s.sold)} sold`);
+    if (s.unsold > 0) parts.push(`${fmt(s.unsold)} unsold`);
+    parts.push(`${fmt(s.unlisted)} not listed`);
+    return parts.join(' · ');
   }
 
   function renderDash(): void {
