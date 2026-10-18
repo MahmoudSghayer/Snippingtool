@@ -2297,6 +2297,16 @@
                             "minimum": 0,
                             "maximum": 9007199254740991
                           },
+                          "eligibleD7": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "eligibleD30": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
                           "retainedD7": {
                             "type": "integer",
                             "minimum": 0,
@@ -2308,19 +2318,35 @@
                             "maximum": 9007199254740991
                           },
                           "retentionD7": {
-                            "type": "number",
-                            "minimum": 0,
-                            "maximum": 1
+                            "anyOf": [
+                              {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           },
                           "retentionD30": {
-                            "type": "number",
-                            "minimum": 0,
-                            "maximum": 1
+                            "anyOf": [
+                              {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           }
                         },
                         "required": [
                           "cohortWeek",
                           "cohortSize",
+                          "eligibleD7",
+                          "eligibleD30",
                           "retainedD7",
                           "retainedD30",
                           "retentionD7",
@@ -7613,7 +7639,10 @@
                       }
                     },
                     "wsOnlineUsers": {
-                      "type": "number"
+                      "type": [
+                        "number",
+                        "null"
+                      ]
                     },
                     "extensionVersions": {
                       "type": "object",
@@ -7625,7 +7654,16 @@
                       }
                     },
                     "errorRateLast5Min": {
-                      "type": "number"
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "degraded": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     }
                   },
                   "required": [
@@ -7635,7 +7673,8 @@
                     "queues",
                     "wsOnlineUsers",
                     "extensionVersions",
-                    "errorRateLast5Min"
+                    "errorRateLast5Min",
+                    "degraded"
                   ],
                   "additionalProperties": false
                 }

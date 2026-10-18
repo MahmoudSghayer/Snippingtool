@@ -5,7 +5,8 @@
 // Plugin order (do not reorder without checking each plugin's `dependencies`
 // in its fp() options): config -> otel -> security headers -> cors -> cookie
 // -> csrf -> metrics -> request-id -> db -> redis -> rate-limit -> auth ->
-// websocket -> error-handler -> module autoload -> jobs (worker.ts only).
+// websocket -> admin-overview-tick -> error-handler -> module autoload ->
+// jobs (worker.ts only).
 
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,6 +21,9 @@ import {
 } from 'fastify-type-provider-zod';
 
 import { loadEnv } from './config/env.js';
+import adminOverviewTickPlugin, {
+  type AdminOverviewTickOptions,
+} from './plugins/admin-overview-tick.js';
 import authPlugin from './plugins/auth.js';
 import configPlugin from './plugins/config.js';
 import cookiePlugin from './plugins/cookie.js';
@@ -45,6 +49,9 @@ export interface BuildAppOptions {
   /** Skip autoloading src/modules — used by tests that want a bare app plus
    * a single module registered by hand. Defaults to false. */
   skipModuleAutoload?: boolean;
+  /** The `admin.overview.tick` publisher (plugins/admin-overview-tick.ts).
+   * Off under NODE_ENV=test unless a test passes `{ enabled: true }`. */
+  adminOverviewTick?: AdminOverviewTickOptions;
 }
 
 export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyInstance> {
@@ -99,6 +106,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   await app.register(rateLimitPlugin);
   await app.register(authPlugin);
   await app.register(websocketPlugin);
+  await app.register(adminOverviewTickPlugin, options.adminOverviewTick ?? {});
   await app.register(errorHandlerPlugin);
 
   await app.register(import('@fastify/swagger'), {

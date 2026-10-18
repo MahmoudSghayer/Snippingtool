@@ -73,8 +73,8 @@ All in `lib/analytics/kpi.ts`. `from`/`to` are inclusive UTC calendar days.
 | `conversion.rate`                  | see below                                                                                           |                                                                                                                                                                                                           |
 | `churn.rate`                       | see below                                                                                           |                                                                                                                                                                                                           |
 | `retention[]`                      | see below                                                                                           |                                                                                                                                                                                                           |
-| `extensionInstalls`                | `COUNT(*) FROM extension_installs WHERE uninstalled_at IS NULL`, plus a `byBrowser` breakdown       | Not range-dependent — always "installs live right now".                                                                                                                                                   |
-| `versionDistribution`              | same install set, grouped by `version`                                                              |                                                                                                                                                                                                           |
+| `extensionInstalls`                | `COUNT(*)` of live `extension_installs` (see "Extension installs" below), plus `byBrowser`          | Not range-dependent — always "installs live right now": not uninstalled and seen within the last 14 days.                                                                                                 |
+| `versionDistribution`              | same install set, grouped by `version`                                                              | An install that upgraded counts once, under its current version.                                                                                                                                          |
 
 ### Conversion (trial → paid within 30 days)
 
@@ -134,16 +134,64 @@ from) AND (ended_at IS NULL OR ended_at > from)`. `canceled_at` is set
 
 - **Cohort**: users whose `created_at` falls within `[from, to]`, grouped
   by the Monday (UTC) of their signup week — `cohortWeek`.
-- **D7 retained**: cohort member has ≥1 `user_activity` row on the _exact_
-  calendar day `signup_day + 7` (a fixed 24h UTC window, not "any activity
-  since"). **D30 retained**: same test at `signup_day + 30`.
-- `retentionD7 = retainedD7 / cohortSize`, `retentionD30 = retainedD30 /
-cohortSize`, per cohort week.
+- **Eligible at DN** (`eligibleD7` / `eligibleD30`): cohort members whose
+  `created_at + N × 24h` is already in the past — the only ones who could
+  have come back by day N.
+- **Retained at DN**: an eligible member with ≥1 `user_activity` row
+  (heartbeat, login, settings change, error report, …) at or after
+  `created_at + N × 24h`.
+- `retentionDN = retainedDN / eligibleDN` per cohort week, and **`null`**
+  when `eligibleDN = 0` (the whole cohort is younger than N days): "not
+  measurable yet", never a misleading 0%. The Overview chart leaves those
+  bars out.
 
-This is "N-day retention" (active on exactly day N after signup), the
-simplest and most common definition — not "N-day rolling retention" (active
-at any point on or after day N), which would double-count a user who is
-merely still using the product continuously.
+This is **unbounded** ("on or after day N") retention, the usual choice for
+a small user base: a trader who skips exactly day 7 but plays on day 8 is
+retained, so a cohort of a handful of users is not a flat 0% line just
+because nobody happened to be active on one specific calendar day.
+(Exact-day "N-day retention" was used before; with this product's user
+counts it read as zero almost everywhere.)
+
+### Extension installs
+
+`extension_installs` has one row per installed copy of the extension or
+the Tampermonkey userscript, upserted by `POST /api/v1/extension/bootstrap`
+(every start) and `POST /api/v1/extension/heartbeat` (every 10 minutes) —
+`lib/extension-installs.ts`:
+
+- `install_id` = the device id the API assigned at bootstrap (a salted,
+  per-install fingerprint; the client sends it on every heartbeat), so an
+  upgrade rewrites the same row's `version` instead of leaving the old
+  version behind.
+- `version` = the reported extension version; `browser` = the device
+  fingerprint's browser; `last_seen` = the last report.
+- A known install is rewritten only when something changed or `last_seen`
+  is more than 5 minutes old, so frequent bootstraps cost no writes.
+- **Live** = `uninstalled_at IS NULL AND last_seen` within the last
+  14 days (`LIVE_INSTALL_WINDOW_DAYS`). An install that stopped reporting
+  (uninstalled, or a browser update that changed its fingerprint and so
+  registered a new device) drops out after that.
+
+### Live Overview counters (`admin.overview.tick`)
+
+Pushed over the admin WS channel every 10 seconds by
+`plugins/admin-overview-tick.ts` (`src/ws/admin-tick.ts`), only while an
+admin is connected, by one API instance per tick (Redis `SET NX` lock):
+
+- `onlineUsers`: `SCARD presence:online`, the same number as
+  `onlineUsers` above and the System page's "WS online users".
+- `activeSnipesLastMinute`: `sniping_activity` rows (buy attempts, every
+  outcome) with `created_at >= now() - 60s AND occurred_at >= now() - 10 min`.
+- `errorsLastMinute`: `user_activity` rows with `type = 'error'` and the
+  same two time conditions.
+
+Both activity counters use the time a row was **received** (`created_at`):
+the extension uploads attempts every 2 minutes and error reports every 5, so
+a window on `occurred_at` would read 0 on almost every tick. Rows that
+happened more than 10 minutes before they arrived (an offline queue flushed
+late) are not live and are left out. `errorsLastMinute` is the extension's
+error reports (the Activity page's Errors tab), not API 5xx responses —
+those are the System page's Redis counter.
 
 ---
 
@@ -216,8 +264,8 @@ scoped, `/api/v1/analytics/me/activity`), sourced from three tables:
 - **Extension usage** (`lib/analytics/extension.ts`): `heartbeats` =
   `user_activity` rows with `type = 'heartbeat'` in `[from, to]` (written
   by `POST /api/v1/extension/heartbeat`); `activeInstalls`, `byVersion`,
-  `byBrowser` = a snapshot of live (`uninstalled_at IS NULL`)
-  `extension_installs` rows.
+  `byBrowser` = a snapshot of live `extension_installs` rows (§2
+  "Extension installs": not uninstalled, seen within 14 days).
 - **Error rates** (`lib/analytics/errors.ts`): `extensionErrorsInRange` =
   `COUNT(*) FROM user_activity WHERE type = 'error' AND occurred_at IN
 [from, to)` (written by `POST /api/v1/extension/errors`);

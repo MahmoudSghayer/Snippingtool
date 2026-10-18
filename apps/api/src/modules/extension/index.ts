@@ -41,6 +41,7 @@ import { z } from 'zod';
 
 import { findOrRegisterDevice } from '../../lib/devices.js';
 import { AppErrors } from '../../lib/errors.js';
+import { recordExtensionInstall } from '../../lib/extension-installs.js';
 import { newId } from '../../lib/ids.js';
 import { INGEST_RATE_LIMIT } from '../../lib/rate-limit-tiers.js';
 import { getOrCreateUserSettings } from '../../lib/settings.js';
@@ -55,16 +56,16 @@ async function isKillSwitchActive(fastify: FastifyInstance): Promise<boolean> {
   return row?.enabled ?? false;
 }
 
-/** `deviceId` if it is one of this user's active devices, else null. The
- * body's `deviceId` is only the client's claim: heartbeat signs an
+/** The device if `deviceId` is one of this user's active devices, else
+ * null. The body's `deviceId` is only the client's claim: heartbeat signs an
  * entitlement blob for it, and the reports attribute rows to it. */
-async function ownActiveDeviceId(
+async function ownActiveDevice(
   fastify: FastifyInstance,
   userId: string,
   deviceId: string,
-): Promise<string | null> {
+): Promise<{ id: string; browser: string | null } | null> {
   const device = await fastify.db.query.devices.findFirst({
-    columns: { id: true },
+    columns: { id: true, browser: true },
     where: and(
       eq(devices.id, deviceId),
       eq(devices.userId, userId),
@@ -72,7 +73,30 @@ async function ownActiveDeviceId(
       isNull(devices.deletedAt),
     ),
   });
-  return device?.id ?? null;
+  return device ?? null;
+}
+
+async function ownActiveDeviceId(
+  fastify: FastifyInstance,
+  userId: string,
+  deviceId: string,
+): Promise<string | null> {
+  return (await ownActiveDevice(fastify, userId, deviceId))?.id ?? null;
+}
+
+/** Keeps `extension_installs` current (lib/extension-installs.ts) from the
+ * two calls every install makes: bootstrap on start, heartbeat every 10
+ * minutes. Bookkeeping only: a failure is logged, never returned to the
+ * extension, whose licence check must not depend on it. */
+async function touchInstall(
+  fastify: FastifyInstance,
+  report: Parameters<typeof recordExtensionInstall>[1],
+): Promise<void> {
+  try {
+    await recordExtensionInstall(fastify.db, report);
+  } catch (err) {
+    fastify.log.warn({ err }, 'extension install bookkeeping failed (non-fatal)');
+  }
 }
 
 async function loadSubscriptionAndLicenseDto(
@@ -201,6 +225,12 @@ export default fp(
           .update(devices)
           .set({ extensionVersion: request.body.extensionVersion })
           .where(eq(devices.id, deviceId));
+        await touchInstall(fastify, {
+          installId: deviceId,
+          userId,
+          version: request.body.extensionVersion,
+          browser: request.body.device.browser,
+        });
 
         const [entitlementSnapshot, { settings }, killSwitchActive, dtos, email] =
           await Promise.all([
@@ -253,11 +283,18 @@ export default fp(
         // Never sign a blob for a device that isn't the caller's, or that
         // was revoked. The extension keeps its cached blob until its next
         // bootstrap, which registers the device again within the limit.
-        if (!(await ownActiveDeviceId(fastify, userId, deviceId))) throw AppErrors.deviceNotFound();
+        const device = await ownActiveDevice(fastify, userId, deviceId);
+        if (!device) throw AppErrors.deviceNotFound();
         await fastify.db
           .update(devices)
           .set({ lastSeenAt: new Date(), extensionVersion, lastIp: request.ip })
           .where(eq(devices.id, deviceId));
+        await touchInstall(fastify, {
+          installId: deviceId,
+          userId,
+          version: extensionVersion,
+          browser: device.browser,
+        });
 
         await fastify.db.insert(userActivity).values({
           id: newId(),
