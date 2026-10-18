@@ -57,3 +57,46 @@ describe('activityIngestBatchSchema', () => {
     expect(activityIngestBatchSchema.safeParse({ events }).success).toBe(false);
   });
 });
+
+describe('heartbeat with the bot pace', () => {
+  const pace = {
+    windowMs: 120_000,
+    searches: 48,
+    withResults: 3,
+    failed: 1,
+    searchMsP50: 182,
+    searchMsP90: 260,
+    waitingMs: 95_000,
+    backoffMs: 0,
+    blockedMs: 0,
+    breakMs: 0,
+    cooldownMs: 10_000,
+  };
+  const heartbeat = (bot: unknown) =>
+    activityEventSchema.safeParse({
+      type: 'heartbeat',
+      occurredAt,
+      metadata: { extensionVersion: '0.2.0', engineState: 'running', bot },
+    });
+
+  it('takes the pace: counts and times only', () => {
+    expect(heartbeat(pace).success).toBe(true);
+    expect(heartbeat({ ...pace, searchMsP50: null, searchMsP90: null }).success).toBe(true);
+    // Still valid without one, as before.
+    expect(
+      activityEventSchema.safeParse({
+        type: 'heartbeat',
+        occurredAt,
+        metadata: { extensionVersion: '0.2.0' },
+      }).success,
+    ).toBe(true);
+  });
+
+  it('refuses anything else in it, a zero window, or values past the bounds', () => {
+    expect(heartbeat({ ...pace, listings: [] }).success).toBe(false);
+    expect(heartbeat({ ...pace, windowMs: 0 }).success).toBe(false);
+    expect(heartbeat({ ...pace, windowMs: 3_600_001 }).success).toBe(false);
+    expect(heartbeat({ ...pace, searches: -1 }).success).toBe(false);
+    expect(heartbeat({ ...pace, searchMsP50: 1.5 }).success).toBe(false);
+  });
+});

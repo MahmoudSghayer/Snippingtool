@@ -361,6 +361,94 @@
                                     "paused",
                                     "halted"
                                   ]
+                                },
+                                "bot": {
+                                  "type": "object",
+                                  "properties": {
+                                    "windowMs": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 3600000
+                                    },
+                                    "searches": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 100000
+                                    },
+                                    "withResults": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 100000
+                                    },
+                                    "failed": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 100000
+                                    },
+                                    "searchMsP50": {
+                                      "anyOf": [
+                                        {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 3600000
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
+                                    },
+                                    "searchMsP90": {
+                                      "anyOf": [
+                                        {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 3600000
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
+                                    },
+                                    "waitingMs": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 3600000
+                                    },
+                                    "backoffMs": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 3600000
+                                    },
+                                    "blockedMs": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 3600000
+                                    },
+                                    "breakMs": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 3600000
+                                    },
+                                    "cooldownMs": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 3600000
+                                    }
+                                  },
+                                  "required": [
+                                    "windowMs",
+                                    "searches",
+                                    "withResults",
+                                    "failed",
+                                    "searchMsP50",
+                                    "searchMsP90",
+                                    "waitingMs",
+                                    "backoffMs",
+                                    "blockedMs",
+                                    "breakMs",
+                                    "cooldownMs"
+                                  ],
+                                  "additionalProperties": false
                                 }
                               },
                               "required": [

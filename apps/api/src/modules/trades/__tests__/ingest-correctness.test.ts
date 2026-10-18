@@ -3,7 +3,7 @@
 // None of that may duplicate stats, 500 a batch, or put a row somewhere
 // `partitions.maintain` cannot cope with.
 
-import { profits, snipingActivity, trades, users } from '@sl/db';
+import { profits, snipingActivity, trades, userActivity, users } from '@sl/db';
 import { resetDatabase } from '@sl/db/test-utils';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -246,6 +246,37 @@ describe('ingest correctness', () => {
         attempts: [attempt({ occurredAt: new Date(Date.now() + 2 * MINUTE).toISOString() })],
       });
       expect(res.statusCode).toBe(200);
+    });
+
+    it("stores the bot's pace with a heartbeat event", async () => {
+      const { userId, token } = await createUser(app, 'pace@example.com');
+      const bot = {
+        windowMs: 120_000,
+        searches: 48,
+        withResults: 3,
+        failed: 0,
+        searchMsP50: 182,
+        searchMsP90: 260,
+        waitingMs: 95_000,
+        backoffMs: 0,
+        blockedMs: 0,
+        breakMs: 0,
+        cooldownMs: 10_000,
+      };
+      const res = await post('/api/v1/activity/batch', token, {
+        events: [
+          {
+            type: 'heartbeat',
+            occurredAt: new Date().toISOString(),
+            metadata: { extensionVersion: '0.2.0', engineState: 'running', bot },
+          },
+        ],
+      });
+      expect(res.statusCode, res.body).toBe(200);
+      const [row] = await app.db.query.userActivity.findMany({
+        where: eq(userActivity.userId, userId),
+      });
+      expect(row).toMatchObject({ type: 'heartbeat', metadata: { bot } });
     });
 
     it('rejects an activity event dated far in the future with a 400', async () => {

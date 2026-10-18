@@ -82,6 +82,7 @@ import type {
   AdapterEaError,
   BotBudgetState,
   BotDailyUsage,
+  BotPace,
   BotSettings,
   FilterCriteria,
   RiskEventKind,
@@ -395,6 +396,51 @@ interface BuyBlock {
 }
 
 /** A search on its way (`Sniper.startSearch`). */
+/** The kinds of wait a pace report adds up (`BotPace`): the phase each
+ * wait runs in, mapped to its bucket (a rest counts as a break). */
+type PaceWait = 'waitingMs' | 'backoffMs' | 'blockedMs' | 'breakMs' | 'cooldownMs';
+const PACE_WAITS: Partial<Record<SniperPhase, PaceWait>> = {
+  waiting: 'waitingMs',
+  backoff: 'backoffMs',
+  blocked: 'blockedMs',
+  break: 'breakMs',
+  rest: 'breakMs',
+  cooldown: 'cooldownMs',
+};
+/** `BotPace`'s bounds: a window over an hour or a count past them is cut. */
+const PACE_MAX_MS = 3_600_000;
+const PACE_MAX_COUNT = 100_000;
+
+/** What the bot did since the last pace report (`Sniper.takePace`). */
+interface PaceWindow {
+  since: number;
+  searches: number;
+  withResults: number;
+  failed: number;
+  /** Round trip of each answered search. */
+  searchMs: number[];
+  waits: Record<PaceWait, number>;
+}
+
+function newPaceWindow(since: number): PaceWindow {
+  return {
+    since,
+    searches: 0,
+    withResults: 0,
+    failed: 0,
+    searchMs: [],
+    waits: { waitingMs: 0, backoffMs: 0, blockedMs: 0, breakMs: 0, cooldownMs: 0 },
+  };
+}
+
+/** The `q` quantile of `sorted` (nearest rank), or null when empty. */
+function quantile(sorted: readonly number[], q: number): number | null {
+  if (sorted.length === 0) return null;
+  return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(q * sorted.length) - 1))]!;
+}
+
+const paceMs = (ms: number): number => Math.min(PACE_MAX_MS, Math.max(0, Math.round(ms)));
+
 interface SearchRun {
   /** Settles once a listing the bot can buy has arrived, or the search is over. */
   ready: Promise<void>;
@@ -531,6 +577,8 @@ export class Sniper {
   /** This start's own buys, for the limits that apply to one run: stop
    * after N purchases, and the session coin budget. */
   private runTotals = { purchases: 0, coinsSpent: 0 };
+  /** Since the last pace report (`takePace`). */
+  private pace: PaceWindow = newPaceWindow(0);
   private stateValue: SniperState = {
     phase: 'idle',
     phaseEndsAt: null,
@@ -636,6 +684,35 @@ export class Sniper {
     return this.stats;
   }
 
+  /** How the bot searched since the last call, for the telemetry report
+   * (`BotPace`), and a new window from now. Null when it did nothing in
+   * that time (stopped). A search that finds nothing is reported nowhere
+   * else, so this is what shows the bot's real search pace. */
+  takePace(): BotPace | null {
+    const p = this.pace;
+    const now = this.now();
+    this.pace = newPaceWindow(now);
+    const waited = Object.values(p.waits).reduce((a, b) => a + b, 0);
+    if (p.searches === 0 && waited === 0) return null;
+    const sorted = [...p.searchMs].sort((a, b) => a - b);
+    const p50 = quantile(sorted, 0.5);
+    const p90 = quantile(sorted, 0.9);
+    const count = (n: number) => Math.min(PACE_MAX_COUNT, n);
+    return {
+      windowMs: Math.max(1, paceMs(now - p.since)),
+      searches: count(p.searches),
+      withResults: count(p.withResults),
+      failed: count(p.failed),
+      searchMsP50: p50 == null ? null : paceMs(p50),
+      searchMsP90: p90 == null ? null : paceMs(p90),
+      waitingMs: paceMs(p.waits.waitingMs),
+      backoffMs: paceMs(p.waits.backoffMs),
+      blockedMs: paceMs(p.waits.blockedMs),
+      breakMs: paceMs(p.waits.breakMs),
+      cooldownMs: paceMs(p.waits.cooldownMs),
+    };
+  }
+
   getLog(): readonly SniperLogEntry[] {
     return this.log;
   }
@@ -727,6 +804,7 @@ export class Sniper {
     this.buyBlock = null;
     this.stats.startedAt = this.now();
     this.runTotals = { purchases: 0, coinsSpent: 0 };
+    this.pace = newPaceWindow(this.now());
     this.filterIndex = 0;
     this.searchRounds.clear();
     // The sell prices the minimum-profit check reads, looked up now so the
@@ -844,6 +922,12 @@ export class Sniper {
       if (end === 'stopped') return;
       const found = await search.done;
       if (signal.aborted) return;
+      this.pace.searches++;
+      if (!found.ok) this.pace.failed++;
+      else {
+        this.pace.searchMs.push(found.at - startedAt);
+        if (found.listings > 0) this.pace.withResults++;
+      }
       if (!found.ok) {
         if (!this.eaExcused(found.error, startedAt)) failuresInRow++;
         this.addLog({ kind: 'failed', message: `Search "${target.name}" failed: ${found.error}` });
@@ -1661,7 +1745,14 @@ export class Sniper {
    * longer one (`waitBlocked`). */
   private async wait(phase: SniperPhase, ms: number, signal: AbortSignal, endsAt = this.now() + ms): Promise<void> {
     this.setState({ phase, phaseEndsAt: endsAt, stopReason: null, stopDetail: null });
-    await this.sleep(ms, signal);
+    const bucket = PACE_WAITS[phase];
+    const from = this.now();
+    try {
+      await this.sleep(ms, signal);
+    } finally {
+      // The time it really waited, also when a stop cut the wait short.
+      if (bucket) this.pace.waits[bucket] += Math.max(0, this.now() - from);
+    }
   }
 
   private pickInt(r: { min: number; max: number }): number {

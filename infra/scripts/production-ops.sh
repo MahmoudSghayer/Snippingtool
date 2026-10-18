@@ -237,7 +237,7 @@ CREATE TEMP TABLE sa AS
 \echo
 \echo '== cards matching the player'
 SELECT * FROM pc ORDER BY rating DESC NULLS LAST;
-\echo '== buy attempts by outcome (latency = the buy request's round trip to EA, ms)'
+\echo '== buy attempts by outcome (latency = round trip of the buy request to EA, ms)'
 SELECT outcome, count(*) AS n,
        percentile_cont(0.5) WITHIN GROUP (ORDER BY latency_ms)::int AS p50_ms,
        percentile_cont(0.9) WITHIN GROUP (ORDER BY latency_ms)::int AS p90_ms,
@@ -271,7 +271,27 @@ SELECT CASE WHEN latency_ms IS NULL THEN 'unknown'
        count(*) FILTER (WHERE outcome = 'success') AS won,
        count(*) FILTER (WHERE outcome IN ('failed', 'too_slow')) AS lost
   FROM sa GROUP BY 1 ORDER BY 1;
-\echo '== searches'
+\echo '== search pace per hour (Nova AI bot builds that report it, every 2 minutes)'
+\echo '   pct_* = share of the time spent in the search delay, EA backoff, a limit, a break or rest, the pause after a buy'
+WITH p AS (
+  SELECT occurred_at, metadata->'bot' AS b
+    FROM user_activity
+   WHERE user_id = :'uid' AND type = 'heartbeat' AND metadata ? 'bot'
+     AND occurred_at > now() - make_interval(hours => :hours))
+SELECT to_char(date_trunc('hour', occurred_at AT TIME ZONE :'tz'), 'Mon DD HH24:00') AS hour,
+       sum((b->>'searches')::int) AS searches,
+       round(sum((b->>'searches')::numeric) * 60000 / nullif(sum((b->>'windowMs')::numeric), 0), 1) AS per_min,
+       sum((b->>'withResults')::int) AS with_results,
+       sum((b->>'failed')::int) AS failed,
+       round(avg((b->>'searchMsP50')::numeric)) AS search_p50_ms,
+       max((b->>'searchMsP90')::int) AS search_p90_max_ms,
+       round(100 * sum((b->>'waitingMs')::numeric) / nullif(sum((b->>'windowMs')::numeric), 0)) AS pct_delay,
+       round(100 * sum((b->>'backoffMs')::numeric) / nullif(sum((b->>'windowMs')::numeric), 0)) AS pct_backoff,
+       round(100 * sum((b->>'blockedMs')::numeric) / nullif(sum((b->>'windowMs')::numeric), 0)) AS pct_limit,
+       round(100 * sum((b->>'breakMs')::numeric) / nullif(sum((b->>'windowMs')::numeric), 0)) AS pct_break,
+       round(100 * sum((b->>'cooldownMs')::numeric) / nullif(sum((b->>'windowMs')::numeric), 0)) AS pct_cooldown
+  FROM p GROUP BY 1 ORDER BY 1;
+\echo '== searches that found listings (searches with none are only in the pace above)'
 WITH s AS (
   SELECT occurred_at, results_count, floor_price,
          extract(epoch FROM occurred_at - lag(occurred_at) OVER (ORDER BY occurred_at)) AS gap_s

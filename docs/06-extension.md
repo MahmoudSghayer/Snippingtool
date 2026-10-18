@@ -376,7 +376,13 @@ carries where the time before the buy went: `searchMs` (search sent to the
 listing arriving) and `reactionMs` (listing arriving to the buy sent), next
 to `latencyMs` (the buy's own round trip), cut to the schema's bounds by
 `attemptTiming` (`sniping_activity.search_ms` / `reaction_ms`, migration
-0038). The minimum-profit check never
+0038). Every two minutes while it runs, content sends the bot's pace
+(`Sniper.takePace`, `botPaceSchema`) as a `heartbeat` activity event:
+searches sent, with listings and failed, the search round trip's median
+and 90th percentile, and the time spent in the search delay, EA backoff,
+limits, breaks and the pause after a buy. A search that finds nothing is
+reported nowhere else, so this is what shows the real search pace. The
+minimum-profit check never
 waits on the network: the sale price is `plannedSalePrice`, the price
 auto-sell lists at (the user's own sell price when set, else the market
 price), less EA's 5% tax; a market price counts only once its lookup has
