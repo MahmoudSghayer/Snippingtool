@@ -45,6 +45,7 @@ const PROTECTED_ROUTES: Array<{
   { method: 'GET', path: '/api/v1/admin/config' },
   { method: 'GET', path: '/api/v1/admin/system/health' },
   { method: 'GET', path: '/api/v1/admin/activity/logins' },
+  { method: 'GET', path: '/api/v1/admin/bot-performance' },
   { method: 'GET', path: '/api/v1/admin/bans' },
   { method: 'GET', path: '/api/v1/admin/flags' },
   { method: 'GET', path: '/api/v1/admin/coupons' },

@@ -43,6 +43,7 @@ interface AdminRoute {
 // that goes stale, not the assertion methodology).
 const ADMIN_ROUTES: AdminRoute[] = [
   { method: 'GET', path: '/api/v1/admin/activity/logins', permission: 'analytics.read' },
+  { method: 'GET', path: '/api/v1/admin/bot-performance', permission: 'analytics.read' },
   { method: 'GET', path: '/api/v1/admin/analytics/overview', permission: 'analytics.read' },
   { method: 'GET', path: '/api/v1/admin/audit', permission: 'audit.read' },
   { method: 'GET', path: '/api/v1/admin/audit/export.csv', permission: 'audit.read' },

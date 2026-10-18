@@ -18,6 +18,8 @@ export interface StatTileProps {
   invertDeltaTone?: boolean;
   sparkline?: ReactNode;
   icon?: ReactNode;
+  /** One plain sentence under the value saying what the number means. */
+  hint?: ReactNode;
   className?: string;
 }
 
@@ -29,6 +31,7 @@ export function StatTile({
   invertDeltaTone,
   sparkline,
   icon,
+  hint,
   className,
 }: StatTileProps) {
   const isPositive = typeof delta === 'number' ? delta >= 0 : undefined;
@@ -48,6 +51,7 @@ export function StatTile({
       <div className="mt-2 font-mono text-2xl font-semibold tabular-nums text-(--sl-fg)">
         {value}
       </div>
+      {hint && <p className="mt-1 text-xs text-(--sl-fg-muted)">{hint}</p>}
       <div className="mt-2 flex items-center justify-between gap-2">
         {typeof delta === 'number' ? (
           <span

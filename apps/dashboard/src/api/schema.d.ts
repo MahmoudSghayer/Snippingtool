@@ -521,6 +521,132 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/bot-performance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    from?: string;
+                    to?: string;
+                    userId?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: date-time */
+                            from: string;
+                            /** Format: date-time */
+                            to: string;
+                            userId: string | null;
+                            summary: {
+                                attempts: number;
+                                won: number;
+                                lost: number;
+                                blocked: number;
+                                errors: number;
+                                unknown: number;
+                                winRate: number | null;
+                                searches: number;
+                                searchesWithResults: number;
+                                failedSearches: number;
+                                searchesPerMinute: number | null;
+                                runningMs: number;
+                            };
+                            timings: {
+                                overall: {
+                                    attempts: number;
+                                    search: {
+                                        p50: number | null;
+                                        p90: number | null;
+                                    };
+                                    reaction: {
+                                        p50: number | null;
+                                        p90: number | null;
+                                    };
+                                    buy: {
+                                        p50: number | null;
+                                        p90: number | null;
+                                    };
+                                };
+                                won: {
+                                    attempts: number;
+                                    search: {
+                                        p50: number | null;
+                                        p90: number | null;
+                                    };
+                                    reaction: {
+                                        p50: number | null;
+                                        p90: number | null;
+                                    };
+                                    buy: {
+                                        p50: number | null;
+                                        p90: number | null;
+                                    };
+                                };
+                                lost: {
+                                    attempts: number;
+                                    search: {
+                                        p50: number | null;
+                                        p90: number | null;
+                                    };
+                                    reaction: {
+                                        p50: number | null;
+                                        p90: number | null;
+                                    };
+                                    buy: {
+                                        p50: number | null;
+                                        p90: number | null;
+                                    };
+                                };
+                            };
+                            timeSplit: {
+                                delay: number;
+                                backoff: number;
+                                limit: number;
+                                break: number;
+                                cooldown: number;
+                                other: number;
+                            } | null;
+                            hourly: {
+                                /** Format: date-time */
+                                hour: string;
+                                searches: number;
+                                searchesPerMinute: number | null;
+                                attempts: number;
+                                won: number;
+                                lost: number;
+                                searchP50: number | null;
+                                reactionP50: number | null;
+                                buyP50: number | null;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/analytics/overview": {
         parameters: {
             query?: never;

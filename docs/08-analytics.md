@@ -237,6 +237,33 @@ scoped, `/api/v1/analytics/me/activity`), sourced from three tables:
   most the width of the bucket the true percentile falls in. Real-time
   only (reflects the process's metrics since last restart); has no `from`/
   `to` parameter.
+- **Bot performance** (`lib/analytics/bot-performance.ts`, served by
+  `modules/admin-activity` as `GET /api/v1/admin/bot-performance`, the
+  dashboard's `/admin/performance`): the Nova AI bot over `[from, to]`
+  (both inclusive; default the last 24 h, at most 31 days), for one user or
+  all. The same numbers as the ops `session-report`
+  (`infra/scripts/production-ops.sh`).
+  - From `sniping_activity`: attempts by outcome; won = `success`, lost =
+    `failed` + `too_slow` (someone else's buy landed first), `blocked` =
+    the bot's own limits, `errors` = `error`, `unknown` = `attempted`.
+    `winRate` = won ÷ (won + lost), null when both are 0. `timings` =
+    `percentile_cont` p50/p90 (rounded to whole ms) of `search_ms`,
+    `reaction_ms` and `latency_ms` over non-blocked attempts (`overall`),
+    `success` ones (`won`) and `failed`/`too_slow` ones (`lost`); nulls are
+    skipped, null with no sample.
+  - From `user_activity` heartbeats carrying `metadata.bot`
+    (`botPaceSchema`, one every ~2 minutes while the bot runs):
+    `searches`/`searchesWithResults`/`failedSearches` = sums;
+    `runningMs` = Σ `windowMs`; `searchesPerMinute` = searches × 60000 ÷
+    `runningMs`; `timeSplit` = Σ `waitingMs` / `backoffMs` / `blockedMs` /
+    `breakMs` / `cooldownMs` ÷ `runningMs` (delay / backoff / limit / break
+    / cooldown), `other` = the rest; null without pace reports.
+  - `hourly`: every UTC hour the range touches, zero-filled. Attempts count
+    toward the hour they happened in, a pace report toward the hour it was
+    sent in; the hour's `searchP50`/`reactionP50`/`buyP50` are medians over
+    its non-blocked attempts.
+  - Every query filters on `occurred_at` (the partition key, so only the
+    partitions in range are read) and, with `userId`, on `user_id`.
 
 ---
 

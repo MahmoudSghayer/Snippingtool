@@ -300,9 +300,9 @@ describe('AccountPage', () => {
     const titles = within(security)
       .getAllByRole('heading', { level: 3 })
       .map((h) => h.textContent);
-    expect(titles).toEqual(['Email', 'Password', 'Two-factor authentication', 'Delete account']);
+    expect(titles).toEqual(['Email', 'Password', 'Delete account']);
     expect(within(security).getByLabelText('Signed in as')).toHaveValue('player@example.com');
     expect(within(security).getByRole('button', { name: 'Change password' })).toBeVisible();
-    expect(within(security).getByRole('button', { name: 'Turn on 2FA' })).toBeVisible();
+    expect(within(security).queryByRole('button', { name: 'Turn on 2FA' })).toBeNull();
   });
 });

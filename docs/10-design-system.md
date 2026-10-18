@@ -237,7 +237,8 @@ surface area — the rest follow the same tokens and are simpler variations.
   these.
 - `StatTile`: label (uppercase eyebrow) + `font-mono` value + optional
   delta (arrow + signed percent, green/red by `invertDeltaTone`) +
-  optional `sparkline` slot. A status is never color-alone here either —
+  optional `sparkline` slot + optional `hint` (one plain sentence under the
+  value saying what the number means, e.g. on `/admin/performance`). A status is never color-alone here either —
   the arrow direction is independent of the delta's color, so a
   colorblind reader still gets the trend from the glyph.
 

@@ -15,6 +15,13 @@ export type DateRangePreset = '7d' | '30d' | '90d' | 'custom';
 export interface DateRangePickerProps {
   value: DateRange;
   onChange: (range: DateRange, preset: DateRangePreset) => void;
+  /** The preset buttons to offer, in order (default: 7d, 30d, 90d) — e.g.
+   * leave out 90d for a page whose API caps the range shorter. */
+  presets?: readonly Exclude<DateRangePreset, 'custom'>[];
+  /** Overrides which button shows as selected; `null` selects none, for a
+   * page whose own control picked the current range. Omit to let the
+   * picker track the user's last choice. */
+  activePreset?: DateRangePreset | null;
   className?: string;
 }
 
@@ -30,34 +37,52 @@ function presetRange(preset: Exclude<DateRangePreset, 'custom'>): DateRange {
   return { from: toDateString(from), to: toDateString(to) };
 }
 
-const PRESETS: { key: Exclude<DateRangePreset, 'custom'>; label: string }[] = [
-  { key: '7d', label: '7d' },
-  { key: '30d', label: '30d' },
-  { key: '90d', label: '90d' },
-];
+const ALL_PRESETS: readonly Exclude<DateRangePreset, 'custom'>[] = ['7d', '30d', '90d'];
+
+/** The preset whose range `value` is (today's 7/30/90 days), else custom. */
+function presetFor(
+  value: DateRange,
+  presets: readonly Exclude<DateRangePreset, 'custom'>[],
+): DateRangePreset {
+  return (
+    presets.find((p) => {
+      const range = presetRange(p);
+      return range.from === value.from && range.to === value.to;
+    }) ?? 'custom'
+  );
+}
 
 /** Presets + custom from/to, per PHASE 10's requirement. `onChange` always
  * receives a fully-formed `{from,to}` — callers never see an incomplete
  * custom range mid-edit. */
-export function DateRangePicker({ value, onChange, className }: DateRangePickerProps) {
-  const [activePreset, setActivePreset] = useState<DateRangePreset>('30d');
+export function DateRangePicker({
+  value,
+  onChange,
+  presets = ALL_PRESETS,
+  activePreset: activePresetOverride,
+  className,
+}: DateRangePickerProps) {
+  const [chosenPreset, setChosenPreset] = useState<DateRangePreset>(() =>
+    presetFor(value, presets),
+  );
   const [showCustom, setShowCustom] = useState(false);
+  const activePreset = activePresetOverride === undefined ? chosenPreset : activePresetOverride;
 
   return (
     <div className={cn('flex flex-wrap items-center gap-2', className)}>
-      {PRESETS.map((p) => (
+      {presets.map((p) => (
         <Button
-          key={p.key}
+          key={p}
           type="button"
           size="sm"
-          variant={activePreset === p.key ? 'primary' : 'outline'}
+          variant={activePreset === p ? 'primary' : 'outline'}
           onClick={() => {
-            setActivePreset(p.key);
+            setChosenPreset(p);
             setShowCustom(false);
-            onChange(presetRange(p.key), p.key);
+            onChange(presetRange(p), p);
           }}
         >
-          {p.label}
+          {p}
         </Button>
       ))}
       <Button
@@ -65,8 +90,11 @@ export function DateRangePicker({ value, onChange, className }: DateRangePickerP
         size="sm"
         variant={activePreset === 'custom' ? 'primary' : 'outline'}
         onClick={() => {
-          setActivePreset('custom');
+          setChosenPreset('custom');
           setShowCustom((s) => !s);
+          // Tell the page the custom range is now the active one, so a page
+          // that overrides the selection (activePreset) can drop its own.
+          onChange(value, 'custom');
         }}
       >
         Custom
