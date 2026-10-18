@@ -1,7 +1,8 @@
 // The Nova AI page's risk meter (`ui/bot-page.ts`): recommended limits
 // by default, a live risk level with projections and reasons, a one-time
 // acknowledgment the first time settings above low are saved, "Reset to
-// recommended", and the level reported as telemetry (`lib/bot-safety.ts`).
+// recommended", the "Short bursts" preset, and the level reported as
+// telemetry (`lib/bot-safety.ts`).
 
 import {
   DEFAULT_BOT_SETTINGS,
@@ -131,6 +132,31 @@ describe('bot page — risk meter', () => {
     expect(current().searchDelay).toEqual(DEFAULT_BOT_SETTINGS.searchDelay);
     expect(current().safety).toEqual(DEFAULT_BOT_SETTINGS.safety);
     expect($('risk')!.textContent).toBe('Risk: Low');
+  });
+
+  it('fills in the short bursts preset, asking for the acknowledgment first', () => {
+    const { $, flush, root, saves } = mount();
+    root.querySelector<HTMLButtonElement>('#preset-bursts')!.click();
+    flush();
+    // Shown on the page, not saved until the risk is confirmed.
+    expect($<HTMLInputElement>('delay')!.value).toBe('4-6');
+    expect($('risk')!.textContent).toBe('Risk: Moderate');
+    expect($<HTMLInputElement>('r-after')!.value).toBe('10-15');
+    expect($<HTMLInputElement>('r-minutes')!.value).toBe('10-20');
+    expect($<HTMLInputElement>('s-sph')!.value).toBe('450');
+    expect($('ackbox')!.hidden).toBe(false);
+    expect(saves).toHaveLength(0);
+
+    const ack = $<HTMLInputElement>('ack-check')!;
+    ack.checked = true;
+    ack.dispatchEvent(new Event('change', { bubbles: true }));
+    $('ack-confirm')!.click();
+    flush();
+    expect(saves).toHaveLength(1);
+    expect(saves[0]!.searchDelay).toEqual({ min: 4, max: 6 });
+    expect(saves[0]!.rest).toEqual({ enabled: true, afterMinutes: { min: 10, max: 15 }, minutes: { min: 10, max: 20 } });
+    expect(saves[0]!.breaks).toEqual({ enabled: true, searches: { min: 40, max: 60 }, seconds: { min: 15, max: 30 } });
+    expect(saves[0]!.safety).toMatchObject({ maxSearchesPerHour: 450, maxActiveHoursPerDay: 6, cooldownSeconds: 8 });
   });
 
   it('asks for the acknowledgment for unconfirmed settings saved by an older build', () => {

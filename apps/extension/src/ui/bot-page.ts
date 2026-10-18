@@ -20,7 +20,8 @@
  * the reasons, live as the user edits. The first time the user saves
  * settings above low, the page holds them back until they tick
  * `RISK_ACKNOWLEDGMENT`, and stores `riskAcknowledgedAt`; after that it only
- * shows the level. "Reset to recommended" restores the defaults.
+ * shows the level. "Reset to recommended" restores the defaults, and
+ * "Short bursts" fills in fast short sessions with rests between them.
  *
  * Renders in its own closed shadow root: EA's styles cannot reach in, and
  * neither can page scripts (`host.shadowRoot` is null to them). Every
@@ -45,6 +46,7 @@ import {
   roundToPriceStep,
   stepPrice,
   withRecommendedLimits,
+  withShortBurstLimits,
   type BotRiskLevel,
   type BotSettings,
   type FilterCriteria,
@@ -341,6 +343,10 @@ function parseRange(text: string, integer: boolean): { min: number; max: number 
 /** On the transfer list figures until EA's page has loaded the whole list:
  * they are read from what it loads, never asked of EA. */
 const TL_WAITING = 'Open your Transfer List in EA once and Nova AI will keep these up to date';
+
+/** What the "Short bursts" preset does (`withShortBurstLimits`). */
+const SHORT_BURSTS_HINT =
+  'fast 10-15 minute sessions (4-6 seconds between searches), each followed by a 10-20 minute rest, at most 450 searches an hour';
 
 const PHASE_LABEL: Record<SniperPhase, string> = {
   idle: 'Ready',
@@ -955,6 +961,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   function riskBoxHtml(): string {
     return `<section class="riskbox" id="riskbox" aria-labelledby="risk-title">
       <div class="riskhead"><b id="risk-title">Risk level <span id="risk-level"></span></b><span class="spacer"></span>
+        <button type="button" id="preset-bursts" title="${esc(SHORT_BURSTS_HINT)}">Short bursts</button>
         <button type="button" id="reset-rec">Reset to recommended</button></div>
       <div class="riskbar" id="riskbar" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
       <div id="risk-proj"></div>
@@ -1854,6 +1861,9 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     } else if (el.id === 'reset-rec') {
       commit(withRecommendedLimits(shown()), true);
       say('Reset to recommended', false);
+    } else if (el.id === 'preset-bursts') {
+      commit(withShortBurstLimits(shown()), true);
+      say(`Short bursts: ${SHORT_BURSTS_HINT}`, false);
     } else if (el.id === 'ack-confirm') {
       const check = root.getElementById('ack-check') as HTMLInputElement | null;
       if (!check?.checked) return;

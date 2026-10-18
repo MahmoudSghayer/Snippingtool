@@ -414,7 +414,13 @@ a random 8–12 s search delay, at most 250 searches and 15 buys an hour, a
 60-minute session then a 20-minute rest, at most 6 active hours a day, at
 most 500,000 coins spent an hour, and a 10 s cooldown after every buy. The
 user can change any of them within `BOT_LIMITS` (the hard technical
-bounds); "Reset to recommended" restores them. Settings saved by older
+bounds); "Reset to recommended" restores them. "Short bursts"
+(`withShortBurstLimits`, `SHORT_BURSTS_BOT_SETTINGS`) fills in fast short
+sessions instead: 4–6 s between searches, a 15–30 s break every 40–60
+searches, 10–15 minutes of searching then a 10–20 minute rest, at most 450
+searches an hour and 6 active hours a day (rated moderate, so it asks for
+the acknowledgment); both keep the user's targets, thresholds and
+auto-sell. Settings saved by older
 builds still parse: missing fields take the recommended values, and the
 retired `safetyMode`, `customRiskAcknowledgedAt`, `safety.actionsPerHour`
 and `safety.sessionLengthMinutes` are accepted and ignored.
