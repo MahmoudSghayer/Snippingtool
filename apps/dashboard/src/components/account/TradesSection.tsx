@@ -1,14 +1,18 @@
 // "Your trades" on /account: today's net in the trader's own time zone,
 // totals for the current filters, and the trades themselves (a table from
-// `sm` up, cards below it) with a "Record sale" action on every trade not
-// yet sold. Filters and order are applied by the API: the list is
-// cursor-paged, so sorting on the client would only reorder one page.
+// `sm` up, cards below it) with a "Mark as sold" action on every trade not
+// yet sold, for a sale the extension never saw (sold from another device,
+// or cleared from the transfer list first). Bought trades of one card can
+// also be selected and marked sold together at one price. Filters and
+// order are applied by the API: the list is cursor-paged, so sorting on
+// the client would only reorder one page.
 //
 // Renders content only; AccountPage wraps it in its AccountSection.
 import {
   Badge,
   Button,
   Card,
+  Checkbox,
   DataTable,
   EmptyState,
   Skeleton,
@@ -18,12 +22,13 @@ import {
   type ColumnDef,
 } from '@sl/ui';
 import { Download, Inbox } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { createContext, useContext, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
 import { downloadServerCsv } from '@/lib/csv.js';
 import { useAuthStore } from '@/stores/auth.js';
 
+import { BulkMarkSoldDialog } from './BulkMarkSoldDialog.js';
 import { RecordSaleDialog, signedCoins, tradeLabel } from './RecordSaleDialog.js';
 import { formatInZone, initialTimeZone, timeZoneOptions } from './timezone.js';
 import {
@@ -67,6 +72,55 @@ const SELECT_CLASSES =
   'h-11 w-full rounded-(--sl-radius-sm) border border-(--sl-border) bg-(--sl-ground) px-3 text-sm text-(--sl-fg) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--sl-accent) sm:h-10';
 
 const canRecordSale = (t: TradeListItem) => t.status === 'bought' || t.status === 'listed';
+
+/** A sale price the extension estimated (a listed card that left the
+ * transfer list unseen, recorded at its list price). */
+function SellPrice({ trade }: { trade: TradeListItem }) {
+  if (trade.sellPrice == null) return <span className="text-ink-2">—</span>;
+  return (
+    <span className="font-mono tabular-nums">
+      {formatCoins(trade.sellPrice)}
+      {trade.saleSource === 'inferred' && (
+        <abbr
+          title="Estimated: the card left your transfer list without its sale being seen, so it was recorded at its list price."
+          className="ml-1 font-sans text-xs text-ink-2 no-underline"
+        >
+          est.
+        </abbr>
+      )}
+    </span>
+  );
+}
+
+/** The selection for "Mark N as sold", read by each row's checkbox through
+ * context: the table's columns stay the same objects while it changes, so
+ * a toggled checkbox is not re-mounted (and keeps keyboard focus). */
+interface Selection {
+  isSelected: (id: string) => boolean;
+  /** Bought, and the card already selected (if any). */
+  canSelect: (trade: TradeListItem) => boolean;
+  toggle: (trade: TradeListItem, on: boolean) => void;
+  tz: string;
+}
+const SelectionContext = createContext<Selection | null>(null);
+
+function SelectBox({ trade }: { trade: TradeListItem }) {
+  const selection = useContext(SelectionContext);
+  if (!selection || trade.status !== 'bought') return null;
+  const checked = selection.isSelected(trade.id);
+  return (
+    <div className="flex size-11 items-center justify-center">
+      <Checkbox
+        checked={checked}
+        disabled={!checked && !selection.canSelect(trade)}
+        onCheckedChange={(on) => selection.toggle(trade, on === true)}
+        aria-label={`Select ${tradeLabel(trade)} bought ${formatInZone(trade.boughtAt, selection.tz)}`}
+        // A 44px touch target (WCAG 2.5.5) around the 20px box.
+        className="relative after:absolute after:-inset-3 after:content-['']"
+      />
+    </div>
+  );
+}
 
 function CardName({ trade }: { trade: TradeListItem }) {
   return (
@@ -128,6 +182,10 @@ export function TradesSection() {
   // Cursors of the pages visited so far; the last one is on screen.
   const [cursors, setCursors] = useState<(string | undefined)[]>([undefined]);
   const [selling, setSelling] = useState<TradeListItem | null>(null);
+  // Bought trades picked for "Mark N as sold", by id. Kept across pages;
+  // all one card, since they sell at one price.
+  const [selected, setSelected] = useState<ReadonlyMap<string, TradeListItem>>(new Map());
+  const [bulkOpen, setBulkOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
 
   const cursor = cursors.at(-1);
@@ -143,7 +201,29 @@ export function TradesSection() {
   function updateFilters(next: TradeFilters) {
     setFilters(next);
     setCursors([undefined]);
+    setSelected(new Map());
   }
+
+  // A selected trade the page now shows as no longer bought (marked sold on
+  // its own meanwhile) drops out.
+  const selectedTrades = [...selected.values()].filter((t) => {
+    const shown = trades.find((row) => row.id === t.id);
+    return !shown || shown.status === 'bought';
+  });
+  const selectedCard = selectedTrades[0]?.resourceId ?? null;
+  const selection: Selection = {
+    isSelected: (id) => selected.has(id),
+    canSelect: (t) =>
+      t.status === 'bought' && (selectedCard === null || t.resourceId === selectedCard),
+    toggle: (trade, on) =>
+      setSelected((current) => {
+        const next = new Map(current);
+        if (on) next.set(trade.id, trade);
+        else next.delete(trade.id);
+        return next;
+      }),
+    tz,
+  };
 
   function changeTimeZone(next: string) {
     setTz(next);
@@ -176,55 +256,57 @@ export function TradesSection() {
         // 44px touch target (WCAG 2.5.5) on every row action.
         className={cn('min-h-11', className)}
         onClick={() => setSelling(trade)}
-        aria-label={`Record sale for ${tradeLabel(trade)}`}
+        aria-label={`Mark ${tradeLabel(trade)} as sold`}
       >
-        Record sale
+        Mark as sold
       </Button>
     );
 
   // Sorting is the server's job (see the header comment), so no column
-  // offers DataTable's client-side sort.
-  const columns = (
-    [
-      { id: 'card', header: 'Card', cell: (c) => <CardName trade={c.row.original} /> },
-      {
-        id: 'status',
-        header: 'Status',
-        cell: (c) => (
-          <Badge tone={STATUS_TONE[c.row.original.status]}>
-            {STATUS_LABEL[c.row.original.status]}
-          </Badge>
-        ),
-      },
-      {
-        id: 'boughtAt',
-        header: 'Bought',
-        cell: (c) => (
-          <span className="whitespace-nowrap text-ink-2">
-            {formatInZone(c.row.original.boughtAt, tz)}
-          </span>
-        ),
-      },
-      {
-        id: 'buyPrice',
-        header: 'Buy',
-        cell: (c) => (
-          <span className="font-mono tabular-nums">{formatCoins(c.row.original.buyPrice)}</span>
-        ),
-      },
-      {
-        id: 'sellPrice',
-        header: 'Sell',
-        cell: (c) =>
-          c.row.original.sellPrice != null ? (
-            <span className="font-mono tabular-nums">{formatCoins(c.row.original.sellPrice)}</span>
-          ) : (
-            <span className="text-ink-2">—</span>
-          ),
-      },
-      { id: 'netProfit', header: 'Net', cell: (c) => <Net value={c.row.original.netProfit} /> },
-    ] satisfies ColumnDef<TradeListItem, unknown>[]
-  ).map((col): ColumnDef<TradeListItem, unknown> => ({ ...col, enableSorting: false }));
+  // offers DataTable's client-side sort. The same objects until the zone
+  // changes: DataTable renders each cell function as a component, and a new
+  // one would re-mount every cell (see `Selection`).
+  const columns = useMemo(
+    () =>
+      (
+        [
+          {
+            id: 'select',
+            header: () => <span className="sr-only">Select</span>,
+            cell: (c) => <SelectBox trade={c.row.original} />,
+          },
+          { id: 'card', header: 'Card', cell: (c) => <CardName trade={c.row.original} /> },
+          {
+            id: 'status',
+            header: 'Status',
+            cell: (c) => (
+              <Badge tone={STATUS_TONE[c.row.original.status]}>
+                {STATUS_LABEL[c.row.original.status]}
+              </Badge>
+            ),
+          },
+          {
+            id: 'boughtAt',
+            header: 'Bought',
+            cell: (c) => (
+              <span className="whitespace-nowrap text-ink-2">
+                {formatInZone(c.row.original.boughtAt, tz)}
+              </span>
+            ),
+          },
+          {
+            id: 'buyPrice',
+            header: 'Buy',
+            cell: (c) => (
+              <span className="font-mono tabular-nums">{formatCoins(c.row.original.buyPrice)}</span>
+            ),
+          },
+          { id: 'sellPrice', header: 'Sell', cell: (c) => <SellPrice trade={c.row.original} /> },
+          { id: 'netProfit', header: 'Net', cell: (c) => <Net value={c.row.original.netProfit} /> },
+        ] satisfies ColumnDef<TradeListItem, unknown>[]
+      ).map((col): ColumnDef<TradeListItem, unknown> => ({ ...col, enableSorting: false })),
+    [tz],
+  );
 
   const empty = filtered ? (
     <EmptyState
@@ -254,199 +336,239 @@ export function TradesSection() {
   const showEmpty = !page.isLoading && !page.isError && trades.length === 0;
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi
-          label="Net profit today"
-          value={today.data !== undefined ? signedCoins(today.data) : undefined}
-          caption={tz.replace(/_/g, ' ')}
-          loading={today.isLoading}
-          tone="signed"
-        />
-        <Kpi
-          label="Spent"
-          value={totals.data ? formatCoins(totals.data.spent) : undefined}
-          caption={totals.data ? `${formatCoins(totals.data.count)} trades` : undefined}
-          loading={totals.isLoading}
-        />
-        <Kpi
-          label="Revenue"
-          value={totals.data ? formatCoins(totals.data.revenue) : undefined}
-          caption={totals.data ? `${formatCoins(totals.data.sold)} sold` : undefined}
-          loading={totals.isLoading}
-        />
-        <Kpi
-          label="Net profit"
-          value={totals.data ? signedCoins(totals.data.netProfit) : undefined}
-          caption={filtered ? 'For these filters' : 'All trades'}
-          loading={totals.isLoading}
-          tone="signed"
-        />
-      </div>
-
-      <Card className="p-4">
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <label className="flex flex-col gap-1.5 text-sm font-medium text-ink">
-            Status
-            <select
-              className={SELECT_CLASSES}
-              value={filters.status ?? ''}
-              onChange={(e) =>
-                updateFilters({
-                  ...filters,
-                  status: (e.target.value || undefined) as TradeStatus | undefined,
-                })
-              }
-            >
-              <option value="">All</option>
-              {STATUS_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1.5 text-sm font-medium text-ink">
-            Order
-            <select
-              className={SELECT_CLASSES}
-              value={order}
-              onChange={(e) => {
-                setOrder(e.target.value as 'asc' | 'desc');
-                setCursors([undefined]);
-              }}
-            >
-              <option value="desc">Newest first</option>
-              <option value="asc">Oldest first</option>
-            </select>
-          </label>
-          <label className="flex flex-col gap-1.5 text-sm font-medium text-ink">
-            From
-            <input
-              type="date"
-              className={SELECT_CLASSES}
-              value={filters.from ?? ''}
-              max={filters.to}
-              onChange={(e) => updateFilters({ ...filters, from: e.target.value || undefined })}
-            />
-          </label>
-          <label className="flex flex-col gap-1.5 text-sm font-medium text-ink">
-            To
-            <input
-              type="date"
-              className={SELECT_CLASSES}
-              value={filters.to ?? ''}
-              min={filters.from}
-              onChange={(e) => updateFilters({ ...filters, to: e.target.value || undefined })}
-            />
-          </label>
-          <label className="col-span-2 flex flex-col gap-1.5 text-sm font-medium text-ink sm:col-span-3">
-            Time zone
-            <select
-              className={SELECT_CLASSES}
-              value={tz}
-              onChange={(e) => changeTimeZone(e.target.value)}
-            >
-              {zones.map((zone) => (
-                <option key={zone} value={zone}>
-                  {zone}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="col-span-2 flex items-end sm:col-span-1">
-            <Button
-              variant="outline"
-              className="min-h-11 w-full"
-              leftIcon={<Download className="size-4" aria-hidden="true" />}
-              loading={exporting}
-              disabled={showEmpty}
-              onClick={() => void exportCsv()}
-            >
-              Export CSV
-            </Button>
-          </div>
+    <SelectionContext.Provider value={selection}>
+      <div className="flex flex-col gap-4">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <Kpi
+            label="Net profit today"
+            value={today.data !== undefined ? signedCoins(today.data) : undefined}
+            caption={tz.replace(/_/g, ' ')}
+            loading={today.isLoading}
+            tone="signed"
+          />
+          <Kpi
+            label="Spent"
+            value={totals.data ? formatCoins(totals.data.spent) : undefined}
+            caption={totals.data ? `${formatCoins(totals.data.count)} trades` : undefined}
+            loading={totals.isLoading}
+          />
+          <Kpi
+            label="Revenue"
+            value={totals.data ? formatCoins(totals.data.revenue) : undefined}
+            caption={totals.data ? `${formatCoins(totals.data.sold)} sold` : undefined}
+            loading={totals.isLoading}
+          />
+          <Kpi
+            label="Net profit"
+            value={totals.data ? signedCoins(totals.data.netProfit) : undefined}
+            caption={filtered ? 'For these filters' : 'All trades'}
+            loading={totals.isLoading}
+            tone="signed"
+          />
         </div>
-      </Card>
 
-      {showEmpty ? (
-        <Card>{empty}</Card>
-      ) : (
-        <>
-          <div className="hidden sm:block">
-            <DataTable
-              columns={columns}
-              data={trades}
-              isLoading={page.isLoading}
-              isError={page.isError}
-              onRetry={() => void page.refetch()}
-              getRowId={(row) => row.id}
-              rowActions={(row) => recordSaleButton(row)}
-            />
-          </div>
-
-          <ul aria-label="Trades" className="flex flex-col gap-3 sm:hidden">
-            {trades.map((trade) => (
-              <li key={trade.id}>
-                <Card className="flex flex-col gap-3 p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <CardName trade={trade} />
-                    <Badge tone={STATUS_TONE[trade.status]}>{STATUS_LABEL[trade.status]}</Badge>
-                  </div>
-                  <dl className="grid grid-cols-3 gap-2 text-sm">
-                    <div>
-                      <dt className="text-xs text-ink-2">Buy</dt>
-                      <dd className="font-mono tabular-nums">{formatCoins(trade.buyPrice)}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-xs text-ink-2">Sell</dt>
-                      <dd className="font-mono tabular-nums">
-                        {trade.sellPrice != null ? formatCoins(trade.sellPrice) : '—'}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="text-xs text-ink-2">Net</dt>
-                      <dd>
-                        <Net value={trade.netProfit} />
-                      </dd>
-                    </div>
-                  </dl>
-                  <p className="text-xs text-ink-2">Bought {formatInZone(trade.boughtAt, tz)}</p>
-                  {recordSaleButton(trade, 'w-full')}
-                </Card>
-              </li>
-            ))}
-          </ul>
-
-          {(cursors.length > 1 || page.data?.nextCursor) && (
-            <div className="flex items-center justify-end gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="min-h-11"
-                disabled={cursors.length <= 1}
-                onClick={() => setCursors((c) => c.slice(0, -1))}
+        <Card className="p-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <label className="flex flex-col gap-1.5 text-sm font-medium text-ink">
+              Status
+              <select
+                className={SELECT_CLASSES}
+                value={filters.status ?? ''}
+                onChange={(e) =>
+                  updateFilters({
+                    ...filters,
+                    status: (e.target.value || undefined) as TradeStatus | undefined,
+                  })
+                }
               >
-                Previous
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="min-h-11"
-                disabled={!page.data?.nextCursor || page.isFetching}
-                onClick={() => {
-                  const next = page.data?.nextCursor;
-                  if (next) setCursors((c) => [...c, next]);
+                <option value="">All</option>
+                {STATUS_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1.5 text-sm font-medium text-ink">
+              Order
+              <select
+                className={SELECT_CLASSES}
+                value={order}
+                onChange={(e) => {
+                  setOrder(e.target.value as 'asc' | 'desc');
+                  setCursors([undefined]);
                 }}
               >
-                Next
+                <option value="desc">Newest first</option>
+                <option value="asc">Oldest first</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1.5 text-sm font-medium text-ink">
+              From
+              <input
+                type="date"
+                className={SELECT_CLASSES}
+                value={filters.from ?? ''}
+                max={filters.to}
+                onChange={(e) => updateFilters({ ...filters, from: e.target.value || undefined })}
+              />
+            </label>
+            <label className="flex flex-col gap-1.5 text-sm font-medium text-ink">
+              To
+              <input
+                type="date"
+                className={SELECT_CLASSES}
+                value={filters.to ?? ''}
+                min={filters.from}
+                onChange={(e) => updateFilters({ ...filters, to: e.target.value || undefined })}
+              />
+            </label>
+            <label className="col-span-2 flex flex-col gap-1.5 text-sm font-medium text-ink sm:col-span-3">
+              Time zone
+              <select
+                className={SELECT_CLASSES}
+                value={tz}
+                onChange={(e) => changeTimeZone(e.target.value)}
+              >
+                {zones.map((zone) => (
+                  <option key={zone} value={zone}>
+                    {zone}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="col-span-2 flex items-end sm:col-span-1">
+              <Button
+                variant="outline"
+                className="min-h-11 w-full"
+                leftIcon={<Download className="size-4" aria-hidden="true" />}
+                loading={exporting}
+                disabled={showEmpty}
+                onClick={() => void exportCsv()}
+              >
+                Export CSV
               </Button>
             </div>
-          )}
-        </>
-      )}
+          </div>
+        </Card>
 
-      <RecordSaleDialog trade={selling} onOpenChange={(open) => !open && setSelling(null)} />
-    </div>
+        {selectedTrades.length > 0 && (
+          <Card
+            role="region"
+            aria-label="Selected trades"
+            className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"
+          >
+            <p className="text-sm text-ink">
+              <span className="font-medium">{selectedTrades.length} selected</span>
+              <span className="text-ink-2">
+                {' '}
+                · {tradeLabel(selectedTrades[0]!)}, bought, not yet recorded as sold
+              </span>
+            </p>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row">
+              <Button
+                variant="outline"
+                size="sm"
+                className="min-h-11"
+                onClick={() => setSelected(new Map())}
+              >
+                Clear selection
+              </Button>
+              <Button size="sm" className="min-h-11" onClick={() => setBulkOpen(true)}>
+                Mark {selectedTrades.length} as sold
+              </Button>
+            </div>
+          </Card>
+        )}
+
+        {showEmpty ? (
+          <Card>{empty}</Card>
+        ) : (
+          <>
+            <div className="hidden sm:block">
+              <DataTable
+                columns={columns}
+                data={trades}
+                isLoading={page.isLoading}
+                isError={page.isError}
+                onRetry={() => void page.refetch()}
+                getRowId={(row) => row.id}
+                rowActions={(row) => recordSaleButton(row)}
+              />
+            </div>
+
+            <ul aria-label="Trades" className="flex flex-col gap-3 sm:hidden">
+              {trades.map((trade) => (
+                <li key={trade.id}>
+                  <Card className="flex flex-col gap-3 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-1">
+                        <SelectBox trade={trade} />
+                        <CardName trade={trade} />
+                      </div>
+                      <Badge tone={STATUS_TONE[trade.status]}>{STATUS_LABEL[trade.status]}</Badge>
+                    </div>
+                    <dl className="grid grid-cols-3 gap-2 text-sm">
+                      <div>
+                        <dt className="text-xs text-ink-2">Buy</dt>
+                        <dd className="font-mono tabular-nums">{formatCoins(trade.buyPrice)}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-ink-2">Sell</dt>
+                        <dd>
+                          <SellPrice trade={trade} />
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-ink-2">Net</dt>
+                        <dd>
+                          <Net value={trade.netProfit} />
+                        </dd>
+                      </div>
+                    </dl>
+                    <p className="text-xs text-ink-2">Bought {formatInZone(trade.boughtAt, tz)}</p>
+                    {recordSaleButton(trade, 'w-full')}
+                  </Card>
+                </li>
+              ))}
+            </ul>
+
+            {(cursors.length > 1 || page.data?.nextCursor) && (
+              <div className="flex items-center justify-end gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="min-h-11"
+                  disabled={cursors.length <= 1}
+                  onClick={() => setCursors((c) => c.slice(0, -1))}
+                >
+                  Previous
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="min-h-11"
+                  disabled={!page.data?.nextCursor || page.isFetching}
+                  onClick={() => {
+                    const next = page.data?.nextCursor;
+                    if (next) setCursors((c) => [...c, next]);
+                  }}
+                >
+                  Next
+                </Button>
+              </div>
+            )}
+          </>
+        )}
+
+        <RecordSaleDialog trade={selling} onOpenChange={(open) => !open && setSelling(null)} />
+        <BulkMarkSoldDialog
+          trades={selectedTrades}
+          open={bulkOpen}
+          onOpenChange={setBulkOpen}
+          onMarked={() => setSelected(new Map())}
+        />
+      </div>
+    </SelectionContext.Provider>
   );
 }

@@ -86,19 +86,58 @@ export function useTodayNet(tz: string) {
   });
 }
 
-/** `POST /trades/:id/close`. The API computes the tax and net itself. */
+/** `POST /trades/:id/close`. The API computes the tax and net itself;
+ * without `soldAt` it records the sale as made now. */
 export function useRecordSale() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, sellPrice }: { id: string; sellPrice: number }) => {
+    mutationFn: async ({
+      id,
+      sellPrice,
+      soldAt,
+    }: {
+      id: string;
+      sellPrice: number;
+      soldAt?: string;
+    }) => {
       const { data, error } = await api.POST('/api/v1/trades/{id}/close', {
         params: { path: { id } },
-        body: { sellPrice },
+        body: { sellPrice, ...(soldAt ? { soldAt } : {}) },
       });
       if (error) throw error;
       return data;
     },
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['trades'] }),
+  });
+}
+
+/** `POST /trades/mark-sold`: several bought trades of one card at one
+ * price. The API skips (and names) any that are no longer `bought`. */
+export function useMarkTradesSold() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: { ids: string[]; sellPrice: number; soldAt?: string }) => {
+      const { data, error } = await api.POST('/api/v1/trades/mark-sold', { body });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['trades'] }),
+  });
+}
+
+/** The trader's average sale price for a card (`GET /trades/sell-price`),
+ * the bulk dialog's default. Off while no card is chosen. */
+export function useAverageSellPrice(resourceId: number | null) {
+  return useQuery({
+    queryKey: ['trades', 'sell-price', resourceId],
+    enabled: resourceId !== null,
+    queryFn: async () => {
+      const { data, error } = await api.GET('/api/v1/trades/sell-price', {
+        params: { query: { resourceId: resourceId! } },
+      });
+      if (error) throw error;
+      return data;
+    },
   });
 }
 

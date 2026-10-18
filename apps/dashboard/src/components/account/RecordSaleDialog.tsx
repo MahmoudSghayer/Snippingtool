@@ -1,8 +1,11 @@
-// "Record sale" for a trade the extension logged as bought or listed but
-// never saw sell. Reads the price the way traders type it (60k, 1.2m,
-// 60,000, via @sl/shared's parser), previews EA's tax and the net before
-// sending, and warns about a sale that loses more than half the buy price,
-// which is usually a missing digit.
+// "Mark as sold" for a trade the extension logged as bought or listed but
+// never saw sell (sold from another device, or cleared from the transfer
+// list before the extension looked). Reads the price the way traders type
+// it (60k, 1.2m, 60,000, via @sl/shared's parser), takes when it sold (now,
+// unless changed), previews EA's tax and the net before sending, and warns
+// about a sale that loses more than half the buy price, which is usually a
+// missing digit. The price and time fields are shared with the bulk dialog
+// (BulkMarkSoldDialog.tsx).
 import { EA_TAX_RATE, computeTradeProfit, isHeavyLoss, parseSalePrice } from '@sl/shared';
 import { Button, FormField, Input, Modal, cn, formatCoins } from '@sl/ui';
 import { AlertTriangle } from 'lucide-react';
@@ -23,6 +26,86 @@ export function signedCoins(value: number): string {
   return value > 0 ? `+${formatCoins(value)}` : formatCoins(value);
 }
 
+/** `YYYY-MM-DDTHH:mm` in the browser's zone, what a datetime-local input
+ * holds. */
+export function toLocalInputValue(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+/** A clock a minute ahead of the API's is not a sale in the future. */
+const FUTURE_SLACK_MS = 60_000;
+
+/** The sale time to send for the sale-time field's `value`. Untouched, none:
+ * the API records the sale as made now, which can never precede the
+ * purchase. A time in the minute of the latest purchase (the field has no
+ * seconds) is moved to that purchase; anything earlier, or in the future,
+ * is an error. */
+export function resolveSoldAt(
+  value: string,
+  touched: boolean,
+  boughtAt: string[],
+  now: number = Date.now(),
+): { soldAt?: string; error?: string } {
+  if (!touched) return {};
+  const at = new Date(value).getTime();
+  if (!value || Number.isNaN(at)) return { error: 'Enter the date and time it sold.' };
+  if (at > now + FUTURE_SLACK_MS) return { error: "A sale can't be in the future." };
+  const latest = Math.max(...boughtAt.map((b) => Date.parse(b)).filter(Number.isFinite));
+  if (Number.isFinite(latest) && at < latest) {
+    if (at + 60_000 > latest) return { soldAt: new Date(latest).toISOString() };
+    return {
+      error:
+        boughtAt.length > 1
+          ? 'One of these trades was bought after that time.'
+          : 'It was bought after that time.',
+    };
+  }
+  return { soldAt: new Date(at).toISOString() };
+}
+
+/** The sale-time field: now by default, in the browser's time zone. */
+export function useSaleTime(boughtAt: string[]) {
+  const [value, setValue] = useState(() => toLocalInputValue(new Date()));
+  const [touched, setTouched] = useState(false);
+  const resolved = resolveSoldAt(value, touched, boughtAt);
+  return {
+    value,
+    onChange: (next: string) => {
+      setValue(next);
+      setTouched(true);
+    },
+    ...resolved,
+  };
+}
+
+export function SaleTimeField({
+  id,
+  field,
+}: {
+  id: string;
+  field: ReturnType<typeof useSaleTime>;
+}) {
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return (
+    <FormField
+      label="Sold at"
+      htmlFor={id}
+      error={field.error}
+      hint={`Now, unless you change it. Your browser's time (${zone.replace(/_/g, ' ')}).`}
+    >
+      <Input
+        id={id}
+        type="datetime-local"
+        value={field.value}
+        max={toLocalInputValue(new Date())}
+        invalid={field.error !== undefined}
+        onChange={(e) => field.onChange(e.target.value)}
+      />
+    </FormField>
+  );
+}
+
 interface RecordSaleDialogProps {
   trade: TradeListItem | null;
   onOpenChange: (open: boolean) => void;
@@ -33,7 +116,7 @@ export function RecordSaleDialog({ trade, onOpenChange }: RecordSaleDialogProps)
     <Modal
       open={trade !== null}
       onOpenChange={onOpenChange}
-      title="Record sale"
+      title="Mark as sold"
       description={
         trade
           ? `${tradeLabel(trade)}${trade.rating != null ? ` ${trade.rating}` : ''}, bought for ${formatCoins(trade.buyPrice)} coins.`
@@ -48,6 +131,7 @@ export function RecordSaleDialog({ trade, onOpenChange }: RecordSaleDialogProps)
 
 function RecordSaleForm({ trade, onDone }: { trade: TradeListItem; onDone: () => void }) {
   const [input, setInput] = useState('');
+  const saleTime = useSaleTime([trade.boughtAt]);
   const recordSale = useRecordSale();
 
   const parsed = input.trim() === '' ? null : parseSalePrice(input);
@@ -60,12 +144,12 @@ function RecordSaleForm({ trade, onDone }: { trade: TradeListItem; onDone: () =>
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (price === null) return;
+    if (price === null || saleTime.error) return;
     recordSale.mutate(
-      { id: trade.id, sellPrice: price },
+      { id: trade.id, sellPrice: price, ...(saleTime.soldAt ? { soldAt: saleTime.soldAt } : {}) },
       {
         onSuccess: (saved) => {
-          toast.success('Sale recorded', {
+          toast.success('Marked as sold', {
             description:
               saved.netProfit != null
                 ? `Net profit ${signedCoins(saved.netProfit)} coins.`
@@ -74,7 +158,7 @@ function RecordSaleForm({ trade, onDone }: { trade: TradeListItem; onDone: () =>
           onDone();
         },
         onError: (error) =>
-          toast.error("Couldn't record the sale", { description: apiErrorMessage(error) }),
+          toast.error("Couldn't mark it as sold", { description: apiErrorMessage(error) }),
       },
     );
   }
@@ -97,6 +181,8 @@ function RecordSaleForm({ trade, onDone }: { trade: TradeListItem; onDone: () =>
           onChange={(e) => setInput(e.target.value)}
         />
       </FormField>
+
+      <SaleTimeField id="record-sale-time" field={saleTime} />
 
       {preview && price !== null && (
         <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 rounded-(--sl-radius-md) bg-surface-2 p-3 font-mono text-sm tabular-nums">
@@ -135,10 +221,10 @@ function RecordSaleForm({ trade, onDone }: { trade: TradeListItem; onDone: () =>
         <Button
           type="submit"
           className="min-h-11 sm:min-h-0"
-          disabled={price === null}
+          disabled={price === null || saleTime.error !== undefined}
           loading={recordSale.isPending}
         >
-          Record sale
+          Mark as sold
         </Button>
       </div>
     </form>

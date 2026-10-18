@@ -1,9 +1,11 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { toast } from 'sonner';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { api } from '@/api/client.js';
+import { resolveSoldAt, toLocalInputValue } from '@/components/account/RecordSaleDialog.js';
 import { initialTimeZone, todayIn } from '@/components/account/timezone.js';
 import { TradesSection } from '@/components/account/TradesSection.js';
 import { downloadServerCsv } from '@/lib/csv.js';
@@ -76,15 +78,31 @@ interface MockOptions {
   items?: TradeListItem[];
   totals?: TradeTotals;
   todayNet?: number;
+  /** `GET /trades/sell-price`'s average for any card. */
+  averageSellPrice?: number | null;
 }
 
-function mockApi({ items = TRADES, totals = TOTALS, todayNet = 12_345 }: MockOptions = {}) {
-  const get = vi.spyOn(api, 'GET').mockImplementation(((path: string) => {
+function mockApi({
+  items = TRADES,
+  totals = TOTALS,
+  todayNet = 12_345,
+  averageSellPrice = null,
+}: MockOptions = {}) {
+  const get = vi.spyOn(api, 'GET').mockImplementation(((
+    path: string,
+    init?: { params?: { query?: { resourceId?: number } } },
+  ) => {
     switch (path) {
       case '/api/v1/trades':
         return ok({ items, nextCursor: null });
       case '/api/v1/trades/totals':
         return ok(totals);
+      case '/api/v1/trades/sell-price':
+        return ok({
+          resourceId: init?.params?.query?.resourceId,
+          averageSellPrice,
+          sales: averageSellPrice === null ? 0 : 4,
+        });
       case '/api/v1/analytics/me/profits':
         return ok({
           granularity: 'lifetime',
@@ -98,10 +116,22 @@ function mockApi({ items = TRADES, totals = TOTALS, todayNet = 12_345 }: MockOpt
         });
     }
   }) as never);
-  const post = vi
-    .spyOn(api, 'POST')
-    .mockImplementation((() =>
-      ok({ ...TRADES[0], status: 'sold', sellPrice: 60_000, netProfit: 7_000 })) as never);
+  const post = vi.spyOn(api, 'POST').mockImplementation(((
+    path: string,
+    init: { body: { ids?: string[]; sellPrice: number } },
+  ) =>
+    path === '/api/v1/trades/mark-sold'
+      ? ok({
+          updated: (init.body.ids ?? []).map((id) => ({
+            ...TRADES[0],
+            id,
+            status: 'sold',
+            sellPrice: init.body.sellPrice,
+            netProfit: 1_000,
+          })),
+          skipped: [],
+        })
+      : ok({ ...TRADES[0], status: 'sold', sellPrice: 60_000, netProfit: 7_000 })) as never);
   const patch = vi.spyOn(api, 'PATCH').mockImplementation(((
     _path: string,
     init: { body: { timezone: string } },
@@ -325,24 +355,24 @@ describe('TradesSection', () => {
   });
 });
 
-describe('Record sale', () => {
+describe('Mark as sold', () => {
   async function openDialog() {
     const api = mockApi();
     const { user } = renderSection();
     const table = await screen.findByRole('table');
     await within(table).findByText('Messi');
     // Only the unsold trade can be recorded.
-    const buttons = within(table).getAllByRole('button', { name: /Record sale/ });
+    const buttons = within(table).getAllByRole('button', { name: /as sold/ });
     expect(buttons).toHaveLength(1);
     await user.click(buttons[0]!);
-    const dialog = await screen.findByRole('dialog', { name: 'Record sale' });
+    const dialog = await screen.findByRole('dialog', { name: 'Mark as sold' });
     return { user, dialog, ...api };
   }
 
   it('rejects a price below 200 or above 15,000,000, or one that is not a price', async () => {
     const { user, dialog, post } = await openDialog();
     const input = within(dialog).getByLabelText('Sale price');
-    const submit = within(dialog).getByRole('button', { name: 'Record sale' });
+    const submit = within(dialog).getByRole('button', { name: 'Mark as sold' });
 
     await user.type(input, '150');
     expect(within(dialog).getByText('The lowest sale price is 200 coins.')).toBeVisible();
@@ -370,7 +400,7 @@ describe('Record sale', () => {
     expect(within(dialog).getByText('+7,000')).toBeVisible();
     expect(within(dialog).queryByText(/more than half/)).not.toBeInTheDocument();
 
-    await user.click(within(dialog).getByRole('button', { name: 'Record sale' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Mark as sold' }));
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith('/api/v1/trades/{id}/close', {
         params: { path: { id: TRADES[0]!.id } },
@@ -386,7 +416,7 @@ describe('Record sale', () => {
     // 20,000 - 1,000 - 50,000 = -31,000: more than half of 50,000.
     expect(within(dialog).getByText('-31,000')).toBeVisible();
     expect(within(dialog).getByText(/more than half of what you paid/)).toBeVisible();
-    expect(within(dialog).getByRole('button', { name: 'Record sale' })).toBeEnabled();
+    expect(within(dialog).getByRole('button', { name: 'Mark as sold' })).toBeEnabled();
   });
 
   it("uses the trade's own tax rate in the preview", async () => {
@@ -399,10 +429,172 @@ describe('Record sale', () => {
           : ok({ granularity: 'lifetime', items: [] })) as never);
     const { user } = renderSection();
     const table = await screen.findByRole('table');
-    await user.click(await within(table).findByRole('button', { name: /Record sale/ }));
-    const dialog = await screen.findByRole('dialog', { name: 'Record sale' });
+    await user.click(await within(table).findByRole('button', { name: /as sold/ }));
+    const dialog = await screen.findByRole('dialog', { name: 'Mark as sold' });
     await user.type(within(dialog).getByLabelText('Sale price'), '60,000');
     expect(within(dialog).getByText('-6,000')).toBeVisible();
     expect(within(dialog).getByText('+4,000')).toBeVisible();
+  });
+
+  it('sends the sale time when the trader changes it (now, left to the API, otherwise)', async () => {
+    const { user, dialog, post } = await openDialog();
+    const when = within(dialog).getByLabelText('Sold at') as HTMLInputElement;
+    // Now, by default.
+    expect(when.value).toBe(toLocalInputValue(new Date()));
+
+    await user.type(within(dialog).getByLabelText('Sale price'), '60k');
+    const soldAt = new Date('2026-09-21T15:30:00.000Z');
+    fireEvent.change(when, { target: { value: toLocalInputValue(soldAt) } });
+    await user.click(within(dialog).getByRole('button', { name: 'Mark as sold' }));
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith('/api/v1/trades/{id}/close', {
+        params: { path: { id: TRADES[0]!.id } },
+        body: { sellPrice: 60_000, soldAt: soldAt.toISOString() },
+      }),
+    );
+  });
+
+  it('refuses a sale time before the purchase, or in the future', async () => {
+    const { user, dialog, post } = await openDialog();
+    await user.type(within(dialog).getByLabelText('Sale price'), '60k');
+    const when = within(dialog).getByLabelText('Sold at');
+    const submit = within(dialog).getByRole('button', { name: 'Mark as sold' });
+
+    // Bought 2026-09-20T12:00Z.
+    fireEvent.change(when, { target: { value: toLocalInputValue(new Date('2026-09-19T12:00Z')) } });
+    expect(within(dialog).getByText('It was bought after that time.')).toBeVisible();
+    expect(submit).toBeDisabled();
+
+    fireEvent.change(when, {
+      target: { value: toLocalInputValue(new Date(Date.now() + 3 * 3600_000)) },
+    });
+    expect(within(dialog).getByText("A sale can't be in the future.")).toBeVisible();
+    expect(submit).toBeDisabled();
+    expect(post).not.toHaveBeenCalled();
+  });
+});
+
+describe('resolveSoldAt', () => {
+  const bought = '2026-09-20T12:00:30.000Z';
+  const now = Date.parse('2026-10-01T00:00:00.000Z');
+
+  it('sends nothing while untouched: the API records now', () => {
+    expect(resolveSoldAt('2026-01-01T00:00', false, [bought], now)).toEqual({});
+  });
+
+  it('moves a time in the minute of the latest purchase onto it (the field has no seconds)', () => {
+    const sameMinute = toLocalInputValue(new Date('2026-09-20T12:00:00.000Z'));
+    expect(resolveSoldAt(sameMinute, true, [bought], now)).toEqual({ soldAt: bought });
+  });
+
+  it('names a time before any of several purchases', () => {
+    const before = toLocalInputValue(new Date('2026-09-20T11:00:00.000Z'));
+    expect(resolveSoldAt(before, true, ['2026-09-01T00:00:00.000Z', bought], now)).toEqual({
+      error: 'One of these trades was bought after that time.',
+    });
+    expect(resolveSoldAt('', true, [bought], now).error).toBeDefined();
+  });
+});
+
+describe('Mark several as sold', () => {
+  const BOUGHT: TradeListItem[] = [
+    trade({ id: '00000000-0000-0000-0000-0000000000b1', tradeId: 'b-1', buyPrice: 50_000 }),
+    trade({
+      id: '00000000-0000-0000-0000-0000000000b2',
+      tradeId: 'b-2',
+      buyPrice: 52_000,
+      boughtAt: '2026-09-22T12:00:00.000Z',
+    }),
+    trade({
+      id: '00000000-0000-0000-0000-0000000000b3',
+      tradeId: 'b-3',
+      resourceId: 999999,
+      cardName: 'Mbappé',
+      buyPrice: 90_000,
+    }),
+    trade({
+      id: '00000000-0000-0000-0000-0000000000b4',
+      tradeId: 'b-4',
+      status: 'sold',
+      sellPrice: 61_000,
+      netProfit: 7_950,
+      soldAt: '2026-09-23T12:00:00.000Z',
+      saleSource: 'inferred',
+    }),
+  ];
+
+  async function renderBought(options: MockOptions = {}) {
+    const mocks = mockApi({ items: BOUGHT, ...options });
+    const { user } = renderSection();
+    const table = await screen.findByRole('table');
+    await within(table).findByText('Mbappé');
+    return { user, table, ...mocks };
+  }
+
+  it('offers a checkbox on bought trades only, and one card at a time', async () => {
+    const { user, table } = await renderBought();
+    const boxes = within(table).getAllByRole('checkbox');
+    expect(boxes).toHaveLength(3);
+    const [messi1, messi2, mbappe] = boxes as [HTMLElement, HTMLElement, HTMLElement];
+
+    await user.click(messi1);
+    expect(messi1).toBeChecked();
+    expect(messi2).toBeEnabled();
+    // Another card cannot join: the selection sells at one price.
+    expect(mbappe).toBeDisabled();
+    const bar = screen.getByRole('region', { name: 'Selected trades' });
+    expect(within(bar).getByText('1 selected')).toBeVisible();
+
+    await user.click(within(bar).getByRole('button', { name: 'Clear selection' }));
+    expect(screen.queryByRole('region', { name: 'Selected trades' })).not.toBeInTheDocument();
+    expect(mbappe).toBeEnabled();
+  });
+
+  it("marks the selected trades sold at one price, starting at the trader's average for the card", async () => {
+    const { user, table, post, get } = await renderBought({ averageSellPrice: 61_000 });
+    const [messi1, messi2] = within(table).getAllByRole('checkbox') as [HTMLElement, HTMLElement];
+    await user.click(messi1);
+    await user.click(messi2);
+    await user.click(screen.getByRole('button', { name: 'Mark 2 as sold' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Mark 2 as sold' });
+    const price = within(dialog).getByLabelText('Sale price, each') as HTMLInputElement;
+    await waitFor(() => expect(price.value).toBe('61,000'));
+    expect(queriesTo(get, '/api/v1/trades/sell-price').at(-1)).toEqual({ resourceId: 158023 });
+    expect(within(dialog).getByText(/average over your last 4 recorded sales/)).toBeVisible();
+    // 2 x 61,000 = 122,000; tax 2 x 3,050; bought for 102,000: +13,900.
+    expect(within(dialog).getByText('122,000')).toBeVisible();
+    expect(within(dialog).getByText('-6,100')).toBeVisible();
+    expect(within(dialog).getByText('+13,900')).toBeVisible();
+
+    await user.click(within(dialog).getByRole('button', { name: 'Mark 2 as sold' }));
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith('/api/v1/trades/mark-sold', {
+        body: { ids: [BOUGHT[0]!.id, BOUGHT[1]!.id], sellPrice: 61_000 },
+      }),
+    );
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith('Marked 2 trades as sold', expect.anything()),
+    );
+    expect(screen.queryByRole('region', { name: 'Selected trades' })).not.toBeInTheDocument();
+  });
+
+  it('starts with no price for a card never sold before', async () => {
+    const { user, table } = await renderBought({ averageSellPrice: null });
+    await user.click(within(table).getAllByRole('checkbox')[2]!);
+    await user.click(screen.getByRole('button', { name: 'Mark 1 as sold' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Mark 1 as sold' });
+    expect(await within(dialog).findByText(/No recorded sales of this card yet/)).toBeVisible();
+    const price = within(dialog).getByLabelText('Sale price, each') as HTMLInputElement;
+    expect(price.value).toBe('');
+    const submit = within(dialog).getByRole('button', { name: 'Mark 1 as sold' });
+    expect(submit).toBeDisabled();
+    await user.type(price, '95k');
+    expect(submit).toBeEnabled();
+  });
+
+  it('marks an estimated sale price as such', async () => {
+    const { table } = await renderBought();
+    expect(within(table).getByTitle(/Estimated/)).toHaveTextContent('est.');
   });
 });
