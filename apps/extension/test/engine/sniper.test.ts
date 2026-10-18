@@ -1818,6 +1818,40 @@ describe('Sniper — the minimum profit, checked without waiting', () => {
   });
 });
 
+describe('Sniper — pace report', () => {
+  it('reports how often it searched, what came back and where the time went, then starts a new window', async () => {
+    const h = setup({
+      // Two empty searches and one with a listing over the cap (not bought).
+      results: [[], [auction('t-x', 50_000)], []],
+      searchTakesMs: 150,
+      settings: { searchDelay: { min: 2, max: 2 }, breaks: { ...DEFAULT_BOT_SETTINGS.breaks, enabled: false } },
+      maxSearches: 3,
+    });
+    h.sniper.start();
+    await h.done();
+    // The stop lands inside the last wait, which settles a tick later.
+    await new Promise((r) => setTimeout(r, 0));
+    const pace = h.sniper.takePace();
+    expect(pace).toMatchObject({
+      searches: 3,
+      withResults: 1,
+      failed: 0,
+      searchMsP50: 150,
+      searchMsP90: 150,
+      blockedMs: 0,
+      backoffMs: 0,
+      breakMs: 0,
+      cooldownMs: 0,
+    });
+    // The 2 s delay runs from one search's start to the next: 1.85 s of
+    // waiting after each 150 ms search (the third is cut short by the stop).
+    expect(pace!.waitingMs).toBe(2 * 1_850 + 1_850);
+    expect(pace!.windowMs).toBe(h.clock.t - 1_000_000);
+    // A new window, and nothing happened in it.
+    expect(h.sniper.takePace()).toBeNull();
+  });
+});
+
 describe('Sniper — buys as soon as the listings arrive', () => {
   it("buys before the search's own answer is back, and logs how fast it reacted", async () => {
     let answer!: () => void;

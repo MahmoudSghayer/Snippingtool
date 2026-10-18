@@ -90,12 +90,45 @@ export const errorActivitySchema = baseActivityEvent.extend({
     .strict(),
 });
 
+const paceCount = z.number().int().min(0).max(100_000);
+const paceMs = z.number().int().min(0).max(3_600_000);
+
+/** The Nova AI bot's pace over one report window (every two minutes while
+ * it runs, content/index.ts): how often it really searched and what held it
+ * back. A search that finds nothing is not reported on its own (`search`
+ * events carry only searches with listings), so without this the search
+ * cadence cannot be told from the data. Counts only, never listings. */
+export const botPaceSchema = z
+  .object({
+    /** The time this report covers. */
+    windowMs: paceMs.min(1),
+    /** Searches sent, those that came back with listings, and failed ones. */
+    searches: paceCount,
+    withResults: paceCount,
+    failed: paceCount,
+    /** Search round trip (sent to EA's answer), median and 90th percentile;
+     * null with no answered search. */
+    searchMsP50: paceMs.nullable(),
+    searchMsP90: paceMs.nullable(),
+    /** Time spent in each kind of wait: the search delay, an EA backoff, a
+     * limit holding the bot back, a break or rest, the pause after a buy. */
+    waitingMs: paceMs,
+    backoffMs: paceMs,
+    blockedMs: paceMs,
+    breakMs: paceMs,
+    cooldownMs: paceMs,
+  })
+  .strict();
+export type BotPace = z.infer<typeof botPaceSchema>;
+
 export const heartbeatActivitySchema = baseActivityEvent.extend({
   type: z.literal('heartbeat'),
   metadata: z
     .object({
       extensionVersion: z.string().min(1).max(30),
       engineState: z.enum(['idle', 'running', 'paused', 'halted']).optional(),
+      /** Set while the Nova AI bot runs: its pace since the last report. */
+      bot: botPaceSchema.optional(),
     })
     .strict(),
 });

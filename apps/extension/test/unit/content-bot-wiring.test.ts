@@ -86,3 +86,14 @@ describe('an attempt’s timings stay inside the schema', () => {
     expect(attempt({ searchMs: 600_001 })).toBe(false);
   });
 });
+
+describe('the bot’s pace report', () => {
+  it('goes out every two minutes while the bot runs, as a heartbeat activity event', () => {
+    expect(contentSource).toContain('const BOT_PACE_REPORT_MS = 2 * 60_000;');
+    const block = /setInterval\(\(\) => \{\s*const pace = sniper\?\.takePace\(\) \?\? null;([\s\S]*?)\}, BOT_PACE_REPORT_MS\);/.exec(contentSource)?.[1] ?? '';
+    expect(block).toContain('if (!pace) return;');
+    expect(block).toContain("type: 'heartbeat'");
+    expect(block).toContain('bot: pace');
+    expect(block).toContain("send('telemetry.enqueue', { kind: 'activity', items: [event] })");
+  });
+});

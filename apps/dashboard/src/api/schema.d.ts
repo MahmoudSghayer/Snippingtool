@@ -103,6 +103,19 @@ export interface paths {
                                 extensionVersion: string;
                                 /** @enum {string} */
                                 engineState?: "idle" | "running" | "paused" | "halted";
+                                bot?: {
+                                    windowMs: number;
+                                    searches: number;
+                                    withResults: number;
+                                    failed: number;
+                                    searchMsP50: number | null;
+                                    searchMsP90: number | null;
+                                    waitingMs: number;
+                                    backoffMs: number;
+                                    blockedMs: number;
+                                    breakMs: number;
+                                    cooldownMs: number;
+                                };
                             };
                         })[];
                     };

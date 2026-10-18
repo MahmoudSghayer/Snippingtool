@@ -88,6 +88,8 @@ const RECORD_FLUSH_MS = 2000;
 const RECORD_FLUSH_AT = 300;
 const STATE_PERSIST_MS = 5000;
 const AUTOBUYER_TICK_MS = 8000;
+/** How often the Nova AI bot's pace goes out (`Sniper.takePace`). */
+const BOT_PACE_REPORT_MS = 2 * 60_000;
 const WATCHDOG_MS = 15000;
 const WATCHDOG_STALE_MS = 60000;
 /** The watchdog's allowance in a hidden tab, where Chrome runs both worlds'
@@ -791,6 +793,24 @@ async function main(): Promise<void> {
       );
     };
     await prepareSniper(false);
+
+    // The bot's pace for the session report (`BotPace`): every two minutes
+    // while it runs, as a heartbeat activity event. Searches that find
+    // nothing are reported nowhere else.
+    setInterval(() => {
+      const pace = sniper?.takePace() ?? null;
+      if (!pace) return;
+      const event: ActivityEvent = {
+        type: 'heartbeat',
+        occurredAt: nowIso(),
+        metadata: {
+          extensionVersion: (import.meta.env.VITE_EXTENSION_VERSION as string | undefined)?.slice(0, 30) || 'unknown',
+          engineState: 'running',
+          bot: pace,
+        },
+      };
+      void send('telemetry.enqueue', { kind: 'activity', items: [event] });
+    }, BOT_PACE_REPORT_MS);
 
     // A plan that loses the bot mid-session (the heartbeat refreshes
     // background's cached entitlement) stops it with a reason, not at the
