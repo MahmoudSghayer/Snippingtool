@@ -199,7 +199,7 @@ SQL
     # the user's own trading data and these logs are public, so it is
     # printed only encrypted to REPORT_PUBKEY_B64 (a PEM public key whose
     # private half never leaves the operator): an RSA-OAEP-wrapped random
-    # key, then the report under AES-256-CBC with that key.
+    # key, then the gzipped report under AES-256-CBC with that key.
     sha="${EMAIL_SHA:?set EMAIL_SHA}"
     [[ "$sha" =~ ^[0-9a-f]{64}$ ]] || { echo 'EMAIL_SHA is not a sha256' >&2; exit 1; }
     hours="${REPORT_HOURS:-36}"
@@ -328,7 +328,9 @@ SQL
     echo "encrypted report ($(wc -l <"$work/report.txt") lines)"
     echo "key: $(openssl pkeyutl -encrypt -pubin -inkey "$work/pub.pem" \
       -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -in "$work/key" | base64 -w0)"
-    echo "data: $(openssl enc -aes-256-cbc -pbkdf2 -salt -pass "file:$work/key" -in "$work/report.txt" | base64 -w0)"
+    # gzip first: the operator copies the ciphertext out of the log by hand.
+    echo "data (gzip): $(gzip -9c "$work/report.txt" |
+      openssl enc -aes-256-cbc -pbkdf2 -salt -pass "file:$work/key" | base64 -w0)"
     ;;
 
   *)
