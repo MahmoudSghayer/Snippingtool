@@ -23,11 +23,19 @@ interface SearchScript {
   eaErrors?: Omit<AdapterEaError, 'seenAt'>[];
   shape?: { reason: string; endpoint: 'market' | 'pile' };
   outcome?: ActionOutcome;
+  /** Listings the search finds (all under the filter's max price). */
+  listings?: TrimmedAuction[];
+  /** An EA error every buy in this search gets. */
+  buyEaError?: Omit<AdapterEaError, 'seenAt'>;
 }
 
 const RATE_LIMITED = { status: 429, category: 'rate_limited', endpoint: 'market' } as const;
 const FAILED: ActionOutcome = { ok: false, error: 'search reported success: false', latencyMs: 5 };
 const OK: ActionOutcome = { ok: true, latencyMs: 5 };
+
+function listing(tradeId: string, buyNow: number): TrimmedAuction {
+  return { tradeId, resourceId: 100, assetId: 100, rating: 85, buyNow, startingBid: 0, currentBid: 0, offers: 0, expiresAt: null, seenAt: 0 };
+}
 
 function setup(script: (n: number) => SearchScript, opts: { maxSearches: number }) {
   const settings: BotSettings = {
@@ -39,7 +47,9 @@ function setup(script: (n: number) => SearchScript, opts: { maxSearches: number 
   };
   const clock = { t: 1_000_000 };
   const searchTimes: number[] = [];
+  const buys: string[] = [];
   const phases: string[] = [];
+  let step: SearchScript = {};
   const listeners = {
     auctions: new Set<(a: TrimmedAuction[]) => void>(),
     shape: new Set<(reason: string, endpoint: 'market' | 'pile') => void>(),
@@ -58,14 +68,20 @@ function setup(script: (n: number) => SearchScript, opts: { maxSearches: number 
     adapter: {
       search: async () => {
         searchTimes.push(clock.t);
-        const step = script(searchTimes.length);
+        step = script(searchTimes.length);
         for (const e of step.eaErrors ?? []) for (const cb of listeners.eaError) cb({ ...e, seenAt: clock.t });
         if (step.shape) for (const cb of listeners.shape) cb(step.shape.reason, step.shape.endpoint);
         const outcome = step.outcome ?? OK;
-        if (outcome.ok) for (const cb of listeners.auctions) cb([]);
+        if (outcome.ok) for (const cb of listeners.auctions) cb(step.listings ?? []);
         return outcome;
       },
-      buy: async () => ({ ok: true, latencyMs: 5 }),
+      buy: async (tradeId) => {
+        buys.push(tradeId);
+        const e = step.buyEaError;
+        if (!e) return { ok: true, latencyMs: 5 };
+        for (const cb of listeners.eaError) cb({ ...e, seenAt: clock.t });
+        return { ok: false, signed: true, error: `bid reported success: false (status ${e.status})`, latencyMs: 5 };
+      },
       list: async () => ({ ok: true, latencyMs: 5 }),
       onAuctions: subscribe(listeners.auctions),
       onBuyable: () => () => undefined,
@@ -92,7 +108,7 @@ function setup(script: (n: number) => SearchScript, opts: { maxSearches: number 
   /** Time between one search and the next, in seconds. */
   const gaps = () => searchTimes.slice(1).map((t, i) => (t - searchTimes[i]!) / 1000);
   const log = () => sniper.getLog().map((e) => e.message);
-  return { sniper, done: () => done, gaps, phases, log, searchTimes };
+  return { sniper, done: () => done, gaps, phases, log, searchTimes, buys };
 }
 
 describe('Sniper — EA errors', () => {
@@ -153,6 +169,17 @@ describe('Sniper — EA errors', () => {
     await h.done();
     expect(h.gaps()).toEqual([5, 10]);
     expect(h.log()).toContain('EA had a server error (HTTP 503): waiting 5 s before the next search');
+  });
+
+  it('stops buying the rest of a search once EA rate-limits a buy', async () => {
+    const rateLimitedBuy = { status: 429, category: 'rate_limited', endpoint: 'bid' } as const;
+    const listings = [listing('t1', 9_000), listing('t2', 9_100), listing('t3', 9_200)];
+    const h = setup((n) => (n === 1 ? { listings, buyEaError: rateLimitedBuy } : {}), { maxSearches: 2 });
+    h.sniper.start();
+    await h.done();
+    // One bid, not three: the other two would only have added to the limit.
+    expect(h.buys).toEqual(['t1']);
+    expect(h.gaps()).toEqual([5]);
   });
 
   it("backs off on EA's status in a failed search's error when no ea_error came", async () => {

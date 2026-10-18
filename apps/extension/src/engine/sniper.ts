@@ -1162,6 +1162,9 @@ export class Sniper {
       }
 
       if (this.applyKillSwitch() || this.applyEntitlement() || this.applyExclusive()) return 'stopped';
+      // EA is limiting requests or erroring (`onEaError`): more buys now only
+      // add to it. The next search waits the backoff out.
+      if (this.eaBackoff.until > this.now()) return 'dropped';
       const buyWait = this.windowWait(this.buyTimes, this.settings.safety.maxBuysPerHour);
       if (buyWait > 0) {
         this.noteBlock(this.buysPerHourBlock(buyWait), m);
