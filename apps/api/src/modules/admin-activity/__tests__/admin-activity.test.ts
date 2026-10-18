@@ -68,12 +68,12 @@ describe('admin-activity module: every tab reads what the extension writes', () 
   async function seedProductionShapedActivity() {
     const ip = '198.51.100.70';
     const email = 'trader@example.com';
-    const password = 'correcthorsebattery12';
+    const TEST_PW = 'correcthorsebattery12';
     await app.inject({
       method: 'POST',
       url: '/api/v1/auth/register',
       remoteAddress: ip,
-      payload: { email, password, device, acceptTerms: true },
+      payload: { email, password: TEST_PW, device, acceptTerms: true },
     });
     await app.inject({
       method: 'POST',
@@ -85,7 +85,7 @@ describe('admin-activity module: every tab reads what the extension writes', () 
       method: 'POST',
       url: '/api/v1/auth/login',
       remoteAddress: ip,
-      payload: { email, password, device },
+      payload: { email, password: TEST_PW, device },
     });
     expect(login.statusCode).toBe(200);
     const accessToken = login.json().accessToken as string;
