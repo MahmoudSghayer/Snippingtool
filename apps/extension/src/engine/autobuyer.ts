@@ -38,7 +38,7 @@ export interface AutobuyerDeps {
   sessionCoinBudget?: number | null;
 }
 
-export type StopReason = 'probe_failure' | 'shape_mismatch' | 'manual' | 'session_budget_exhausted' | 'not_entitled';
+export type StopReason = 'probe_failure' | 'shape_mismatch' | 'manual' | 'session_budget_exhausted' | 'not_entitled' | 'signed_out' | 'account_unreachable';
 
 /** A sold-out / no-longer-available auction is not a retryable failure —
  * matching these error strings against the ASSUMED SHAPE's rejection

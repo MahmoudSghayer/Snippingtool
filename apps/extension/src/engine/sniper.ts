@@ -307,7 +307,14 @@ export type SniperStopReason =
   | 'session_length'
   | 'daily_limit'
   | 'risk_unacknowledged'
+  /** The server answered, and the plan has no Nova AI. */
   | 'not_entitled'
+  /** The Nova Trade session ended (signed out, revoked, the password
+   * changed): never a plan problem. */
+  | 'signed_out'
+  /** The Nova Trade account could not be confirmed for a while (the API
+   * unreachable, the extension restarting). */
+  | 'account_unreachable'
   | 'other_tab'
   | 'budget_unavailable'
   | 'search_failing'
@@ -467,6 +474,13 @@ type Timings = Pick<AttemptInput, 'searchMs' | 'reactionMs'>;
  * buying back). */
 type BatchEnd = 'done' | 'dropped' | 'stopped';
 
+/** `SniperDeps.account`'s answer while the account cannot be confirmed. */
+export interface SniperAccountIssue {
+  reason: Extract<SniperStopReason, 'signed_out' | 'account_unreachable'>;
+  /** The stop message; omitted = the reason's own. */
+  detail?: string;
+}
+
 export interface SniperDeps {
   adapter: Pick<AdapterClient, 'search' | 'buy' | 'list' | 'onAuctions' | 'onBuyable' | 'onProbe' | 'onShape'> &
     Partial<Pick<AdapterClient, 'onEaError'>>;
@@ -486,6 +500,11 @@ export interface SniperDeps {
    * in the current entitlement). Checked before every action; omitted =
    * always. */
   entitled?: () => boolean;
+  /** Why the Nova Trade account cannot be confirmed right now (signed out,
+   * or unreachable for a while), with an optional message; null while it
+   * can. Checked before every action, ahead of `entitled`, so a session that
+   * ended is never reported as a plan problem. Omitted = always confirmed. */
+  account?: () => SniperAccountIssue | null;
   /** Whether this tab holds the engine lease (only one EA tab runs an
    * engine at a time). Checked before every action; omitted = always. */
   exclusive?: () => boolean;
@@ -771,6 +790,16 @@ export class Sniper {
         phaseEndsAt: null,
         stopReason: 'risk_unacknowledged',
         stopDetail: STOP_MESSAGES.risk_unacknowledged,
+      });
+      return;
+    }
+    const accountIssue = this.deps.account?.() ?? null;
+    if (accountIssue) {
+      this.setState({
+        phase: 'stopped',
+        phaseEndsAt: null,
+        stopReason: accountIssue.reason,
+        stopDetail: accountIssue.detail ?? STOP_MESSAGES[accountIssue.reason],
       });
       return;
     }
@@ -1660,8 +1689,14 @@ export class Sniper {
     return this.usage.activeMs >= this.settings.safety.maxActiveHoursPerDay * ONE_HOUR_MS;
   }
 
-  /** Stops the bot when the user's plan no longer includes it. */
+  /** Stops the bot when the account can no longer be confirmed (signed
+   * out, or unreachable), or else when the plan no longer includes it. */
   private applyEntitlement(): boolean {
+    const accountIssue = this.deps.account?.() ?? null;
+    if (accountIssue) {
+      this.stop(accountIssue.reason, accountIssue.detail);
+      return true;
+    }
     if (!this.deps.entitled || this.deps.entitled()) return false;
     this.stop('not_entitled');
     return true;
@@ -1810,6 +1845,8 @@ const STOP_MESSAGES: Record<SniperStopReason, string> = {
   risk_unacknowledged:
     'these settings are above low risk: confirm the risk on the Nova AI page first, or reset to recommended',
   not_entitled: 'your plan no longer includes Nova AI',
+  signed_out: 'signed out of Nova Trade — sign in again to restart',
+  account_unreachable: "Nova Trade could not confirm your account (it may be unreachable) — Start again once it's back",
   other_tab: 'Nova Trade is running in another EA tab: stop the bot there, or close that tab, first',
   budget_unavailable:
     'the saved hourly limits could not be read (the extension may be restarting) — try Start again in a moment',

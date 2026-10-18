@@ -49,6 +49,7 @@ import { createBotPage, type LiveSearch } from '../ui/bot-page.js';
 import { createConfirmOverlay, type ConfirmOverlay } from '../ui/confirm-overlay.js';
 import { installNavItem } from '../ui/ea-nav.js';
 
+import { createAccountCheck, type AccountStatus } from './account-check.js';
 import { createAdapterClient, pageWindow } from './adapter-client.js';
 import { confirmDetailsFor, installAssistHotkeys, selectionDetailsFor } from './assist-keys.js';
 import { createBackgroundClient } from './background-request.js';
@@ -61,7 +62,7 @@ import { createSearchObserver } from './search-observer.js';
 import { createWatchdog } from './watchdog.js';
 
 import type { Autobuyer, StopReason } from '../engine/autobuyer.js';
-import type { Sniper } from '../engine/sniper.js';
+import type { Sniper, SniperAccountIssue } from '../engine/sniper.js';
 import type { AttemptInput, TradeInput } from '../engine/types.js';
 import type { Catalog } from '../model/catalog.js';
 import type { PriceSummary } from '../model/prices.js';
@@ -105,7 +106,8 @@ const ADAPTER_WARN_GAP_MS = 10 * 60_000;
 const PROBE_STARTUP_GRACE_MS = 2 * 60_000;
 /** How often a running Sniping Bot re-reads the entitlement (background's
  * cached `license.bootstrap`, refreshed by its heartbeat), so a plan that
- * loses the bot stops it mid-session. */
+ * loses the bot, or a session that ends, stops it mid-session
+ * (content/account-check.ts). */
 const ENTITLEMENT_CHECK_MS = 30000;
 /** How often features and the kill switch are re-read from background's
  * cached entitlement (refreshed by its heartbeat), so a plan change reaches
@@ -187,6 +189,11 @@ async function main(): Promise<void> {
   // The Sniping Bot (automation builds; see "M3: the Sniping Bot page"
   // below). Declared here so the kill switch above can stop it.
   let sniper: Sniper | null = null;
+  // Why the Nova Trade account cannot be confirmed (signed out, or
+  // unreachable for a while), as the bot's entitlement check last found;
+  // null while it can. The bot refuses to run meanwhile, with that reason
+  // rather than "your plan…" (content/account-check.ts).
+  let accountIssue: SniperAccountIssue | null = null;
   // The engine lease (this file's header), created once the bootstrap below
   // knows there is an engine to run. Null: this tab runs none.
   let lease: EngineLease | null = null;
@@ -639,6 +646,8 @@ async function main(): Promise<void> {
   async function liveTick(): Promise<void> {
     const boot = await send<BootstrapResponse>('license.bootstrap');
     if (!boot) return;
+    // An entitlement means a confirmed account (signed back in, reachable).
+    accountIssue = null;
     features = boot.features;
     deviceIdCache = deviceIdCache ?? boot.deviceId;
     if (boot.killSwitchActive && !killSwitchActive) applyKillSwitch(true, 'server kill switch active');
@@ -690,12 +699,14 @@ async function main(): Promise<void> {
 
     const prepareSniper = async (fresh: boolean): Promise<void> => {
       if (sniper) {
-        // A plan lost mid-session (the check below) empties `features`, and
-        // the bot then refuses to start. Opening the page re-checks, so a
-        // user who signs back in or renews gets the bot without a reload.
-        if (fresh && !features.includes('automation.autobuyer')) {
+        // A plan lost or a session ended mid-session (the check below)
+        // empties `features` or sets `accountIssue`, and the bot then refuses
+        // to start. Opening the page re-checks, so a user who signs back in
+        // or renews gets the bot without a reload.
+        if (fresh && (accountIssue || !features.includes('automation.autobuyer'))) {
           const boot = await send<BootstrapResponse>('license.bootstrap');
           if (boot) {
+            accountIssue = null;
             features = boot.features;
             killSwitchActive = killSwitchActive || boot.killSwitchActive;
           }
@@ -776,6 +787,7 @@ async function main(): Promise<void> {
           loadBudget: () => bg.requireAnswer<BotBudgetState | null>('bot.budgetGet'),
           saveBudget: (budget) => void send('bot.budgetSet', budget),
           entitled: () => features.includes('automation.autobuyer'),
+          account: () => accountIssue,
           // One EA tab runs the bot: the one holding the engine lease.
           exclusive: () => !!lease?.isHeld(),
           killSwitch: () => ({ active: killSwitchActive || !!governor?.isKillSwitchActive() }),
@@ -813,28 +825,41 @@ async function main(): Promise<void> {
     }, BOT_PACE_REPORT_MS);
 
     // A plan that loses the bot mid-session (the heartbeat refreshes
-    // background's cached entitlement) stops it with a reason, not at the
-    // next page load. The kill switch has its own push and pull above.
-    let entitlementMisses = 0;
+    // background's cached entitlement), or a session that ends, stops it
+    // with the real reason, not at the next page load: `not_entitled` only
+    // when the server says the plan lacks it, `signed_out` at once when the
+    // session ended, `account_unreachable` when the account stays
+    // unconfirmed — never on the first miss (content/account-check.ts). The
+    // kill switch has its own push and pull above.
+    const checkAccount = createAccountCheck({
+      bootstrap: () => send<BootstrapResponse>('license.bootstrap'),
+      authStatus: () => bg.request<AccountStatus | null>('auth.status'),
+    });
+    /** Stops whichever automation runs: the bot with `detail` (omitted:
+     * its own message for `reason`), the autobuyer with `autobuyerDetail`. */
+    const stopAutomation = (reason: SniperAccountIssue['reason'] | 'not_entitled', detail: string | undefined, autobuyerDetail: string): void => {
+      sniper?.stop(reason, detail);
+      if (autobuyer && !autobuyer.isStopped()) {
+        autobuyer.stop(reason, autobuyerDetail);
+        reportAutobuyerStop(reason, autobuyerDetail);
+      }
+    };
     setInterval(() => {
       const autobuyerRunning = !!autobuyer && !autobuyer.isStopped();
       if (!sniper?.isRunning() && !autobuyerRunning) return;
-      void send<BootstrapResponse>('license.bootstrap').then((boot) => {
-        if (boot) {
-          entitlementMisses = 0;
-          features = boot.features;
-          if (boot.killSwitchActive) applyKillSwitch(true, 'server kill switch active');
-        } else if (++entitlementMisses >= 2) {
-          // No entitlement at all (signed out, or background has none to
-          // give): fail closed.
-          features = [];
+      void checkAccount().then((check) => {
+        if (check.kind === 'unconfirmed') return; // the next check decides
+        if (check.kind === 'entitled') {
+          accountIssue = null;
+          features = check.bootstrap.features;
+          if (check.bootstrap.killSwitchActive) applyKillSwitch(true, 'server kill switch active');
+          if (!features.includes('automation.autobuyer')) stopAutomation('not_entitled', undefined, 'your plan no longer includes automation');
+          return;
         }
-        if (features.includes('automation.autobuyer')) return;
-        sniper?.stop('not_entitled');
-        if (autobuyer && !autobuyer.isStopped()) {
-          autobuyer.stop('not_entitled', 'your plan no longer includes automation');
-          reportAutobuyerStop('not_entitled', 'your plan no longer includes automation');
-        }
+        // Signed out, or unconfirmed for too long: fail closed, saying so.
+        accountIssue = check.kind === 'signed_out' ? { reason: 'signed_out', detail: check.detail } : { reason: 'account_unreachable' };
+        features = [];
+        stopAutomation(accountIssue.reason, accountIssue.detail, accountIssue.detail ?? 'Nova Trade could not confirm your account (it may be unreachable)');
       });
     }, ENTITLEMENT_CHECK_MS);
 

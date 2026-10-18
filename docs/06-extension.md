@@ -863,6 +863,26 @@ filters arrive the same way. Features are re-read from background's cached
 entitlement every 30 s, so a plan that gains assist gets its engine, and one
 that loses it (or an expired offline grace) loses it, without a reload.
 
+**Why a running Nova AI bot stops** (`content/account-check.ts`). While the
+bot or the autobuyer runs, the same 30 s check tells three cases apart, so
+a session that ends is never reported as a plan problem:
+
+- an entitlement from background (a bootstrap, or its fresh verified
+  cache) without `automation.autobuyer`: `not_entitled`, "your plan no
+  longer includes Nova AI". Only the server's own answer can say this;
+- no entitlement and no tokens left (`auth.status` `hasAccount: false`: a
+  refresh was refused — session revoked, token reuse, the password
+  changed — or the user signed out): `signed_out` at once, fail closed,
+  "signed out of Nova Trade — sign in again to restart" (or "… because the
+  password changed …" when the API said so when refusing the refresh);
+- no entitlement while still signed in (the API unreachable with no
+  offline grace, the service worker restarting): nothing on the first
+  miss; a second in a row is `account_unreachable`.
+
+The bot checks the account before the plan at Start and before every
+action, and opening its page re-checks, so signing back in is enough to
+start it again.
+
 `Governor.snapshot()` is the always-on "current utilization" read the risk
 meter (`ui/panel.ts`'s "Risk budget" section, and the popup) displays; it
 never denies anything itself, `allow()` is the only gate.
