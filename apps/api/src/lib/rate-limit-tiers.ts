@@ -8,7 +8,7 @@
 //  - `INGEST_RATE_LIMIT` — the extension's own batched telemetry/data-sync
 //    endpoints (`activity`, `sniping`, `trades`, `filters`, `risk-events`,
 //    `extension/telemetry`, `extension/errors`,
-//    `extension/recent-searches`). Looser than auth (a
+//    `extension/recent-searches`, `extension/bot-settings`). Looser than auth (a
 //    logged-in device legitimately calls these often — every heartbeat,
 //    every batch flush), tight enough to bound a compromised/bugged
 //    extension build hammering the API.

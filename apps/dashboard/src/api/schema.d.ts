@@ -4901,6 +4901,312 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/extension/bot-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            settings: {
+                                safetyMode?: unknown;
+                                customRiskAcknowledgedAt?: unknown;
+                                /** @default null */
+                                riskAcknowledgedAt: string | null;
+                                searchDelay: {
+                                    min: number;
+                                    max: number;
+                                };
+                                breaks: {
+                                    enabled: boolean;
+                                    searches: {
+                                        min: number;
+                                        max: number;
+                                    };
+                                    seconds: {
+                                        min: number;
+                                        max: number;
+                                    };
+                                };
+                                rest: {
+                                    enabled: boolean;
+                                    afterMinutes: {
+                                        min: number;
+                                        max: number;
+                                    };
+                                    minutes: {
+                                        min: number;
+                                        max: number;
+                                    };
+                                };
+                                thresholds: {
+                                    maxBuyPrice: number;
+                                    minProfit: number;
+                                    stopAfterPurchases: number;
+                                    sessionCoinBudget: number;
+                                };
+                                autoSell: {
+                                    enabled: boolean;
+                                    /** @enum {string} */
+                                    mode: "market" | "fixed";
+                                    steps: number;
+                                    fixedPrice: number;
+                                    /** @enum {string} */
+                                    platform: "console" | "pc";
+                                    noLoss: boolean;
+                                };
+                                safety: {
+                                    /** @default 250 */
+                                    maxSearchesPerHour: number;
+                                    /** @default 15 */
+                                    maxBuysPerHour: number;
+                                    /** @default 6 */
+                                    maxActiveHoursPerDay: number;
+                                    /** @default 0.35 */
+                                    buyToSearchRatio: number;
+                                    /** @default 10 */
+                                    cooldownSeconds: number;
+                                    /** @default 500000 */
+                                    maxCoinFlowPerHour: number;
+                                    actionsPerHour?: unknown;
+                                    sessionLengthMinutes?: unknown;
+                                };
+                            } | null;
+                            updatedAt: string | null;
+                        };
+                    };
+                };
+            };
+        };
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        settings: {
+                            safetyMode?: unknown;
+                            customRiskAcknowledgedAt?: unknown;
+                            /** @default null */
+                            riskAcknowledgedAt?: string | null;
+                            /**
+                             * @default {
+                             *       "min": 8,
+                             *       "max": 12
+                             *     }
+                             */
+                            searchDelay?: {
+                                min: number;
+                                max: number;
+                            };
+                            /**
+                             * @default {
+                             *       "enabled": true,
+                             *       "searches": {
+                             *         "min": 15,
+                             *         "max": 15
+                             *       },
+                             *       "seconds": {
+                             *         "min": 10,
+                             *         "max": 10
+                             *       }
+                             *     }
+                             */
+                            breaks?: {
+                                enabled: boolean;
+                                searches: {
+                                    min: number;
+                                    max: number;
+                                };
+                                seconds: {
+                                    min: number;
+                                    max: number;
+                                };
+                            };
+                            /**
+                             * @default {
+                             *       "enabled": true,
+                             *       "afterMinutes": {
+                             *         "min": 60,
+                             *         "max": 60
+                             *       },
+                             *       "minutes": {
+                             *         "min": 20,
+                             *         "max": 20
+                             *       }
+                             *     }
+                             */
+                            rest?: {
+                                enabled: boolean;
+                                afterMinutes: {
+                                    min: number;
+                                    max: number;
+                                };
+                                minutes: {
+                                    min: number;
+                                    max: number;
+                                };
+                            };
+                            /**
+                             * @default {
+                             *       "maxBuyPrice": 0,
+                             *       "minProfit": 1000,
+                             *       "stopAfterPurchases": 0,
+                             *       "sessionCoinBudget": 0
+                             *     }
+                             */
+                            thresholds?: {
+                                maxBuyPrice: number;
+                                minProfit: number;
+                                stopAfterPurchases: number;
+                                sessionCoinBudget: number;
+                            };
+                            /**
+                             * @default {
+                             *       "enabled": false,
+                             *       "mode": "market",
+                             *       "steps": 0,
+                             *       "fixedPrice": 10000,
+                             *       "platform": "console",
+                             *       "noLoss": true
+                             *     }
+                             */
+                            autoSell?: {
+                                enabled: boolean;
+                                /** @enum {string} */
+                                mode: "market" | "fixed";
+                                steps: number;
+                                fixedPrice: number;
+                                /** @enum {string} */
+                                platform: "console" | "pc";
+                                noLoss: boolean;
+                            };
+                            /** @default {} */
+                            safety?: {
+                                /** @default 250 */
+                                maxSearchesPerHour?: number;
+                                /** @default 15 */
+                                maxBuysPerHour?: number;
+                                /** @default 6 */
+                                maxActiveHoursPerDay?: number;
+                                /** @default 0.35 */
+                                buyToSearchRatio?: number;
+                                /** @default 10 */
+                                cooldownSeconds?: number;
+                                /** @default 500000 */
+                                maxCoinFlowPerHour?: number;
+                                actionsPerHour?: unknown;
+                                sessionLengthMinutes?: unknown;
+                            };
+                        };
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            settings: {
+                                safetyMode?: unknown;
+                                customRiskAcknowledgedAt?: unknown;
+                                /** @default null */
+                                riskAcknowledgedAt: string | null;
+                                searchDelay: {
+                                    min: number;
+                                    max: number;
+                                };
+                                breaks: {
+                                    enabled: boolean;
+                                    searches: {
+                                        min: number;
+                                        max: number;
+                                    };
+                                    seconds: {
+                                        min: number;
+                                        max: number;
+                                    };
+                                };
+                                rest: {
+                                    enabled: boolean;
+                                    afterMinutes: {
+                                        min: number;
+                                        max: number;
+                                    };
+                                    minutes: {
+                                        min: number;
+                                        max: number;
+                                    };
+                                };
+                                thresholds: {
+                                    maxBuyPrice: number;
+                                    minProfit: number;
+                                    stopAfterPurchases: number;
+                                    sessionCoinBudget: number;
+                                };
+                                autoSell: {
+                                    enabled: boolean;
+                                    /** @enum {string} */
+                                    mode: "market" | "fixed";
+                                    steps: number;
+                                    fixedPrice: number;
+                                    /** @enum {string} */
+                                    platform: "console" | "pc";
+                                    noLoss: boolean;
+                                };
+                                safety: {
+                                    /** @default 250 */
+                                    maxSearchesPerHour: number;
+                                    /** @default 15 */
+                                    maxBuysPerHour: number;
+                                    /** @default 6 */
+                                    maxActiveHoursPerDay: number;
+                                    /** @default 0.35 */
+                                    buyToSearchRatio: number;
+                                    /** @default 10 */
+                                    cooldownSeconds: number;
+                                    /** @default 500000 */
+                                    maxCoinFlowPerHour: number;
+                                    actionsPerHour?: unknown;
+                                    sessionLengthMinutes?: unknown;
+                                };
+                            } | null;
+                            updatedAt: string | null;
+                        };
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/extension/version": {
         parameters: {
             query?: never;

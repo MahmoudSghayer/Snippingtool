@@ -139,6 +139,8 @@ describe('dist/ledger contents', () => {
       'recentSearches.get',
       'recentSearches.set',
       'extension/recent-searches',
+      // The bot's settings, synced with the account.
+      'extension/bot-settings',
     ];
     const files = readdirSync(outDir, { recursive: true, withFileTypes: true }).filter((e) => e.isFile());
     for (const file of files) {

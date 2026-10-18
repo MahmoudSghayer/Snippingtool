@@ -1,7 +1,9 @@
 /*
  * bot.ts — background handlers for the Sniping Bot page: its settings
- * (`bot.settingsGet` / `bot.settingsSet`, `storage.local`, never sent to the
- * server), EA's player/club/league/nation lists for the Snipe Targets form
+ * (`bot.settingsGet` / `bot.settingsSet`: `storage.local`, and the signed-in
+ * account's copy at `/api/v1/extension/bot-settings`, so every browser the
+ * trader signs in on starts with the same ones), EA's
+ * player/club/league/nation lists for the Snipe Targets form
  * (`catalog.get` / `catalog.save`, see `model/catalog.ts`), and player names
  * for the log (`cards.names`).
  *
@@ -14,6 +16,7 @@
 import {
   DEFAULT_BOT_SETTINGS,
   adapterCatalogSchema,
+  botSettingsSyncResponseSchema,
   botDailyUsageSchema,
   extBackgroundBotBudgetSetPayloadSchema,
   botSettingsSchema,
@@ -23,7 +26,7 @@ import {
   type MarketCardHistoryResponse,
 } from '@sl/shared';
 
-import { apiJson } from '../lib/api.js';
+import { apiJson, NetworkError } from '../lib/api.js';
 import { isAuthenticated } from '../lib/auth.js';
 import { logger } from '../lib/logger.js';
 import { getLocal, setLocal } from '../lib/storage.js';
@@ -31,6 +34,10 @@ import { getLocal, setLocal } from '../lib/storage.js';
 import type { Catalog } from '../model/catalog.js';
 
 const SETTINGS_KEY = 'sl.bot.settings.v1';
+/** Set (to the save's time) while a save has not reached the account yet. */
+const SETTINGS_PENDING_KEY = 'sl.bot.settings.pending.v1';
+/** A burst of edits (a slider dragged) goes up as one save. */
+const SETTINGS_UPLOAD_DELAY_MS = 1_500;
 const NAMES_KEY = 'sl.cards.names.v1';
 const CATALOG_KEY = 'sl.catalog.v1';
 const USAGE_KEY = 'sl.bot.usage.v1';
@@ -43,20 +50,89 @@ interface NameEntry {
   at: number;
 }
 
-export async function handleBotSettingsGet(): Promise<BotSettings> {
+/** The settings saved in this browser, or null when there are none. */
+async function localBotSettings(): Promise<BotSettings | null> {
   const stored = await getLocal<unknown>(SETTINGS_KEY, null);
-  if (stored == null) return DEFAULT_BOT_SETTINGS;
+  if (stored == null) return null;
   const parsed = botSettingsSchema.safeParse(stored);
   if (parsed.success) return parsed.data;
   // Saved by an older version with a different shape — start from the
   // defaults rather than run the bot on settings nobody chose.
   logger.warn('stored bot settings no longer match the schema — using defaults', 'bot');
-  return DEFAULT_BOT_SETTINGS;
+  return null;
 }
 
+/** Sends `settings` to the account. False when it did not get there
+ * (signed out, offline, or refused: the local copy stays the one in use). */
+async function uploadBotSettings(settings: BotSettings): Promise<boolean> {
+  if (!(await isAuthenticated())) return false;
+  try {
+    await apiJson('/api/v1/extension/bot-settings', { method: 'PUT', body: JSON.stringify({ settings }) }, { retries: 1 });
+    return true;
+  } catch (err) {
+    if (!(err instanceof NetworkError)) logger.warn(`bot settings not saved to the account: ${String(err)}`, 'bot');
+    return false;
+  }
+}
+
+/** The account's settings. Null when it has none to give (never saved, or
+ * stored by a version whose shape this one no longer reads); undefined
+ * when it could not be asked (signed out, offline, refused), which must
+ * never read as "none": the local copy would then overwrite the account's. */
+async function accountBotSettings(): Promise<BotSettings | null | undefined> {
+  if (!(await isAuthenticated())) return undefined;
+  try {
+    // One retry: the page is waiting on this to show the settings.
+    const body = await apiJson<unknown>('/api/v1/extension/bot-settings', {}, { retries: 1 });
+    const parsed = botSettingsSyncResponseSchema.safeParse(body);
+    return parsed.success ? parsed.data.settings : undefined;
+  } catch (err) {
+    if (!(err instanceof NetworkError)) logger.warn(`bot settings not read from the account: ${String(err)}`, 'bot');
+    return undefined;
+  }
+}
+
+/** The bot's settings: the account's when it has some, so a browser the
+ * trader signs in on (another PC, a cloud machine) starts with the ones
+ * they chose; else this browser's, which then go up to the account; else
+ * the defaults. A save that has not reached the account yet (made offline)
+ * goes up first, rather than be overwritten by the account's older copy. */
+export async function handleBotSettingsGet(): Promise<BotSettings> {
+  const local = await localBotSettings();
+  const pending = await getLocal<number | null>(SETTINGS_PENDING_KEY, null);
+  if (local && pending != null) {
+    if (await uploadBotSettings(local)) await clearPendingIf(pending);
+    return local;
+  }
+  const account = await accountBotSettings();
+  if (account) {
+    await setLocal(SETTINGS_KEY, account);
+    return account;
+  }
+  if (account === null && local) void uploadBotSettings(local);
+  return local ?? DEFAULT_BOT_SETTINGS;
+}
+
+let uploadTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Saves `settings` here at once, and to the account shortly after (one
+ * upload for a burst of edits). Until that upload lands, the pending mark
+ * keeps the next load from taking the account's older copy. */
 export async function handleBotSettingsSet(settings: BotSettings): Promise<BotSettings> {
+  const savedAt = Date.now();
   await setLocal(SETTINGS_KEY, settings);
+  await setLocal(SETTINGS_PENDING_KEY, savedAt);
+  if (uploadTimer) clearTimeout(uploadTimer);
+  uploadTimer = setTimeout(() => {
+    uploadTimer = null;
+    void uploadBotSettings(settings).then((ok) => (ok ? clearPendingIf(savedAt) : undefined));
+  }, SETTINGS_UPLOAD_DELAY_MS);
   return settings;
+}
+
+/** Clears the pending mark, unless a later save has set it again. */
+async function clearPendingIf(savedAt: number): Promise<void> {
+  if ((await getLocal<number | null>(SETTINGS_PENDING_KEY, null)) === savedAt) await setLocal(SETTINGS_PENDING_KEY, null);
 }
 
 /** Today's active time for the bot's hours-per-day limit (engine/sniper.ts). */
