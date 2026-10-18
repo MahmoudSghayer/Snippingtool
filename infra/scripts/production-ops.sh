@@ -237,13 +237,23 @@ CREATE TEMP TABLE sa AS
 \echo
 \echo '== cards matching the player'
 SELECT * FROM pc ORDER BY rating DESC NULLS LAST;
-\echo '== buy attempts by outcome (latency = ms from seeing the listing to EA answering the buy)'
+\echo '== buy attempts by outcome (latency = the buy request's round trip to EA, ms)'
 SELECT outcome, count(*) AS n,
        percentile_cont(0.5) WITHIN GROUP (ORDER BY latency_ms)::int AS p50_ms,
        percentile_cont(0.9) WITHIN GROUP (ORDER BY latency_ms)::int AS p90_ms,
        min(latency_ms) AS min_ms, max(latency_ms) AS max_ms,
        round(avg(target_price)) AS avg_target, round(avg(listed_price)) AS avg_listed
   FROM sa GROUP BY 1 ORDER BY 2 DESC;
+\echo '== where the time went before each buy, ms (Nova AI bot builds that report it)'
+\echo '   search = search sent -> listing arrived; react = listing arrived -> buy sent; buy = buy round trip'
+SELECT outcome, count(search_ms) AS timed,
+       percentile_cont(0.5) WITHIN GROUP (ORDER BY search_ms)::int AS search_p50,
+       percentile_cont(0.9) WITHIN GROUP (ORDER BY search_ms)::int AS search_p90,
+       percentile_cont(0.5) WITHIN GROUP (ORDER BY reaction_ms)::int AS react_p50,
+       percentile_cont(0.9) WITHIN GROUP (ORDER BY reaction_ms)::int AS react_p90,
+       percentile_cont(0.5) WITHIN GROUP (ORDER BY latency_ms)::int AS buy_p50,
+       percentile_cont(0.9) WITHIN GROUP (ORDER BY latency_ms)::int AS buy_p90
+  FROM sa WHERE outcome <> 'blocked' GROUP BY 1 ORDER BY 2 DESC;
 \echo '== failure reasons'
 SELECT outcome, coalesce(error_code, '-') AS error_code, count(*) AS n
   FROM sa WHERE outcome <> 'success' GROUP BY 1, 2 ORDER BY 3 DESC;

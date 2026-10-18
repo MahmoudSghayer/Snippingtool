@@ -129,6 +129,23 @@ describe('ingest correctness', () => {
       });
       // Without an id the server cannot tell a retry from a second attempt.
       expect(rows).toHaveLength(2);
+      // Nor does an old client send the bot's timings.
+      expect(rows.map((r) => [r.searchMs, r.reactionMs])).toEqual([
+        [null, null],
+        [null, null],
+      ]);
+    });
+
+    it("stores the bot's search and reaction times with the attempt", async () => {
+      const { userId, token } = await createUser(app, 'timings@example.com');
+      const res = await post('/api/v1/sniping/attempts', token, {
+        attempts: [attempt({ searchMs: 182, reactionMs: 3, latencyMs: 140 })],
+      });
+      expect(res.statusCode, res.body).toBe(200);
+      const [row] = await app.db.query.snipingActivity.findMany({
+        where: eq(snipingActivity.userId, userId),
+      });
+      expect(row).toMatchObject({ searchMs: 182, reactionMs: 3, latencyMs: 140 });
     });
   });
 

@@ -111,6 +111,10 @@ export const snipingActivity = pgTable(
     outcome: snipingOutcomeEnum('outcome').notNull(),
     latencyMs: integer('latency_ms'),
     errorCode: text('error_code'),
+    // Nova AI bot timings (0038): search sent → listing arrived, and
+    // listing arrived → buy sent. NULL when not measured.
+    searchMs: integer('search_ms'),
+    reactionMs: integer('reaction_ms'),
     // Client-generated per attempt (0032); NULL from older extensions.
     attemptId: uuid('attempt_id'),
 

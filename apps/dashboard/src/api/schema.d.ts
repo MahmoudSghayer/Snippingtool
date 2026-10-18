@@ -6834,6 +6834,8 @@ export interface paths {
                             /** @enum {string} */
                             outcome: "attempted" | "success" | "failed" | "too_slow" | "blocked" | "error";
                             latencyMs: number | null;
+                            searchMs?: number;
+                            reactionMs?: number;
                             errorCode: string | null;
                             /** Format: date-time */
                             occurredAt: string;

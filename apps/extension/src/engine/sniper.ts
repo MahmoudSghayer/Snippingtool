@@ -405,11 +405,16 @@ interface SearchRun {
   >;
   /** Its matches so far, cheapest first. */
   matches: () => SniperMatch[];
+  /** When the search went out to EA (for the search time). */
+  sentAt: number;
   /** When a listing reached the bot buyable (for the reaction time). */
   arrivedAt: (tradeId: string) => number | undefined;
   /** The cards its listings are. */
   resourceIds: () => number[];
 }
+
+/** Where the time before a buy went (`AttemptInput.searchMs`/`reactionMs`). */
+type Timings = Pick<AttemptInput, 'searchMs' | 'reactionMs'>;
 
 /** How a batch of matches ended (`Sniper.buyMatches`): `dropped` when it
  * left the rest (a pause after a buy made them stale, or a budget holds
@@ -1085,7 +1090,8 @@ export class Sniper {
     const criteria: FilterCriteria = { ...target.filter };
     const maxBuy = searchMaxBuy(round, target.filter.minPrice, cap);
     if (maxBuy != null) criteria.maxPrice = maxBuy;
-    this.searchTimes.push(this.now());
+    const sentAt = this.now();
+    this.searchTimes.push(sentAt);
     const searching = this.deps.adapter.search(criteria);
     // Saved once the search is on its way, not before it.
     this.persistBudget();
@@ -1114,6 +1120,7 @@ export class Sniper {
       ready,
       done,
       matches,
+      sentAt,
       arrivedAt: (tradeId) => arrived.get(tradeId),
       resourceIds: () => [...new Set([...collected.values()].map((a) => a.resourceId))],
     };
@@ -1189,8 +1196,11 @@ export class Sniper {
       // did not buy.
       const at = this.now();
       this.buyTimes.push(at);
+      // Where the time before this buy went, for the log and the telemetry:
+      // EA answering the search, then the bot reacting.
       const arrivedAt = search.arrivedAt(m.tradeId);
       const reactionMs = arrivedAt == null ? undefined : at - arrivedAt;
+      const timings: Timings = { searchMs: arrivedAt == null ? undefined : arrivedAt - search.sentAt, reactionMs };
       // The resourceId binds the buy to the card this filter targets: the
       // adapter refuses it unless the listing it saw for this tradeId is
       // that card (a forged `auctions` message can claim any tradeId).
@@ -1217,6 +1227,7 @@ export class Sniper {
         });
         this.deps.onAttempt?.({
           ...this.attemptBase(m),
+          ...timings,
           outcome: 'attempted',
           latencyMs: result.latencyMs,
           errorCode: ACT_ERROR.timeoutUnknown,
@@ -1231,7 +1242,7 @@ export class Sniper {
             }
             return;
           }
-          this.recordBought(m, late.latencyMs, estimate, reactionMs);
+          this.recordBought(m, late.latencyMs, estimate, timings);
           // Shown now, not at the next search (the bot may have stopped).
           this.deps.onChange();
           this.autoSellInBackground(m);
@@ -1247,7 +1258,7 @@ export class Sniper {
         // EA's listing call) runs on its own, while the bot goes straight
         // on to the next listing and search. Only the user's own pause
         // after a buy, when they set one, waits.
-        this.recordBought(m, result.latencyMs, estimate, reactionMs);
+        this.recordBought(m, result.latencyMs, estimate, timings);
         this.autoSellInBackground(m);
         if (t.stopAfterPurchases > 0 && this.runTotals.purchases >= t.stopAfterPurchases) {
           this.stop('purchase_limit');
@@ -1288,6 +1299,7 @@ export class Sniper {
         });
         this.deps.onAttempt?.({
           ...this.attemptBase(m),
+          ...timings,
           outcome: missOutcome(result.error),
           latencyMs: result.latencyMs,
           errorCode: attemptErrorCode(result.error),
@@ -1428,7 +1440,7 @@ export class Sniper {
   /** Counts a buy at once. Its sell price and profit come from `known`
    * when the buy already had them, else they are filled in (with the
    * Profit figure and Top snipes) when the lookup answers. */
-  private recordBought(m: SniperMatch, latencyMs: number, known: Estimate | null, reactionMs?: number): void {
+  private recordBought(m: SniperMatch, latencyMs: number, known: Estimate | null, timings: Timings = {}): void {
     this.stats.purchases++;
     this.stats.coinsSpent += m.buyNow;
     this.runTotals.purchases++;
@@ -1441,7 +1453,7 @@ export class Sniper {
       price: m.buyNow,
       sellPrice: known?.sellPrice ?? null,
       profit: known?.profit ?? null,
-      reactionMs,
+      reactionMs: timings.reactionMs,
       message: 'bought',
     });
     const settle = (e: Estimate) => {
@@ -1458,6 +1470,7 @@ export class Sniper {
       });
     this.deps.onAttempt?.({
       ...this.attemptBase(m),
+      ...timings,
       outcome: 'success',
       latencyMs,
       errorCode: null,

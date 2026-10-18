@@ -64,6 +64,8 @@ export default fp(
           listedPrice: a.listedPrice,
           outcome: a.outcome,
           latencyMs: a.latencyMs,
+          searchMs: a.searchMs ?? null,
+          reactionMs: a.reactionMs ?? null,
           errorCode: a.errorCode,
           occurredAt: new Date(a.occurredAt),
         }));
