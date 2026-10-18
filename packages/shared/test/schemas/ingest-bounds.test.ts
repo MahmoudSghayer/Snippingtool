@@ -69,6 +69,20 @@ describe('ingest bounds', () => {
     expect(snipingAttemptSchema.safeParse(attempt({ attemptId: 'x' })).success).toBe(false);
   });
 
+  it('sniping: searchMs and reactionMs are optional whole ms up to 10 minutes', () => {
+    expect(snipingAttemptSchema.safeParse(attempt()).success).toBe(true);
+    expect(snipingAttemptSchema.safeParse(attempt({ searchMs: 180, reactionMs: 4 })).success).toBe(
+      true,
+    );
+    expect(
+      snipingAttemptSchema.safeParse(attempt({ searchMs: 0, reactionMs: 600_000 })).success,
+    ).toBe(true);
+    for (const bad of [-1, 600_001, 1.5, null]) {
+      expect(snipingAttemptSchema.safeParse(attempt({ searchMs: bad })).success).toBe(false);
+      expect(snipingAttemptSchema.safeParse(attempt({ reactionMs: bad })).success).toBe(false);
+    }
+  });
+
   it('sniping: occurredAt must be within 7 days back and 5 minutes ahead', () => {
     expect(snipingAttemptSchema.safeParse(attempt({ occurredAt: iso(4 * MINUTE) })).success).toBe(
       true,

@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { SNIPE_ERROR_CODE_MAX, snipingAttemptSchema } from '@sl/shared';
 import { describe, expect, it } from 'vitest';
 
-import { attemptErrorCode } from '../../src/engine/types.js';
+import { attemptErrorCode, attemptTiming } from '../../src/engine/types.js';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const contentSource = readFileSync(path.resolve(dirname, '../../src/content/index.ts'), 'utf8');
@@ -58,5 +58,31 @@ describe('an attempt’s errorCode stays inside the schema', () => {
     expect(attempt(attemptErrorCode(long))).toBe(true);
     expect(attemptErrorCode(long)).toHaveLength(SNIPE_ERROR_CODE_MAX);
     expect(attempt(attemptErrorCode(''))).toBe(true);
+  });
+});
+
+describe('an attempt’s timings stay inside the schema', () => {
+  it('content passes the bot’s search and reaction times through attemptTiming', () => {
+    expect(contentSource).toContain('searchMs: attemptTiming(input.searchMs),');
+    expect(contentSource).toContain('reactionMs: attemptTiming(input.reactionMs),');
+  });
+
+  it('attemptTiming gives timings the schema accepts, or none', () => {
+    const attempt = (timings: { searchMs?: number; reactionMs?: number }) =>
+      snipingAttemptSchema.safeParse({
+        resourceId: 100,
+        targetPrice: 1_000,
+        listedPrice: 1_000,
+        outcome: 'success',
+        latencyMs: 10,
+        errorCode: null,
+        occurredAt: new Date().toISOString(),
+        deviceId: '00000000-0000-0000-0000-000000000000',
+        ...timings,
+      }).success;
+    for (const ms of [182.6, 0, 600_000, 600_001, -5, Number.NaN, undefined]) {
+      expect(attempt({ searchMs: attemptTiming(ms), reactionMs: attemptTiming(ms) })).toBe(true);
+    }
+    expect(attempt({ searchMs: 600_001 })).toBe(false);
   });
 });

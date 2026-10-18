@@ -23,7 +23,7 @@ import {
   type SniperDeps,
   type SniperFilter,
 } from '../../src/engine/sniper.js';
-import { attemptErrorCode, type AttemptInput } from '../../src/engine/types.js';
+import { attemptErrorCode, attemptTiming, type AttemptInput } from '../../src/engine/types.js';
 import { ACT_ERROR } from '../../src/lib/act-auth.js';
 
 import type { ActionOutcome } from '../../src/content/adapter-client.js';
@@ -1834,6 +1834,35 @@ describe('Sniper — buys as soon as the listings arrive', () => {
     expect(h.sniper.getLog().find((e) => e.kind === 'bought')?.reactionMs).toBe(40);
   });
 
+  it('reports where the time before each buy went: EA answering the search, then the bot reacting', async () => {
+    let answer!: () => void;
+    const held = new Promise<void>((r) => (answer = r));
+    const attempts: AttemptInput[] = [];
+    const h = setup({
+      results: [[auction('t-a', 8_000), auction('t-b', 8_100)]],
+      searchTakesMs: 120,
+      answerLagMs: 40,
+      holdAnswer: () => held,
+      // Someone else's buy landed first on the cheaper one (EA's signed refusal).
+      buyResult: (id) =>
+        id === 't-a'
+          ? { ok: false, signed: true, error: 'bid reported success: false (status 403)', latencyMs: 5 }
+          : { ok: true, latencyMs: 5 },
+      onAttempt: (a) => void attempts.push(a),
+      maxSearches: 1,
+    });
+    h.sniper.start();
+    await vi.waitFor(() => expect(h.buys).toEqual(['t-a', 't-b']));
+    answer();
+    await h.done();
+    // The search took 120 ms to bring the listings; the bot sent its buys
+    // 40 ms after they arrived (the fake clock stands still during the buys).
+    expect(attempts.map((a) => [a.tradeId, a.outcome, a.searchMs, a.reactionMs])).toEqual([
+      ['t-a', 'too_slow', 120, 40],
+      ['t-b', 'success', 120, 40],
+    ]);
+  });
+
   it('then buys what the answer itself makes buyable, never anything twice', async () => {
     let answer!: () => void;
     const held = new Promise<void>((r) => (answer = r));
@@ -1891,5 +1920,12 @@ describe('Sniper — how a missed buy is reported', () => {
     expect(attemptErrorCode('')).toBe('unknown_error');
     expect(attemptErrorCode(undefined)).toBe('unknown_error');
     expect(attemptErrorCode('y'.repeat(81))).toHaveLength(80);
+  });
+
+  it('attemptTiming: whole ms within what the schema takes, else left out', () => {
+    expect(attemptTiming(182.4)).toBe(182);
+    expect(attemptTiming(0)).toBe(0);
+    expect(attemptTiming(600_000)).toBe(600_000);
+    for (const bad of [undefined, -1, 600_001, Number.NaN, Number.POSITIVE_INFINITY]) expect(attemptTiming(bad)).toBeUndefined();
   });
 });

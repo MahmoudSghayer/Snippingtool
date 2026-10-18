@@ -356,7 +356,12 @@ waiting for the search's own signed answer: the adapter checks every buy
 against the listing it saw itself (`priceCheck`: price, card, expiry), so
 an `auctions` message, which any page script could post, can never make
 it buy anything else. Each bought or missed buy's log line gives the
-bot's reaction time (listing in to buy out). The minimum-profit check never
+bot's reaction time (listing in to buy out), and each attempt's telemetry
+carries where the time before the buy went: `searchMs` (search sent to the
+listing arriving) and `reactionMs` (listing arriving to the buy sent), next
+to `latencyMs` (the buy's own round trip), cut to the schema's bounds by
+`attemptTiming` (`sniping_activity.search_ms` / `reaction_ms`, migration
+0038). The minimum-profit check never
 waits on the network: the sale price is `plannedSalePrice`, the price
 auto-sell lists at (the user's own sell price when set, else the market
 price), less EA's 5% tax; a market price counts only once its lookup has

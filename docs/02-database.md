@@ -553,7 +553,8 @@ One row per snipe attempt outcome, computed by the extension.
 | `resource_id`, `trade_id`      | text              | `trade_id` correlates to `trades.trade_id` on success                            |
 | `target_price`, `listed_price` | integer, ≥ 0      |                                                                                  |
 | `outcome`                      | `sniping_outcome` | attempted/success/failed/too_slow/blocked/error — `blocked` = governor denied it |
-| `latency_ms`, `error_code`     | —                 |                                                                                  |
+| `latency_ms`, `error_code`     | —                 | `latency_ms`: the buy's round trip to EA                                         |
+| `search_ms`, `reaction_ms`     | integer, nullable | Nova AI bot (0038): search sent → listing arrived; listing arrived → buy sent    |
 | `attempt_id`                   | uuid, nullable    | client-generated per attempt (0032); NULL from extensions that predate it        |
 
 **Indexes:** `(user_id, occurred_at desc)`, `(device_id, occurred_at desc)`,

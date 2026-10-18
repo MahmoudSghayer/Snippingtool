@@ -17038,6 +17038,16 @@
                             }
                           ]
                         },
+                        "searchMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 600000
+                        },
+                        "reactionMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 600000
+                        },
                         "errorCode": {
                           "anyOf": [
                             {

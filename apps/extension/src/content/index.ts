@@ -35,7 +35,7 @@ import { AssistEngine, activeFilterHandles } from '../engine/assist.js';
 import { Governor, type GovernorState } from '../engine/governor.js';
 import { rankCandidates, type ScoredOpportunity } from '../engine/ranker.js';
 import { countObservedSearches, governedSearch } from '../engine/search.js';
-import { attemptErrorCode } from '../engine/types.js';
+import { attemptErrorCode, attemptTiming } from '../engine/types.js';
 import { handOffWasLate, readHandedOffNonce } from '../lib/act-auth.js';
 import { createBackgroundTimer } from '../lib/background-timer.js';
 import { riskLevelChangeEvent } from '../lib/bot-safety.js';
@@ -495,6 +495,8 @@ async function main(): Promise<void> {
       listedPrice: input.listedPrice,
       outcome: input.outcome,
       latencyMs: input.latencyMs,
+      searchMs: attemptTiming(input.searchMs),
+      reactionMs: attemptTiming(input.reactionMs),
       // Cut to what the schema takes: a longer EA error had background
       // reject the whole item.
       errorCode: input.errorCode == null ? null : attemptErrorCode(input.errorCode),
