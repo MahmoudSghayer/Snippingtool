@@ -1580,7 +1580,8 @@ describe('Sniper — a missed buy says why, in plain words', () => {
     expect(missReason('bid reported success: false (status 478)')).toBe('someone else got it first');
     expect(missReason('bid reported success: false (status 470)')).toBe('not enough coins');
     expect(missReason('bid reported success: false (status 458)')).toBe('EA wants a verification: solve it in the web app');
-    expect(missReason('bid reported success: false (status 512)')).toBe('EA is limiting requests: slow the bot down');
+    expect(missReason('bid reported success: false (status 512)')).toBe('EA is temporarily limiting your account (error 512): slow the bot down');
+    expect(missReason('bid reported success: false (status 429)')).toBe('EA says too many requests (error 429): slow the bot down');
     expect(missReason('bid reported success: false (status 500)')).toBe('EA refused it (error 500)');
     expect(missReason(ACT_ERROR.priceMismatch)).toBe('the price changed');
     expect(missReason(ACT_ERROR.listingUnknown)).toBe('the listing was gone');

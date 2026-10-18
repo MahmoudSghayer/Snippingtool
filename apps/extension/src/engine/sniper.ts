@@ -118,7 +118,8 @@ export function missReason(error: string | undefined): string {
     if (status === '470') return 'not enough coins';
     if (status === '458') return 'EA wants a verification: solve it in the web app';
     if (status === '401') return 'your EA session ended: reload the web app';
-    if (status === '429' || status === '512' || status === '521') return 'EA is limiting requests: slow the bot down';
+    if (status === '429') return 'EA says too many requests (error 429): slow the bot down';
+    if (status === '512' || status === '521') return `EA is temporarily limiting your account (error ${status}): slow the bot down`;
     return `EA refused it (error ${status})`;
   }
   if (error === ACT_ERROR.priceMismatch) return 'the price changed';
@@ -127,6 +128,14 @@ export function missReason(error: string | undefined): string {
   if (error === ACT_ERROR.unauthenticated) return 'Nova AI lost its link to the page: reload it';
   if (/timed out/i.test(error)) return 'EA did not answer in time';
   return 'EA did not accept the buy';
+}
+
+/** What an EA rate limit or server error means, for the bot's log. */
+export function eaErrorText(status: number | string): string {
+  const code = String(status);
+  if (code === '429') return 'EA says too many requests (error 429)';
+  if (code === '512' || code === '521') return `EA is temporarily limiting your searches (error ${code})`;
+  return `EA's servers had a problem (error ${code})`;
 }
 
 /**
@@ -693,8 +702,7 @@ export class Sniper {
     if (error.category === 'rate_limited' && this.onRateLimit(error.status, now)) return;
     const stepMs = this.eaBackoff.stepMs > 0 ? Math.min(this.eaBackoff.stepMs * 2, EA_BACKOFF_MAX_MS) : EA_BACKOFF_FIRST_MS;
     this.eaBackoff = { stepMs, until: Math.max(this.eaBackoff.until, now + stepMs), at: now };
-    const what = error.category === 'rate_limited' ? 'EA is limiting requests' : 'EA had a server error';
-    this.addLog({ kind: 'blocked', message: `${what} (HTTP ${error.status}): waiting ${Math.round(stepMs / 1000)} s before the next search` });
+    this.addLog({ kind: 'blocked', message: `${eaErrorText(error.status)}: waiting ${Math.round(stepMs / 1000)} s before the next search` });
     if (error.category === 'rate_limited') this.slowDown(this.eaBackoff.until);
     this.deps.onChange();
   }
@@ -715,21 +723,23 @@ export class Sniper {
     this.eaBackoff = { stepMs: 0, until: Math.max(this.eaBackoff.until, now + restMs), at: now };
     this.addLog({
       kind: 'blocked',
-      message: `EA limited searches ${EA_LIMITS_BEFORE_REST} times in ${EA_LIMIT_WINDOW_MS / 60_000} minutes (HTTP ${status}): resting ${restMs / 60_000} min to protect your account`,
+      message: `EA limited your searches ${EA_LIMITS_BEFORE_REST} times in ${EA_LIMIT_WINDOW_MS / 60_000} minutes (error ${status}): resting ${restMs / 60_000} min to protect your account, then searching at a third of your normal speed`,
     });
-    this.slowDown(this.eaBackoff.until);
+    this.slowDown(this.eaBackoff.until, false);
     this.deps.onChange();
     return true;
   }
 
-  /** Searches slower until `EA_SLOW_MS` after `from` (the end of the wait). */
-  private slowDown(from: number): void {
+  /** Searches slower until `EA_SLOW_MS` after `from` (the end of the wait),
+   * saying so (`announce`) when it was searching at full speed. */
+  private slowDown(from: number, announce = true): void {
     const wasSlow = this.now() < this.eaSlowUntil;
     this.eaSlowUntil = Math.max(this.eaSlowUntil, from + EA_SLOW_MS);
-    if (!wasSlow) {
+    if (!wasSlow && announce) {
+      const speed = this.eaPaceFactor() === 3 ? 'a third of your normal speed' : 'half your normal speed';
       this.addLog({
         kind: 'info',
-        message: `EA asked the bot to slow down: searching ${this.eaPaceFactor()}× slower for the next ${EA_SLOW_MS / 60_000} minutes`,
+        message: `Searching at ${speed} for the next ${EA_SLOW_MS / 60_000} minutes so EA's limit can reset`,
       });
     }
   }
@@ -1927,5 +1937,5 @@ const STOP_MESSAGES: Record<SniperStopReason, string> = {
   ea_session_ended: 'Your EA session ended — log in to the web app again',
   ea_verification: 'EA wants a verification (captcha) — solve it in the web app, then Start again',
   ea_rate_limited:
-    'EA kept limiting searches (HTTP 429 / 512 / 521), so the bot stopped to protect your account from a transfer market ban — wait at least an hour, then Start again with a longer search delay',
+    'EA kept limiting your searches after two rests: your account is likely soft banned (EA has blocked transfer market searches for a while). Do not search for a few hours, then Start again with a longer search delay',
 };

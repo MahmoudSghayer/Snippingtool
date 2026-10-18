@@ -171,14 +171,14 @@ describe('Sniper — EA errors', () => {
     expect(h.gaps()).toEqual([5, 10, 900, 5, 10, 1800, 5, 10]);
     expect(h.sniper.state).toMatchObject({
       stopReason: 'ea_rate_limited',
-      stopDetail: expect.stringContaining('to protect your account from a transfer market ban'),
+      stopDetail: expect.stringContaining('your account is likely soft banned'),
     });
     expect(h.log()).toEqual(
       expect.arrayContaining([
-        'EA is limiting requests (HTTP 429): waiting 5 s before the next search',
-        'EA asked the bot to slow down: searching 2× slower for the next 15 minutes',
-        'EA limited searches 3 times in 10 minutes (HTTP 429): resting 15 min to protect your account',
-        'EA limited searches 3 times in 10 minutes (HTTP 429): resting 30 min to protect your account',
+        'EA says too many requests (error 429): waiting 5 s before the next search',
+        "Searching at half your normal speed for the next 15 minutes so EA's limit can reset",
+        'EA limited your searches 3 times in 10 minutes (error 429): resting 15 min to protect your account, then searching at a third of your normal speed',
+        'EA limited your searches 3 times in 10 minutes (error 429): resting 30 min to protect your account, then searching at a third of your normal speed',
       ]),
     );
   });
@@ -219,7 +219,7 @@ describe('Sniper — EA errors', () => {
     h.sniper.start();
     await h.done();
     expect(h.gaps()).toEqual([5, 10]);
-    expect(h.log()).toContain('EA had a server error (HTTP 503): waiting 5 s before the next search');
+    expect(h.log()).toContain("EA's servers had a problem (error 503): waiting 5 s before the next search");
   });
 
   it('stops buying the rest of a search once EA rate-limits a buy', async () => {
@@ -239,6 +239,7 @@ describe('Sniper — EA errors', () => {
     await h.done();
     expect(h.searchTimes).toHaveLength(7);
     expect(h.gaps()).toEqual([5, 10, 900, 5, 10, 1800]);
+    expect(h.log()).toContain('EA is temporarily limiting your searches (error 521): waiting 5 s before the next search');
   });
 
   it('still stops after five failed searches in a row that were not EA slowing it down', async () => {
