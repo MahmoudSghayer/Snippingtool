@@ -22,7 +22,7 @@ on:
       action:
         description: What to do
         type: choice
-        options: [diagnose, deploy, admin-login, account]
+        options: [diagnose, deploy, admin-login, account, session-report]
         required: true
       commit:
         description: "deploy: commit on main to deploy (empty = this run's commit)"
@@ -36,6 +36,18 @@ on:
         description: "admin-login: the new password's argon2id hash (never the password)"
         required: false
         default: ''
+      report_pubkey:
+        description: 'session-report: base64 PEM public key the report is encrypted to'
+        required: false
+        default: ''
+      player:
+        description: 'session-report: player name to filter on (empty = every player)'
+        required: false
+        default: ''
+      hours:
+        description: 'session-report: how many hours back'
+        required: false
+        default: '36'
 
 permissions:
   contents: read
@@ -64,6 +76,9 @@ jobs:
           INPUT_COMMIT: ${{ inputs.commit }}
           INPUT_HASH: ${{ inputs.password_hash }}
           INPUT_EMAIL_SHA: ${{ inputs.email_sha256 }}
+          INPUT_PUBKEY: ${{ inputs.report_pubkey }}
+          INPUT_PLAYER: ${{ inputs.player }}
+          INPUT_HOURS: ${{ inputs.hours }}
         run: |
           set -euo pipefail
           if [ -z "$SSH_HOST" ] || [ -z "$SSH_USER" ] || [ -z "$SSH_KEY" ]; then
@@ -91,6 +106,10 @@ jobs:
             hash_b64="$(printf '%s' "$INPUT_HASH" | base64 -w0)"
           fi
           email_sha="$(printf '%s' "$INPUT_EMAIL_SHA" | tr -cd '0-9a-f')"
+          # Quoted into the remote command below: keep each to a safe charset.
+          pubkey="$(printf '%s' "$INPUT_PUBKEY" | tr -cd 'A-Za-z0-9+/=')"
+          player="$(printf '%s' "$INPUT_PLAYER" | tr -cd 'A-Za-z0-9 .-')"
+          hours="$(printf '%s' "${INPUT_HOURS:-36}" | tr -cd '0-9')"
           compose_sha="$(sha256sum infra/docker-compose.prod.yml | cut -d' ' -f1)"
 
           remote="$SSH_USER@$SSH_HOST"
@@ -100,7 +119,7 @@ jobs:
           scp "${opts[@]}" infra/scripts/production-ops.sh "$remote:$dir/"
           # shellcheck disable=SC2029 # these expand on the runner, by design
           ssh "${opts[@]}" "$remote" \
-            "OPS_ACTION='$ACTION' DEPLOY_SHA='$commit' HASH_B64='$hash_b64' EMAIL_SHA='$email_sha' REPO_COMPOSE_SHA='$compose_sha' CADDY_CONTAINER='$CADDY_CONTAINER' bash '$dir/production-ops.sh'; s=\$?; rm -rf '$dir'; exit \$s" \
+            "OPS_ACTION='$ACTION' DEPLOY_SHA='$commit' HASH_B64='$hash_b64' EMAIL_SHA='$email_sha' REPORT_PUBKEY_B64='$pubkey' REPORT_PLAYER='$player' REPORT_HOURS='$hours' REPO_COMPOSE_SHA='$compose_sha' CADDY_CONTAINER='$CADDY_CONTAINER' bash '$dir/production-ops.sh'; s=\$?; rm -rf '$dir'; exit \$s" \
             | tee ops.log
           {
             echo "### production ops: $ACTION"
