@@ -89,14 +89,30 @@ describe('trade lifecycle', () => {
     expect((await store.get('900001'))?.state).toBe('bought');
   });
 
-  it('a card never seen listed has no sale: closed straight from bought is ignored', async () => {
-    const { lifecycle, reported } = setup();
+  it("a listing never seen still sells: closed straight from bought on the card's own tradeId is its sale", async () => {
+    // Auto-sell listed the card, and no trade-pile load was read while it
+    // was up (EA answered the reloads with errors): the sale is the first
+    // the lifecycle sees of it. Such cards used to stay `bought` for good.
+    const { lifecycle, reported, store } = setup();
     await lifecycle.recordBuy(buy());
     await lifecycle.observePile([SOLD]);
-    expect(reported).toHaveLength(0);
+    expect(reported).toHaveLength(1);
+    expect(reported[0]).toMatchObject({ tradeId: '5001', sellPrice: 13_500, status: 'sold' });
+    expect(await store.get('900001')).toMatchObject({ state: 'sold', listTradeId: '7001', relists: 0 });
+    // Seen again (a duplicate load, or listed then sold as reported): once.
     await lifecycle.observePile([LISTED]);
     await lifecycle.observePile([SOLD]);
     expect(reported).toHaveLength(1);
+  });
+
+  it('expired straight from bought is followed too, and its relist sells', async () => {
+    const { lifecycle, reported, store } = setup();
+    await lifecycle.recordBuy(buy());
+    await lifecycle.observePile([pile({ tradeState: 'expired' })]);
+    expect(await store.get('900001')).toMatchObject({ state: 'expired', listTradeId: '7001' });
+    await lifecycle.observePile([pile({ tradeId: '7002', tradeState: 'closed', currentBid: 12_500 })]);
+    expect(reported).toHaveLength(1);
+    expect(await store.get('900001')).toMatchObject({ state: 'sold', sellPrice: 12_500, relists: 1 });
   });
 
   it('a relist never seen active still sells: any other closed tradeId of a listed card is its own later listing', async () => {

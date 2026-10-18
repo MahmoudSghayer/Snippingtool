@@ -35,9 +35,11 @@ import { AssistEngine, activeFilterHandles } from '../engine/assist.js';
 import { Governor, type GovernorState } from '../engine/governor.js';
 import { rankCandidates, type ScoredOpportunity } from '../engine/ranker.js';
 import { countObservedSearches, governedSearch } from '../engine/search.js';
+import { attemptErrorCode } from '../engine/types.js';
 import { handOffWasLate, readHandedOffNonce } from '../lib/act-auth.js';
 import { createBackgroundTimer } from '../lib/background-timer.js';
 import { riskLevelChangeEvent } from '../lib/bot-safety.js';
+import { createLogThrottle, droppedSuffix } from '../lib/log-throttle.js';
 import { logger } from '../lib/logger.js';
 import { PILE_MIN_GAP_MS, createPileRefresher } from '../lib/pile-refresh.js';
 import { singleFlight } from '../lib/single-flight.js';
@@ -54,6 +56,7 @@ import { currentCandidates } from './candidates.js';
 import { createDiagnosticsResponder } from './diagnostics.js';
 import { EngineLease, engineStateOf } from './engine-lease.js';
 import { applySettingsToEngine, watchLiveSettings } from './live-settings.js';
+import { createRecentSearchesSync } from './recent-searches.js';
 import { createSearchObserver } from './search-observer.js';
 import { createWatchdog } from './watchdog.js';
 
@@ -64,6 +67,7 @@ import type { Catalog } from '../model/catalog.js';
 import type { PriceSummary } from '../model/prices.js';
 import type {
   ActivityEvent,
+  AdapterEaError,
   BotBudgetState,
   BotDailyUsage,
   BotSettings,
@@ -86,6 +90,17 @@ const STATE_PERSIST_MS = 5000;
 const AUTOBUYER_TICK_MS = 8000;
 const WATCHDOG_MS = 15000;
 const WATCHDOG_STALE_MS = 60000;
+/** The watchdog's allowance in a hidden tab, where Chrome runs both worlds'
+ * timers about once a minute (content/watchdog.ts). */
+const WATCHDOG_HIDDEN_STALE_MS = 5 * 60_000;
+/** At most one log line (so one server error report, lib/errors.ts) per
+ * kind of EA error or shape change in this long: while EA rate-limits the
+ * account, the same error comes back on every search. */
+const ADAPTER_WARN_GAP_MS = 10 * 60_000;
+/** A failing probe this soon after the page loaded only means EA's web app
+ * has not built its service layer yet (it does after login); the adapter
+ * reports the real verdict once it passes, or after 10 minutes. */
+const PROBE_STARTUP_GRACE_MS = 2 * 60_000;
 /** How often a running Sniping Bot re-reads the entitlement (background's
  * cached `license.bootstrap`, refreshed by its heartbeat), so a plan that
  * loses the bot stops it mid-session. */
@@ -97,8 +112,6 @@ const LIVE_TICK_MS = 30000;
 /** How often the engine lease is renewed (background/engine-lease.ts's
  * `ENGINE_LEASE_RENEW_MS`; a lease lasts three minutes). */
 const LEASE_RENEW_MS = 20000;
-/** The Nova AI page's recent-searches log (`RecentSearch[]`, ui/bot-page.ts). */
-const RECENT_SEARCHES_KEY = 'sl.bot.recentSearches.v1';
 
 // ---- background messaging ---------------------------------------------------
 
@@ -236,7 +249,14 @@ async function main(): Promise<void> {
       },
       onCurrentSearch: (auctions) => {
         currentSearch = auctions;
-        if (engineReady) void rerank();
+        if (!engineReady) return;
+        // While the Sniping Bot runs it is the one engine buying (the
+        // autobuyer waits for it too): nothing is offered from a ranking,
+        // and no price lookups share the page with its searches and buys.
+        if (sniper?.isRunning()) {
+          rankedCandidates = [];
+          assist?.cancelPending();
+        } else void rerank();
       },
     }),
   );
@@ -244,9 +264,11 @@ async function main(): Promise<void> {
   // Every observed search response counts toward the governor's
   // buy/search ratio and actionsPerHour — the human searching in EA's own UI
   // is what keeps assist-mode buys allowed (engine/search.ts). A no-op until
-  // the bootstrap below has created a governor. The unsubscribe is kept
-  // for the page's teardown (`pagehide` below).
-  const stopCountingSearches = countObservedSearches(adapter, () => governor);
+  // the bootstrap below has created a governor, and while the Sniping Bot
+  // runs: its searches are its own governor's, and counting them here too
+  // would spend assist's hourly budget on them. The unsubscribe is kept for
+  // the page's teardown (`pagehide` below).
+  const stopCountingSearches = countObservedSearches(adapter, () => (sniper?.isRunning() ? null : governor));
 
   // The trader's own trade pile (defect C13): background's trade lifecycle
   // links each item to the buy it came from and reports its sale once
@@ -267,19 +289,55 @@ async function main(): Promise<void> {
   });
 
   let probeOk = true;
+  // Reported once per failure, not on every act call that re-runs the
+  // probe, and not while the web app is still starting: an adapter injected
+  // after the page began loading (a late userscript) can report its very
+  // first probe, from before EA built its service layer, to a content
+  // script that is already listening.
+  const bootedAt = Date.now();
+  let probePassedOnce = false;
+  let probeFailureReported: string | null = null;
   adapter.onProbe((status) => {
     probeOk = status.ok;
-    if (!status.ok) {
-      logger.error(`bundle probe failed: ${status.reason}`, 'adapter.probe');
-      void send('telemetry.enqueue', {
-        kind: 'activity',
-        items: [{ type: 'error', occurredAt: nowIso(), metadata: { code: 'ADAPTER_PROBE_FAILED', message: status.reason ?? 'unknown', context: 'adapter.probe' } }] satisfies ActivityEvent[],
-      });
+    if (status.ok) {
+      probePassedOnce = true;
+      probeFailureReported = null;
+      return;
     }
+    const reason = status.reason ?? 'unknown';
+    if (reason === probeFailureReported) return;
+    if (!probePassedOnce && Date.now() - bootedAt < PROBE_STARTUP_GRACE_MS) {
+      logger.info(`bundle probe not passing yet (EA's web app may still be starting): ${reason}`, 'adapter.probe');
+      return;
+    }
+    probeFailureReported = reason;
+    logger.error(`bundle probe failed: ${reason}`, 'adapter.probe');
+    void send('telemetry.enqueue', {
+      kind: 'activity',
+      items: [{ type: 'error', occurredAt: nowIso(), metadata: { code: 'ADAPTER_PROBE_FAILED', message: reason, context: 'adapter.probe' } }] satisfies ActivityEvent[],
+    });
   });
 
-  adapter.onShape((reason) => {
-    logger.warn(`market payload shape changed: ${reason}`, 'adapter.shape');
+  const throttleAdapterWarning = createLogThrottle(ADAPTER_WARN_GAP_MS);
+  adapter.onShape((reason, endpoint) => {
+    const dropped = throttleAdapterWarning(`shape:${endpoint}:${reason}`);
+    if (dropped === null) return;
+    // The trade pile only feeds the transfer list counts and the sale
+    // tracking: nothing stops for it.
+    if (endpoint === 'pile') logger.warn(`trade pile payload shape changed (nothing stops for it): ${reason.replace(/^trade pile: /, '')}${droppedSuffix(dropped)}`, 'adapter.shape');
+    else logger.warn(`market payload shape changed: ${reason}${droppedSuffix(dropped)}`, 'adapter.shape');
+  });
+
+  // EA's own errors, as the adapter filed them (main/adapter.ts): never a
+  // shape change. The Sniping Bot reacts to them itself (engine/sniper.ts).
+  adapter.onEaError((error) => {
+    const dropped = throttleAdapterWarning(`ea:${error.endpoint}:${error.category}`);
+    if (dropped === null) return;
+    const line = `EA answered HTTP ${error.status} to a ${EA_ENDPOINT_WORDS[error.endpoint]} (${error.category})${droppedSuffix(dropped)}`;
+    // A refusal (someone else's buy got there first, say) is everyday
+    // sniping, not a problem with the extension.
+    if (error.category === 'rejected') logger.info(line, 'adapter.ea');
+    else logger.warn(line, 'adapter.ea');
   });
 
   // engineHealthState()/engineHealthMessage() (a live status string for the
@@ -437,7 +495,9 @@ async function main(): Promise<void> {
       listedPrice: input.listedPrice,
       outcome: input.outcome,
       latencyMs: input.latencyMs,
-      errorCode: input.errorCode,
+      // Cut to what the schema takes: a longer EA error had background
+      // reject the whole item.
+      errorCode: input.errorCode == null ? null : attemptErrorCode(input.errorCode),
       occurredAt: nowIso(),
       deviceId: deviceIdCache ?? '00000000-0000-0000-0000-000000000000',
     };
@@ -693,6 +753,7 @@ async function main(): Promise<void> {
             onBuyable: adapter.onBuyable,
             onProbe: adapter.onProbe,
             onShape: adapter.onShape,
+            onEaError: adapter.onEaError,
           },
           sleep: timer.sleep,
           timingMode: timer.mode,
@@ -722,6 +783,7 @@ async function main(): Promise<void> {
           },
           onAttempt: recordAttempt,
           onTrade: recordTrade,
+          onRiskEvent: (event) => recordRiskEvents([event]),
         },
         botSettings,
       );
@@ -772,12 +834,17 @@ async function main(): Promise<void> {
       },
       resolveNames: async (resourceIds) => (await send<Record<string, string | null>>('cards.names', { resourceIds })) ?? {},
       getCatalog: () => send<Catalog | null>('catalog.get'),
-      // Extension storage (Tampermonkey's in the userscript build), which
-      // EA's page cannot read.
-      recentSearches: {
-        load: async () => (await browser.storage.local.get(RECENT_SEARCHES_KEY))[RECENT_SEARCHES_KEY],
-        save: (list) => browser.storage.local.set({ [RECENT_SEARCHES_KEY]: list }),
-      },
+      // The signed-in account's list, through background, so every browser
+      // shows the same one; a copy in extension storage (Tampermonkey's in
+      // the userscript build), which EA's page cannot read, for when the
+      // account cannot be reached (content/recent-searches.ts).
+      recentSearches: createRecentSearchesSync({
+        storage: {
+          get: async (key) => (await browser.storage.local.get(key))[key],
+          set: (key, value) => browser.storage.local.set({ [key]: value }),
+        },
+        send,
+      }),
       // Read from the trade-pile responses EA's page fetched (above), never
       // from a request of the extension's own.
       getTransferList: () => transferList.summary(),
@@ -836,6 +903,9 @@ async function main(): Promise<void> {
     const pulled = await send<{ active: boolean; reason?: string }>('license.killSwitchGet');
     if (pulled && pulled.active !== killSwitchActive) applyKillSwitch(pulled.active, pulled.reason);
     if (killSwitchActive) return; // nothing to rank or attempt while halted
+    // While the Sniping Bot runs nothing buys from a ranking (see
+    // `onCurrentSearch` above): no ranking, no price lookups.
+    if (sniper?.isRunning()) return;
     await rerank();
 
     // The Sniping Bot buys on its own; never let two engines buy at once —
@@ -891,13 +961,20 @@ async function main(): Promise<void> {
 
   // ---- watchdog: notice a MAIN-world adapter that has gone quiet ----------
   //
-  // Once per stall (content/watchdog.ts), not every 15 s while it lasts.
+  // The adapter's heartbeat keeps it fed while nothing else happens; a
+  // background tab's throttled timers, a few quiet checks or a recent
+  // warning do not set it off (content/watchdog.ts).
   const watchdog = createWatchdog({
     staleMs: WATCHDOG_STALE_MS,
-    warn: () => logger.warn('adapter has not reported a probe result recently — possible MAIN-world stall', 'watchdog'),
+    hiddenStaleMs: WATCHDOG_HIDDEN_STALE_MS,
+    checkMs: WATCHDOG_MS,
+    isHidden: () => document.visibilityState === 'hidden',
+    warn: (quietMs) =>
+      logger.warn(`adapter has not reported a probe result or heartbeat for ${Math.round(quietMs / 1000)} s — possible MAIN-world stall`, 'watchdog'),
     recovered: () => logger.info('adapter is reporting again', 'watchdog'),
   });
   adapter.onProbe(() => watchdog.seen());
+  adapter.onHeartbeat(() => watchdog.seen());
   setInterval(() => watchdog.check(), WATCHDOG_MS);
 
   // Keeps `deviceId` fresh for attempt/trade/risk-event reporting above.
@@ -906,6 +983,14 @@ async function main(): Promise<void> {
   const bootstrapForDevice = authStatus?.authenticated ? await send<BootstrapResponse>('license.bootstrap') : null;
   deviceIdCache = bootstrapForDevice?.deviceId ?? deviceIdCache;
 }
+
+/** What an EA error's request was for, in a log line. */
+const EA_ENDPOINT_WORDS: Record<AdapterEaError['endpoint'], string> = {
+  market: 'market search',
+  pile: 'transfer list request',
+  bid: 'buy',
+  other: 'request',
+};
 
 /** Shown on the Nova AI page when no act-channel nonce was handed off. */
 const NO_ACT_CHANNEL_REASON =

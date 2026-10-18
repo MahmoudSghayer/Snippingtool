@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  EA_ERROR_CATEGORIES,
+  EA_ERROR_ENDPOINTS,
   adapterActionResultMessageSchema,
   adapterActRequestMessageSchema,
   adapterCatalogMessageSchema,
   adapterMessageSchema,
   adapterProbeMessageSchema,
+  adapterShapeMessageSchema,
   backgroundMessageEnvelopeSchema,
+  eaErrorCategory,
   extBackgroundEngineStateSetPayloadSchema,
   extBackgroundGovernorSnapshotPushPayloadSchema,
   extContentKillSwitchMessageSchema,
@@ -246,6 +250,64 @@ describe('adapterProbeMessageSchema', () => {
       data: { ok: false, checkedAt: Date.now(), reason: 'services.Item missing' },
     });
     expect(result.success).toBe(true);
+  });
+});
+
+// EA's own errors used to reach content as "market payload shape changed"
+// and stop the Sniping Bot; they now have a message of their own.
+describe('EA errors on the adapter channel', () => {
+  const eaError = (data: Record<string, unknown>) =>
+    adapterMessageSchema.safeParse({ channel: 'ledger:v2', kind: 'ea_error', data });
+
+  it('accepts every category on every endpoint', () => {
+    for (const category of EA_ERROR_CATEGORIES) {
+      for (const endpoint of EA_ERROR_ENDPOINTS) {
+        expect(eaError({ status: 429, category, endpoint, seenAt: 1 }).success).toBe(true);
+      }
+    }
+  });
+
+  it('rejects an unknown category or endpoint, and a status that is not an HTTP status', () => {
+    expect(eaError({ status: 429, category: 'slow', endpoint: 'market', seenAt: 1 }).success).toBe(
+      false,
+    );
+    expect(
+      eaError({ status: 429, category: 'rate_limited', endpoint: 'watchlist', seenAt: 1 }).success,
+    ).toBe(false);
+    expect(
+      eaError({ status: 4290, category: 'rate_limited', endpoint: 'market', seenAt: 1 }).success,
+    ).toBe(false);
+    expect(
+      eaError({ status: 4.5, category: 'rate_limited', endpoint: 'market', seenAt: 1 }).success,
+    ).toBe(false);
+    expect(eaError({ status: 429, category: 'rate_limited', endpoint: 'market' }).success).toBe(
+      false,
+    );
+  });
+
+  it("files EA's statuses: session, captcha, rate limits (512 and 521 too), outages, refusals", () => {
+    expect(eaErrorCategory(401)).toBe('session_ended');
+    expect(eaErrorCategory(458)).toBe('verification');
+    for (const s of [429, 512, 521]) expect(eaErrorCategory(s)).toBe('rate_limited');
+    for (const s of [500, 502, 503, 599]) expect(eaErrorCategory(s)).toBe('server_error');
+    for (const s of [400, 403, 404, 461, 470, 478]) expect(eaErrorCategory(s)).toBe('rejected');
+    for (const s of [0, 200, 204, 304]) expect(eaErrorCategory(s)).toBe('other');
+  });
+
+  it('a shape change may say it was the trade pile; without, it is the market', () => {
+    const shape = (data: Record<string, unknown>) =>
+      adapterShapeMessageSchema.safeParse({ channel: 'ledger:v2', kind: 'shape', data });
+    const base = { seen: 1, parsed: 0, failed: 1, reason: 'x' };
+    expect(shape(base).success).toBe(true);
+    expect(shape({ ...base, endpoint: 'pile' }).success).toBe(true);
+    expect(shape({ ...base, endpoint: 'bid' }).success).toBe(false);
+  });
+
+  it('carries the heartbeat, with its time', () => {
+    const beat = (data: unknown) =>
+      adapterMessageSchema.safeParse({ channel: 'ledger:v2', kind: 'heartbeat', data });
+    expect(beat({ at: 1 }).success).toBe(true);
+    expect(beat({}).success).toBe(false);
   });
 });
 

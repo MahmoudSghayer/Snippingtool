@@ -31,6 +31,13 @@ function networkResponse(body: unknown, url: string): Response {
   return res;
 }
 
+/** The same, with an HTTP status and a raw body (`''`: an empty answer). */
+function networkAnswer(status: number, body: string, url: string): Response {
+  const res = new Response(body === '' ? null : body, { status });
+  (res as unknown as { __testUrl: string }).__testUrl = url;
+  return res;
+}
+
 function rawAuction(tradeId: number, buyNowPrice: number, card: { resourceId?: number; assetId?: number } = {}) {
   return { tradeId, buyNowPrice, startingBid: 150, currentBid: 0, offers: 0, expires: 3600, itemData: { resourceId: 42, assetId: 42, rating: 85, ...card } };
 }
@@ -442,11 +449,13 @@ describe('passive observation of the trade pile', () => {
     expect(posted.filter((m) => m.kind === 'tradepile')).toHaveLength(0);
   });
 
-  it('reports a shape change for a trade pile none of whose entries it can read', async () => {
+  it('reports a (trade-pile) shape change for a trade pile none of whose entries it can read', async () => {
     const url = EA + '/tradepile';
     nativeFetch.mockResolvedValueOnce(networkResponse({ auctionInfo: [{ something: 'else' }] }, url));
     await window.fetch(url);
     await vi.waitFor(() => expect(posted.filter((m) => m.kind === 'shape')).toHaveLength(1));
+    // Marked as the pile's, so no engine stops for it.
+    expect(posted.find((m) => m.kind === 'shape')!.data.endpoint).toBe('pile');
     expect(posted.filter((m) => m.kind === 'tradepile')).toHaveLength(0);
   });
 
@@ -490,5 +499,217 @@ describe('passive observation of the trade pile', () => {
     expect(names[0]).toBe('Erling Haaland');
     expect(names[1]).toHaveLength(80);
     expect(names[2]).toBeUndefined();
+  });
+});
+
+// Production: one EA error (an expired session, a rate limit, an outage)
+// was reported as "market payload shape changed", which stopped the
+// Sniping Bot with a misleading reason, and every trade-pile reload EA
+// answered with an error became a shape change too. An EA error is now an
+// `ea_error`, filed by kind; a shape change is only a successful answer
+// whose JSON really changed.
+describe('EA errors are EA errors, never shape changes', () => {
+  const EA = 'https://utas.mob.v4.prd.futc-ext.gcp.ea.com/ut/game/fc25';
+  const kinds = (kind: string) => posted.filter((m) => m.kind === kind);
+  const envelope = (code: number) => JSON.stringify({ code: String(code), reason: 'not today', message: null });
+
+  async function answer(path: string, status: number, body: string, init?: RequestInit): Promise<void> {
+    nativeFetch.mockResolvedValueOnce(networkAnswer(status, body, EA + path));
+    await window.fetch(EA + path, init);
+    await settle();
+  }
+
+  const statuses = [
+    [401, 'session_ended'],
+    [458, 'verification'],
+    [429, 'rate_limited'],
+    [512, 'rate_limited'],
+    [521, 'rate_limited'],
+    [500, 'server_error'],
+    [503, 'server_error'],
+    [403, 'rejected'],
+    [478, 'rejected'],
+  ] as const;
+  for (const [status, category] of statuses) {
+    it(`files a market answer with HTTP ${status} as ${category}`, async () => {
+      await answer('/transfermarket?num=21', status, envelope(status));
+      expect(kinds('ea_error').map((m) => m.data)).toEqual([expect.objectContaining({ status, category, endpoint: 'market' })]);
+      expect(kinds('shape')).toHaveLength(0);
+      expect(kinds('auctions')).toHaveLength(0);
+    });
+  }
+
+  it('never records listings from an error answer, whatever its body holds', async () => {
+    await answer('/transfermarket?num=21', 429, JSON.stringify({ auctionInfo: [rawAuction(6301, 100)] }));
+    expect(kinds('auctions')).toHaveLength(0);
+    deliver(await signedRequest({ action: 'buy', requestId: 'buy-from-error', tradeId: '6301', price: 100 }));
+    expect((await resultFor('buy-from-error')).data).toMatchObject({ ok: false, error: 'listing_unknown' });
+  });
+
+  it('files an empty answer as an EA error, not as an "empty body" shape change', async () => {
+    await answer('/transfermarket?num=21', 200, '');
+    expect(kinds('ea_error').map((m) => m.data)).toEqual([expect.objectContaining({ status: 200, category: 'other', endpoint: 'market' })]);
+    expect(kinds('shape')).toHaveLength(0);
+  });
+
+  it("reads EA's error envelope under a success status as the error it states", async () => {
+    await answer('/transfermarket?num=21', 200, envelope(521));
+    expect(kinds('ea_error').map((m) => m.data)).toEqual([expect.objectContaining({ status: 521, category: 'rate_limited', endpoint: 'market' })]);
+    expect(kinds('shape')).toHaveLength(0);
+  });
+
+  it('still reports a successful answer whose JSON really changed as a market shape change', async () => {
+    await answer('/transfermarket?num=21', 200, JSON.stringify({ results: [] }));
+    expect(kinds('shape').map((m) => m.data)).toEqual([expect.objectContaining({ reason: 'no auctionInfo array in response', endpoint: 'market' })]);
+    expect(kinds('ea_error')).toHaveLength(0);
+  });
+
+  it("files a buy's error answer as the buy's", async () => {
+    await answer('/trade/6201/bid', 429, '', { method: 'PUT' });
+    expect(kinds('ea_error').map((m) => m.data)).toEqual([expect.objectContaining({ status: 429, category: 'rate_limited', endpoint: 'bid' })]);
+    expect(kinds('shape')).toHaveLength(0);
+  });
+
+  it('logs a run of the same EA error once in the diagnostics log, not once per answer', async () => {
+    for (let i = 0; i < 5; i++) await answer('/transfermarket?num=21', 529, '');
+    expect(kinds('ea_error')).toHaveLength(5);
+    deliver(await signedRequest({ action: 'diagnostics', requestId: 'diag-ea-errors' }));
+    const log = ((await resultFor('diag-ea-errors')).data.diagnostics as { log: string[] }).log;
+    expect(log.filter((line) => line.includes('answered HTTP 529 (server_error)'))).toHaveLength(1);
+  });
+});
+
+// Production: "trade pile: no auctionInfo / itemData list in response" 494
+// times in one night, after which the bot's bought cards were never seen
+// listed or sold. Every answer EA might give the trade pile now ends up as
+// items, an EA error, or (a successful answer with no list) a trade-pile
+// shape change that names what came instead and stops nothing.
+describe('trade pile answers, whatever EA sends', () => {
+  const EA = 'https://utas.mob.v4.prd.futc-ext.gcp.ea.com/ut/game/fc25';
+  const kinds = (kind: string) => posted.filter((m) => m.kind === kind);
+  function entry(itemId: number, tradeState: string | null) {
+    return {
+      tradeId: tradeState ? 7000 + itemId : 0,
+      buyNowPrice: 14_000,
+      startingBid: 13_000,
+      currentBid: tradeState === 'closed' ? 14_000 : 0,
+      offers: 0,
+      expires: 0,
+      tradeState,
+      itemData: { id: itemId, resourceId: 42, assetId: 42, rating: 88 },
+    };
+  }
+  async function answer(path: string, status: number, body: string, init?: RequestInit): Promise<void> {
+    nativeFetch.mockResolvedValueOnce(networkAnswer(status, body, EA + path));
+    await window.fetch(EA + path, init);
+    await settle();
+  }
+
+  it('an error answer (an expired session) is an EA error: no shape change, no items', async () => {
+    await answer('/tradepile', 401, JSON.stringify({ code: '401', reason: 'expired session', message: null }));
+    expect(kinds('ea_error').map((m) => m.data)).toEqual([expect.objectContaining({ status: 401, category: 'session_ended', endpoint: 'pile' })]);
+    expect(kinds('shape')).toHaveLength(0);
+    expect(kinds('tradepile')).toHaveLength(0);
+  });
+
+  it('a rate-limited reload is an EA error too', async () => {
+    await answer('/tradepile', 512, '');
+    expect(kinds('ea_error').map((m) => m.data)).toEqual([expect.objectContaining({ status: 512, category: 'rate_limited', endpoint: 'pile' })]);
+    expect(kinds('shape')).toHaveLength(0);
+  });
+
+  it('so is an empty answer', async () => {
+    await answer('/tradepile', 200, '');
+    expect(kinds('ea_error').map((m) => m.data)).toEqual([expect.objectContaining({ status: 200, category: 'other', endpoint: 'pile' })]);
+    expect(kinds('shape')).toHaveLength(0);
+  });
+
+  it('an empty pile is the whole (empty) transfer list', async () => {
+    await answer('/tradepile', 200, JSON.stringify({ auctionInfo: [], credits: 1_000 }));
+    expect(kinds('tradepile').map((m) => m.data)).toEqual([expect.objectContaining({ items: [], full: true })]);
+  });
+
+  const listed = () => [entry(21, 'active'), entry(22, 'closed'), entry(23, 'expired')];
+  const envelopes: [string, unknown][] = [
+    ['auctionInfo', { auctionInfo: listed() }],
+    ['data.auctionInfo', { data: { auctionInfo: listed() } }],
+    ['items', { items: listed() }],
+    ['data.items', { success: true, data: { items: listed() } }],
+    ['bare list', listed()],
+  ];
+  for (const [name, body] of envelopes) {
+    it(`reads listed, sold and expired items from a ${name} envelope, as the whole list`, async () => {
+      await answer('/tradepile', 200, JSON.stringify(body));
+      const [message] = kinds('tradepile');
+      expect(message!.data.full).toBe(true);
+      expect((message!.data.items as { itemId: string; tradeState: string }[]).map((i) => [i.itemId, i.tradeState])).toEqual([
+        ['21', 'active'],
+        ['22', 'closed'],
+        ['23', 'expired'],
+      ]);
+      expect(kinds('shape')).toHaveLength(0);
+    });
+  }
+
+  it("reads an item move's itemData, but never as the whole list", async () => {
+    await answer('/tradepile', 200, JSON.stringify({ itemData: [entry(24, null)] }));
+    expect(kinds('tradepile').map((m) => m.data)).toEqual([expect.objectContaining({ full: false })]);
+  });
+
+  it('a successful answer with no list at all is a trade-pile shape change naming its keys, and posts no items', async () => {
+    await answer('/tradepile', 200, JSON.stringify({ credits: 5, bidTokens: {} }));
+    const shapes = kinds('shape');
+    expect(shapes).toHaveLength(1);
+    expect(shapes[0]!.data).toMatchObject({ endpoint: 'pile' });
+    expect(String(shapes[0]!.data.reason)).toContain('keys: credits, bidTokens');
+    expect(kinds('tradepile')).toHaveLength(0);
+    expect(kinds('ea_error')).toHaveLength(0);
+  });
+
+  it('a relist or item move answering with nothing is only logged', async () => {
+    await answer('/auctionhouse/relist', 200, '', { method: 'PUT' });
+    await answer('/item', 200, '', { method: 'PUT' });
+    expect(kinds('ea_error')).toHaveLength(0);
+    expect(kinds('shape')).toHaveLength(0);
+    expect(kinds('tradepile')).toHaveLength(0);
+  });
+});
+
+// The adapter remembers every listing it saw (up to 5,000) for the buy
+// price check. Past the cap it used to start over, wiping the current
+// search's listings with the rest: their buys came back `listing_unknown`.
+describe('remembered listings: past the cap the least recently seen go, never all of them', () => {
+  const EA = 'https://utas.mob.v4.prd.futc-ext.gcp.ea.com/ut/game/fc25';
+  const range = (from: number, count: number) => Array.from({ length: count }, (_, i) => from + i);
+
+  async function seePassively(tradeIds: number[], price: number): Promise<void> {
+    const url = EA + '/transfermarket?num=21';
+    nativeFetch.mockResolvedValueOnce(networkResponse({ auctionInfo: tradeIds.map((id) => rawAuction(id, price)) }, url));
+    const before = posted.filter((m) => m.kind === 'auctions').length;
+    await window.fetch(url);
+    await vi.waitFor(() => expect(posted.filter((m) => m.kind === 'auctions')).toHaveLength(before + 1));
+  }
+
+  async function buy(requestId: string, tradeId: number, price: number): Promise<Record<string, unknown>> {
+    deliver(await signedRequest({ action: 'buy', requestId, tradeId: String(tradeId), price }));
+    return (await resultFor(requestId)).data;
+  }
+
+  it('drops only the oldest, so the newer listings stay buyable', async () => {
+    await seePassively([800_000], 1_000);
+    await seePassively(range(800_001, 5_000), 1_000);
+    expect(await buy('lru-oldest', 800_000, 1_000)).toMatchObject({ ok: false, error: 'listing_unknown' });
+    // The first of the newer ones: a reset at the cap lost it.
+    expect(await buy('lru-first-new', 800_001, 1_000)).toMatchObject({ ok: true });
+    expect(await buy('lru-last-new', 805_000, 1_000)).toMatchObject({ ok: true });
+  });
+
+  it('counts a listing seen again as recent', async () => {
+    await seePassively([900_000], 2_000);
+    await seePassively(range(900_001, 4_999), 2_000);
+    await seePassively([900_000], 2_000); // a search showing it again
+    await seePassively(range(910_000, 10), 2_000);
+    expect(await buy('lru-refreshed', 900_000, 2_000)).toMatchObject({ ok: true });
+    expect(await buy('lru-evicted', 900_001, 2_000)).toMatchObject({ ok: false, error: 'listing_unknown' });
   });
 });

@@ -135,6 +135,10 @@ describe('dist/ledger contents', () => {
       'price.futbin',
       'futbin.com',
       'list_not_bought',
+      // The Nova AI page's Recent searches log, synced with the account.
+      'recentSearches.get',
+      'recentSearches.set',
+      'extension/recent-searches',
     ];
     const files = readdirSync(outDir, { recursive: true, withFileTypes: true }).filter((e) => e.isFile());
     for (const file of files) {

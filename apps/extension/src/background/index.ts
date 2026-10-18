@@ -33,6 +33,7 @@ import {
   extBackgroundSummaryPayloadSchema,
   extBackgroundTelemetryEnqueuePayloadSchema,
   mfaVerifyRequestSchema,
+  putRecentSearchesRequestSchema,
   updateUserSettingsRequestSchema,
 } from '@sl/shared';
 import browser from 'webextension-polyfill';
@@ -74,6 +75,7 @@ import {
   handleLifecycleTodayPnl,
   retryUnreportedSales,
 } from './lifecycle.js';
+import { handleRecentSearchesGet, handleRecentSearchesSet } from './recent-searches.js';
 import {
   handleDevicesList,
   handleFiltersList,
@@ -182,6 +184,8 @@ if (AUTOMATION_ENABLED) {
     'catalog.get': () => handleCatalogGet(),
     'catalog.save': (payload) => handleCatalogSave(payload as never),
     'price.futbin': (payload) => handleFutbinPrice(payload as never),
+    'recentSearches.get': () => handleRecentSearchesGet(),
+    'recentSearches.set': (payload) => handleRecentSearchesSet(payload as never),
   } satisfies Record<string, Handler>);
 }
 
@@ -231,6 +235,7 @@ if (AUTOMATION_ENABLED) {
     'cards.names': extBackgroundCardNamesPayloadSchema,
     'catalog.save': extBackgroundCatalogSavePayloadSchema,
     'price.futbin': extBackgroundFutbinPricePayloadSchema,
+    'recentSearches.set': putRecentSearchesRequestSchema,
   });
 }
 

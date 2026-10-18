@@ -9,16 +9,21 @@
  * shows (main/adapter.ts reads it passively):
  *
  *   bought -> listed(price) -> sold(price, soldAt)
- *                          \-> expired -> listed again (a relist) -> ...
+ *         \                \-> expired -> listed again (a relist) -> ...
+ *          \-> sold (its listing never seen: see below)
  *   listed/expired -> gone (missing from a full trade pile: sold unseen,
  *                          quick-sold, or moved to the club)
  *
- * Only a card it saw listed can have a sale: a `closed` item counts only
- * once the card was seen listed at least once, and never on the tradeId
- * the card was bought on (any other tradeId of the card is one of its own
- * listings, seen or not). The bought auction itself shows as
+ * A `closed` item is a sale on any tradeId but the one the card was bought
+ * on: an itemId is one card, so any other tradeId of it is one of its own
+ * listings, seen listed or not. The bought auction itself shows as
  * `closed` at the price paid (watch list, trade status), and reading that
- * as a sale would report the purchase as a zero-profit sale.
+ * as a sale would report the purchase as a zero-profit sale. A sale
+ * straight from `bought` is the common case for Nova AI's own auto-sell:
+ * it lists the card itself, and if no trade-pile load was read while the
+ * listing was up (EA answering the reloads with errors, say), the first
+ * the lifecycle sees of it is the sale. Those cards used to stay `bought`
+ * for good.
  *
  * A sale is reported through the same path as the buy (`/trades/batch`,
  * via telemetry) with the buy's own `tradeId`, `status: 'sold'`,
@@ -320,12 +325,11 @@ export class TradeLifecycle {
         if (record.state === 'expired' && record.listTradeId === item.tradeId) return null;
         return { ...record, state: 'expired', listTradeId: item.tradeId, updatedAt: at };
       case 'closed': {
-        // Only a card seen listed at least once can have sold. An itemId is
-        // one card, so any closed tradeId other than the one it was bought
-        // on is that card's own listing, even one never seen active (a
-        // "Relist all" whose response carries no auctions, sold before the
-        // pile was next opened): a relist.
-        if (record.state !== 'listed' && record.state !== 'expired' && record.state !== 'gone') return null;
+        // An itemId is one card, so any closed tradeId other than the one it
+        // was bought on (ruled out above) is that card's own listing, even
+        // one never seen active: auto-sell's listing, sold before a
+        // trade-pile load was read, or a "Relist all" whose response carries
+        // no auctions.
         const price = salePrice(item);
         if (!inCoinRange(price)) return null;
         const relisted = record.listTradeId !== null && record.listTradeId !== item.tradeId;

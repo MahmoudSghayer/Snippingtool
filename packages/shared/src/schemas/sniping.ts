@@ -17,6 +17,10 @@ export const SNIPE_OUTCOMES = [
 ] as const;
 export type SnipeOutcome = (typeof SNIPE_OUTCOMES)[number];
 
+/** The longest `errorCode` an attempt may carry. A client cuts a longer
+ * error to this before reporting it, or the whole item is rejected. */
+export const SNIPE_ERROR_CODE_MAX = 80;
+
 /** `POST /sniping` — one row per attempt, reported by `engine/assist.ts` or
  * `engine/autobuyer.ts` after `adapter.act()` returns (or after the governor
  * blocks the attempt). Never includes listing details beyond the ids/prices
@@ -35,7 +39,7 @@ export const snipingAttemptSchema = z
     listedPrice: coinPriceSchema.nullable(),
     outcome: z.enum(SNIPE_OUTCOMES),
     latencyMs: z.number().int().min(0).nullable(),
-    errorCode: z.string().min(1).max(80).nullable(),
+    errorCode: z.string().min(1).max(SNIPE_ERROR_CODE_MAX).nullable(),
     occurredAt: ingestTimestampSchema,
     deviceId: z.string().guid(),
   })

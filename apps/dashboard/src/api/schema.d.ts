@@ -4769,6 +4769,138 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/extension/recent-searches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: {
+                                at: number;
+                                name: string;
+                                form: {
+                                    minOvr: number;
+                                    maxOvr: number;
+                                    player: {
+                                        id: number;
+                                        name: string;
+                                        rating: number | null;
+                                    } | null;
+                                    playerQuery: string;
+                                    quality: string | null;
+                                    rarity: number | null;
+                                    position: string | null;
+                                    chem: number | null;
+                                    nation: number | null;
+                                    league: number | null;
+                                    club: number | null;
+                                    minBuy: number | null;
+                                    maxBuy: number | null;
+                                };
+                            }[];
+                            updatedAt: string | null;
+                        };
+                    };
+                };
+            };
+        };
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        items: {
+                            at: number;
+                            name: string;
+                            form: {
+                                minOvr: number;
+                                maxOvr: number;
+                                player: {
+                                    id: number;
+                                    name: string;
+                                    rating: number | null;
+                                } | null;
+                                playerQuery: string;
+                                quality: string | null;
+                                rarity: number | null;
+                                position: string | null;
+                                chem: number | null;
+                                nation: number | null;
+                                league: number | null;
+                                club: number | null;
+                                minBuy: number | null;
+                                maxBuy: number | null;
+                            };
+                        }[];
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: {
+                                at: number;
+                                name: string;
+                                form: {
+                                    minOvr: number;
+                                    maxOvr: number;
+                                    player: {
+                                        id: number;
+                                        name: string;
+                                        rating: number | null;
+                                    } | null;
+                                    playerQuery: string;
+                                    quality: string | null;
+                                    rarity: number | null;
+                                    position: string | null;
+                                    chem: number | null;
+                                    nation: number | null;
+                                    league: number | null;
+                                    club: number | null;
+                                    minBuy: number | null;
+                                    maxBuy: number | null;
+                                };
+                            }[];
+                            updatedAt: string | null;
+                        };
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/extension/version": {
         parameters: {
             query?: never;

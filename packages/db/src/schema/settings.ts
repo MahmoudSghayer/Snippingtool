@@ -1,4 +1,5 @@
-// Matches migrations/0015_settings.sql, 0016_notifications.sql.
+// Matches migrations/0015_settings.sql, 0016_notifications.sql,
+// 0037_user_recent_searches.sql.
 
 import { isNull, relations } from 'drizzle-orm';
 import { index, integer, jsonb, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
@@ -30,6 +31,28 @@ export const userSettings = pgTable('user_settings', {
 
 export const userSettingsRelations = relations(userSettings, ({ one }) => ({
   user: one(users, { fields: [userSettings.userId], references: [users.id] }),
+}));
+
+// ---------------------------------------------------------------------------
+
+/** The Nova AI page's Recent searches log, replaced whole by
+ * `PUT /extension/recent-searches` (items: @sl/shared `RecentSearchDto[]`). */
+export const userRecentSearches = pgTable('user_recent_searches', {
+  id: idPk(),
+  userId: uuid('user_id')
+    .notNull()
+    .unique()
+    .references(() => users.id, { onDelete: 'cascade' }),
+
+  items: jsonb('items').notNull().default([]).$type<unknown[]>(),
+
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+  rowVersion: rowVersion(),
+});
+
+export const userRecentSearchesRelations = relations(userRecentSearches, ({ one }) => ({
+  user: one(users, { fields: [userRecentSearches.userId], references: [users.id] }),
 }));
 
 // ---------------------------------------------------------------------------

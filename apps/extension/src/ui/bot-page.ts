@@ -35,11 +35,13 @@ import {
   BOT_LIMITS,
   BOT_RISK_LABELS,
   MIN_SALE_PRICE,
+  RECENT_SEARCHES_MAX,
   RISK_ACKNOWLEDGMENT,
   SEARCH_DELAY_PRESETS,
   botRiskLevel,
   botSettingsSchema,
   computeTradeProfit,
+  effectiveSearchPace,
   roundToPriceStep,
   stepPrice,
   withRecommendedLimits,
@@ -93,8 +95,9 @@ export interface BotPageDeps {
   /** EA's player/club/league/nation lists, if the web app has loaded them
    * since the extension was installed (model/catalog.ts). */
   getCatalog: () => Promise<Catalog | null>;
-  /** Where the recent-searches log is kept between page loads. Without it
-   * the log lasts until the page reloads. */
+  /** Where the recent-searches log is kept between page loads (the
+   * account's copy, content/recent-searches.ts). Read again each time the
+   * page opens. Without it the log lasts until the page reloads. */
   recentSearches?: {
     load: () => Promise<unknown>;
     save: (list: RecentSearch[]) => Promise<void>;
@@ -210,8 +213,9 @@ export function saleProfit(sell: number, buy: number | null): { tax: number; net
 // ---- recent searches -------------------------------------------------------
 // Every search the user starts the bot on, newest first, so an earlier one
 // is a click away. A log, not saved filters: nothing to name or manage.
+// The account keeps it (@sl/shared `recentSearchSchema` is this shape).
 
-export const MAX_RECENT_SEARCHES = 10;
+export const MAX_RECENT_SEARCHES = RECENT_SEARCHES_MAX;
 
 export interface RecentSearch {
   /** When the bot was started on it. */
@@ -312,6 +316,18 @@ function rangeText(r: { min: number; max: number }): string {
   return r.min === r.max ? String(r.min) : `${r.min}-${r.max}`;
 }
 
+/** The pace the bot really searches at (`effectiveSearchPace`): the
+ * delay's, or the hourly limit's when that is lower, and then how soon the
+ * limit pauses it. */
+function paceText(s: BotSettings): string {
+  const p = effectiveSearchPace(s);
+  if (!p.capped) return `About ${fmt(p.perHour)} searches an hour at this delay (your limit is ${fmt(p.capPerHour)}).`;
+  return (
+    `This delay would make about ${fmt(p.delayPerHour)} searches an hour, over your limit of ${fmt(p.capPerHour)}: ` +
+    `Nova AI pauses after about ${fmt(Math.max(1, p.minutesToCap ?? 0))} minutes of searching each hour, so it searches about ${fmt(p.perHour)} times an hour.`
+  );
+}
+
 /** "3", "2-4" or "2 - 4" -> a range; null when unparseable. */
 function parseRange(text: string, integer: boolean): { min: number; max: number } | null {
   const m = text.trim().match(/^(\d+(?:\.\d+)?)\s*(?:-\s*(\d+(?:\.\d+)?))?$/);
@@ -335,6 +351,7 @@ const PHASE_LABEL: Record<SniperPhase, string> = {
   break: 'On a break',
   rest: 'Resting',
   blocked: 'Paused by your limits',
+  backoff: 'EA asked to slow down',
   stopped: 'Stopped',
 };
 
@@ -611,6 +628,7 @@ const CSS = `
   .start:disabled { background: #4f504c; color: #787873; }
   .run-status { margin-top: 8px; min-height: 18px; color: var(--ea-muted); font-size: 13px; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .run-status.bad { color: var(--ea-warning); }
+  .run-status.wrap { white-space: normal; }
   .run-status.go { cursor: pointer; text-decoration: underline; }
 
   /* right column: the session */
@@ -806,7 +824,10 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   // ---- recent searches ----------------------------------------------------
 
   let recent: RecentSearch[] = [];
-  let recentLoaded = false;
+  /** Bumped by each load, so only the latest one is applied. */
+  let recentLoads = 0;
+  /** Searches started while a load is in flight, kept on top of what it reads. */
+  let startedWhileLoading: RecentSearch[] | null = null;
 
   function renderRecent(): void {
     const wasOpen = root.querySelector('#recent details')?.hasAttribute('open') ?? true;
@@ -824,28 +845,41 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     $('recent').innerHTML = section('Recent searches', body, '', wasOpen);
   }
 
-  /** Picks up the log kept from earlier page loads, once. */
+  /** Picks up the log kept from earlier page loads, each time the page
+   * opens: it is the account's, so another browser (or signing in since)
+   * may have changed it. What is read replaces the list, apart from
+   * searches started while it loaded. A load that fails keeps the list. */
   function loadRecent(): void {
-    if (recentLoaded || !deps.recentSearches) return;
-    recentLoaded = true;
-    void deps.recentSearches
-      .load()
-      .catch(() => null)
-      .then((raw) => {
+    const store = deps.recentSearches;
+    if (!store) return;
+    const load = ++recentLoads;
+    const meanwhile = (startedWhileLoading ??= []);
+    void store.load().then(
+      (raw) => {
+        if (load !== recentLoads) return;
+        startedWhileLoading = null;
         // Oldest first, so each search keeps its latest run, and one
         // started while this loaded stays on top.
         let merged: RecentSearch[] = [];
-        for (const r of [...parseRecentSearches(raw), ...recent].sort((a, b) => a.at - b.at))
+        for (const r of [...parseRecentSearches(raw), ...meanwhile].sort((a, b) => a.at - b.at))
           merged = addRecentSearch(merged, r);
         recent = merged;
         renderRecent();
-      });
+        // Those were saved over a list this had not read yet: save again.
+        if (meanwhile.length > 0) void store.save(recent).catch(() => undefined);
+      },
+      () => {
+        if (load === recentLoads) startedWhileLoading = null;
+      },
+    );
   }
 
   const copyForm = (f: TargetForm): TargetForm => ({ ...f, player: f.player ? { ...f.player } : null });
 
   function rememberSearch(name: string): void {
-    recent = addRecentSearch(recent, { at: Date.now(), name, form: copyForm(form) });
+    const entry: RecentSearch = { at: Date.now(), name, form: copyForm(form) };
+    recent = addRecentSearch(recent, entry);
+    startedWhileLoading?.push(entry);
     renderRecent();
     void deps.recentSearches?.save(recent).catch(() => undefined);
   }
@@ -955,7 +989,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
             const level = presetLevel(p);
             return `<button type="button" class="preset" data-delay="${p.key}" data-min="${p.min}" data-max="${p.max}" aria-pressed="${delayPreset === p.key}">
             <b>${p.min}-${p.max}</b><small class="tag-${level}">${esc(BOT_RISK_LABELS[level].toUpperCase())}</small></button>`;
-          }).join('')}</div>`,
+          }).join('')}</div>` +
+          `<div class="hint" id="pace" aria-live="polite"></div>`,
       ) +
       section(
         'Short breaks',
@@ -1021,7 +1056,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         ) +
           field(
             'Buys per hour',
-            'Most players bought in any hour',
+            'Most players bought in any hour. A missed buy does not count',
             stepper('s-bph', String(s.safety.maxBuysPerHour), 'per hr', 'Buys per hour'),
           ) +
           field(
@@ -1031,7 +1066,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
           ) +
           field(
             'Coins per hour',
-            'Most coins spent in any hour',
+            'Most coins spent in any hour. A missed buy does not count',
             stepper('s-flow', String(s.safety.maxCoinFlowPerHour), 'coins', 'Coins per hour', true),
           ) +
           field(
@@ -1633,6 +1668,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     $('riskbar').className = `riskbar ${risk.level}`;
     $('risk-proj').textContent = `About ${fmt(risk.projectedSearchesPerDay)} searches and ${fmt(risk.projectedBuysPerDay)} buys a day at most.`;
     $('risk-reasons').innerHTML = risk.reasons.map((r) => `<li>${esc(r)}</li>`).join('');
+    const pace = root.getElementById('pace');
+    if (pace) pace.textContent = paceText(shown());
     const ack = $('ackbox');
     const needed = ackNeeded();
     if (ack.hidden === needed) {
@@ -1857,6 +1894,10 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     if (!sniper) {
       text = deps.getUnavailableReason() ?? 'Nova AI is not available right now.';
       bad = true;
+    } else if (running && sniper.state.notice) {
+      // An hourly limit holding buying back: which, and when it frees.
+      text = sniper.state.notice;
+      bad = true;
     } else if (running) {
       const startedAt = sniper.getStats().startedAt;
       text = `Running for ${clock(startedAt ? Date.now() - startedAt : 0)}`;
@@ -1879,7 +1920,9 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     start.disabled = !sniper || (!running && ackNeeded());
     start.title = start.disabled ? text : '';
     status.textContent = text;
+    status.title = text;
     status.classList.toggle('bad', bad);
+    status.classList.toggle('wrap', running && !!sniper?.state.notice);
     // Start waits on the risk confirmation, which is on the Settings tab:
     // the line saying so takes the user there.
     status.classList.toggle('go', !running && !!sniper && ackNeeded());
@@ -2103,13 +2146,15 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     if (e.kind === 'info')
       return `<div class="log"><div class="main">${esc(e.message)}<div class="sub">${when}</div></div></div>`;
     const who = `${e.rating ?? ''} ${esc(nameOf(e.assetId ?? e.resourceId))}`.trim();
+    // How fast the bot went for it, from the listing arriving to the buy.
+    const reacted = e.reactionMs != null ? `, reacted in ${fmt(e.reactionMs)} ms` : '';
     if (e.kind === 'bought') {
       const pill =
         e.profit == null
           ? ''
           : `<span class="pill ${e.profit < 0 ? 'neg' : ''}">${e.profit >= 0 ? '+' : ''}${fmt(e.profit)}${COIN}</span>`;
       return `<div class="log bought"><div class="main"><b>${who}</b> bought for <span class="amt">${fmt(e.price ?? 0)}${COIN}</span>
-        <div class="sub">${when}${e.sellPrice != null ? `, sells for <span class="amt">${fmt(e.sellPrice)}${COIN}</span>` : ''}</div></div>${pill}</div>`;
+        <div class="sub">${when}${e.sellPrice != null ? `, sells for <span class="amt">${fmt(e.sellPrice)}${COIN}</span>` : ''}${reacted}</div></div>${pill}</div>`;
     }
     if (e.kind === 'listed') {
       return `<div class="log listed"><div class="main"><b>${who}</b> listed for <span class="amt">${fmt(e.price ?? 0)}${COIN}</span>
@@ -2117,7 +2162,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     }
     if (e.kind === 'failed') {
       return `<div class="log failed"><div class="main">${e.resourceId != null ? `<b>${who}</b> missed at <span class="amt">${fmt(e.price ?? 0)}${COIN}</span>` : esc(e.message)}
-        <div class="sub">${when}${e.resourceId != null ? `, ${esc(e.message)}` : ''}</div></div></div>`;
+        <div class="sub">${when}${e.resourceId != null ? `, ${esc(e.message)}` : ''}${reacted}</div></div></div>`;
     }
     return `<div class="log blocked"><div class="main">${e.resourceId != null ? `<b>${who}</b> ` : ''}${esc(e.message)}<div class="sub">${when}</div></div></div>`;
   }
@@ -2172,7 +2217,10 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     phase.textContent =
       state?.phase === 'stopped' && state.stopDetail
         ? `Stopped: ${state.stopDetail}`
-        : PHASE_LABEL[state?.phase ?? 'idle'];
+        : running && state?.notice
+          ? 'Buying paused'
+          : PHASE_LABEL[state?.phase ?? 'idle'];
+    phase.title = running ? (state?.notice ?? '') : '';
     phase.className = `chip ${running ? 'running' : state?.phase === 'stopped' ? 'stopped' : ''}`;
     renderRunbar();
     $<HTMLButtonElement>('reset').disabled = !sniper || running;

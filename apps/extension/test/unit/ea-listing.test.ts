@@ -8,7 +8,7 @@ import { MAX_COIN_PRICE as SHARED_MAX_COIN_PRICE } from '@sl/shared';
 import { describe, expect, it, vi } from 'vitest';
 
 import { MAX_COIN_PRICE, normaliseListing, normaliseListings, normalisePileItem, normalisePileItems } from '../../src/main/ea-listing.js';
-import { ShapeError, TimeoutUnknownError, describeError, extractListingArray, settle } from '../../src/main/ea-response.js';
+import { ShapeError, TimeoutUnknownError, describeError, errorEnvelopeStatus, extractListingArray, isOkStatus, settle } from '../../src/main/ea-response.js';
 import { itemEntity, observable, utasAuction } from '../fixtures/ea-shapes.js';
 
 describe('normaliseListing', () => {
@@ -268,5 +268,26 @@ describe('normalisePileItem', () => {
     expect(normalisePileItems([pileEntry({}), {}], onSkipped)).toHaveLength(1);
     expect(onSkipped).toHaveBeenCalledWith(1);
     expect(normalisePileItems([])).toEqual([]);
+  });
+});
+
+// An EA error is never read as a payload (main/adapter.ts): by its HTTP
+// status, or by EA's `{ code, reason }` envelope when it comes with a
+// success status.
+describe('isOkStatus / errorEnvelopeStatus', () => {
+  it('only 2xx is a success', () => {
+    for (const s of [200, 201, 204, 299]) expect(isOkStatus(s)).toBe(true);
+    for (const s of [0, 199, 304, 401, 429, 512]) expect(isOkStatus(s)).toBe(false);
+  });
+
+  it("reads the status EA's error envelope states, as a number or a numeric string", () => {
+    expect(errorEnvelopeStatus({ code: '401', reason: 'expired session', message: null })).toBe(401);
+    expect(errorEnvelopeStatus({ code: 512, reason: 'too many requests' })).toBe(512);
+  });
+
+  it('is null for anything that is no error envelope', () => {
+    for (const body of [null, 'x', [], {}, { auctionInfo: [] }, { code: 200 }, { code: 'abc' }, { code: '4010' }, { code: 99 }]) {
+      expect(errorEnvelopeStatus(body)).toBeNull();
+    }
   });
 });

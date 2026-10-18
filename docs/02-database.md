@@ -72,6 +72,7 @@ erDiagram
     users ||--o{ profits : "rolls up to"
     users ||--o{ saved_filters : "saves"
     users ||--o| user_settings : "has"
+    users ||--o| user_recent_searches : "has"
     users ||--o{ notifications : "receives"
     users ||--o{ payments : "pays"
     users ||--o{ flags : "may be flagged"
@@ -644,11 +645,12 @@ history, synced from the extension so they survive reinstalls. Both
 
 ### 6.7 Settings & notifications
 
-| Table              | Key columns                                                                                                                             | Notes                                                                                                                             |
-| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `user_settings`    | `user_id` **CASCADE**, unique; `settings jsonb`, `version`                                                                              | current settings blob, validated by the shared Zod schema at the API boundary (not the DB); server version wins on sync conflicts |
-| `settings_history` | `user_id` **CASCADE**; `settings jsonb`, `version` (unique with `user_id`), `changed_by` **SET NULL**                                   | append-only snapshot on every change                                                                                              |
-| `notifications`    | `user_id` **CASCADE**; `type`, `title`, `body`, `data jsonb`, `read_at`, `delivered_via` (`notification_channel`: in_app/email/push/ws) |                                                                                                                                   |
+| Table                  | Key columns                                                                                                                             | Notes                                                                                                                                                                                                               |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `user_settings`        | `user_id` **CASCADE**, unique; `settings jsonb`, `version`                                                                              | current settings blob, validated by the shared Zod schema at the API boundary (not the DB); server version wins on sync conflicts                                                                                   |
+| `settings_history`     | `user_id` **CASCADE**; `settings jsonb`, `version` (unique with `user_id`), `changed_by` **SET NULL**                                   | append-only snapshot on every change                                                                                                                                                                                |
+| `user_recent_searches` | `user_id` **CASCADE**, unique; `items jsonb` (array, at most 10)                                                                        | the Nova AI page's Recent searches log, replaced whole by `PUT /extension/recent-searches`; entries validated by the shared Zod schema at the API boundary. No `deleted_at`: one row per user, like `user_settings` |
+| `notifications`        | `user_id` **CASCADE**; `type`, `title`, `body`, `data jsonb`, `read_at`, `delivered_via` (`notification_channel`: in_app/email/push/ws) |                                                                                                                                                                                                                     |
 
 ---
 

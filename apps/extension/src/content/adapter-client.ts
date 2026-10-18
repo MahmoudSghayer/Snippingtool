@@ -16,7 +16,7 @@ import { ADAPTER_CHANNEL, adapterMessageSchema } from '@sl/shared';
 import { ACT_ERROR, canonicalActMessage, createActSigner } from '../lib/act-auth.js';
 
 import type { Catalog } from '../model/catalog.js';
-import type { AdapterDiagnostics, FilterCriteria, TradePileItem, TrimmedAuction } from '@sl/shared';
+import type { AdapterDiagnostics, AdapterEaError, FilterCriteria, TradePileItem, TrimmedAuction } from '@sl/shared';
 
 const ACTION_TIMEOUT_MS = 15_000;
 /** How long a `timeout_unknown` buy waits for EA's late answer before it is
@@ -72,7 +72,15 @@ export interface AdapterClient {
    * authenticated channel as every act call (docs/06-extension.md §4). */
   diagnostics(): Promise<ActionOutcome>;
   onProbe(cb: (status: ProbeStatus) => void): () => void;
-  onShape(cb: (reason: string) => void): () => void;
+  /** A successful EA answer whose JSON changed shape. `endpoint`: a market
+   * search, or the trader's own trade pile (which no engine stops for). */
+  onShape(cb: (reason: string, endpoint: 'market' | 'pile') => void): () => void;
+  /** An EA error the adapter saw on a market, trade-pile or buy response
+   * (an expired session, a captcha, a rate limit...): never a shape change.
+   * Unsigned, like `onShape`. */
+  onEaError(cb: (error: AdapterEaError) => void): () => void;
+  /** The adapter's periodic sign of life, for the watchdog. */
+  onHeartbeat(cb: () => void): () => void;
   onAuctions(cb: (auctions: TrimmedAuction[]) => void): () => void;
   /** Already-reported listings the adapter can now buy. Not a search. */
   onBuyable(cb: (tradeIds: string[]) => void): () => void;
@@ -136,7 +144,9 @@ export function createAdapterClient(target: Window, nonce: string | null, option
   const earlyLate = new Map<string, ActionOutcome>();
   const buyableListeners = new Set<(tradeIds: string[]) => void>();
   const probeListeners = new Set<(status: ProbeStatus) => void>();
-  const shapeListeners = new Set<(reason: string) => void>();
+  const shapeListeners = new Set<(reason: string, endpoint: 'market' | 'pile') => void>();
+  const eaErrorListeners = new Set<(error: AdapterEaError) => void>();
+  const heartbeatListeners = new Set<() => void>();
   const auctionsListeners = new Set<(auctions: TrimmedAuction[]) => void>();
   const catalogListeners = new Set<(catalog: Catalog) => void>();
   const pileListeners = new Set<(items: TradePileItem[], full: boolean) => void>();
@@ -158,7 +168,15 @@ export function createAdapterClient(target: Window, nonce: string | null, option
       return;
     }
     if (msg.kind === 'shape') {
-      for (const cb of shapeListeners) cb(msg.data.reason);
+      for (const cb of shapeListeners) cb(msg.data.reason, msg.data.endpoint ?? 'market');
+      return;
+    }
+    if (msg.kind === 'ea_error') {
+      for (const cb of eaErrorListeners) cb(msg.data);
+      return;
+    }
+    if (msg.kind === 'heartbeat') {
+      for (const cb of heartbeatListeners) cb();
       return;
     }
     if (msg.kind === 'auctions') {
@@ -336,6 +354,14 @@ export function createAdapterClient(target: Window, nonce: string | null, option
       shapeListeners.add(cb);
       return () => shapeListeners.delete(cb);
     },
+    onEaError: (cb) => {
+      eaErrorListeners.add(cb);
+      return () => eaErrorListeners.delete(cb);
+    },
+    onHeartbeat: (cb) => {
+      heartbeatListeners.add(cb);
+      return () => heartbeatListeners.delete(cb);
+    },
     onAuctions: (cb) => {
       auctionsListeners.add(cb);
       return () => auctionsListeners.delete(cb);
@@ -365,6 +391,8 @@ export function createAdapterClient(target: Window, nonce: string | null, option
       buyableListeners.clear();
       probeListeners.clear();
       shapeListeners.clear();
+      eaErrorListeners.clear();
+      heartbeatListeners.clear();
       auctionsListeners.clear();
       catalogListeners.clear();
       pileListeners.clear();

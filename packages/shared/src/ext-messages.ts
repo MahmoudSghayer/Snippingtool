@@ -1,6 +1,11 @@
 import { z } from 'zod';
 
-import { ADAPTER_CHANNEL, isEaAssetUrl } from './adapter-channel.js';
+import {
+  ADAPTER_CHANNEL,
+  EA_ERROR_CATEGORIES,
+  EA_ERROR_ENDPOINTS,
+  isEaAssetUrl,
+} from './adapter-channel.js';
 import { activityEventSchema } from './schemas/activity.js';
 import { emailSchema, passwordSchema } from './schemas/auth.js';
 import { botDailyUsageSchema, botSettingsSchema } from './schemas/bot.js';
@@ -25,7 +30,16 @@ import type { AutomationBackgroundMessageType } from './automation-messages.js';
 // and the `act` surface (search/buy/readResult) alongside passive observation.
 // Re-exported from `./adapter-channel.js` (zod-free — see that file) so
 // every existing `import { ADAPTER_CHANNEL } from '@sl/shared'` keeps working.
-export { ADAPTER_CHANNEL, EA_ASSET_DOMAINS, isEaAssetUrl } from './adapter-channel.js';
+export {
+  ADAPTER_CHANNEL,
+  EA_ASSET_DOMAINS,
+  EA_ERROR_CATEGORIES,
+  EA_ERROR_ENDPOINTS,
+  eaErrorCategory,
+  isEaAssetUrl,
+  type EaErrorCategory,
+  type EaErrorEndpoint,
+} from './adapter-channel.js';
 
 export const trimmedAuctionSchema = z.object({
   tradeId: z.string(),
@@ -85,6 +99,8 @@ export const adapterProbeMessageSchema = z.object({
   }),
 });
 
+/** A successful (2xx) EA answer whose JSON no longer looks the way the
+ * adapter expects. Never an EA error: those are `ea_error` messages. */
 export const adapterShapeMessageSchema = z.object({
   channel: z.literal(ADAPTER_CHANNEL),
   kind: z.literal('shape'),
@@ -93,7 +109,39 @@ export const adapterShapeMessageSchema = z.object({
     parsed: z.number(),
     failed: z.number(),
     reason: z.string(),
+    /** Which response changed: a market search (absent means market, as
+     * older adapters only reported those) or the trader's own trade pile,
+     * which is only read for the transfer list counts and sale tracking
+     * and so never stops an engine. */
+    endpoint: z.enum(['market', 'pile']).optional(),
   }),
+});
+
+/** An EA error the adapter saw on a response the page itself received
+ * (`EA_ERROR_CATEGORIES` in ./adapter-channel.ts has what each category
+ * means) — not a changed payload shape, which is what these used to be
+ * reported as.
+ * Unsigned, like `shape`: a forged one can at worst stop the Sniping Bot
+ * with a misleading reason, or make it wait before its next search. */
+export const adapterEaErrorMessageSchema = z.object({
+  channel: z.literal(ADAPTER_CHANNEL),
+  kind: z.literal('ea_error'),
+  data: z.object({
+    status: z.number().int().min(0).max(999),
+    category: z.enum(EA_ERROR_CATEGORIES),
+    endpoint: z.enum(EA_ERROR_ENDPOINTS),
+    seenAt: z.number(),
+  }),
+});
+export type AdapterEaError = z.infer<typeof adapterEaErrorMessageSchema>['data'];
+
+/** The adapter is alive: sent every few seconds whatever the page does, so
+ * content's watchdog (content/watchdog.ts) can tell a quiet page from an
+ * adapter that stopped running. Carries nothing else. */
+export const adapterHeartbeatMessageSchema = z.object({
+  channel: z.literal(ADAPTER_CHANNEL),
+  kind: z.literal('heartbeat'),
+  data: z.object({ at: z.number() }),
 });
 
 export const adapterAuctionsMessageSchema = z.object({
@@ -425,6 +473,8 @@ export const adapterMessageSchema = z.discriminatedUnion('kind', [
   adapterReadyMessageSchema,
   adapterProbeMessageSchema,
   adapterShapeMessageSchema,
+  adapterEaErrorMessageSchema,
+  adapterHeartbeatMessageSchema,
   adapterAuctionsMessageSchema,
   adapterListingsBuyableMessageSchema,
   adapterTradePileMessageSchema,

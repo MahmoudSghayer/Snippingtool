@@ -11,6 +11,7 @@ export * from './ingest-bounds.js';
 export * from './market.js';
 export * from './moderation.js';
 export * from './pagination.js';
+export * from './recent-searches.js';
 export * from './risk.js';
 export * from './settings.js';
 export * from './sniping.js';

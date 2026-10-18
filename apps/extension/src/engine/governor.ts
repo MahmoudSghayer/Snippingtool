@@ -29,7 +29,10 @@
  *                            pass `allow({kind:'search'})` (engine/search.ts's
  *                            `governedSearch`), and ones the human runs in
  *                            EA's own UI — which the extension only observes —
- *                            are counted by `recordObservedSearch()`.
+ *                            are counted by `recordObservedSearch()`. A caller
+ *                            that keeps rolling one-hour counts of its own
+ *                            (the Sniping Bot) hands them in as `ratioCounts`
+ *                            instead of the session's.
  *   - maxCoinFlowPerHour   — coins spent on `buy` actions, sliding one-hour
  *                            window (added to `GovernorSettings` alongside
  *                            the other three — see packages/shared/src/
@@ -143,6 +146,13 @@ export const OBSERVED_SEARCH_DEDUPE_MS = 1_500;
 /** The floor/ceiling a governor clamps every threshold into. */
 export type GovernorBounds = Record<keyof GovernorSettings, { min: number; max: number }>;
 
+/** Searches and buys in the last hour, as a caller counts them on its own
+ * sliding windows (`ratioCounts`). */
+export interface RatioCounts {
+  searches: number;
+  buys: number;
+}
+
 function clampSetting(key: keyof GovernorSettings, value: number, bounds: GovernorBounds): number {
   // A non-finite value (a corrupt cache) has no meaningful clamp — fall
   // back to the shipped default rather than letting NaN disable a check
@@ -200,15 +210,32 @@ export class Governor {
    * `GovernorSettings`: it is a budget, not a threshold, and the Sniping Bot's
    * governor has its own price cap (`thresholds.maxBuyPrice`). */
   private maxCoinsPerBuy: number | null = null;
+  /** The caller's rolling counts for the buy:search ratio, or null for the
+   * session's own (`searchCount` / `buyCount`). */
+  private readonly ratioCounts: (() => RatioCounts) | null;
 
+  /**
+   * `ratioCounts`: rolling one-hour counts of searches and of buys that
+   * bought, kept by the caller (the Sniping Bot's own windows, which it
+   * saves and reloads). With them the ratio rolls with the hour rather than
+   * banking a session's history, and a cold start counts as at least
+   * ceil(1 / ratio) searches, so the first buy is not refused for want of
+   * searches nobody has had time to run yet: one buy, then the ratio as set.
+   */
   constructor(
     settings: GovernorSettings,
-    opts: { now?: () => number; state?: GovernorState; bounds?: GovernorBounds } = {},
+    opts: {
+      now?: () => number;
+      state?: GovernorState;
+      bounds?: GovernorBounds;
+      ratioCounts?: () => RatioCounts;
+    } = {},
   ) {
     this.bounds = opts.bounds ?? GOVERNOR_ABSOLUTE_LIMITS;
     this.settings = clampGovernorSettings(settings, this.bounds);
     this.now = opts.now ?? Date.now;
     this.state = opts.state ?? freshState(this.now());
+    this.ratioCounts = opts.ratioCounts ?? null;
   }
 
   /** `bounds` changes the clamp too; omitted, the current bounds stay. */
@@ -344,8 +371,7 @@ export class Governor {
         return { allowed: false, reason: 'coin_flow', detail: 'above your max coins per snipe', events };
       }
 
-      const projectedBuys = this.state.buyCount + 1;
-      const ratio = projectedBuys / Math.max(this.state.searchCount, 1);
+      const ratio = this.buyRatio(1);
       if (ratio > this.settings.buyToSearchRatio) {
         events.push({ kind: 'buy_search_ratio', value: ratio, threshold: this.settings.buyToSearchRatio });
         return { allowed: false, reason: 'buy_search_ratio', detail: 'too many buys relative to searches', events };
@@ -391,6 +417,65 @@ export class Governor {
       this.state.searchCount = Math.max(0, this.state.searchCount - 1);
       return;
     }
+    this.takeBackBuy(charge);
+  }
+
+  /** Take back the spend of an allowed buy that reached EA and bought
+   * nothing (someone else's buy landed first, or EA refused it): its coins
+   * and its place in the buy count, so a lost race never uses up the
+   * coin-flow budget or the buy:search ratio. The action itself stays in
+   * `actionsPerHour` — EA saw the request, and that window is the ban-risk
+   * backstop. Only for an answer known not to have bought (a timeout stays
+   * charged); once per decision, and never after `refund()`. */
+  releaseSpend(decision: GovernorDecision): void {
+    const charge = decision.charge;
+    if (!decision.allowed || charge?.kind !== 'buy' || this.refunded.has(decision)) return;
+    this.refunded.add(decision);
+    this.takeBackBuy(charge);
+  }
+
+  /** buys / searches with `extraBuys` more buys: the session's counts, or
+   * the caller's rolling ones with the cold-start floor (`ratioCounts`). */
+  private buyRatio(extraBuys: number): number {
+    if (!this.ratioCounts) return (this.state.buyCount + extraBuys) / Math.max(this.state.searchCount, 1);
+    const { searches, buys } = this.ratioCounts();
+    return (buys + extraBuys) / Math.max(searches, Math.ceil(1 / this.settings.buyToSearchRatio), 1);
+  }
+
+  /** Whether the buy:search ratio would let one more buy through now. */
+  ratioAllowsBuy(): boolean {
+    return this.buyRatio(1) <= this.settings.buyToSearchRatio;
+  }
+
+  /** When a buy of `coins` next fits the coin-flow window: `now` if it fits
+   * already, else once enough of the last hour's spend has aged out. Null
+   * when it never can: it costs more than the whole hourly budget. */
+  coinFlowFreesAt(coins: number, now: number = this.now()): number | null {
+    this.prune(now);
+    const limit = this.settings.maxCoinFlowPerHour;
+    if (coins > limit) return null;
+    let flow = this.state.coinFlow.reduce((sum, c) => sum + c.coins, 0);
+    if (flow + coins <= limit) return now;
+    for (const c of [...this.state.coinFlow].sort((x, y) => x.at - y.at)) {
+      flow -= c.coins;
+      if (flow + coins <= limit) return c.at + ONE_HOUR_MS;
+    }
+    return now;
+  }
+
+  /** When another action fits `actionsPerHour` and any hard-stop cooldown
+   * is over: `now` if both already hold. */
+  actionsFreeAt(now: number = this.now()): number {
+    this.prune(now);
+    const times = [...this.state.actionTimestamps].sort((x, y) => x - y);
+    // One more action fits once the count is under the limit again: when
+    // the action `over` places from the oldest leaves the window.
+    const over = times.length - this.settings.actionsPerHour;
+    const windowFree = over >= 0 ? times[over]! + ONE_HOUR_MS : now;
+    return Math.max(now, windowFree, this.state.cooldownUntil);
+  }
+
+  private takeBackBuy(charge: NonNullable<GovernorDecision['charge']>): void {
     this.state.buyCount = Math.max(0, this.state.buyCount - 1);
     if (charge.coins) {
       this.state.sessionCoinsSpent = Math.max(0, (this.state.sessionCoinsSpent ?? 0) - charge.coins);
@@ -415,7 +500,8 @@ export class Governor {
     const pendingReset = this.state.sessionExpired === true && now >= this.state.cooldownUntil;
     const sessionElapsedMinutes = pendingReset ? 0 : (now - this.state.sessionStartedAt) / 60_000;
     const coinFlowLastHour = this.state.coinFlow.reduce((sum, c) => sum + c.coins, 0);
-    const ratio = pendingReset ? 0 : this.state.buyCount / Math.max(this.state.searchCount, 1);
+    // Rolling counts are the hour's, whatever the session did.
+    const ratio = !this.ratioCounts && pendingReset ? 0 : this.buyRatio(0);
     return {
       actionsLastHour: this.state.actionTimestamps.length,
       actionsPerHourLimit: this.settings.actionsPerHour,

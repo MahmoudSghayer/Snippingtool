@@ -198,6 +198,22 @@ export function assertSucceeded(response: unknown, what: string, requireSuccess 
   return r;
 }
 
+/** Whether an HTTP status is a success. */
+export function isOkStatus(status: number): boolean {
+  return status >= 200 && status <= 299;
+}
+
+/** The status an EA error envelope states in its body (`{ code, reason }`,
+ * `code` a number or a numeric string), or null when the body is no such
+ * envelope. Only 4xx/5xx codes count: anything else is not an error. */
+export function errorEnvelopeStatus(body: unknown): number | null {
+  const r = asObject(body);
+  if (!r || !('code' in r)) return null;
+  const raw = r.code;
+  const code = typeof raw === 'number' ? raw : typeof raw === 'string' && /^\d{3}$/.test(raw) ? Number(raw) : NaN;
+  return code >= 400 && code <= 599 ? code : null;
+}
+
 /** The list of entries in a search response, wherever the envelope keeps
  * it: `auctionInfo` (UTAS JSON), `items`, `data.items` (the observable
  * shape), `data.auctionInfo`. Throws — never returns `[]` — when there is

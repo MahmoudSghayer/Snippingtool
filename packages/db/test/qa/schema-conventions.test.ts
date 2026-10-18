@@ -97,6 +97,10 @@ const EXCEPTIONS: Record<string, { missing: Column[]; reason: string }> = {
     reason:
       'one row per user, cascades with the user rather than being soft-deleted independently (§6.7)',
   },
+  user_recent_searches: {
+    missing: ['deleted_at'],
+    reason: 'one row per user, replaced whole on every save and cascades with the user (§6.7)',
+  },
   settings_history: {
     missing: ['updated_at', 'deleted_at', 'row_version'],
     reason: 'append-only snapshot on every settings change (§6.7)',

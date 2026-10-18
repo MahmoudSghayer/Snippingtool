@@ -23,7 +23,12 @@ import {
   type payments,
   type paymentHistory,
 } from './billing.js';
-import { type userSettings, type settingsHistory, type notifications } from './settings.js';
+import {
+  type userSettings,
+  type settingsHistory,
+  type notifications,
+  type userRecentSearches,
+} from './settings.js';
 import { type plans, type subscriptions, type licenses } from './subscriptions.js';
 import {
   type auditLogs,
@@ -99,6 +104,8 @@ export type UserSettings = InferSelectModel<typeof userSettings>;
 export type NewUserSettings = InferInsertModel<typeof userSettings>;
 export type SettingsHistoryEntry = InferSelectModel<typeof settingsHistory>;
 export type NewSettingsHistoryEntry = InferInsertModel<typeof settingsHistory>;
+export type UserRecentSearches = InferSelectModel<typeof userRecentSearches>;
+export type NewUserRecentSearches = InferInsertModel<typeof userRecentSearches>;
 export type Notification = InferSelectModel<typeof notifications>;
 export type NewNotification = InferInsertModel<typeof notifications>;
 

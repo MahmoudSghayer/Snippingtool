@@ -65,8 +65,9 @@ export class Autobuyer {
     this.unsubscribeProbe = deps.adapter.onProbe((status) => {
       if (!status.ok) this.stop('probe_failure', status.reason ?? 'bundle probe failed');
     });
-    this.unsubscribeShape = deps.adapter.onShape((reason) => {
-      this.stop('shape_mismatch', reason);
+    this.unsubscribeShape = deps.adapter.onShape((reason, endpoint) => {
+      // A trade-pile change says nothing about the market it buys on.
+      if (endpoint !== 'pile') this.stop('shape_mismatch', reason);
     });
   }
 
