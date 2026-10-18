@@ -11,6 +11,9 @@ name: Production ops
 #                build, migrate, restart, health check)
 #   admin-login  set the (single) admin account's password, unlock it and
 #                clear its 2FA
+#   trader-report a trader's whole Nova AI picture (profit per player, the
+#                market by hour and day in Israel time, pace, risk signals,
+#                settings), encrypted to report_pubkey like session-report
 #   admin-panels what the admin dashboard's Overview/Activity/System pages
 #                are drawn from (row counts, latest timestamps, versions) and
 #                the API's failed /api/v1/admin/ requests; aggregates only,
@@ -26,7 +29,7 @@ on:
       action:
         description: What to do
         type: choice
-        options: [diagnose, deploy, admin-login, account, session-report, ea-probe, admin-panels]
+        options: [diagnose, deploy, admin-login, account, session-report, trader-report, ea-probe, admin-panels]
         required: true
       commit:
         description: "deploy: commit on main to deploy (empty = this run's commit)"
@@ -41,7 +44,7 @@ on:
         required: false
         default: ''
       report_pubkey:
-        description: 'session-report: base64 PEM public key the report is encrypted to'
+        description: 'session-report / trader-report: base64 PEM public key the report is encrypted to'
         required: false
         default: ''
       player:
@@ -49,7 +52,7 @@ on:
         required: false
         default: ''
       hours:
-        description: 'session-report: how many hours back'
+        description: 'session-report / trader-report: how many hours back'
         required: false
         default: '36'
 
