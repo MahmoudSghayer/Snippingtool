@@ -81,6 +81,9 @@ interface Opts {
   credits?: () => number | null;
   /** No Bid mode calls at all (an adapter built without them). */
   noBidding?: boolean;
+  /** EA's answer to a Clear expired. Default: the finished auctions it did
+   * not win go off the watch list. */
+  clearResult?: () => ActionOutcome | undefined;
   /** Stops the bot at the wait after which this is true. */
   stopWhen?: (h: Harness) => boolean;
   budgetStore?: { value: BotBudgetState | null };
@@ -100,6 +103,8 @@ interface Harness {
   moves: string[];
   lists: [string, number, number][];
   reads: number;
+  /** When each Clear expired went out. */
+  clears: number[];
   attempts: AttemptInput[];
   trades: TradeInput[];
   ea: Map<string, EaAuction>;
@@ -154,6 +159,7 @@ function setup(opts: Opts = {}): Harness {
     moves: [],
     lists: [],
     reads: 0,
+    clears: [],
     attempts: [],
     trades: [],
     ea,
@@ -230,6 +236,19 @@ function setup(opts: Opts = {}): Harness {
       h.moves.push(tradeId);
       ea.delete(tradeId);
       return { ok: true, signed: true, latencyMs: 5 };
+    };
+    adapter.clearExpired = async () => {
+      h.clears.push(clock.t);
+      const replaced = opts.clearResult?.();
+      if (replaced) return replaced;
+      let cleared = 0;
+      for (const [id, e] of ea) {
+        if (e.tradeState === 'expired' || (e.tradeState === 'closed' && e.bidState !== 'highest')) {
+          ea.delete(id);
+          cleared++;
+        }
+      }
+      return { ok: true, signed: true, latencyMs: 5, cleared };
     };
   }
 
@@ -682,6 +701,89 @@ describe('Bid mode — guards the bids it holds first', () => {
     expect(waits.find((w) => w.phase === 'rest')!.t).toBeGreaterThanOrEqual(Math.min(lastEnd, START + 280 * SEC));
   });
 
+});
+
+describe('Bid mode — keeps the watch list clear', () => {
+  // Live: "Your EA watch list is full (50 cards): no new bids until there is
+  // room", with the trader clearing expired items by hand.
+  const finished = (id: string, tradeState: 'closed' | 'expired'): EaAuction => ({
+    a: auction(id, 0),
+    bidState: tradeState === 'closed' ? 'outbid' : 'none',
+    tradeState,
+    currentBid: 15_000,
+  });
+  const running = (id: string): EaAuction => ({ a: auction(id, 3_000), bidState: 'none', tradeState: 'active', currentBid: 0 });
+
+  it('clears expired and lost items when the session starts, never a won one', async () => {
+    const h = setup({ results: () => [] });
+    h.ea.set('lost', finished('lost', 'closed'));
+    h.ea.set('old', finished('old', 'expired'));
+    h.ea.set('won', { ...finished('won', 'closed'), bidState: 'highest' });
+    h.sniper.start();
+    await h.done();
+    // Right after the first watch list read (its quick gap), before any search.
+    expect(h.clears).toEqual([START + 4 * SEC]);
+    expect(h.searchTimes.every((t) => t > h.clears[0]!)).toBe(true);
+    expect([...h.ea.keys()]).toEqual(['won']);
+    expect(h.log()).toContain('Cleared 2 expired items from your watch list (Transfer Targets)');
+  });
+
+  it('keeps clearing every few minutes while it runs', async () => {
+    const h = setup({
+      bidding: { windowMinutes: 60, maxActiveBids: 1 },
+      results: () => [auction('a', 600)],
+      beforeRead: (_n, ea, now) => {
+        if (now >= START + MIN && !ea.has('x1') && h.clears.length === 0) ea.set('x1', finished('x1', 'closed'));
+        if (now >= START + 2 * MIN && h.clears.length === 1 && !ea.has('x2')) ea.set('x2', finished('x2', 'expired'));
+      },
+      stopWhen: (x) => x.clock.t > START + 8 * MIN,
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.clears).toHaveLength(2);
+    expect(h.clears[0]!).toBeGreaterThanOrEqual(START + MIN);
+    // The next one waits its five minutes.
+    expect(h.clears[1]! - h.clears[0]!).toBeGreaterThanOrEqual(5 * MIN);
+    expect(h.ea.has('x1')).toBe(false);
+    expect(h.ea.has('x2')).toBe(false);
+  });
+
+  it('clears at once when the watch list is nearly full', async () => {
+    let filled = false;
+    const h = setup({
+      bidding: { windowMinutes: 60, maxActiveBids: 1 },
+      results: () => [auction('a', 600)],
+      beforeRead: (_n, ea, now) => {
+        if (now < START + MIN || filled) return;
+        filled = true;
+        for (let i = 0; i < 40; i++) ea.set(`r${i}`, running(`r${i}`));
+        ea.set('late', finished('late', 'expired'));
+      },
+      stopWhen: (x) => x.clock.t > START + 3 * MIN,
+    });
+    h.ea.set('old', finished('old', 'expired'));
+    h.sniper.start();
+    await h.done();
+    // At the start, then as soon as the list neared 50, well within five minutes.
+    expect(h.clears).toHaveLength(2);
+    expect(h.clears[1]! - h.clears[0]!).toBeLessThan(2 * MIN);
+    expect(h.ea.has('late')).toBe(false);
+  });
+
+  it('says once when the page cannot clear, and keeps bidding', async () => {
+    const h = setup({
+      results: () => [auction('a', 180)],
+      clearResult: () => ({ ok: false, signed: true, latencyMs: 5, error: 'window.services.Item.untarget is not a function' }),
+    });
+    h.ea.set('old', finished('old', 'expired'));
+    h.sniper.start();
+    await h.done();
+    expect(h.clears).toHaveLength(1);
+    expect(h.log().filter((m) => m.startsWith('Could not clear the expired items'))).toEqual([
+      'Could not clear the expired items from your watch list: window.services.Item.untarget is not a function',
+    ]);
+    expect(h.bids.map(([id]) => id)).toEqual(['a']);
+  });
 });
 
 describe('Bid mode — coins its bids hold', () => {

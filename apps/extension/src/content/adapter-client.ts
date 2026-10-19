@@ -36,6 +36,9 @@ export interface ActionOutcome {
   watched?: WatchedAuction[];
   /** Only for a successful `unsold()`: the unsold cards on the transfer list. */
   unsold?: TradePileItem[];
+  /** Only for a successful `clearExpired()`: how many finished auctions went
+   * off the watch list. */
+  cleared?: number;
   /** Only for a buy that came back `timeout_unknown`: settles with EA's
    * late answer if the adapter sends one (signed, like every result), or
    * `ok: false` after a few minutes without one. */
@@ -80,6 +83,10 @@ export interface AdapterClient {
   /** Automation builds (Bid mode): move an auction the adapter won to the
    * transfer list. */
   move(tradeId: string): Promise<ActionOutcome>;
+  /** Automation builds (Bid mode): take the finished auctions the last watch
+   * list read saw (expired, or lost) off the watch list, like Transfer
+   * Targets' "Clear expired". Never a won or running one. */
+  clearExpired(): Promise<ActionOutcome>;
   /** Automation builds: have the web app reload the transfer list. The
    * list itself arrives through `onTradePile`, like any load of it. */
   refreshPile(): Promise<ActionOutcome>;
@@ -139,7 +146,21 @@ export function pageWindow(): Window {
   return typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
 }
 
-type ActAction = 'search' | 'buy' | 'readResult' | 'diagnostics' | 'list' | 'pile' | 'bid' | 'watchlist' | 'move' | 'clearSold' | 'relistAll' | 'unsold' | 'relist';
+type ActAction =
+  | 'search'
+  | 'buy'
+  | 'readResult'
+  | 'diagnostics'
+  | 'list'
+  | 'pile'
+  | 'bid'
+  | 'watchlist'
+  | 'move'
+  | 'clearSold'
+  | 'relistAll'
+  | 'unsold'
+  | 'relist'
+  | 'clearExpired';
 
 interface Pending {
   action: ActAction;
@@ -279,6 +300,7 @@ export function createAdapterClient(target: Window, nonce: string | null, option
           diagnostics: data.diagnostics,
           watched: data.watched,
           unsold: data.unsold,
+          cleared: data.cleared,
           signed: true,
           latencyMs: data.completedAt - data.requestedAt,
         };
@@ -383,6 +405,7 @@ export function createAdapterClient(target: Window, nonce: string | null, option
       }),
     watchlist: () => call({ action: 'watchlist' }),
     move: (tradeId) => call({ action: 'move', tradeId }),
+    clearExpired: () => call({ action: 'clearExpired' }),
     refreshPile: () => call({ action: 'pile' }),
     clearSold: () => call({ action: 'clearSold' }),
     relistAll: () => call({ action: 'relistAll' }),

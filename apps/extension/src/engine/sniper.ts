@@ -641,6 +641,12 @@ const GUARD_MS = 60_000;
  * lead is answered within seconds, not a full search delay per bid. */
 const QUICK_GAP_SHARE = 0.4;
 const QUICK_GAP_MIN_MS = 2_000;
+/** Bid mode keeps the watch list clear of finished auctions it did not
+ * win (expired, or lost to another bid), as Transfer Targets' "Clear
+ * expired" does: when a session starts, every CLEAR_EVERY_MS while it runs,
+ * and at once when the list is within CLEAR_NEAR_FULL of EA's 50. */
+const CLEAR_EVERY_MS = 5 * 60_000;
+const CLEAR_NEAR_FULL = 10;
 /** Failed watch list reads in a row before Bid mode gives up. */
 const MAX_WATCH_FAILURES_IN_A_ROW = 3;
 /** New bids Bid mode places on one search's results: one, so bids go out
@@ -667,7 +673,7 @@ export interface SniperDeps {
   /** `bid`, `watchlist` and `move` are Bid mode's: without the first two it
    * refuses to start in Bid mode (`bid_unavailable`). */
   adapter: Pick<AdapterClient, 'search' | 'buy' | 'list' | 'onAuctions' | 'onBuyable' | 'onProbe' | 'onShape'> &
-    Partial<Pick<AdapterClient, 'onEaError' | 'bid' | 'watchlist' | 'move'>>;
+    Partial<Pick<AdapterClient, 'onEaError' | 'bid' | 'watchlist' | 'move' | 'clearExpired'>>;
   getFilters: () => SniperFilter[];
   /** The coin balance EA's own answers last stated (null: none seen). Bid
    * mode bids only what it leaves after the coins its other bids hold.
@@ -837,7 +843,7 @@ export class Sniper {
   private readonly book = new BidBook();
   /** Bid mode's watch list: when it was last read, failed reads in a row,
    * how many auctions it holds, and whether "it is full" has been said. */
-  private watch = { at: -Infinity, failures: 0, size: 0, fullNoted: false };
+  private watch = { at: -Infinity, failures: 0, size: 0, fullNoted: false, finished: 0, clearedAt: -Infinity, clearOff: false };
   /** What the last watch list read said, for `settleBids`. */
   private bidEvents: BidEvent[] = [];
 
@@ -1167,7 +1173,7 @@ export class Sniper {
     } else {
       this.governor = this.newGovernor();
     }
-    this.watch = { at: -Infinity, failures: 0, size: 0, fullNoted: false };
+    this.watch = { at: -Infinity, failures: 0, size: 0, fullNoted: false, finished: 0, clearedAt: -Infinity, clearOff: false };
     this.bidEvents = [];
     this.nextEaRequestAt = -Infinity;
     this.buyBlock = null;
@@ -1881,6 +1887,7 @@ export class Sniper {
     if (this.applyKillSwitch() || this.applyEntitlement() || this.applyExclusive()) return;
     if ((await this.waitOutEaBackoff(signal)) && signal.aborted) return;
     if (!(await this.readWatchlist(signal, true))) return;
+    if ((await this.clearExpired(signal, true)) === 'stopped') return;
 
     while (!signal.aborted) {
       if (this.dailyLimitReached()) return this.stop('daily_limit');
@@ -1901,6 +1908,7 @@ export class Sniper {
       if (this.watchlistDue(startedAt) && !(await this.readWatchlist(signal, false))) return;
       if ((await this.settleBids(signal)) === 'stopped') return;
       if ((await this.collectNext(signal)) === 'stopped') return;
+      if ((await this.clearExpired(signal, false)) === 'stopped') return;
       if (this.watchlistFull()) return this.stop('watchlist_full');
 
       // The bids it holds come first: while one is near its end, outbid or
@@ -1960,6 +1968,37 @@ export class Sniper {
     return this.book.bids().some((b) => b.state !== 'leading' || b.expiresAt - now <= GUARD_MS);
   }
 
+  /** Takes the finished auctions the last watch list read saw, that the
+   * trader did not win, off the watch list (the adapter's `clearExpired`
+   * picks them; never a won or running one): at the start (`starting`),
+   * every CLEAR_EVERY_MS, and at once when the list is nearly full. A
+   * page without the call, or a clear EA refuses, leaves them, says so
+   * once, and tries again only after CLEAR_EVERY_MS. */
+  private async clearExpired(signal: AbortSignal, starting: boolean): Promise<'done' | 'stopped'> {
+    const clear = this.deps.adapter.clearExpired;
+    if (!clear || this.watch.clearOff || this.watch.finished === 0) return 'done';
+    const nearFull = this.watch.size >= WATCHLIST_SIZE - CLEAR_NEAR_FULL;
+    if (!starting && !nearFull && this.now() - this.watch.clearedAt < CLEAR_EVERY_MS) return 'done';
+    if (!(await this.paceEaRequest(signal, 'checking'))) return 'stopped';
+    this.setState({ phase: 'checking', phaseEndsAt: null, stopReason: null, stopDetail: null });
+    const clearing = clear();
+    this.noteEaRequest(true);
+    const res = await clearing;
+    if (signal.aborted) return 'stopped';
+    this.watch.clearedAt = this.now();
+    if (res.ok) {
+      const n = res.cleared ?? 0;
+      this.watch.size = Math.max(0, this.watch.size - n);
+      this.watch.finished = 0;
+      if (n > 0) this.addLog({ kind: 'info', message: `Cleared ${plural(n, 'expired item')} from your watch list (Transfer Targets)` });
+      return 'done';
+    }
+    const error = res.error ?? 'unknown error';
+    if (/_unsupported$|is not a function$/.test(error)) this.watch.clearOff = true;
+    this.addLog({ kind: 'failed', message: `Could not clear the expired items from your watch list: ${error}` });
+    return 'done';
+  }
+
   /** How many more auctions Bid mode may bid on now: the user's max open
    * bids, and room on EA's watch list. */
   private bidRoom(): number {
@@ -1980,7 +2019,10 @@ export class Sniper {
       this.watch.fullNoted = true;
       this.addLog({
         kind: 'blocked',
-        message: `Your EA watch list is full (${WATCHLIST_SIZE} cards): no new bids until there is room. Clear expired items in EA's Transfer Targets`,
+        message:
+          this.deps.adapter.clearExpired && !this.watch.clearOff
+            ? `Your EA watch list is full (${WATCHLIST_SIZE} cards) of running or won auctions: no new bids until some end`
+            : `Your EA watch list is full (${WATCHLIST_SIZE} cards): no new bids until there is room. Clear expired items in EA's Transfer Targets`,
       });
     }
     return false;
@@ -2037,6 +2079,7 @@ export class Sniper {
       this.watch.failures = 0;
       const watched = res.watched ?? [];
       this.watch.size = watched.length;
+      this.watch.finished = watched.filter((w) => w.tradeState === 'expired' || (w.tradeState === 'closed' && w.bidState !== 'highest')).length;
       this.bidEvents.push(...this.book.reconcile(watched, this.now()));
       return true;
     }

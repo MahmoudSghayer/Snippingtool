@@ -257,7 +257,7 @@ function post(kind: string, data: unknown): void {
 }
 
 interface ActionResult {
-  action: 'search' | 'buy' | 'readResult' | 'diagnostics' | 'list' | 'pile' | 'bid' | 'watchlist' | 'move' | 'clearSold' | 'relistAll' | 'unsold' | 'relist';
+  action: 'search' | 'buy' | 'readResult' | 'diagnostics' | 'list' | 'pile' | 'bid' | 'watchlist' | 'move' | 'clearSold' | 'relistAll' | 'unsold' | 'relist' | 'clearExpired';
   requestId: string;
   ok: boolean;
   requestedAt: number;
@@ -269,6 +269,8 @@ interface ActionResult {
   watched?: WatchedAuction[];
   /** The unsold cards on the transfer list (`unsold`). */
   unsold?: TradePileItem[];
+  /** How many finished auctions `clearExpired` took off the watch list. */
+  cleared?: number;
   /** A second result for a buy that first came back `timeout_unknown`:
    * EA's answer arrived after all (lib/act-auth.ts). */
   late?: boolean;
@@ -1290,6 +1292,11 @@ const bidOn = new Map<string, true>();
 
 /** A watch list holds about 50 auctions; more than this is not one. */
 const MAX_WATCHED = 100;
+/** The finished auctions the last watch list read saw that the trader did
+ * not win (expired, or ended with someone else's bid), with their
+ * entities: the only items `actClearExpired` takes off the watch list. A
+ * won auction, or one still running, is never in it. */
+const finishedWatched = new Map<string, unknown>();
 /** The shortest gap between two watch list reads, whatever content sends:
  * they are real requests to EA. Content asks far less often. */
 const WATCHLIST_MIN_GAP_MS = 5_000;
@@ -1395,11 +1402,14 @@ async function actWatchlist(requestId: string): Promise<void> {
     }
     const seenAt = now();
     const out: WatchedAuction[] = [];
+    apply(mapClear, finishedWatched, []);
     for (let i = 0; i < watched.length && out.length < MAX_WATCHED; i++) {
       const w = watched[i]!;
       out[out.length] = w;
       const entity = apply(mapGet, entities, [w.tradeId]);
       rememberWatched(w, entity, seenAt);
+      const lostOrExpired = w.tradeState === 'expired' || (w.tradeState === 'closed' && w.bidState !== 'highest');
+      if (lostOrExpired && entity !== undefined) apply(mapSet, finishedWatched, [w.tradeId, entity]);
       if (w.tradeState === 'closed' && w.bidState === 'highest' && apply(mapGet, bidOn, [w.tradeId]) === true) rememberBought(w.tradeId, entity);
     }
     adapterLog.add(`watchlist ok (${shape.name}): ${out.length} auctions`);
@@ -1426,6 +1436,29 @@ async function actMove(requestId: string, tradeId: string): Promise<void> {
     postResult({ action: 'move', requestId, ok: true, requestedAt, completedAt: now() });
   } catch (err) {
     fail('move', requestId, requestedAt, errorText(err), describeError(err));
+  }
+}
+
+/** Takes the finished auctions the last watch list read saw (expired, or
+ * lost to another bid) off the watch list, as Transfer Targets' "Clear
+ * expired" does. Never a won or running one (`finishedWatched`). */
+async function actClearExpired(requestId: string): Promise<void> {
+  const requestedAt = now();
+  const { result, selection } = runProbeAndReport();
+  const shape = selection.shape;
+  if (!result.ok || !shape) return fail('clearExpired', requestId, requestedAt, result.reason);
+  const untarget = shape.bidding?.untarget;
+  if (!untarget) return fail('clearExpired', requestId, requestedAt, 'clear_expired_unsupported');
+  const entities: unknown[] = [];
+  for (const entity of finishedWatched.values()) entities[entities.length] = entity;
+  if (entities.length === 0) return postResult({ action: 'clearExpired', requestId, ok: true, requestedAt, completedAt: now(), cleared: 0 });
+  try {
+    await apply(untarget, shape.bidding, [servicesRoot() as Record<string, unknown>, entities]);
+    apply(mapClear, finishedWatched, []);
+    adapterLog.add(`clear expired ok (${shape.name}): ${entities.length}`);
+    postResult({ action: 'clearExpired', requestId, ok: true, requestedAt, completedAt: now(), cleared: entities.length });
+  } catch (err) {
+    fail('clearExpired', requestId, requestedAt, errorText(err), describeError(err));
   }
 }
 
@@ -1512,6 +1545,7 @@ type ActRequest =
   | { action: 'clearSold'; requestId: string }
   | { action: 'relistAll'; requestId: string }
   | { action: 'unsold'; requestId: string }
+  | { action: 'clearExpired'; requestId: string }
   | { action: 'relist'; requestId: string; itemId: string; startPrice: number; buyNowPrice: number };
 
 /** EA's listing limits, with the starting bid below the buy-now price. */
@@ -1541,7 +1575,8 @@ function asActRequest(value: unknown): ActRequest | null {
     d.action === 'watchlist' ||
     d.action === 'clearSold' ||
     d.action === 'relistAll' ||
-    d.action === 'unsold'
+    d.action === 'unsold' ||
+    d.action === 'clearExpired'
   )
     return d as unknown as ActRequest;
   if (d.action === 'relist') {
@@ -1589,6 +1624,9 @@ async function handleActRequest(data: unknown, mac: unknown): Promise<void> {
   }
   else if (request.action === 'move') {
     if (BIDDING_ENABLED) await actMove(request.requestId, request.tradeId);
+  }
+  else if (request.action === 'clearExpired') {
+    if (BIDDING_ENABLED) await actClearExpired(request.requestId);
   }
   else if (request.action === 'readResult') await actReadResult(request.requestId, request.tradeId);
   else if (request.action === 'list') {
