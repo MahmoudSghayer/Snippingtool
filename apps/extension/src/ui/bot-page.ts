@@ -122,6 +122,14 @@ export interface BotPageDeps {
    * (lib/transfer-list.ts): null until EA has loaded the whole list once.
    * Without it the Sold, Unsold and Transfer list figures stay empty. */
   getTransferList?: () => TransferListSummary | null;
+  /** The Transfer list card's buttons (content/transfer-tools.ts): Clear
+   * sold, and Relist unsold one price step lower, at the same prices or one
+   * step higher. Each resolves with what happened, in the trader's words.
+   * Without it the card has no buttons. */
+  transferTools?: {
+    clearSold: () => Promise<{ ok: boolean; message: string }>;
+    relist: (step: -1 | 0 | 1, onProgress: (done: number, total: number) => void) => Promise<{ ok: boolean; message: string }>;
+  };
   /** The coin balance EA's own responses last stated (a market, trade-pile
    * or buy answer), and when it arrived: EA's top bar is not always redrawn
    * after the bot's own buys and sales. */
@@ -357,6 +365,12 @@ function parseRange(text: string, integer: boolean): { min: number; max: number 
 /** On the transfer list figures until EA's page has loaded the whole list:
  * they are read from what it loads, never asked of EA. */
 const TL_WAITING = 'Open your Transfer List in EA once and Nova AI will keep these up to date';
+/** The Transfer list card's relist choices. */
+const RELIST_CHOICES: readonly { step: -1 | 0 | 1; label: string; title: string }[] = [
+  { step: -1, label: '−1 step', title: 'List every unsold card again one price step lower' },
+  { step: 0, label: 'Same', title: "List every unsold card again at its last prices (EA's Re-list All)" },
+  { step: 1, label: '+1 step', title: 'List every unsold card again one price step higher' },
+];
 
 /** What the "Short bursts" preset does (`withShortBurstLimits`). */
 const SHORT_BURSTS_HINT =
@@ -716,6 +730,15 @@ const CSS = `
   .tl .big { font-size: 18px; font-weight: 500; margin-top: 4px; }
   .tl .of { font-size: 12px; font-weight: 600; }
   .tl .sub { min-height: 17px; margin-top: 6px; color: var(--ea-muted); font-size: 12px; }
+  .tl .hd { align-items: center; }
+  .tl-btn { border: 1px solid var(--ea-btn-line); background: var(--ea-btn); border-radius: 5px; padding: 2px 8px; color: var(--ea-text); font-size: 11px; line-height: 14px; white-space: nowrap; cursor: pointer; }
+  .tl-btn:hover:not(:disabled) { background: var(--ea-row-hover); }
+  .tl-btn:disabled { background: var(--ea-disabled); color: var(--ea-disabled-ink); cursor: default; }
+  .tl .relist { margin-top: 8px; color: var(--ea-text-2); font-size: 12px; }
+  .tl .relist .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-top: 4px; }
+  .tl .relist .tl-btn { padding: 3px 4px; }
+  .tl .msg { min-height: 15px; margin-top: 4px; color: var(--ea-muted); font-size: 11px; }
+  .tl .msg.bad { color: var(--ea-danger); }
   .bar { height: 6px; border-radius: 3px; background: var(--ea-line); margin-top: 8px; overflow: hidden; }
   .bar > i { display: block; height: 100%; background: var(--ea-success); }
 
@@ -2146,6 +2169,11 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   /** What the transfer list figures show now, so a render that would write
    * the same figures does nothing. */
   let tlShown = '';
+  /** The Transfer list card's button at work (`transferTools`): what the
+   * card says meanwhile, or null when none is. */
+  let tlBusy: string | null = null;
+  /** What the last button press did, for the card. */
+  let tlResult: { ok: boolean; message: string } | null = null;
 
   /** The dash is built once, with the ring in it, and updated in place. */
   function buildDash(): void {
@@ -2162,13 +2190,26 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       </div>
       <div class="panelbox ring-box" id="ringbox"></div>
       <div class="panelbox tl" id="d-tl" title="${esc(TL_WAITING)}">
-        <div class="hd"><span>Transfer list</span></div>
+        <div class="hd"><span>Transfer list</span>${
+          deps.transferTools
+            ? `<button type="button" class="tl-btn" id="d-tl-clear" title="Take the sold cards off your transfer list (EA's Clear Sold)" disabled>Clear sold</button>`
+            : ''
+        }</div>
         <div class="big na" id="d-tl-big"><span id="d-tl-n">—</span> <span class="of">/${TRANSFER_LIST_SIZE}</span></div>
         <div class="bar"><i id="d-tl-bar" style="width:0%"></i></div>
         <div class="sub" id="d-tl-sub"></div>
+        ${
+          deps.transferTools
+            ? `<div class="relist" id="d-tl-relist">Relist unsold<div class="steps">${RELIST_CHOICES.map(
+                (c) => `<button type="button" class="tl-btn" data-step="${c.step}" title="${esc(c.title)}" disabled>${c.label}</button>`,
+              ).join('')}</div></div>
+        <div class="msg" id="d-tl-msg"></div>`
+            : ''
+        }
       </div>
     `;
     $('ringbox').append(ring.el);
+    if (deps.transferTools) wireTransferTools(deps.transferTools);
     // Fresh elements: the next render writes the transfer list figures.
     tlShown = '';
   }
@@ -2179,19 +2220,58 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
    * figures changed. */
   function renderTransferList(): void {
     const s = deps.getTransferList?.() ?? null;
-    const key = s ? `${s.total}/${s.sold}/${s.unsold}/${s.listed}/${s.unlisted}/${s.seenAt}` : 'none';
+    const key = `${s ? `${s.total}/${s.sold}/${s.soldCleared}/${s.unsold}/${s.listed}/${s.unlisted}/${s.seenAt}` : 'none'}|${tlBusy ?? ''}|${tlResult?.message ?? ''}`;
     if (key === tlShown || !root.getElementById('d-tl')) return;
     tlShown = key;
     const title = s ? `Your Transfer List as EA last showed it, at ${timeOfDay(s.seenAt)}` : TL_WAITING;
-    for (const id of ['d-sold-row', 'd-unsold-row', 'd-tl']) $(id).title = title;
+    for (const id of ['d-unsold-row', 'd-tl']) $(id).title = title;
+    $('d-sold-row').title = s ? `${title}, with the sold cards cleared off it since this page opened` : title;
     for (const id of ['d-sold', 'd-unsold', 'd-tl-big']) $(id).classList.toggle('na', !s);
-    setText($('d-sold'), s ? fmt(s.sold) : '—');
+    // Clearing the sold cards off the list never takes them off this count.
+    setText($('d-sold'), s ? fmt(s.sold + s.soldCleared) : '—');
     setText($('d-unsold'), s ? fmt(s.unsold) : '—');
     setText($('d-tl-n'), s ? fmt(s.total) : '—');
     // The bar stops at a full list, even if a count kept up from partial
     // responses runs over (a card that left the list unseen).
     $('d-tl-bar').style.width = `${s ? Math.min(100, (s.total / TRANSFER_LIST_SIZE) * 100) : 0}%`;
     setText($('d-tl-sub'), s ? transferListBreakdown(s) : '');
+    if (!deps.transferTools) return;
+    // A button works only on what the list has, and one at a time.
+    $<HTMLButtonElement>('d-tl-clear').disabled = !!tlBusy || !s || s.sold === 0;
+    for (const b of $('d-tl-relist').querySelectorAll('button')) b.disabled = !!tlBusy || !s || s.unsold === 0;
+    const msg = $('d-tl-msg');
+    setText(msg, tlBusy ?? tlResult?.message ?? '');
+    msg.classList.toggle('bad', !tlBusy && tlResult?.ok === false);
+  }
+
+  /** The Transfer list card's buttons: each runs to its end before another
+   * can start, and the card says what it did. */
+  function wireTransferTools(tools: NonNullable<BotPageDeps['transferTools']>): void {
+    const run = (busy: string, work: () => Promise<{ ok: boolean; message: string }>) => {
+      if (tlBusy) return;
+      tlBusy = busy;
+      tlResult = null;
+      renderTransferList();
+      void work()
+        .catch((err: unknown) => ({ ok: false, message: `Something went wrong: ${String(err)}` }))
+        .then((result) => {
+          tlBusy = null;
+          tlResult = result;
+          renderTransferList();
+        });
+    };
+    onTrusted($('d-tl-clear'), 'click', () => run('Clearing the sold cards…', () => tools.clearSold()));
+    for (const b of $('d-tl-relist').querySelectorAll('button')) {
+      const step = Number(b.dataset.step) as -1 | 0 | 1;
+      onTrusted(b, 'click', () =>
+        run('Relisting the unsold cards…', () =>
+          tools.relist(step, (done, total) => {
+            tlBusy = `Relisting ${done} of ${total}…`;
+            renderTransferList();
+          }),
+        ),
+      );
+    }
   }
 
   /** What the cards on the list are, adding up to its total: listed and

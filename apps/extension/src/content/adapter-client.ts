@@ -34,6 +34,8 @@ export interface ActionOutcome {
   diagnostics?: AdapterDiagnostics;
   /** Only for a successful `watchlist()`: the auctions on the watch list. */
   watched?: WatchedAuction[];
+  /** Only for a successful `unsold()`: the unsold cards on the transfer list. */
+  unsold?: TradePileItem[];
   /** Only for a buy that came back `timeout_unknown`: settles with EA's
    * late answer if the adapter sends one (signed, like every result), or
    * `ok: false` after a few minutes without one. */
@@ -81,6 +83,17 @@ export interface AdapterClient {
   /** Automation builds: have the web app reload the transfer list. The
    * list itself arrives through `onTradePile`, like any load of it. */
   refreshPile(): Promise<ActionOutcome>;
+  /** Automation builds (the Transfer list card): EA's own Clear Sold. */
+  clearSold(): Promise<ActionOutcome>;
+  /** Automation builds: EA's own Re-list All, every unsold card at its
+   * last prices. */
+  relistAll(): Promise<ActionOutcome>;
+  /** Automation builds: the unsold cards on the transfer list, in
+   * `outcome.unsold`; the only cards `relist` lists again. */
+  unsold(): Promise<ActionOutcome>;
+  /** Automation builds: list one card the last `unsold()` returned again,
+   * at new prices. */
+  relist(itemId: string, startPrice: number, buyNowPrice: number): Promise<ActionOutcome>;
   /** The adapter's read-only diagnostics report, over the same
    * authenticated channel as every act call (docs/06-extension.md §4). */
   diagnostics(): Promise<ActionOutcome>;
@@ -126,7 +139,7 @@ export function pageWindow(): Window {
   return typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
 }
 
-type ActAction = 'search' | 'buy' | 'readResult' | 'diagnostics' | 'list' | 'pile' | 'bid' | 'watchlist' | 'move';
+type ActAction = 'search' | 'buy' | 'readResult' | 'diagnostics' | 'list' | 'pile' | 'bid' | 'watchlist' | 'move' | 'clearSold' | 'relistAll' | 'unsold' | 'relist';
 
 interface Pending {
   action: ActAction;
@@ -265,6 +278,7 @@ export function createAdapterClient(target: Window, nonce: string | null, option
           stillListed: data.stillListed,
           diagnostics: data.diagnostics,
           watched: data.watched,
+          unsold: data.unsold,
           signed: true,
           latencyMs: data.completedAt - data.requestedAt,
         };
@@ -370,6 +384,10 @@ export function createAdapterClient(target: Window, nonce: string | null, option
     watchlist: () => call({ action: 'watchlist' }),
     move: (tradeId) => call({ action: 'move', tradeId }),
     refreshPile: () => call({ action: 'pile' }),
+    clearSold: () => call({ action: 'clearSold' }),
+    relistAll: () => call({ action: 'relistAll' }),
+    unsold: () => call({ action: 'unsold' }),
+    relist: (itemId, startPrice, buyNowPrice) => call({ action: 'relist', itemId, startPrice, buyNowPrice }),
     diagnostics: () => call({ action: 'diagnostics' }),
     onProbe: (cb) => {
       probeListeners.add(cb);

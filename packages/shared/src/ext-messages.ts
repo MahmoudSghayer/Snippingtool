@@ -372,6 +372,10 @@ export const adapterActionResultMessageSchema = z.object({
       'bid',
       'watchlist',
       'move',
+      'clearSold',
+      'relistAll',
+      'unsold',
+      'relist',
     ]),
     requestId: z.string().min(1).optional(),
     ok: z.boolean(),
@@ -389,6 +393,10 @@ export const adapterActionResultMessageSchema = z.object({
      * the result, so a page script cannot tell the bot it won or was
      * outbid. */
     watched: z.array(watchedAuctionSchema).max(100).optional(),
+    /** Only present for a successful `action: 'unsold'`: the unsold
+     * (expired) cards on the trader's transfer list, for a relist at new
+     * prices. Signed with the rest of the result. */
+    unsold: z.array(tradePileItemSchema).max(100).optional(),
     /** A second result for a `buy` whose first result was
      * `error: 'timeout_unknown'`: EA's answer arrived after the adapter
      * stopped waiting, and `ok` says whether it bought. */
@@ -496,6 +504,36 @@ export const adapterActRequestMessageSchema = z.object({
       action: z.literal('move'),
       requestId: z.string().min(1),
       tradeId: z.string().min(1),
+    }),
+    /** Automation builds (the Nova AI page's Transfer list card): the web
+     * app's own "Clear Sold", then a reload of the transfer list. */
+    z.object({
+      action: z.literal('clearSold'),
+      requestId: z.string().min(1),
+    }),
+    /** Automation builds: the web app's own "Re-list All" (every unsold
+     * card at its last prices), then a reload of the transfer list. */
+    z.object({
+      action: z.literal('relistAll'),
+      requestId: z.string().min(1),
+    }),
+    /** Automation builds: read the transfer list through the web app's own
+     * service; the result carries its unsold cards (`unsold`), the only
+     * cards a `relist` will list again. */
+    z.object({
+      action: z.literal('unsold'),
+      requestId: z.string().min(1),
+    }),
+    /** Automation builds: list one unsold card the last `unsold` read
+     * (named by EA's itemId) again at new prices, a step lower or higher;
+     * anything else is refused (`relist_not_unsold`). Prices as for `list`.
+     * `main/adapter.ts`'s `asActRequest` re-checks this shape by hand. */
+    z.object({
+      action: z.literal('relist'),
+      requestId: z.string().min(1),
+      itemId: z.string().min(1).max(40),
+      startPrice: z.number().int().min(150).max(15_000_000),
+      buyNowPrice: z.number().int().min(200).max(15_000_000),
     }),
     /** Read-only: the adapter's diagnostics report (options page, "Copy
      * diagnostics"). Authenticated like every other act request, so no page

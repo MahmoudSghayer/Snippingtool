@@ -63,6 +63,7 @@ import {
   nextBidPrice,
   normaliseListing,
   normaliseListings,
+  normalisePileItem,
   normalisePileItems,
   normaliseWatchedItem,
   normaliseWatchedItems,
@@ -128,6 +129,7 @@ const URLCtor = URL;
 const mapGet = Map.prototype.get;
 const mapSet = Map.prototype.set;
 const mapDelete = Map.prototype.delete;
+const mapClear = Map.prototype.clear;
 const mapKeys = Map.prototype.keys;
 const mapSize = protoGetter(Map.prototype, 'size')!;
 const mapIteratorNext = (Object.getPrototypeOf(new Map().keys()) as Iterator<unknown>).next;
@@ -255,7 +257,7 @@ function post(kind: string, data: unknown): void {
 }
 
 interface ActionResult {
-  action: 'search' | 'buy' | 'readResult' | 'diagnostics' | 'list' | 'pile' | 'bid' | 'watchlist' | 'move';
+  action: 'search' | 'buy' | 'readResult' | 'diagnostics' | 'list' | 'pile' | 'bid' | 'watchlist' | 'move' | 'clearSold' | 'relistAll' | 'unsold' | 'relist';
   requestId: string;
   ok: boolean;
   requestedAt: number;
@@ -265,6 +267,8 @@ interface ActionResult {
   diagnostics?: AdapterDiagnostics;
   /** A watch list read's auctions (Bid mode). */
   watched?: WatchedAuction[];
+  /** The unsold cards on the transfer list (`unsold`). */
+  unsold?: TradePileItem[];
   /** A second result for a buy that first came back `timeout_unknown`:
    * EA's answer arrived after all (lib/act-auth.ts). */
   late?: boolean;
@@ -1163,6 +1167,113 @@ async function actRefreshPile(requestId: string): Promise<void> {
   }
 }
 
+// ---- the transfer list tools (automation builds) ----------------------------
+//
+// The Nova AI page's Transfer list card: Clear sold, and Relist unsold at
+// the same prices (EA's own Re-list All) or a price step lower or higher
+// (each card listed again, one act per card, paced by content).
+
+/** The unsold cards the last `actUnsold` read, by EA's itemId, with their
+ * entities: the only cards `actRelist` will put back on the market. A card
+ * leaves once relisted. */
+const MAX_UNSOLD_ITEMS = 100;
+const unsoldItems = new Map<string, unknown>();
+
+/** After a clear or a relist, the web app reloads the transfer list so the
+ * page's counts show it (its GET reaches content passively, like any). The
+ * result has already gone out: a reload that fails changes nothing EA did. */
+async function reloadPileAfter(shape: ServiceShape): Promise<void> {
+  if (!shape.refreshPile) return;
+  lastPileRefreshAt = now();
+  try {
+    await shape.refreshPile(servicesRoot() as Record<string, unknown>);
+  } catch (err) {
+    adapterLog.add(`pile reload failed: ${describeError(err)}`);
+  }
+}
+
+async function actClearSold(requestId: string): Promise<void> {
+  const requestedAt = now();
+  const { result, selection } = runProbeAndReport();
+  const shape = selection.shape;
+  if (!result.ok || !shape) return fail('clearSold', requestId, requestedAt, result.reason);
+  if (!shape.clearSold) return fail('clearSold', requestId, requestedAt, 'clear_unsupported');
+  try {
+    await shape.clearSold(servicesRoot() as Record<string, unknown>);
+  } catch (err) {
+    return fail('clearSold', requestId, requestedAt, errorText(err), describeError(err));
+  }
+  adapterLog.add(`clear sold ok (${shape.name})`);
+  postResult({ action: 'clearSold', requestId, ok: true, requestedAt, completedAt: now() });
+  await reloadPileAfter(shape);
+}
+
+async function actRelistAll(requestId: string): Promise<void> {
+  const requestedAt = now();
+  const { result, selection } = runProbeAndReport();
+  const shape = selection.shape;
+  if (!result.ok || !shape) return fail('relistAll', requestId, requestedAt, result.reason);
+  if (!shape.relistAll) return fail('relistAll', requestId, requestedAt, 'relist_unsupported');
+  try {
+    await shape.relistAll(servicesRoot() as Record<string, unknown>);
+  } catch (err) {
+    return fail('relistAll', requestId, requestedAt, errorText(err), describeError(err));
+  }
+  // Every card it held is listed again, under a new trade.
+  apply(mapClear, unsoldItems, []);
+  adapterLog.add(`relist all ok (${shape.name})`);
+  postResult({ action: 'relistAll', requestId, ok: true, requestedAt, completedAt: now() });
+  await reloadPileAfter(shape);
+}
+
+/** Reads the transfer list through the web app's own service and answers
+ * with its unsold (expired) cards, keeping their entities for `actRelist`.
+ * The read is a reload of the list, so the page's counts follow it too. It
+ * leaves `actRefreshPile`'s gap alone: the reload content asks for once the
+ * cards are relisted must not be refused for it. */
+async function actUnsold(requestId: string): Promise<void> {
+  const requestedAt = now();
+  const { result, selection } = runProbeAndReport();
+  const shape = selection.shape;
+  if (!result.ok || !shape) return fail('unsold', requestId, requestedAt, result.reason);
+  if (!shape.readPile || !shape.list) return fail('unsold', requestId, requestedAt, 'relist_unsupported');
+  try {
+    const entries = await shape.readPile(servicesRoot() as Record<string, unknown>);
+    apply(mapClear, unsoldItems, []);
+    const unsold: TradePileItem[] = [];
+    for (let i = 0; i < entries.length && unsold.length < MAX_UNSOLD_ITEMS; i++) {
+      const item = normalisePileItem(entries[i]);
+      if (!item || item.tradeState !== 'expired') continue;
+      unsold[unsold.length] = item;
+      apply(mapSet, unsoldItems, [item.itemId, entries[i]]);
+    }
+    adapterLog.add(`unsold read ok (${shape.name}): ${unsold.length} of ${entries.length} cards`);
+    postResult({ action: 'unsold', requestId, ok: true, requestedAt, completedAt: now(), unsold });
+  } catch (err) {
+    fail('unsold', requestId, requestedAt, errorText(err), describeError(err));
+  }
+}
+
+/** Lists one unsold card the last `actUnsold` read (by its itemId) again,
+ * at the prices content chose. Anything else is refused. */
+async function actRelist(requestId: string, itemId: string, startPrice: number, buyNowPrice: number): Promise<void> {
+  const requestedAt = now();
+  const { result, selection } = runProbeAndReport();
+  const shape = selection.shape;
+  if (!result.ok || !shape) return fail('relist', requestId, requestedAt, result.reason);
+  if (!shape.list) return fail('relist', requestId, requestedAt, 'relist_unsupported');
+  const entity = apply(mapGet, unsoldItems, [itemId]);
+  if (entity === undefined) return fail('relist', requestId, requestedAt, 'relist_not_unsold');
+  try {
+    await shape.list(servicesRoot() as Record<string, unknown>, { entity, startPrice, buyNowPrice, durationSeconds: LIST_DURATION_SECONDS });
+    apply(mapDelete, unsoldItems, [itemId]);
+    adapterLog.add(`relist ok (${shape.name})`);
+    postResult({ action: 'relist', requestId, ok: true, requestedAt, completedAt: now() });
+  } catch (err) {
+    fail('relist', requestId, requestedAt, errorText(err), describeError(err));
+  }
+}
+
 // ---- Bid mode (automation builds) -------------------------------------------
 //
 // Nova AI's Bid mode bids on auctions in their last minutes, follows them on
@@ -1397,7 +1508,16 @@ type ActRequest =
   | { action: 'diagnostics'; requestId: string }
   | { action: 'catalog'; requestId: string }
   | { action: 'pile'; requestId: string }
-  | { action: 'watchlist'; requestId: string };
+  | { action: 'watchlist'; requestId: string }
+  | { action: 'clearSold'; requestId: string }
+  | { action: 'relistAll'; requestId: string }
+  | { action: 'unsold'; requestId: string }
+  | { action: 'relist'; requestId: string; itemId: string; startPrice: number; buyNowPrice: number };
+
+/** EA's listing limits, with the starting bid below the buy-now price. */
+function isListingPrice(start: unknown, bin: unknown): boolean {
+  return isInteger(start) && isInteger(bin) && (start as number) >= 150 && (bin as number) >= 200 && (bin as number) <= 15_000_000 && (start as number) < (bin as number);
+}
 
 /** A whole coin amount within EA's bid limits (150 to 15,000,000). */
 function isBidAmount(value: unknown): boolean {
@@ -1414,7 +1534,20 @@ function asActRequest(value: unknown): ActRequest | null {
     if (!d.filter || typeof d.filter !== 'object') return null;
     return d.maxBid === undefined || isBidAmount(d.maxBid) ? (d as unknown as ActRequest) : null;
   }
-  if (d.action === 'diagnostics' || d.action === 'catalog' || d.action === 'pile' || d.action === 'watchlist') return d as unknown as ActRequest;
+  if (
+    d.action === 'diagnostics' ||
+    d.action === 'catalog' ||
+    d.action === 'pile' ||
+    d.action === 'watchlist' ||
+    d.action === 'clearSold' ||
+    d.action === 'relistAll' ||
+    d.action === 'unsold'
+  )
+    return d as unknown as ActRequest;
+  if (d.action === 'relist') {
+    if (typeof d.itemId !== 'string' || d.itemId === '' || d.itemId.length > 40) return null;
+    return isListingPrice(d.startPrice, d.buyNowPrice) ? (d as unknown as ActRequest) : null;
+  }
   if (typeof d.tradeId !== 'string' || d.tradeId === '') return null;
   if (d.action === 'readResult' || d.action === 'move') return d as unknown as ActRequest;
   if (d.action === 'bid') {
@@ -1423,11 +1556,7 @@ function asActRequest(value: unknown): ActRequest | null {
     return d as unknown as ActRequest;
   }
   if (d.action === 'list') {
-    // EA's limits, and a starting bid below the buy-now price.
-    const start = d.startPrice as number;
-    const bin = d.buyNowPrice as number;
-    if (!isInteger(start) || !isInteger(bin) || start < 150 || bin < 200 || bin > 15_000_000 || start >= bin) return null;
-    return d as unknown as ActRequest;
+    return isListingPrice(d.startPrice, d.buyNowPrice) ? (d as unknown as ActRequest) : null;
   }
   if (d.action === 'buy') {
     if (!isInteger(d.price) || (d.price as number) <= 0) return null;
@@ -1467,6 +1596,18 @@ async function handleActRequest(data: unknown, mac: unknown): Promise<void> {
   }
   else if (request.action === 'pile') {
     if (LISTING_ENABLED) await actRefreshPile(request.requestId);
+  }
+  else if (request.action === 'clearSold') {
+    if (LISTING_ENABLED) await actClearSold(request.requestId);
+  }
+  else if (request.action === 'relistAll') {
+    if (LISTING_ENABLED) await actRelistAll(request.requestId);
+  }
+  else if (request.action === 'unsold') {
+    if (LISTING_ENABLED) await actUnsold(request.requestId);
+  }
+  else if (request.action === 'relist') {
+    if (LISTING_ENABLED) await actRelist(request.requestId, request.itemId, request.startPrice, request.buyNowPrice);
   }
   else if (request.action === 'catalog') await refreshCatalog(true);
   else actDiagnostics(request.requestId);

@@ -12,7 +12,10 @@
  * cards: each of those is updated or added, and the rest stay as they were.
  * Until a full list has been seen, nothing is known about the cards a
  * partial did not show, so the summary stays null rather than count a few
- * cards as the whole list.
+ * cards as the whole list. A sold card missing from the next full list was
+ * cleared (EA's Clear Sold, here or on the Nova AI page): it is still
+ * counted as sold (`soldCleared`), so clearing never takes sales away from
+ * the page's Sold counter.
  *
  * Kept in memory for the page load only: the list changes whenever the
  * trader uses it, so counts from an earlier load would be out of date.
@@ -28,6 +31,8 @@ export interface TransferListSummary {
   total: number;
   /** Sold (`closed`), waiting to be cleared. */
   sold: number;
+  /** Sold and cleared off the list since this page load. */
+  soldCleared: number;
   /** Expired without selling. */
   unsold: number;
   /** On the market now (`active`). */
@@ -51,14 +56,20 @@ export function createTransferListTracker(opts: { now?: () => number } = {}): Tr
   // it is listed). Null until a full list has been seen.
   let cards: Map<string, TradePileItem['tradeState']> | null = null;
   let seenAt = 0;
+  let soldCleared = 0;
   // The page asks for the summary every second while it is open; it is
   // only worked out again after an update.
   let counted: TransferListSummary | null = null;
 
   return {
     update(items, full) {
-      if (full) cards = new Map();
-      else if (!cards) return;
+      if (full) {
+        if (cards) {
+          const onList = new Set(items.map((item) => item.itemId));
+          for (const [itemId, state] of cards) if (state === 'closed' && !onList.has(itemId)) soldCleared++;
+        }
+        cards = new Map();
+      } else if (!cards) return;
       for (const item of items) cards.set(item.itemId, item.tradeState);
       seenAt = now();
       counted = null;
@@ -78,6 +89,7 @@ export function createTransferListTracker(opts: { now?: () => number } = {}): Tr
         counted = Object.freeze({
           total,
           sold,
+          soldCleared,
           unsold,
           listed,
           unlisted: total - sold - unsold - listed,
