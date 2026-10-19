@@ -17,7 +17,8 @@
  *     window, 5 by default), and only when the next valid bid (`nextBid`:
  *     the starting bid while nobody has bid, else one step of EA's price
  *     grid above the current bid) is at or under the max and below the
- *     buy-now price. Soonest-ending first.
+ *     buy-now price. Cheapest bid first, and at the same bid the one
+ *     ending soonest (the trader's choice).
  *
  * Every bid lands on the trader's watch list (EA's Transfer Targets). Reading
  * it (`BidBook.reconcile`) says which bids still lead, which were outbid
@@ -82,7 +83,8 @@ function isTarget(a: TrimmedAuction, f: FilterCriteria): boolean {
 }
 
 /** What to do with a search's auctions (see the header): buys first,
- * cheapest first, then bids, soonest-ending first. `skip`: auctions the bot
+ * cheapest first, then bids: the lowest bid first, and at the same bid the
+ * one ending soonest. `skip`: auctions the bot
  * already bids on or is done with. */
 export function pickAuctions(
   auctions: Iterable<TrimmedAuction>,
@@ -106,7 +108,7 @@ export function pickAuctions(
     bids.push({ auction: a, action: 'bid', price: bid });
   }
   buys.sort((x, y) => x.price - y.price);
-  bids.sort((x, y) => x.auction.expiresAt! - y.auction.expiresAt! || x.price - y.price);
+  bids.sort((x, y) => x.price - y.price || x.auction.expiresAt! - y.auction.expiresAt!);
   return [...buys, ...bids];
 }
 

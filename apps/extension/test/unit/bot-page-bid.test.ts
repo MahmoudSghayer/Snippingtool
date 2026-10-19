@@ -189,15 +189,15 @@ it("writes Bid mode's log lines with the card's name in the sentence", async () 
     { id: 6, at, kind: 'listed', ...card, price: 17_000, message: 'your fixed price' },
     { id: 5, at, kind: 'won', ...card, price: 12_500, sellPrice: 17_000, profit: 3_650, message: 'Won {card} for 12,500' },
     { id: 4, at, kind: 'dropped', ...card, price: 12_500, message: 'Max bid reached on {card} — dropping it', detail: 'the next bid would be 12,750, your max is 12,500' },
-    { id: 3, at, kind: 'bid', ...card, price: 12_500, message: 'Outbid on {card} — re-bidding 12,500' },
-    { id: 2, at, kind: 'bid', ...card, price: 12_250, message: 'Bid 12,250 on {card} (3 min left)' },
+    { id: 3, at, kind: 'bid', ...card, price: 12_500, message: 'Outbid on {card} at 12,250 — re-bidding 12,500' },
+    { id: 2, at, kind: 'bid', ...card, price: 12_250, message: 'Bid 12,250 on {card} (current bid 12,000, 3 min left)' },
     { id: 1, at, kind: 'moved', ...card, message: 'Moved {card} to your transfer list' },
   ];
   vi.spyOn(sniper, 'getLog').mockReturnValue(log);
   await refresh();
   const text = $('log')!.textContent!.replace(/\s+/g, ' ');
-  expect(text).toContain('Bid 12,250 on 85 Kika Nazareth (3 min left)');
-  expect(text).toContain('Outbid on 85 Kika Nazareth — re-bidding 12,500');
+  expect(text).toContain('Bid 12,250 on 85 Kika Nazareth (current bid 12,000, 3 min left)');
+  expect(text).toContain('Outbid on 85 Kika Nazareth at 12,250 — re-bidding 12,500');
   expect(text).toContain('Max bid reached on 85 Kika Nazareth — dropping it');
   expect(text).toContain('the next bid would be 12,750, your max is 12,500');
   expect(text).toContain('Won 85 Kika Nazareth for 12,500');
@@ -212,13 +212,19 @@ it('shows the bid a search result would take', async () => {
     id: 1,
     at: Date.now(),
     filterName: 'Target',
-    matches: [{ tradeId: 'a', resourceId: 100, assetId: 100, rating: 85, buyNow: 20_000, expiresAt: Date.now() + 180_000, bid: 12_250 }],
+    matches: [
+      { tradeId: 'a', resourceId: 100, assetId: 100, rating: 85, buyNow: 20_000, expiresAt: Date.now() + 180_000, bid: 12_250, currentBid: 12_000 },
+      { tradeId: 'b', resourceId: 100, assetId: 100, rating: 85, buyNow: 20_000, expiresAt: Date.now() + 200_000, bid: 800, currentBid: 0 },
+    ],
     listings: 3,
     cheapest: 15_000,
   };
   vi.spyOn(sniper, 'getSearchResults').mockReturnValue([result]);
   await refresh();
-  expect($('results')!.textContent!.replace(/\s+/g, ' ')).toContain('bid 12,250');
+  const text = $('results')!.textContent!.replace(/\s+/g, ' ');
+  // The auction's own price beside the bid: the current bid, or its start.
+  expect(text).toContain('bid 12,250 (now 12,000)');
+  expect(text).toContain('bid 800 (start)');
 });
 
 it('shows a lost lead in the search results as a re-bid, or as over the max', async () => {

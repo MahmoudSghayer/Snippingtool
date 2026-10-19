@@ -276,7 +276,7 @@ describe('Bid mode — bidding', () => {
     // The max price is the max bid: searched as EA's maxBid, with no max buy-now.
     expect(h.searches[0]!.options).toEqual({ maxBid: 12_500 });
     expect(h.searches[0]!.filter).toEqual({ resourceId: 100 });
-    expect(h.log()).toContain('Bid 10,000 on {card} (3 min left)');
+    expect(h.log()).toContain('Bid 10,000 on {card} (starting bid, 3 min left)');
     expect(h.log()).toContain(
       'Bot started in Bid mode: bids on auctions with 5 minutes or less left, up to 10 bids at a time, never above your max price',
     );
@@ -311,8 +311,8 @@ describe('Bid mode — bidding', () => {
     ]);
     expect(h.log()).toEqual(
       expect.arrayContaining([
-        'Bid 10,000 on {card} (1 min left)',
-        'Outbid on {card} — re-bidding 12,250',
+        'Bid 10,000 on {card} (starting bid, 1 min left)',
+        'Outbid on {card} at 12,000 — re-bidding 12,250',
         'Max bid reached on {card} — dropping it | the next bid would be 12,750, your max is 12,500',
       ]),
     );
@@ -352,6 +352,8 @@ describe('Bid mode — bidding', () => {
         autoSell: { ...DEFAULT_BOT_SETTINGS.autoSell, mode: 'fixed', fixedPrice: 11_000 },
       },
       results: () => [auction('thin', 60), auction('fat', 120, { startingBid: 9_000 })],
+      // The cheaper bid goes first; the other is tried on the next search.
+      stopWhen: (x) => x.searches.length >= 2 && x.sniper.state.phase !== 'bidding',
     });
     h.sniper.start();
     await h.done();

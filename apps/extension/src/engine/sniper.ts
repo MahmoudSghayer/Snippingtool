@@ -336,7 +336,7 @@ function bidMatch(
 /** A Bid mode pick as the search results show it, and as a buy takes it. */
 function pickMatch(p: BidPick): SniperMatch {
   const m = bidMatch(p.auction, p.auction.buyNow);
-  return p.action === 'bid' ? { ...m, bid: p.price } : m;
+  return p.action === 'bid' ? { ...m, bid: p.price, currentBid: p.auction.currentBid } : m;
 }
 
 /** The union of two saved copies of one window: each entry as many times
@@ -456,6 +456,9 @@ export interface SniperMatch {
   expiresAt: number | null;
   /** Bid mode: the bid it would take (absent: bought with Buy Now). */
   bid?: number;
+  /** Bid mode: the auction's current bid when it was seen (0: nobody has
+   * bid, so `bid` is its starting bid). */
+  currentBid?: number;
   /** Bid mode: an auction the trader was the highest bidder on and lost the
    * lead on, back in the search results for a re-bid at `bid`;
    * `'over_max'` when that bid would pass the max, so it is dropped. Cards
@@ -2089,7 +2092,7 @@ export class Sniper {
   private showOutbid(b: TrackedBid, next: number, overMax: boolean): void {
     if (b.outbidShown === b.currentBid) return;
     b.outbidShown = b.currentBid;
-    const match: SniperMatch = { ...bidMatch(b, b.buyNow), bid: next, outbid: overMax ? 'over_max' : 'rebid' };
+    const match: SniperMatch = { ...bidMatch(b, b.buyNow), bid: next, currentBid: b.currentBid, outbid: overMax ? 'over_max' : 'rebid' };
     this.addSearchResult('Outbid', [match], 1, null, this.now());
   }
 
@@ -2142,7 +2145,7 @@ export class Sniper {
   }
 
   /** A Bid mode search's auctions (`pickAuctions`): buys first, through
-   * Snipe mode's own buy path and limits, then bids, soonest-ending first,
+   * Snipe mode's own buy path and limits, then bids, cheapest first,
    * while there is room. */
   private async takeAuctions(target: SniperFilter, found: Extract<BidSearch, { ok: true }>, signal: AbortSignal): Promise<'done' | 'stopped'> {
     const maxBid = this.priceCap(target.filter)!;
@@ -2277,7 +2280,11 @@ export class Sniper {
         this.addLog({
           kind: 'bid',
           ...card,
-          message: rebid ? `Outbid on {card} — re-bidding ${amount(bid)}` : `Bid ${amount(bid)} on {card} (${timeLeft(t.expiresAt - at)})`,
+          // The auction's own price beside the bid: one step over the
+          // current bid, or the starting bid while nobody has bid.
+          message: rebid
+            ? `Outbid on {card} at ${amount(t.currentBid)} — re-bidding ${amount(bid)}`
+            : `Bid ${amount(bid)} on {card} (${t.currentBid > 0 ? `current bid ${amount(t.currentBid)}` : 'starting bid'}, ${timeLeft(t.expiresAt - at)})`,
         });
       else this.addLog({ kind: 'failed', ...card, message: `No answer from EA in time for the ${amount(bid)} bid on {card}: the next watch list check will tell` });
       this.deps.onChange();

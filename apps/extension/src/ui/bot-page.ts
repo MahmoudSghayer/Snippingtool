@@ -2384,7 +2384,9 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         (m) =>
           `<div class="res item"><span>${m.rating} ${esc(nameOf(m.assetId))}</span><span>${
             m.outbid === 'rebid' ? 're-bid ' : m.outbid === 'over_max' ? 'next bid ' : m.bid != null ? 'bid ' : ''
-          }${fmt(m.bid ?? m.buyNow)}${COIN}${m.outbid === 'over_max' ? ', over your max' : ''}${
+          }${fmt(m.bid ?? m.buyNow)}${COIN}${
+            m.bid != null && m.currentBid != null ? (m.currentBid > 0 ? ` (now ${fmt(m.currentBid)})` : ' (start)') : ''
+          }${m.outbid === 'over_max' ? ', over your max' : ''}${
             m.expiresAt ? `, ${clock(m.expiresAt - r.at)} left` : ''
           }</span></div>`,
       )
