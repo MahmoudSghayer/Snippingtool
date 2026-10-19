@@ -3,14 +3,14 @@
 // GET history for the caller's own account and (admin) any one user
 // (docs/07-dashboard.md §11 gap #6).
 
-import { riskBudgetEvents } from '@sl/db';
+import { devices, riskBudgetEvents, sessions } from '@sl/db';
 import {
   paginatedResponseSchema,
   reportRiskBudgetEventsRequestSchema,
   riskBudgetEventRowSchema,
   riskEventQuerySchema,
 } from '@sl/shared';
-import { and, desc, eq, gte, lt, lte } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, lt, lte } from 'drizzle-orm';
 import fp from 'fastify-plugin';
 import { z } from 'zod';
 
@@ -53,11 +53,38 @@ export default fp(
       },
       async (request) => {
         const userId = request.authUser!.id;
-        const rows = request.body.events.map((e) => ({
+        const { events } = request.body;
+
+        // `device_id` and `session_id` are foreign keys, and both ids are
+        // only the client's claim: the extension's `sessionId` is its own
+        // bot-run id, not a row in `sessions`, and a device can be revoked
+        // before a flush. Either used to fail the whole batch with a 500
+        // that the extension retried forever. Keep an id only when it
+        // really is one of this user's (as `POST /sniping/attempts` does).
+        const claimedDevices = [...new Set(events.map((e) => e.deviceId))];
+        const claimedSessions = [...new Set(events.map((e) => e.sessionId))];
+        const [ownDevices, ownSessions] = await Promise.all([
+          fastify.db.query.devices.findMany({
+            columns: { id: true },
+            where: and(
+              eq(devices.userId, userId),
+              inArray(devices.id, claimedDevices),
+              isNull(devices.deletedAt),
+            ),
+          }),
+          fastify.db.query.sessions.findMany({
+            columns: { id: true },
+            where: and(eq(sessions.userId, userId), inArray(sessions.id, claimedSessions)),
+          }),
+        ]);
+        const knownDevices = new Set(ownDevices.map((d) => d.id));
+        const knownSessions = new Set(ownSessions.map((s) => s.id));
+
+        const rows = events.map((e) => ({
           id: newId(),
           userId,
-          deviceId: e.deviceId,
-          sessionId: e.sessionId,
+          deviceId: knownDevices.has(e.deviceId) ? e.deviceId : null,
+          sessionId: knownSessions.has(e.sessionId) ? e.sessionId : null,
           kind: e.kind,
           value: String(e.value),
           threshold: String(e.threshold),
