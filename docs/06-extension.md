@@ -593,7 +593,7 @@ asks for one before Start; "Most you'll pay" caps it too):
   at 7,600 — re-bidding 7,700") rather than a read later; refused again,
   the next read says where it stands.
 - **Re-bids on fresh prices, fast**: after a watch list read comes back, and
-  between re-bids, the next re-bid or read waits only 1.2 s
+  between re-bids, the next re-bid or read waits only 1.5 s
   (`REBID_GAP_MS`, slower after EA limits it), whatever the search delay.
   Searches and new bids keep their own pacing. A re-bid goes out only on a
   read at most 4 s old (`REBID_FRESH_MS`); the rest wait for the next read,

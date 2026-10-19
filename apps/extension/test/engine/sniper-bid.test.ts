@@ -445,8 +445,8 @@ describe('Bid mode — pace', () => {
     const requests = [...h.searchTimes, ...bidTimes, ...readTimes].sort((x, y) => x - y);
     const gaps = requests.slice(1).map((t, i) => t - requests[i]!);
     // Never two at once: a watch list read or a re-bid waits REBID_GAP_MS
-    // (1.2 s) after any request, anything else the quick gap (4 s here).
-    expect(Math.min(...gaps)).toBeGreaterThanOrEqual(1.2 * SEC);
+    // (1.5 s) after any request, anything else the quick gap (4 s here).
+    expect(Math.min(...gaps)).toBeGreaterThanOrEqual(1.5 * SEC);
     // Searches keep the full search delay between them...
     const searchGaps = h.searchTimes.slice(1).map((t, i) => t - h.searchTimes[i]!);
     expect(Math.min(...searchGaps)).toBeGreaterThanOrEqual(10 * SEC);
@@ -812,6 +812,7 @@ describe('Bid mode — guards the bids it holds first', () => {
 
   it('re-bids several outbid leads within seconds, soonest-ending first', async () => {
     const bidTimes: [string, number, number][] = [];
+    const readTimes: number[] = [];
     let outbid = false;
     const h: Harness = setup({
       bidding: { maxActiveBids: 3 },
@@ -820,7 +821,8 @@ describe('Bid mode — guards the bids it holds first', () => {
         bidTimes.push([tradeId, price, h.clock.t]);
         return { ok: true, signed: true, latencyMs: 5 };
       },
-      beforeRead: (_n, ea) => {
+      beforeRead: (_n, ea, now) => {
+        readTimes.push(now);
         if (outbid || ea.size < 3) return;
         outbid = true;
         for (const a of ea.values()) Object.assign(a, { bidState: 'outbid', currentBid: 10_000 });
@@ -835,9 +837,10 @@ describe('Bid mode — guards the bids it holds first', () => {
       ['x2', 10_250],
       ['x1', 10_250],
     ]);
-    // REBID_GAP_MS apart, whatever the search delay (10 s here).
-    const gaps = rebids.slice(1).map(([, , t], i) => t - rebids[i]![2]);
-    expect(gaps).toEqual([1.2 * SEC, 1.2 * SEC]);
+    // REBID_GAP_MS apart, whatever the search delay (10 s here), and never
+    // on a read more than 4 s old: the third waits for the next read.
+    expect(rebids[1]![2] - rebids[0]![2]).toBe(1.5 * SEC);
+    for (const [, , t] of rebids) expect(t - Math.max(...readTimes.filter((r) => r <= t))).toBeLessThanOrEqual(4 * SEC);
   });
 
   it('a rest that is due lets the open bids finish first, with no new bids', async () => {

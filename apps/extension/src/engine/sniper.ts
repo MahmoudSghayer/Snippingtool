@@ -677,7 +677,7 @@ const QUICK_GAP_MIN_MS = 2_000;
  * next read) waits only this, whatever the search delay: live, re-bids went
  * out 4 to 5 s apart on a long search delay, and the last ones of a batch
  * were refused on prices 20 s old. */
-const REBID_GAP_MS = 1_200;
+const REBID_GAP_MS = 1_500;
 /** A re-bid goes out only on a watch list read at most this old (from when
  * it came back); past it, the rest wait for the next read, which is due at
  * once. */
