@@ -154,12 +154,30 @@ describe('pickAuctions', () => {
     ]);
   });
 
-  it('goes for the soonest-ending auction first', () => {
+  it('goes for the soonest-ending auction first at the same bid', () => {
     const picks = pickAuctions(
       [auction('late', { expiresAt: NOW + 4 * MIN }), auction('soon', { expiresAt: NOW + MIN }), auction('mid', { expiresAt: NOW + 2 * MIN })],
       opts(),
     );
     expect(picks.map((p) => p.auction.tradeId)).toEqual(['soon', 'mid', 'late']);
+  });
+
+  it('goes for the lowest bid first, ahead of an auction ending sooner', () => {
+    // As live: one auction already at 2,000 (next bid 2,100) ending soonest,
+    // others at 1,900 (next bid 2,000) ending later.
+    const picks = pickAuctions(
+      [
+        auction('soon-dear', { expiresAt: NOW + 2 * MIN, currentBid: 2_000, buyNow: 2_700 }),
+        auction('late-cheap', { expiresAt: NOW + 4 * MIN, currentBid: 1_900, buyNow: 2_700 }),
+        auction('mid-cheap', { expiresAt: NOW + 3 * MIN, currentBid: 1_900, buyNow: 2_700 }),
+      ],
+      opts({ maxBid: 2_100 }),
+    );
+    expect(picks.map((p) => [p.auction.tradeId, p.price])).toEqual([
+      ['mid-cheap', 2_000],
+      ['late-cheap', 2_000],
+      ['soon-dear', 2_100],
+    ]);
   });
 
   it('leaves out what is not for it: known auctions, another card, out of the rating band, ended, unbuyable, no end time', () => {

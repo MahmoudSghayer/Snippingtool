@@ -542,7 +542,8 @@ asks for one before Start; "Most you'll pay" caps it too):
   buy-now price: the starting bid while nobody has bid, else one step of
   EA's price grid above the current bid (`nextBid`, `stepPrice(bid, 1)`: 50
   coins under 1,000, 100 up to 10,000, 250 up to 50,000, 500 up to 100,000,
-  then 1,000). Soonest-ending first, while fewer than `bidding.maxActiveBids`
+  then 1,000). The lowest bid first, and at the same bid the auction ending
+  soonest, while fewer than `bidding.maxActiveBids`
   auctions hold one of its bids (10 by default, 1–50; EA's watch list holds
   about 50 cards) and the watch list has room.
 - **Searching**: by current bid, not buy-now price: the search's max price
