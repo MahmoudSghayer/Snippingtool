@@ -210,7 +210,10 @@ describe('access', () => {
     sessionUser = CUSTOMER;
     renderAt('/account');
     await screen.findByRole('heading', { level: 1, name: 'My account' });
-    expect(screen.getByRole('link', { name: 'Nova Trade home' })).toHaveAttribute('href', '/');
+    expect(screen.getByRole('link', { name: 'Nova Trade AI Powered' })).toHaveAttribute(
+      'href',
+      '/',
+    );
     expect(screen.getByRole('button', { name: 'Sign out' })).toBeVisible();
     expect(screen.queryByRole('link', { name: 'Overview' })).not.toBeInTheDocument();
   });
@@ -241,7 +244,7 @@ describe('access', () => {
       })) as never);
     const verify = renderAt('/verify-email?token=abc');
     expect(await screen.findByText('That link has expired')).toBeVisible();
-    expect(screen.getByRole('link', { name: 'Nova Trade home' })).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Nova Trade AI Powered' })).toBeVisible();
     expect(verify.router.state.location.pathname).toBe('/verify-email');
   });
 });

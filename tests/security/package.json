@@ -19,10 +19,10 @@
     "@sl/api": "workspace:*",
     "@sl/config": "workspace:*",
     "@types/node": "^26.6.5",
-    "dotenv": "^16.4.7",
+    "dotenv": "^18.0.8",
     "fastify": "^5.12.7",
     "otplib": "^12.0.1",
-    "typescript": "^5.7.3",
+    "typescript": "^6.0.3",
     "vitest": "^5.0.5"
   }
 }

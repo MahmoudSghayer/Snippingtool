@@ -17,6 +17,14 @@ updates:
       # package bump.
       minor-and-patch:
         update-types: ['minor', 'patch']
+    # Majors that rewrite the API we use: otplib 13 (the TOTP code in the
+    # auth path) and @tanstack/react-table 9 (packages/ui's DataTable and
+    # its column types). Taken on purpose as a migration, not a bump.
+    ignore:
+      - dependency-name: 'otplib'
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@tanstack/react-table'
+        update-types: ['version-update:semver-major']
     labels: ['dependencies']
     commit-message:
       prefix: 'chore(deps)'

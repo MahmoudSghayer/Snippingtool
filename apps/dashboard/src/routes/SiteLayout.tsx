@@ -63,11 +63,10 @@ export function SiteLayout() {
 
       <header className={s.header}>
         <div className={s.wrap}>
-          <a className={s.brand} href="/" aria-label="Nova Trade home">
+          <a className={s.brand} href="/">
             <BrandMark />
             <span className={s.brandName}>
-              <strong>Nova Trade</strong>
-              <small>AI Powered</small>
+              <strong>Nova Trade</strong> <small>AI Powered</small>
             </span>
           </a>
           <nav className={s.nav} aria-label="Main">
