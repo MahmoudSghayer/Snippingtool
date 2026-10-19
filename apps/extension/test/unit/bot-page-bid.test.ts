@@ -235,6 +235,7 @@ it('shows the open bids in an Active bids tab beside Search results, the one it 
   vi.spyOn(sniper, 'getActiveBids').mockReturnValue({
     max: 10,
     checkedAt: now - 3_000,
+    stale: false,
     bids: [
       { ...card, tradeId: 'a', amount: 12_000, currentBid: 12_000, expiresAt: now + 25_500, state: 'leading', nextBid: 12_250, overMax: false },
       { ...card, tradeId: 'b', amount: 12_000, currentBid: 12_250, expiresAt: now + 51_500, state: 'outbid', nextBid: 12_500, overMax: false },
@@ -269,6 +270,20 @@ it('shows the open bids in an Active bids tab beside Search results, the one it 
   expect(selected()).toBe('results');
   expect($('results')!.hidden).toBe(false);
   expect($('bids')!.hidden).toBe(true);
+});
+
+it('says when EA answered the watch list from its cache', async () => {
+  const { sniper, refresh, $ } = mount({ ...DEFAULT_BOT_MODE_SETTINGS, mode: 'bid' });
+  const now = Date.now();
+  vi.spyOn(sniper, 'isRunning').mockReturnValue(true);
+  vi.spyOn(sniper, 'getActiveBids').mockReturnValue({
+    max: 10,
+    checkedAt: now - 4_000,
+    stale: true,
+    bids: [{ tradeId: 'a', resourceId: 100, assetId: 100, rating: 85, maxBid: 12_000, buyNow: 0, amount: 8_400, currentBid: 8_400, expiresAt: now + 24_000, state: 'leading', nextBid: 8_500, overMax: false }],
+  });
+  await refresh();
+  expect($('bids')!.textContent!.replace(/\s+/g, ' ')).toContain('checked 4 s ago · EA answered from its cache, so these may be out of date');
 });
 
 it('opens on Search results in Snipe mode, with Active bids a click away', async () => {

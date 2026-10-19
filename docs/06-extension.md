@@ -586,8 +586,22 @@ asks for one before Start; "Most you'll pay" caps it too):
   re-bid EA refuses because someone else's bid got there first (403, 461 or
   478, or the adapter's `price_mismatch`) is still followed ("… not
   accepted: … — checking it again"): the next read gives its new price and
-  it bids again while the max allows. After three such refusals in a row it
-  lets the auction go, counted as a miss.
+  it bids again. It lets an auction go only when the next bid would pass the
+  max (or the auction ended). A bid EA takes makes the trader's own bid the
+  auction's current bid at once.
+- **A live watch list**: `requestWatchedItems` answers from the web app's
+  cache. Live, five bids read "leading, 0:24 left" for minutes while they
+  were outbid and ended, and all showed lost at once when the cache ran out
+  (8,500 and 11,250 among them, under the 12,000 max). So each read in the
+  observable shape clears the market cache, reads the list, has EA refresh
+  the running auctions (`services.Item.refreshAuctions(items)`, what
+  community autobuyers call between two reads; UNVERIFIED), and reads it
+  again; without that call, or when it fails, the first read stands. The
+  bot also tells a cached answer apart: a running auction with the same
+  seconds left as the read before keeps counting down from where the last
+  fresh read put it, rather than jumping back. When every running auction
+  reads that way, the log says once "EA answered your watch list from its
+  cache: …" and the Active bids tab adds "EA answered from its cache".
 - **Balance between the bids and the market**: with every open bid taken
   (`bidding.maxActiveBids` or a full watch list) a cycle only checks the
   watch list and re-bids: no search, and its wait says "Checking your bids",

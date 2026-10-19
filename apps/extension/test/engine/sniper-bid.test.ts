@@ -709,9 +709,13 @@ describe('Bid mode — guards the bids it holds first', () => {
     expect(h.sniper.getLog().some((e) => e.kind === 'dropped')).toBe(false);
     expect(h.attempts).toEqual([]);
     expect(h.statuses.at(-1)).toMatchObject({ active: 1, committed: 11_500 });
+    // Leading again: the current bid shown is the trader's own 11,500, not
+    // the 11,250 that beat them.
+    expect(h.sniper.getActiveBids().bids[0]).toMatchObject({ state: 'leading', amount: 11_500, currentBid: 11_500 });
   });
 
-  it('lets a re-bid go once EA has refused it three times in a row', async () => {
+  // Live: "you can't give up on any bid unless it went above the maximum price".
+  it('never gives up on a beaten re-bid while the auction runs and the max allows', async () => {
     const h = setup({
       results: (n) => (n === 1 ? [auction('a', 200)] : []),
       bidResult: (_id, price) =>
@@ -723,11 +727,35 @@ describe('Bid mode — guards the bids it holds first', () => {
     });
     h.sniper.start();
     await h.done();
-    expect(h.bids.map(([, p]) => p)).toEqual([10_000, 11_250, 11_250, 11_250]);
-    expect(h.log().filter((m) => m.endsWith('— checking it again'))).toHaveLength(2);
-    expect(h.log()).toContain('Re-bid 11,250 on {card} not accepted: someone else bid first, or the auction ended');
-    expect(h.attempts).toEqual([expect.objectContaining({ tradeId: 'a', outcome: 'too_slow' })]);
-    expect(h.statuses.at(-1)).toMatchObject({ active: 0 });
+    const rebids = h.bids.slice(1).map(([, p]) => p);
+    expect(rebids.length).toBeGreaterThanOrEqual(8);
+    expect(new Set(rebids)).toEqual(new Set([11_250]));
+    expect(h.log().filter((m) => m.endsWith('— checking it again'))).toHaveLength(rebids.length);
+    expect(h.sniper.getLog().some((e) => e.kind === 'dropped')).toBe(false);
+    expect(h.attempts).toEqual([]);
+    expect(h.statuses.at(-1)).toMatchObject({ active: 1 });
+  });
+
+  // Live: five bids read "leading, 0:24 left" for minutes while EA's cached
+  // watch list hid that they were outbid; all showed lost at once.
+  it('keeps counting a bid down when EA answers the watch list from its cache, and says so once', async () => {
+    let frozen: WatchedAuction[] | null = null;
+    const h: Harness = setup({
+      results: (n) => (n === 1 ? [auction('a', 200)] : []),
+      watchlistResult: (n) => (n >= 3 && frozen ? { ok: true, signed: true, watched: frozen, latencyMs: 5 } : undefined),
+      beforeRead: (n, ea, now) => {
+        if (n !== 2) return;
+        const e = ea.get('a')!;
+        frozen = [{ tradeId: 'a', itemId: 'item-a', resourceId: 100, assetId: 100, rating: 85, bidState: 'highest', tradeState: 'active', currentBid: e.currentBid, startingBid: 10_000, buyNowPrice: 20_000, expires: Math.round((e.a.expiresAt! - now) / SEC) }];
+      },
+      stopWhen: (x) => x.reads >= 5 && x.sniper.state.phase !== 'bidding',
+    });
+    h.sniper.start();
+    await h.done();
+    // The time left still runs out where the auction really ends.
+    expect(h.sniper.getActiveBids().bids[0]!.expiresAt).toBe(START + 200 * SEC);
+    expect(h.sniper.getActiveBids().stale).toBe(true);
+    expect(h.log().filter((m) => m.startsWith('EA answered your watch list from its cache'))).toHaveLength(1);
   });
 
   it('re-bids several outbid leads within seconds, soonest-ending first', async () => {
@@ -1111,7 +1139,7 @@ describe('Bid mode — the open bids, for the page', () => {
       stopWhen: (x) => x.reads >= 2 && x.sniper.state.phase !== 'bidding',
       bidding: { maxActiveBids: 4 },
     });
-    expect(h.sniper.getActiveBids()).toEqual({ bids: [], checkedAt: null, max: 4 });
+    expect(h.sniper.getActiveBids()).toEqual({ bids: [], checkedAt: null, max: 4, stale: false });
     h.sniper.start();
     await h.done();
     const view = h.sniper.getActiveBids();

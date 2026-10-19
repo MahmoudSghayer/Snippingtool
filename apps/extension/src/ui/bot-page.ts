@@ -2579,7 +2579,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       ? 'not checked while Nova AI is stopped: EA keeps these bids'
       : view.checkedAt == null
         ? 'not checked yet'
-        : `checked ${Math.max(0, Math.round((now - view.checkedAt) / 1000))} s ago`;
+        : `checked ${Math.max(0, Math.round((now - view.checkedAt) / 1000))} s ago${view.stale ? ' · EA answered from its cache, so these may be out of date' : ''}`;
     return `<div class="bids-head">${parts.join(' · ')} · <span class="when">${checked}</span></div>${view.bids.map((b) => bidRowHtml(b, now)).join('')}`;
   }
 
