@@ -677,7 +677,17 @@ asks for one before Start; "Most you'll pay" caps it too):
 The page shows the open bids while Bid mode runs ("Running for 3:21 ·
 Active bids: 4/10") and Bid mode's log lines name the card in the sentence
 ("Bid 12,250 on Kika Nazareth (3 min left)", "Won Kika Nazareth for
-12,500"); the Auto-sell card says it covers both modes.
+12,500"); the Auto-sell card says it covers both modes. Beside Search
+results, an **Active bids** tab (the one the page opens on in Bid mode;
+"10/10" on the tab) lists every open bid soonest-ending first
+(`Sniper.getActiveBids`): the card, Leading / Outbid / Waiting for EA, the
+current bid, the time left counting down each second (amber in the last
+minute, red in the last 30 s), and what happens next ("Your bid is the
+highest · max 12,000", "re-bidding 11,750", "Next bid 12,250 is over your
+max"). Its first line sums them up: "10 of 10 open · 7 leading · 2 outbid ·
+62,900 held · checked 3 s ago". That's each auction as the last watch list
+read saw it. After a stop the bids stay listed (EA keeps them) with "not
+checked while Nova AI is stopped".
 
 **The page is laid out like EA's "Search the Transfer Market" screen**: a
 back arrow and title on EA's navy bar, the pitch artwork behind two floating

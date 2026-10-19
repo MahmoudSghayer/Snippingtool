@@ -79,7 +79,7 @@ import { NOVA_LOGO_SVG } from './brand.js';
 import { readWallet } from './ea-wallet.js';
 import { onTrusted } from './trusted-events.js';
 
-import type { Sniper, SniperLogEntry, SniperPhase, SniperSearchResult } from '../engine/sniper.js';
+import type { ActiveBid, Sniper, SniperLogEntry, SniperPhase, SniperSearchResult } from '../engine/sniper.js';
 
 /** The search the bot runs: the one filled in on this page. */
 export interface LiveSearch {
@@ -757,6 +757,29 @@ const CSS = `
   .res { font-size: 13px; padding: 3px 6px; color: var(--ea-text-2); }
   .res .when { color: var(--ea-muted); margin-right: 8px; }
   .res.item { display: flex; justify-content: space-between; color: var(--ea-text); background: var(--ea-surface); border-radius: 6px; margin: 2px 0; }
+  .feeds.bids-open { grid-template-columns: 1fr 1.3fr; }
+  .feed-tabs { display: flex; gap: 8px; padding: 0 8px; border-bottom: 1px solid var(--ea-line); }
+  .ftab { padding: 12px 8px 10px; font: inherit; font-size: 18px; line-height: 20px; font-weight: 500; color: var(--ea-muted); background: none; border: 0; border-bottom: 2px solid transparent; cursor: pointer; }
+  .ftab[aria-selected="true"] { color: var(--ea-text); border-bottom-color: var(--ea-accent); }
+  .ftab .count { margin-left: 6px; font-size: 13px; color: var(--ea-text-2); }
+  .feed .list[hidden] { display: none; }
+  .bids-head { font-size: 13px; padding: 4px 6px 8px; color: var(--ea-text-2); }
+  .bids-head .when { color: var(--ea-muted); }
+  .bidrow { display: flex; align-items: center; gap: 10px; padding: 8px 12px; margin-bottom: 6px; border-radius: var(--ea-radius); background: var(--ea-surface); border-left: 3px solid var(--ea-line-strong); }
+  .bidrow.leading { border-left-color: var(--ea-success); } .bidrow.outbid { border-left-color: var(--ea-danger); } .bidrow.pending { border-left-color: var(--ea-warning); }
+  .bidrow .main { flex: 1; min-width: 0; }
+  .bidrow .main b { font-weight: 500; }
+  .bidrow .sub { color: var(--ea-muted); font-size: 12px; }
+  .st { margin-left: 6px; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 500; white-space: nowrap; }
+  .st.leading { background: color-mix(in srgb, var(--ea-success) 16%, transparent); color: var(--ea-success); }
+  .st.outbid { background: color-mix(in srgb, var(--ea-danger) 16%, transparent); color: var(--ea-danger); }
+  .st.pending { background: color-mix(in srgb, var(--ea-warning) 16%, transparent); color: var(--ea-warning); }
+  .bidrow .cur, .bidrow .left { display: flex; flex-direction: column; align-items: flex-end; white-space: nowrap; }
+  .bidrow .left { min-width: 44px; }
+  .bidrow .k { font-size: 11px; color: var(--ea-muted); }
+  .bidrow .v { font-size: 15px; font-weight: 500; font-variant-numeric: tabular-nums; }
+  .bidrow.leading .cur .v { color: var(--ea-success); }
+  .left.soon .v { color: var(--ea-warning); } .left.now .v { color: var(--ea-danger); }
   .empty { color: var(--ea-muted); padding: 18px; text-align: center; }
   .na { color: var(--ea-muted); }
 
@@ -856,7 +879,14 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         <div class="dash" id="dash"></div>
         <div class="feeds">
           <section class="feed" aria-label="Nova AI activity"><h3>Activity</h3><div class="list" id="log"></div></section>
-          <section class="feed" aria-label="Search results"><h3>Search results</h3><div class="list" id="results"></div></section>
+          <section class="feed" aria-label="Search results and active bids">
+            <div class="feed-tabs" role="tablist" aria-label="Search results and active bids">
+              <button type="button" class="ftab" role="tab" data-feed="results" aria-selected="true">Search results</button>
+              <button type="button" class="ftab" role="tab" data-feed="bids" aria-selected="false">Active bids<span class="count" id="bids-count"></span></button>
+            </div>
+            <div class="list" id="results"></div>
+            <div class="list" id="bids" hidden></div>
+          </section>
         </div>
       </div>
     </div>
@@ -2500,6 +2530,77 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       $('results'),
       results.length === 0 ? '<div class="empty">Each search appears here.</div>' : results.map(resultHtml).join(''),
     );
+    renderBids();
+  }
+
+  /** The tab beside Search results the trader picked; until they pick one,
+   * Active bids in Bid mode and Search results in Snipe mode. */
+  let feedTab: 'results' | 'bids' | null = null;
+
+  /** Bid mode's open bids (`Sniper.getActiveBids`): where each stands and
+   * how long it has left, redrawn every second while the page is open. */
+  function renderBids(): void {
+    const sniper = deps.getSniper();
+    const tab = feedTab ?? (bidMode() ? 'bids' : 'results');
+    for (const el of root.querySelectorAll<HTMLElement>('.ftab')) el.setAttribute('aria-selected', String(el.dataset.feed === tab));
+    $('results').hidden = tab !== 'results';
+    $('bids').hidden = tab !== 'bids';
+    root.querySelector('.feeds')!.classList.toggle('bids-open', tab === 'bids');
+    const view = sniper?.getActiveBids() ?? null;
+    const count = view && view.bids.length > 0 ? `${view.bids.length}/${view.max}` : '';
+    const countEl = $('bids-count');
+    if (countEl.textContent !== count) countEl.textContent = count;
+    if (tab !== 'bids') return;
+    wantNames(view?.bids.map((b) => b.assetId) ?? []);
+    setHtml($('bids'), bidsHtml(view, sniper?.isRunning() ?? false, Date.now()));
+  }
+
+  function bidsHtml(view: ReturnType<Sniper['getActiveBids']> | null, running: boolean, now: number): string {
+    if (!view || view.bids.length === 0) {
+      return running && bidMode()
+        ? '<div class="empty">No open bids right now: Nova AI is looking for auctions to bid on.</div>'
+        : '<div class="empty">Your open bids appear here while Bid mode runs: your bid, the current bid, whether you lead, and the time left.</div>';
+    }
+    let leading = 0;
+    let outbid = 0;
+    let waiting = 0;
+    let held = 0;
+    for (const b of view.bids) {
+      if (b.state === 'leading') leading++;
+      else if (b.state === 'outbid') outbid++;
+      else waiting++;
+      if (b.state !== 'outbid') held += b.amount;
+    }
+    const parts = [`<b>${view.bids.length} of ${view.max}</b> open`, `${leading} leading`];
+    if (outbid > 0) parts.push(`${outbid} outbid`);
+    if (waiting > 0) parts.push(`${waiting} waiting for EA`);
+    parts.push(`${fmt(held)}${COIN} held`);
+    const checked = !running
+      ? 'not checked while Nova AI is stopped: EA keeps these bids'
+      : view.checkedAt == null
+        ? 'not checked yet'
+        : `checked ${Math.max(0, Math.round((now - view.checkedAt) / 1000))} s ago`;
+    return `<div class="bids-head">${parts.join(' · ')} · <span class="when">${checked}</span></div>${view.bids.map((b) => bidRowHtml(b, now)).join('')}`;
+  }
+
+  function bidRowHtml(b: ActiveBid, now: number): string {
+    const left = b.expiresAt - now;
+    const label = b.state === 'leading' ? 'Leading' : b.state === 'outbid' ? 'Outbid' : 'Waiting for EA';
+    const max = `max ${fmt(b.maxBid)}${COIN}`;
+    const sub =
+      b.state === 'leading'
+        ? `Your bid is the highest · ${max}`
+        : b.state === 'outbid'
+          ? b.overMax
+            ? `Next bid ${fmt(b.nextBid)}${COIN} is over your ${max}`
+            : `Your bid ${fmt(b.amount)}${COIN} · re-bidding ${fmt(b.nextBid)}${COIN} · ${max}`
+          : `Your bid ${fmt(b.amount)}${COIN} · the next check says if it leads · ${max}`;
+    const time = left > 0 ? clock(left) : 'ended';
+    const timeCls = left <= 30_000 ? 'left now' : left <= 60_000 ? 'left soon' : 'left';
+    return `<div class="bidrow ${b.state}"><div class="main"><b>${b.rating} ${esc(nameOf(b.assetId))}</b><span class="st ${b.state}">${label}</span>
+      <div class="sub">${sub}</div></div>
+      <div class="cur"><span class="k">Current bid</span><span class="v">${b.currentBid > 0 ? `${fmt(b.currentBid)}${COIN}` : '—'}</span></div>
+      <div class="${timeCls}"><span class="k">Left</span><span class="v">${time}</span></div></div>`;
   }
 
   function renderTop(): void {
@@ -2627,6 +2728,12 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     const tab = (e.target as HTMLElement).closest<HTMLElement>('[data-tab]')?.dataset.tab;
     if (tab === 'search' || tab === 'settings') showTab(tab);
   });
+  onTrusted(root.querySelector('.feed-tabs')!, 'click', (e) => {
+    const tab = (e.target as HTMLElement).closest<HTMLElement>('[data-feed]')?.dataset.feed;
+    if (tab !== 'results' && tab !== 'bids') return;
+    feedTab = tab;
+    renderBids();
+  });
   onTrusted($('close'), 'click', () => api.close());
   // Esc closes the page from anywhere on EA's page, like the nav item does.
   // An open list inside the page takes the first Esc (the search's keydown
@@ -2658,9 +2765,11 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       // The transfer list figures ride on the same tick, for a list EA's
       // page loads while the bot is stopped (nothing else refreshes the
       // dash then). When nothing changed the check is one string compare.
+      // The open bids' time left counts down on it too.
       livePoll = setInterval(() => {
         renderWallet();
         renderTransferList();
+        renderBids();
       }, 1_000);
       ringFrame = requestAnimationFrame(animate);
       openListeners.forEach((cb) => cb(true));
