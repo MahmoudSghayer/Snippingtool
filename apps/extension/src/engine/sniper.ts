@@ -634,6 +634,9 @@ const MAX_WATCH_FAILURES_IN_A_ROW = 3;
  * one at a time, each after the search delay, like a person's. EA answered
  * three bids sent within a second of a search with 521, 429 and 512. */
 const NEW_BIDS_PER_SEARCH = 1;
+/** Tries at moving a won card to the transfer list, and at listing it, before
+ * the bot leaves it where it is and says so. */
+const COLLECT_TRIES = 3;
 
 /** How a batch of matches ended (`Sniper.buyMatches`): `dropped` when it
  * left the rest (a pause after a buy made them stale, or a budget holds
@@ -810,6 +813,9 @@ export class Sniper {
   private nextEaRequestAt = -Infinity;
   /** Bid mode: bids and re-bids sent to EA, for `NEW_BIDS_PER_SEARCH`. */
   private bidRequestsSent = 0;
+  /** Bid mode: won cards still to move to the transfer list (and list, with
+   * auto-sell on), one step per cycle (`collectNext`). */
+  private collecting: { m: SniperMatch; moved: boolean; tries: number }[] = [];
   /** Bid mode: the sliding one-hour window of bids EA saw. */
   private bidTimes: number[] = [];
   /** Bid mode: the auctions holding one of the bot's bids. Kept across
@@ -1194,6 +1200,14 @@ export class Sniper {
         kind: 'info',
         message: `${plural(open, 'bid')} still open: EA keeps bids until their auctions end, and Bid mode follows them again when you start it`,
       });
+    // Won cards it had not finished with: where each one is now.
+    const notMoved = this.collecting.filter((j) => !j.moved).length;
+    const notListed = this.collecting.length - notMoved;
+    this.collecting = [];
+    if (notMoved > 0)
+      this.addLog({ kind: 'info', message: `${plural(notMoved, 'won card')} not moved yet: still in your watch list (Transfer Targets)` });
+    if (notListed > 0)
+      this.addLog({ kind: 'info', message: `${plural(notListed, 'won card')} moved but not listed yet: in your transfer list` });
     this.setState({ phase: 'stopped', phaseEndsAt: null, stopReason: reason, stopDetail: message });
   }
 
@@ -1868,6 +1882,7 @@ export class Sniper {
 
       if (this.watchlistDue(startedAt) && !(await this.readWatchlist(signal, false))) return;
       if ((await this.settleBids(signal)) === 'stopped') return;
+      if ((await this.collectNext(signal)) === 'stopped') return;
       if (this.watchlistFull()) return this.stop('watchlist_full');
 
       if (this.bidRoom() > 0) {
@@ -2300,31 +2315,60 @@ export class Sniper {
   private onWon(b: TrackedBid, price: number): void {
     const m = bidMatch(b, price > 0 ? price : b.amount);
     this.recordBought(m, null, this.knownEstimate(m), {}, { itemId: b.itemId });
-    void this.collectWon(m).catch((err: unknown) => {
-      this.addLog({ kind: 'blocked', resourceId: m.resourceId, assetId: m.assetId, rating: m.rating, message: `{card} stays in your watch list: ${String(err)}` });
-      this.deps.onChange();
-    });
+    // Moved (and listed) one step at a time, each waiting its turn like any
+    // other request: three wins in one read must not become six requests at
+    // once.
+    this.collecting.push({ m, moved: false, tries: 0 });
     const t = this.settings.thresholds;
     if (t.stopAfterPurchases > 0 && this.runTotals.purchases >= t.stopAfterPurchases) this.stop('purchase_limit');
   }
 
-  /** A won card off the watch list, without holding up the bot: moved to
-   * the transfer list (through EA's own call), then listed by auto-sell at
-   * the same price a sniped card gets when it is on. Where it cannot be
-   * moved it stays in the watch list, as EA leaves it. Never throws for EA's
-   * answers: every outcome is in the log. */
-  private async collectWon(m: SniperMatch): Promise<void> {
+  /**
+   * The next step for the oldest won card (`collecting`): move it to the
+   * transfer list, then, with auto-sell on, list it on the next turn at the
+   * price a sniped card gets. Each step waits its turn (`paceEaRequest`). A
+   * step EA refuses is tried again on a later cycle, up to COLLECT_TRIES
+   * times; one that cannot work (no move call, a card this page load did not
+   * win) is not. Where it cannot be moved it stays in the watch list, as EA
+   * leaves it; every outcome is in the log.
+   */
+  private async collectNext(signal: AbortSignal): Promise<'done' | 'stopped'> {
+    const job = this.collecting[0];
+    if (!job) return 'done';
+    if (!(await this.paceEaRequest(signal, 'bidding'))) return 'stopped';
+    const m = job.m;
     const card = { resourceId: m.resourceId, assetId: m.assetId, rating: m.rating };
-    const moved = this.deps.adapter.move ? await this.deps.adapter.move(m.tradeId) : { ok: false, error: 'move_unsupported', latencyMs: 0 };
-    if (!moved.ok) {
-      this.addLog({ kind: 'blocked', ...card, message: `{card} stays in your watch list: ${moveMissReason(moved.error)}` });
+    const permanent = (error: string | undefined) => !!error && /_unsupported$|_not_bought$/.test(error);
+    if (!job.moved) {
+      let moved: { ok: boolean; error?: string };
+      if (this.deps.adapter.move) {
+        const moving = this.deps.adapter.move(m.tradeId);
+        this.noteEaRequest();
+        moved = await moving;
+      } else moved = { ok: false, error: 'move_unsupported' };
+      if (!moved.ok) {
+        job.tries++;
+        if (job.tries < COLLECT_TRIES && !permanent(moved.error)) return 'done';
+        this.collecting.shift();
+        this.addLog({ kind: 'blocked', ...card, message: `{card} stays in your watch list: ${moveMissReason(moved.error)}` });
+        this.deps.onChange();
+        return 'done';
+      }
+      job.moved = true;
+      job.tries = 0;
+      this.watch.size = Math.max(0, this.watch.size - 1);
+      if (this.settings.autoSell.enabled && !this.deps.killSwitch().active) return 'done';
+      this.collecting.shift();
+      this.addLog({ kind: 'moved', ...card, message: 'Moved {card} to your transfer list' });
       this.deps.onChange();
-      return;
+      return 'done';
     }
-    this.watch.size = Math.max(0, this.watch.size - 1);
-    if (this.settings.autoSell.enabled && !this.deps.killSwitch().active) return this.autoSell(m);
-    this.addLog({ kind: 'moved', ...card, message: 'Moved {card} to your transfer list' });
-    this.deps.onChange();
+    job.tries++;
+    const last = job.tries >= COLLECT_TRIES;
+    const listed = await this.autoSell(m, { onSent: () => this.noteEaRequest(), quietFailure: !last });
+    if (listed.outcome === 'failed' && !last && !permanent(listed.error)) return 'done';
+    this.collecting.shift();
+    return 'done';
   }
 
   /** An outbid bid's coins back: EA gave them back. */
@@ -2437,11 +2481,17 @@ export class Sniper {
   /** Auto-sell: list a card the bot just bought, at the user's price (the
    * market price moved by their steps, or their fixed price). Never throws;
    * whatever happens is in the log. */
-  private async autoSell(m: SniperMatch): Promise<void> {
+  private async autoSell(
+    m: SniperMatch,
+    o: { onSent?: () => void; quietFailure?: boolean } = {},
+  ): Promise<{ outcome: 'listed' | 'failed' | 'skipped'; error?: string }> {
     const a = this.settings.autoSell;
-    if (!a.enabled || this.deps.killSwitch().active) return;
+    if (!a.enabled || this.deps.killSwitch().active) return { outcome: 'skipped' };
     const card = { resourceId: m.resourceId, assetId: m.assetId, rating: m.rating };
-    const notListed = (why: string) => void this.addLog({ kind: 'blocked', ...card, message: `not listed: ${why}` });
+    const notListed = (why: string) => {
+      this.addLog({ kind: 'blocked', ...card, message: `not listed: ${why}` });
+      return { outcome: 'skipped' as const };
+    };
 
     let price: number;
     let basis: string;
@@ -2460,10 +2510,13 @@ export class Sniper {
     }
     // Starting bid one step under the buy-now, as the web app suggests.
     const start = Math.max(MIN_START_PRICE, stepPrice(price, -1));
-    const result = await this.deps.adapter.list(m.tradeId, start, price);
+    const listing = this.deps.adapter.list(m.tradeId, start, price);
+    o.onSent?.();
+    const result = await listing;
     if (result.ok) this.addLog({ kind: 'listed', ...card, price, message: basis });
-    else notListed(result.error ?? 'EA did not accept the listing');
+    else if (!o.quietFailure) this.addLog({ kind: 'blocked', ...card, message: `not listed: ${result.error ?? 'EA did not accept the listing'}` });
     this.deps.onChange();
+    return result.ok ? { outcome: 'listed' } : { outcome: 'failed', error: result.error };
   }
 
   /** Why a match was not bought, once per listing: the same one comes back
