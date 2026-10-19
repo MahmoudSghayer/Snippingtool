@@ -283,6 +283,10 @@ describe("the shapes' Bid mode calls (ASSUMED SHAPE)", () => {
     refreshAuctions.mockReturnValueOnce(observable({ success: false }));
     svc.requestWatchedItems.mockReturnValueOnce(observable({ success: true, data: { items: [running] } }));
     expect((await shape.bidding!.readWatchlist(services)).entries).toEqual([running]);
+    // A refresh that never answers does not hold the read either.
+    refreshAuctions.mockReturnValueOnce(observable({ success: true }, false));
+    svc.requestWatchedItems.mockReturnValueOnce(observable({ success: true, data: { items: [running] } }));
+    expect((await shape.bidding!.readWatchlist(services)).entries).toEqual([running]);
     // A page without refreshAuctions reads the list once.
     svc.requestWatchedItems.mockClear();
     svc.requestWatchedItems.mockReturnValueOnce(observable({ success: true, data: { items: [running] } }));

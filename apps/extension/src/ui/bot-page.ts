@@ -2585,7 +2585,9 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
 
   function bidRowHtml(b: ActiveBid, now: number): string {
     const left = b.expiresAt - now;
-    const label = b.state === 'leading' ? 'Leading' : b.state === 'outbid' ? 'Outbid' : 'Waiting for EA';
+    // Ended and still leading: won unless a last-second bid came in, which
+    // the check that runs right after its end says.
+    const label = b.state === 'leading' ? (left > 0 ? 'Leading' : 'Ended, confirming') : b.state === 'outbid' ? 'Outbid' : 'Waiting for EA';
     const max = `max ${fmt(b.maxBid)}${COIN}`;
     const sub =
       b.state === 'leading'
