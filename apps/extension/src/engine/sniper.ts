@@ -624,13 +624,23 @@ interface BidTarget {
   itemId: string | null;
 }
 
-/** Bid mode's watch list reads: at most every WATCH_MIN_GAP_MS, at least
- * every WATCH_MAX_AGE_MS while bids are open, and every cycle (within the
- * gap) once a bid ends within WATCH_NEAR_MS, is outbid or has no answer
- * yet (`Sniper.watchlistDue`). */
-const WATCH_MIN_GAP_MS = 15_000;
-const WATCH_MAX_AGE_MS = 60_000;
+/** Bid mode guards the bids it holds before it looks for more. Its watch
+ * list reads: at most every WATCH_MIN_GAP_MS (the adapter's own floor is
+ * 5 s), at least every WATCH_MAX_AGE_MS while bids are open, and every
+ * cycle (within the gap) once a bid ends within WATCH_NEAR_MS, is outbid,
+ * has no answer yet, or no new bid fits (`Sniper.watchlistDue`). */
+const WATCH_MIN_GAP_MS = 6_000;
+const WATCH_MAX_AGE_MS = 20_000;
 const WATCH_NEAR_MS = 90_000;
+/** A bid this close to its end (or outbid, or without an answer yet) holds
+ * the search back: the cycle checks the watch list and re-bids instead
+ * (`Sniper.bidsNeedGuard`). A search then never costs a lead. */
+const GUARD_MS = 60_000;
+/** After a watch list read or a re-bid, Bid mode's next EA request waits
+ * this share of the search delay, never under QUICK_GAP_MIN_MS: an outbid
+ * lead is answered within seconds, not a full search delay per bid. */
+const QUICK_GAP_SHARE = 0.4;
+const QUICK_GAP_MIN_MS = 2_000;
 /** Failed watch list reads in a row before Bid mode gives up. */
 const MAX_WATCH_FAILURES_IN_A_ROW = 3;
 /** New bids Bid mode places on one search's results: one, so bids go out
@@ -1874,7 +1884,12 @@ export class Sniper {
 
     while (!signal.aborted) {
       if (this.dailyLimitReached()) return this.stop('daily_limit');
-      if (await this.takeBreakIfDue(p, signal)) continue;
+      // No break or rest while a bid needs guarding; a rest that is due
+      // first lets the open bids finish (no new ones) and what they won
+      // reach the transfer list, then starts.
+      const holding = this.book.size() > 0 || this.collecting.length > 0;
+      const winding = holding && this.restDue(p);
+      if (!winding && !(holding && this.bidsNeedGuard(this.now())) && (await this.takeBreakIfDue(p, signal))) continue;
       const filters = this.deps.getFilters();
       if (filters.length === 0) return this.stop('no_filters');
       // The search can be edited while the bot runs; its max price is the max bid.
@@ -1888,7 +1903,11 @@ export class Sniper {
       if ((await this.collectNext(signal)) === 'stopped') return;
       if (this.watchlistFull()) return this.stop('watchlist_full');
 
-      if (this.bidRoom() > 0) {
+      // The bids it holds come first: while one is near its end, outbid or
+      // unanswered, or no new bid fits, the cycle only checks and re-bids.
+      const guarding = winding || this.bidRoom() <= 0 || this.bidsNeedGuard(this.now());
+      let searched = false;
+      if (!guarding) {
         // With bids to follow, a full search window skips the search
         // rather than sleeping through their last minutes.
         const gate = await this.searchWindowGate(signal, this.book.size() > 0);
@@ -1898,6 +1917,7 @@ export class Sniper {
           if (!(await this.paceEaRequest(signal, 'waiting'))) return;
           const target = filters[this.filterIndex++ % filters.length]!;
           const found = await this.bidSearch(target);
+          searched = true;
           if (signal.aborted) return;
           this.stats.searches++;
           this.searchSeq++;
@@ -1918,9 +1938,26 @@ export class Sniper {
       }
       this.deps.onChange();
 
-      const delayMs = this.pickSeconds(this.settings.searchDelay) * 1000 * this.eaPaceFactor();
-      await this.wait('waiting', Math.max(0, delayMs - (this.now() - startedAt)), signal);
+      if (searched) {
+        const delayMs = this.pickSeconds(this.settings.searchDelay) * 1000 * this.eaPaceFactor();
+        await this.wait('waiting', Math.max(0, delayMs - (this.now() - startedAt)), signal);
+      } else {
+        // Guarding (or nothing to search): back as soon as the watch list
+        // may be read again, not a search delay later.
+        await this.wait('checking', Math.max(1_000, this.watch.at + WATCH_MIN_GAP_MS - this.now()), signal);
+      }
     }
+  }
+
+  /** Whether the run is due a rest (`takeBreakIfDue` takes it). */
+  private restDue(p: Pacing): boolean {
+    return this.settings.rest.enabled && this.now() >= p.restAt;
+  }
+
+  /** Whether a bid the bot holds needs it now: ends within GUARD_MS, was
+   * outbid, or has no answer from the watch list yet. */
+  private bidsNeedGuard(now: number): boolean {
+    return this.book.bids().some((b) => b.state !== 'leading' || b.expiresAt - now <= GUARD_MS);
   }
 
   /** How many more auctions Bid mode may bid on now: the user's max open
@@ -1958,7 +1995,7 @@ export class Sniper {
     if (bids.length === 0) return false;
     const age = now - this.watch.at;
     if (age < WATCH_MIN_GAP_MS) return false;
-    if (age >= WATCH_MAX_AGE_MS) return true;
+    if (age >= WATCH_MAX_AGE_MS || this.bidRoom() <= 0) return true;
     return bids.some((b) => b.state !== 'leading' || b.expiresAt - now <= WATCH_NEAR_MS);
   }
 
@@ -1973,9 +2010,13 @@ export class Sniper {
     return !signal.aborted;
   }
 
-  /** A request just went to EA: the next one waits a fresh search delay. */
-  private noteEaRequest(): void {
-    this.nextEaRequestAt = this.now() + this.pickSeconds(this.settings.searchDelay) * 1000 * this.eaPaceFactor();
+  /** A request just went to EA: the next one waits a fresh search delay,
+   * or (`quick`: a watch list read or a re-bid) a share of it, so an
+   * outbid lead is answered in seconds. */
+  private noteEaRequest(quick = false): void {
+    const delay = this.pickSeconds(this.settings.searchDelay) * 1000;
+    const gap = quick ? Math.max(QUICK_GAP_MIN_MS, delay * QUICK_GAP_SHARE) : delay;
+    this.nextEaRequestAt = this.now() + gap * this.eaPaceFactor();
   }
 
   /** Reads the watch list, and keeps what it said for `settleBids`. False
@@ -1989,7 +2030,7 @@ export class Sniper {
     const startedAt = this.now();
     this.watch.at = startedAt;
     const reading = this.deps.adapter.watchlist!();
-    this.noteEaRequest();
+    this.noteEaRequest(true);
     const res = await reading;
     if (signal.aborted) return false;
     if (res.ok) {
@@ -2046,8 +2087,10 @@ export class Sniper {
       else this.releaseBid(e.bid);
     }
     if (signal.aborted) return 'stopped';
-    for (const e of events) {
-      if (e.kind !== 'outbid' || !this.book.get(e.bid.tradeId)) continue;
+    // Soonest-ending first: it has the least time left to win back.
+    const outbid = events.filter((e) => e.kind === 'outbid').sort((x, y) => x.bid.expiresAt - y.bid.expiresAt);
+    for (const e of outbid) {
+      if (!this.book.get(e.bid.tradeId)) continue;
       const r = await this.rebid(e.bid, signal);
       if (r === 'stopped') return 'stopped';
       // A limit holds bidding back: the rest wait for the next read.
@@ -2259,7 +2302,7 @@ export class Sniper {
     const at = this.now();
     this.bidTimes.push(at);
     const bidding = this.deps.adapter.bid!(t.tradeId, bid, { resourceId: t.resourceId, assetId: t.assetId });
-    this.noteEaRequest();
+    this.noteEaRequest(rebid !== null);
     this.bidRequestsSent++;
     // Saved once the bid is on its way, not before it.
     this.persistBudget();
