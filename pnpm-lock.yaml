@@ -242,8 +242,8 @@ importers:
         specifier: ^2.2.0
         version: 2.5.0
       dotenv:
-        specifier: ^16.4.7
-        version: 16.6.1
+        specifier: ^18.0.8
+        version: 18.0.8
       drizzle-orm:
         specifier: ^0.45.4
         version: 0.45.4(@opentelemetry/api@1.9.1)(postgres@3.4.9)
@@ -478,8 +478,8 @@ importers:
         specifier: ^0.45.1
         version: 0.45.1
       dotenv:
-        specifier: ^16.4.7
-        version: 16.6.1
+        specifier: ^18.0.8
+        version: 18.0.8
       drizzle-orm:
         specifier: ^0.45.4
         version: 0.45.4(@opentelemetry/api@1.9.1)(postgres@3.4.9)
@@ -632,8 +632,8 @@ importers:
         specifier: ^8.0.0
         version: 8.0.0
       dotenv:
-        specifier: ^16.4.7
-        version: 16.6.1
+        specifier: ^18.0.8
+        version: 18.0.8
       otplib:
         specifier: ^12.0.1
         version: 12.0.1
@@ -675,8 +675,8 @@ importers:
         specifier: ^26.6.5
         version: 26.6.5
       dotenv:
-        specifier: ^16.4.7
-        version: 16.6.1
+        specifier: ^18.0.8
+        version: 18.0.8
       fastify:
         specifier: ^5.2.1
         version: 5.12.5
@@ -2797,9 +2797,10 @@ packages:
   dom-helpers@5.2.1:
     resolution: {integrity: sha512-nRCa7CK3VTrM2NmGkIy4cbK7IZlgBE/PYMn55rrXefr5xXDP0LdtfPnblFDoVdcAfslJ7or6iqAUnx0CCGIWQA==}
 
-  dotenv@16.6.1:
-    resolution: {integrity: sha512-uBq4egWHTcTt33a72vpSG0z3HnPuIl6NqYcTrKEg2azoEyl2hpW0zqlxysq2pK9HlDIHyHyakeYaYnSAwd8bow==}
+  dotenv@18.0.8:
+    resolution: {integrity: sha512-2KDeoFoK/zRtcnbunCDlLG5VWVMcyqeQc6iK65o231nfNAcuGrKoqUQfJFUtBI+QlShk5HKIHxwebBtUl3rEfA==}
     engines: {node: '>=12'}
+    hasBin: true
 
   drizzle-orm@0.45.4:
     resolution: {integrity: sha512-NiM1YZpJ2UxyeE67DpDDZ+Tsw4YLX3trSlkNT7Tm9eKoUNb1LvaAaQzXgYQsWs+AQ9TUmmwMmBOCXuqqxUWKKQ==}
@@ -6743,7 +6744,7 @@ snapshots:
       '@babel/runtime': 7.29.7
       csstype: 3.2.3
 
-  dotenv@16.6.1: {}
+  dotenv@18.0.8: {}
 
   drizzle-orm@0.45.4(@opentelemetry/api@1.9.1)(postgres@3.4.9):
     optionalDependencies:
