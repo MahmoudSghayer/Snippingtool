@@ -456,6 +456,11 @@ export interface SniperMatch {
   expiresAt: number | null;
   /** Bid mode: the bid it would take (absent: bought with Buy Now). */
   bid?: number;
+  /** Bid mode: an auction the trader was the highest bidder on and lost the
+   * lead on, back in the search results for a re-bid at `bid`;
+   * `'over_max'` when that bid would pass the max, so it is dropped. Cards
+   * the trader leads on never show there. */
+  outbid?: 'rebid' | 'over_max';
 }
 
 export interface SniperSearchResult {
@@ -2047,7 +2052,9 @@ export class Sniper {
       return end === 'stopped' ? 'stopped' : 'done';
     }
     const next = nextBid(b);
-    if (next > b.maxBid || (b.buyNow > 0 && next >= b.buyNow)) {
+    const overMax = next > b.maxBid || (b.buyNow > 0 && next >= b.buyNow);
+    this.showOutbid(b, next, overMax);
+    if (overMax) {
       this.dropBid(b, {
         message: 'Max bid reached on {card} — dropping it',
         detail: `the next bid would be ${amount(next)}, your max is ${amount(b.maxBid)}`,
@@ -2059,6 +2066,16 @@ export class Sniper {
     if (r.end === 'stopped' || r.end === 'dropped') return r.end;
     if (r.end === 'skipped' && r.why) this.dropBid(b, { message: 'Not re-bidding on {card} — dropping it', detail: r.why, errorCode: 'rebid_skipped' });
     return 'done';
+  }
+
+  /** An auction the trader lost the lead on, back in the search results
+   * (once each time it is outbid): to be re-bid at `next`, or dropped when
+   * that would pass the max. */
+  private showOutbid(b: TrackedBid, next: number, overMax: boolean): void {
+    if (b.outbidShown === b.currentBid) return;
+    b.outbidShown = b.currentBid;
+    const match: SniperMatch = { ...bidMatch(b, b.buyNow), bid: next, outbid: overMax ? 'over_max' : 'rebid' };
+    this.addSearchResult('Outbid', [match], 1, null, this.now());
   }
 
   /** One Bid mode search: auctions whose current bid is at most the max

@@ -592,6 +592,10 @@ asks for one before Start; "Most you'll pay" caps it too):
   places at most one new bid per search (`NEW_BIDS_PER_SEARCH`). The first
   live run sent three bids within a second of a search, and EA answered with
   521, 429 and 512.
+- **Search results** never show an auction the trader leads. Each time a
+  watch list read says the trader lost the lead, that auction shows there
+  once ("Outbid: you lost the lead, re-bidding" with the re-bid, or "the
+  next bid is over your max, dropping it"; `SniperMatch.outbid`).
 - **Fails closed**: without the Bid mode calls (`bid` and `watchlist`) the
   bot will not start in Bid mode, and its first act is a watch list read: if
   the page cannot do it for Nova AI (`bidding_unsupported`) or it fails, the

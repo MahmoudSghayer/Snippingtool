@@ -2382,12 +2382,22 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     const rows = r.matches
       .map(
         (m) =>
-          `<div class="res item"><span>${m.rating} ${esc(nameOf(m.assetId))}</span><span>${m.bid != null ? 'bid ' : ''}${fmt(m.bid ?? m.buyNow)}${COIN}${
+          `<div class="res item"><span>${m.rating} ${esc(nameOf(m.assetId))}</span><span>${
+            m.outbid === 'rebid' ? 're-bid ' : m.outbid === 'over_max' ? 'next bid ' : m.bid != null ? 'bid ' : ''
+          }${fmt(m.bid ?? m.buyNow)}${COIN}${m.outbid === 'over_max' ? ', over your max' : ''}${
             m.expiresAt ? `, ${clock(m.expiresAt - r.at)} left` : ''
           }</span></div>`,
       )
       .join('');
-    return `<div class="res"><span class="when">${when}</span>Found ${r.matches.length} match${r.matches.length === 1 ? '' : 'es'}</div>${rows}`;
+    // Bid mode: an auction the trader lost the lead on (Sniper.showOutbid).
+    const outbid = r.matches[0]?.outbid;
+    const head =
+      outbid === 'rebid'
+        ? 'Outbid: you lost the lead, re-bidding'
+        : outbid === 'over_max'
+          ? 'Outbid: the next bid is over your max, dropping it'
+          : `Found ${r.matches.length} match${r.matches.length === 1 ? '' : 'es'}`;
+    return `<div class="res"><span class="when">${when}</span>${head}</div>${rows}`;
   }
 
   function renderFeeds(): void {

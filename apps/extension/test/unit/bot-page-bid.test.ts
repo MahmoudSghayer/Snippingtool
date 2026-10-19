@@ -220,3 +220,22 @@ it('shows the bid a search result would take', async () => {
   await refresh();
   expect($('results')!.textContent!.replace(/\s+/g, ' ')).toContain('bid 12,250');
 });
+
+it('shows a lost lead in the search results as a re-bid, or as over the max', async () => {
+  const { sniper, refresh, $ } = mount({ ...DEFAULT_BOT_MODE_SETTINGS, mode: 'bid' });
+  const lost = (id: number, outbid: 'rebid' | 'over_max', bid: number): SniperSearchResult => ({
+    id,
+    at: Date.now(),
+    filterName: 'Outbid',
+    matches: [{ tradeId: `a${id}`, resourceId: 100, assetId: 100, rating: 85, buyNow: 20_000, expiresAt: Date.now() + 90_000, bid, outbid }],
+    listings: 1,
+    cheapest: null,
+  });
+  vi.spyOn(sniper, 'getSearchResults').mockReturnValue([lost(2, 'over_max', 12_750), lost(1, 'rebid', 12_250)]);
+  await refresh();
+  const text = $('results')!.textContent!.replace(/\s+/g, ' ');
+  expect(text).toContain('Outbid: you lost the lead, re-bidding');
+  expect(text).toContain('re-bid 12,250');
+  expect(text).toContain('Outbid: the next bid is over your max, dropping it');
+  expect(text).toContain('next bid 12,750, over your max');
+});

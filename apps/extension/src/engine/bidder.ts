@@ -137,6 +137,9 @@ export interface TrackedBid {
   decision: GovernorDecision | null;
   /** Watch list reads in a row it was missing from. */
   missing: number;
+  /** The current bid the search results last showed it outbid at, so each
+   * time the trader loses the lead shows once (`Sniper.rebid`). */
+  outbidShown?: number;
 }
 
 /** What a watch list read said about one of the bot's bids. `price`: what

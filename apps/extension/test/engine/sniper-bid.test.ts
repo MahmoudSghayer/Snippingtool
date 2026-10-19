@@ -373,6 +373,32 @@ describe('Bid mode — bidding', () => {
   });
 });
 
+describe('Bid mode — the search results', () => {
+  it('keeps auctions it leads out of them, and shows each lost lead once: for a re-bid, or over the max', async () => {
+    const h = setup({
+      // The same auction on every search.
+      results: () => [auction('a', 80)],
+      beforeRead: (n, ea) => {
+        const a = ea.get('a');
+        if (!a) return;
+        if (n === 2) Object.assign(a, { bidState: 'outbid', currentBid: 12_000 });
+        if (n === 3) Object.assign(a, { bidState: 'outbid', currentBid: 12_500 });
+      },
+      stopWhen: (x) => x.log().some((m) => m.startsWith('Max bid reached')),
+    });
+    h.sniper.start();
+    await h.done();
+    const results = [...h.sniper.getSearchResults()].reverse();
+    // Found by the first search only: while it leads, later searches leave it out.
+    expect(results.filter((r) => r.filterName !== 'Outbid' && r.matches.some((m) => m.tradeId === 'a'))).toHaveLength(1);
+    expect(h.searches.length).toBeGreaterThan(1);
+    expect(results.filter((r) => r.filterName === 'Outbid').map((r) => r.matches)).toEqual([
+      [expect.objectContaining({ tradeId: 'a', bid: 12_250, outbid: 'rebid' })],
+      [expect.objectContaining({ tradeId: 'a', bid: 12_750, outbid: 'over_max' })],
+    ]);
+  });
+});
+
 describe('Bid mode — pace', () => {
   it('sends EA one request at a time, each a search delay after the last, and one new bid per search', async () => {
     // Live, three bids sent within a second of a search drew EA's 521, 429
