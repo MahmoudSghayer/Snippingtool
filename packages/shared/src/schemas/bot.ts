@@ -604,6 +604,89 @@ export const SEARCH_DELAY_PRESETS = [
   { key: 'fastest', min: 1, max: 2 },
 ] as const;
 
+// ---- Bid mode ----------------------------------------------------------------
+
+/**
+ * What Nova AI does with its search: `snipe` buys listings at or under the
+ * max price with Buy Now (what it always did); `bid` bids on auctions in
+ * their last minutes, up to the max price, and buys with Buy Now when that
+ * is at or under it (apps/extension `engine/bidder.ts`). The user picks one
+ * before Start; only one runs at a time.
+ */
+export const BOT_MODES = ['snipe', 'bid'] as const;
+export type BotMode = (typeof BOT_MODES)[number];
+
+/** The hard bounds of Bid mode's own settings. */
+export const BID_LIMITS = {
+  /** Bid only on auctions with at most this many minutes left. */
+  windowMinutes: { min: 1, max: 60 },
+  /** Auctions holding one of the bot's bids at once. EA's watch list
+   * (Transfer Targets), where every bid lands, holds about 50 cards. */
+  maxActiveBids: { min: 1, max: 50 },
+  /** Bids and re-bids in any hour. */
+  maxBidsPerHour: { min: 1, max: 300 },
+} as const;
+
+/** Bid mode's defaults: the last 5 minutes of an auction, 10 bids at once,
+ * 60 bids an hour (one a minute on average: room for 10 new auctions and a
+ * re-bid or two on each every ten minutes, without bidding like a script). */
+export const RECOMMENDED_BID_SETTINGS = {
+  windowMinutes: 5,
+  maxActiveBids: 10,
+  maxBidsPerHour: 60,
+} as const;
+
+/**
+ * The mode and Bid mode's settings. Kept apart from `BotSettings` on
+ * purpose: `botSettingsSchema` is also the body the API validates (strictly)
+ * for `PUT /extension/bot-settings`, so a field added there is refused by
+ * every API deployed before it, and an older extension refuses the API's
+ * answer once the API sends it. These stay in the browser's own storage
+ * (apps/extension `bot.modeGet` / `bot.modeSet`) until the API carries
+ * them; until then they do not follow the account to another browser.
+ * A missing or unknown mode reads as `snipe`, so nobody's bot changes what
+ * it does on its own.
+ */
+export const botModeSettingsSchema = z
+  .object({
+    mode: z.enum(BOT_MODES).default('snipe').catch('snipe'),
+    bidding: z
+      .object({
+        windowMinutes: int(BID_LIMITS.windowMinutes).default(
+          RECOMMENDED_BID_SETTINGS.windowMinutes,
+        ),
+        maxActiveBids: int(BID_LIMITS.maxActiveBids).default(
+          RECOMMENDED_BID_SETTINGS.maxActiveBids,
+        ),
+        maxBidsPerHour: int(BID_LIMITS.maxBidsPerHour).default(
+          RECOMMENDED_BID_SETTINGS.maxBidsPerHour,
+        ),
+      })
+      .strict()
+      .prefault({}),
+  })
+  .strict();
+export type BotModeSettings = z.infer<typeof botModeSettingsSchema>;
+
+export const DEFAULT_BOT_MODE_SETTINGS: BotModeSettings = botModeSettingsSchema.parse({});
+
+/** `m` clamped into `BID_LIMITS`, field by field (a non-number falls back to
+ * the default), like `clampBotSettings`: what the engine runs on. */
+export function clampBotModeSettings(m: BotModeSettings): BotModeSettings {
+  const d = DEFAULT_BOT_MODE_SETTINGS.bidding;
+  const b = (m?.bidding ?? {}) as Partial<BotModeSettings['bidding']>;
+  const whole = (bound: Bound, value: unknown, fallback: number) =>
+    Math.round(clampTo(bound, value, fallback));
+  return {
+    mode: m?.mode === 'bid' ? 'bid' : 'snipe',
+    bidding: {
+      windowMinutes: whole(BID_LIMITS.windowMinutes, b.windowMinutes, d.windowMinutes),
+      maxActiveBids: whole(BID_LIMITS.maxActiveBids, b.maxActiveBids, d.maxActiveBids),
+      maxBidsPerHour: whole(BID_LIMITS.maxBidsPerHour, b.maxBidsPerHour, d.maxBidsPerHour),
+    },
+  };
+}
+
 /** One day's active (non-rest) running time, for maxActiveHoursPerDay. Kept
  * in `storage.local` so a page reload doesn't reset it. */
 export const botDailyUsageSchema = z
