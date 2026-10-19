@@ -588,3 +588,48 @@ describe('Governor.loadState (a tab gaining the engine lease)', () => {
     expect(gov.isKillSwitchActive()).toBe(true);
   });
 });
+
+describe("Governor — Nova AI's bids (kind 'bid')", () => {
+  it('counts a bid toward actionsPerHour, and holds its coins in the coin flow while it stands', () => {
+    const { gov } = governorAt(START);
+    expect(gov.allow({ kind: 'bid', coins: 4_000 }).allowed).toBe(true);
+    expect(gov.snapshot()).toMatchObject({ actionsLastHour: 1, coinFlowLastHour: 4_000 });
+    // Never a buy: neither the buy count nor the session's coins spent.
+    expect(gov.serialize()).toMatchObject({ buyCount: 0, searchCount: 0, sessionCoinsSpent: 0 });
+  });
+
+  it('refuses a bid the coin flow (spend plus standing bids) has no room for', () => {
+    const { gov } = governorAt(START);
+    expect(gov.allow({ kind: 'bid', coins: 7_000 }).allowed).toBe(true);
+    expect(gov.allow({ kind: 'bid', coins: 4_000 })).toMatchObject({ allowed: false, reason: 'coin_flow' });
+    expect(gov.snapshot().coinFlowLastHour).toBe(7_000);
+  });
+
+  it('is never held back by the buy:search ratio', () => {
+    const { gov } = governorAt(START, { buyToSearchRatio: 0.01 });
+    expect(gov.allow({ kind: 'bid', coins: 100 }).allowed).toBe(true);
+    expect(gov.allow({ kind: 'bid', coins: 100 }).allowed).toBe(true);
+  });
+
+  it('gives the coins back once outbid (releaseSpend, once), keeping the request in actionsPerHour', () => {
+    const { gov } = governorAt(START);
+    const decision = gov.allow({ kind: 'bid', coins: 4_000 });
+    gov.allow({ kind: 'bid', coins: 4_000 });
+    gov.releaseSpend(decision);
+    gov.releaseSpend(decision);
+    expect(gov.snapshot()).toMatchObject({ coinFlowLastHour: 4_000, actionsLastHour: 2 });
+  });
+
+  it('gives everything back for a bid the adapter refused before it reached EA (refund)', () => {
+    const { gov } = governorAt(START);
+    gov.refund(gov.allow({ kind: 'bid', coins: 4_000 }));
+    expect(gov.snapshot()).toMatchObject({ coinFlowLastHour: 0, actionsLastHour: 0 });
+  });
+
+  it('is a hard stop past actionsPerHour, like any action', () => {
+    const { gov } = governorAt(START, { actionsPerHour: 2 });
+    gov.allow({ kind: 'search' });
+    gov.allow({ kind: 'bid', coins: 100 });
+    expect(gov.allow({ kind: 'bid', coins: 100 })).toMatchObject({ allowed: false, reason: 'hard_stop' });
+  });
+});

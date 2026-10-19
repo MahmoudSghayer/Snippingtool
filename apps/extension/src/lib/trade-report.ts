@@ -20,8 +20,12 @@ export function buildBoughtTrade(
 ): { trade: Trade; lifecycle: LifecycleBuy } {
   const bought = listing && listing.tradeId === input.tradeId ? listing : undefined;
   const resourceId = bought && bought.resourceId > 0 ? bought.resourceId : input.resourceId;
-  const rating = bought && Number.isInteger(bought.rating) && bought.rating >= 0 && bought.rating <= 99 ? bought.rating : null;
-  const itemId = bought?.itemId ?? null;
+  // The listing's own fields first; then what the engine knew itself (an
+  // auction Nova AI won, read off the watch list).
+  const validRating = (r: number | null | undefined): r is number => r != null && Number.isInteger(r) && r >= 0 && r <= 99;
+  const rating = bought && validRating(bought.rating) ? bought.rating : validRating(input.rating) ? input.rating : null;
+  const itemId = bought?.itemId ?? input.itemId ?? null;
+  const assetId = bought && Number.isInteger(bought.assetId) && bought.assetId > 0 ? bought.assetId : input.assetId != null && Number.isInteger(input.assetId) && input.assetId > 0 ? input.assetId : null;
   const trade: Trade = {
     id: crypto.randomUUID(),
     tradeId: input.tradeId,
@@ -30,7 +34,7 @@ export function buildBoughtTrade(
     // (`GET /api/v1/extension/open-trades`) and reports its sale.
     ...(itemId ? { itemId } : {}),
     resourceId,
-    assetId: bought && Number.isInteger(bought.assetId) && bought.assetId > 0 ? bought.assetId : null,
+    assetId,
     rating,
     buyPrice: input.buyPrice,
     sellPrice: null,

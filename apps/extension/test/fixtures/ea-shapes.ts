@@ -20,6 +20,13 @@ export interface ListingSpec {
   resourceId?: number;
   rating?: number;
   expires?: number;
+  /** An auction's bids, and (on the watch list) where the trader's bid
+   * stands and the item's own id: Nova AI's Bid mode. */
+  startingBid?: number;
+  currentBid?: number;
+  tradeState?: string;
+  bidState?: string;
+  itemId?: number;
 }
 
 /** One `auctionInfo` entry as the UTAS JSON response carries it. */
@@ -42,15 +49,16 @@ type CardIdKey = 'definitionId' | 'resourceId' | 'maskedDefId';
  * prototype method (`getAuctionData()`) or on a `_auction` field, and its
  * card id under whichever of the three names the web app uses. */
 export function itemEntity(spec: ListingSpec, options: { accessor?: 'method' | 'field'; idKey?: CardIdKey; name?: string } = {}) {
-  const auction = {
+  const auction: Record<string, unknown> = {
     tradeId: spec.tradeId,
     buyNowPrice: spec.buyNowPrice,
-    startingBid: 150,
-    currentBid: 0,
+    startingBid: spec.startingBid ?? 150,
+    currentBid: spec.currentBid ?? 0,
     offers: 0,
     expires: spec.expires ?? 3600,
-    tradeState: 'active',
+    tradeState: spec.tradeState ?? 'active',
   };
+  if (spec.bidState) auction.bidState = spec.bidState;
   const entity: Record<string, unknown> =
     options.accessor === 'field'
       ? { _auction: auction }
@@ -62,6 +70,7 @@ export function itemEntity(spec: ListingSpec, options: { accessor?: 'method' | '
   entity[options.idKey ?? 'definitionId'] = spec.resourceId ?? 42;
   entity.rating = spec.rating ?? 85;
   if (options.name) entity.name = options.name;
+  if (spec.itemId) entity.id = spec.itemId;
   return entity as Record<string, unknown> & { _auction?: typeof auction };
 }
 

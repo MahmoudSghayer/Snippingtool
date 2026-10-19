@@ -131,6 +131,15 @@ describe('dist/ledger contents', () => {
       'bot.usageSet',
       'bot.budgetGet',
       'bot.budgetSet',
+      // Bid mode: its settings, and the adapter's and shapes' bid calls
+      // (the listable build keeps only the act names in its message schemas).
+      'bot.modeGet',
+      'bot.modeSet',
+      'requestWatchedItems',
+      'watchlist_too_soon',
+      'move_not_bought',
+      'move_unsupported',
+      'ItemPile',
       // Auto-sell: the FUTBIN lookup and the adapter's listing call.
       'price.futbin',
       'futbin.com',

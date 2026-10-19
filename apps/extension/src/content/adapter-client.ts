@@ -16,7 +16,7 @@ import { ADAPTER_CHANNEL, adapterMessageSchema } from '@sl/shared';
 import { ACT_ERROR, canonicalActMessage, createActSigner } from '../lib/act-auth.js';
 
 import type { Catalog } from '../model/catalog.js';
-import type { AdapterDiagnostics, AdapterEaError, FilterCriteria, TradePileItem, TrimmedAuction } from '@sl/shared';
+import type { AdapterDiagnostics, AdapterEaError, FilterCriteria, TradePileItem, TrimmedAuction, WatchedAuction } from '@sl/shared';
 
 const ACTION_TIMEOUT_MS = 15_000;
 /** How long a `timeout_unknown` buy waits for EA's late answer before it is
@@ -32,6 +32,8 @@ export interface ActionOutcome {
   stillListed?: boolean;
   /** Only for `diagnostics()`. */
   diagnostics?: AdapterDiagnostics;
+  /** Only for a successful `watchlist()`: the auctions on the watch list. */
+  watched?: WatchedAuction[];
   /** Only for a buy that came back `timeout_unknown`: settles with EA's
    * late answer if the adapter sends one (signed, like every result), or
    * `ok: false` after a few minutes without one. */
@@ -56,7 +58,9 @@ export interface ProbeStatus {
 
 export interface AdapterClient {
   readonly probeStatus: ProbeStatus | null;
-  search(filter: FilterCriteria): Promise<ActionOutcome>;
+  /** `options.maxBid` (Bid mode): search auctions whose current bid is at
+   * most this, rather than by buy-now price. */
+  search(filter: FilterCriteria, options?: { maxBid?: number }): Promise<ActionOutcome>;
   /** `card`, when given, binds the buy to that card: the adapter refuses
    * (`resource_mismatch`) unless the listing it saw for `tradeId` has the
    * same resourceId (and assetId, when given). */
@@ -65,6 +69,15 @@ export interface AdapterClient {
   /** Automation builds: list a card this adapter bought (named by the
    * tradeId it was bought under) on the transfer market. */
   list(tradeId: string, startPrice: number, buyNowPrice: number): Promise<ActionOutcome>;
+  /** Automation builds (Bid mode): bid `price` on an auction. The adapter
+   * refuses (`price_mismatch`) anything but the next valid bid on it as it
+   * last saw it; `card` binds the bid to the card, as for a buy. */
+  bid(tradeId: string, price: number, card?: { resourceId: number; assetId?: number }): Promise<ActionOutcome>;
+  /** Automation builds (Bid mode): the watch list, in `outcome.watched`. */
+  watchlist(): Promise<ActionOutcome>;
+  /** Automation builds (Bid mode): move an auction the adapter won to the
+   * transfer list. */
+  move(tradeId: string): Promise<ActionOutcome>;
   /** Automation builds: have the web app reload the transfer list. The
    * list itself arrives through `onTradePile`, like any load of it. */
   refreshPile(): Promise<ActionOutcome>;
@@ -113,7 +126,7 @@ export function pageWindow(): Window {
   return typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
 }
 
-type ActAction = 'search' | 'buy' | 'readResult' | 'diagnostics' | 'list' | 'pile';
+type ActAction = 'search' | 'buy' | 'readResult' | 'diagnostics' | 'list' | 'pile' | 'bid' | 'watchlist' | 'move';
 
 interface Pending {
   action: ActAction;
@@ -251,6 +264,7 @@ export function createAdapterClient(target: Window, nonce: string | null, option
           error: data.error,
           stillListed: data.stillListed,
           diagnostics: data.diagnostics,
+          watched: data.watched,
           signed: true,
           latencyMs: data.completedAt - data.requestedAt,
         };
@@ -326,7 +340,7 @@ export function createAdapterClient(target: Window, nonce: string | null, option
     get probeStatus() {
       return probeStatus;
     },
-    search: (filter) => call({ action: 'search', filter }),
+    search: (filter, options) => call({ action: 'search', filter, ...(options?.maxBid !== undefined ? { maxBid: options.maxBid } : {}) }),
     // A listing with no buy-now price (0) can never match; the adapter would
     // drop the request anyway, so refuse here rather than time out.
     buy: (tradeId, price, card) =>
@@ -344,6 +358,17 @@ export function createAdapterClient(target: Window, nonce: string | null, option
         : Promise.resolve({ ok: false, error: ACT_ERROR.priceMismatch, latencyMs: 0 }),
     readResult: (tradeId) => call({ action: 'readResult', tradeId }),
     list: (tradeId, startPrice, buyNowPrice) => call({ action: 'list', tradeId, startPrice, buyNowPrice }),
+    bid: (tradeId, price, card) =>
+      call({
+        action: 'bid',
+        tradeId,
+        price,
+        // Only real ids, as for a buy.
+        ...(card && card.resourceId > 0 ? { resourceId: card.resourceId } : {}),
+        ...(card?.assetId !== undefined && card.assetId > 0 ? { assetId: card.assetId } : {}),
+      }),
+    watchlist: () => call({ action: 'watchlist' }),
+    move: (tradeId) => call({ action: 'move', tradeId }),
     refreshPile: () => call({ action: 'pile' }),
     diagnostics: () => call({ action: 'diagnostics' }),
     onProbe: (cb) => {

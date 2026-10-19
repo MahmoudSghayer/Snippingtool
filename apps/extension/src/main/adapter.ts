@@ -20,6 +20,11 @@
  *      with a MAC under the per-page-load nonce (lib/act-auth.ts) — any
  *      script on the page can post on this channel. A buy is also refused
  *      unless its price matches the listing this file last saw.
+ *      Automation builds add Nova AI's acts on the same terms: `list`
+ *      (auto-sell), `pile` (reload the transfer list) and Bid mode's
+ *      `bid`, `watchlist` and `move` — a bid only at exactly the next
+ *      valid bid on an auction this file saw itself, and a list or move
+ *      only of a card it bought or won on this page load.
  *   3. The catalog (automation builds only): the Sniping Bot's Snipe
  *      Targets choices, built with the app's own lists and images
  *      (main/catalog-builder.ts). Asked for with an authenticated
@@ -54,13 +59,29 @@ import { scrubText } from '../lib/redact.js';
 
 import { createCatalogBuilder } from './catalog-builder.js';
 import { createAdapterLog, describeKeys } from './diagnostics.js';
-import { normaliseListing, normaliseListings, normalisePileItems, type NormalisedListing } from './ea-listing.js';
+import {
+  nextBidPrice,
+  normaliseListing,
+  normaliseListings,
+  normalisePileItems,
+  normaliseWatchedItem,
+  normaliseWatchedItems,
+  type NormalisedListing,
+} from './ea-listing.js';
 import { TimeoutUnknownError, describeError, errorEnvelopeStatus, extractListingArray, isOkStatus } from './ea-response.js';
 import { createSearchHook } from './search-hook.js';
-import { selectShape, type ServiceShape, type ShapeName, type ShapeSelection } from './shapes.js';
+import { selectShape, type SearchOptions, type ServiceShape, type ShapeName, type ShapeSelection } from './shapes.js';
 
 import type { Catalog } from '../model/catalog.js';
-import type { AdapterDiagnostics, EaErrorCategory, EaErrorEndpoint, FilterCriteria, TradePileItem, TrimmedAuction } from '@sl/shared';
+import type {
+  AdapterDiagnostics,
+  EaErrorCategory,
+  EaErrorEndpoint,
+  FilterCriteria,
+  TradePileItem,
+  TrimmedAuction,
+  WatchedAuction,
+} from '@sl/shared';
 
 /** The userscript build injects this file into the page itself; see the
  * act channel listener at the bottom for the one thing that changes. */
@@ -71,6 +92,9 @@ const CATALOG_ENABLED = import.meta.env.VITE_AUTOMATION === '1';
 /** Likewise only automation builds list what Nova AI bought (auto-sell):
  * the listable build has no `list` act at all. */
 const LISTING_ENABLED = import.meta.env.VITE_AUTOMATION === '1';
+/** ...and only they have Nova AI's Bid mode: the `bid`, `watchlist` and
+ * `move` acts. */
+const BIDDING_ENABLED = import.meta.env.VITE_AUTOMATION === '1';
 
 // ---- act-channel authentication (docs/09-security.md §13) --------------------
 // Taken first thing, at `document_start`, before any page script exists:
@@ -205,8 +229,8 @@ const EA_HOST = /(^|\.)ea\.com$/i;
 // `closed` at the price paid, which is a purchase, not a sale.
 const PILE_PATH = /\/ut\/game\/[^/]+\/(tradepile|auctionhouse\/relist|item)\/?$/i;
 const FULL_PILE_PATH = /\/tradepile\/?$/i;
-// A buy (EA's bid on a trade): read only for the coin balance its answer
-// states (`noteCredits`), never for anything else.
+// A buy or a bid (both are EA's bid on a trade): read only for the coin
+// balance its answer states (`noteCredits`), never for anything else.
 const BID_PATH = /\/ut\/game\/[^/]+\/trade\/\d+\/bid\/?$/i;
 
 const stats = { seen: 0, parsed: 0, failed: 0 };
@@ -231,7 +255,7 @@ function post(kind: string, data: unknown): void {
 }
 
 interface ActionResult {
-  action: 'search' | 'buy' | 'readResult' | 'diagnostics' | 'list' | 'pile';
+  action: 'search' | 'buy' | 'readResult' | 'diagnostics' | 'list' | 'pile' | 'bid' | 'watchlist' | 'move';
   requestId: string;
   ok: boolean;
   requestedAt: number;
@@ -239,6 +263,8 @@ interface ActionResult {
   error?: string;
   stillListed?: boolean;
   diagnostics?: AdapterDiagnostics;
+  /** A watch list read's auctions (Bid mode). */
+  watched?: WatchedAuction[];
   /** A second result for a buy that first came back `timeout_unknown`:
    * EA's answer arrived after all (lib/act-auth.ts). */
   late?: boolean;
@@ -499,6 +525,10 @@ interface SeenListing {
   resourceIds: number[];
   assetIds: number[];
   expiresAt: number | null;
+  /** The auction's starting and current bid as last seen: what a bid is
+   * checked against (`bidCheck`). */
+  startingBid: number;
+  currentBid: number;
   /** The item entity an act search returned for this listing, for shapes
    * that buy on the entity. Absent for a listing only seen passively. */
   entity?: unknown;
@@ -525,10 +555,11 @@ function rememberListing(a: TrimmedAuction, entity: unknown): SeenListing {
   const keep = entity ?? previous?.entity;
   const resourceIds = withId(previous?.resourceIds, a.resourceId);
   const assetIds = withId(previous?.assetIds, a.assetId);
+  const bids = { startingBid: a.startingBid, currentBid: a.currentBid };
   const seen: SeenListing =
     keep === undefined
-      ? { buyNow: a.buyNow, resourceIds, assetIds, expiresAt: a.expiresAt }
-      : { buyNow: a.buyNow, resourceIds, assetIds, expiresAt: a.expiresAt, entity: keep };
+      ? { buyNow: a.buyNow, resourceIds, assetIds, expiresAt: a.expiresAt, ...bids }
+      : { buyNow: a.buyNow, resourceIds, assetIds, expiresAt: a.expiresAt, ...bids, entity: keep };
   setNewest(lastSeenListings, a.tradeId, seen, MAX_REMEMBERED_LISTINGS);
   return seen;
 }
@@ -985,7 +1016,7 @@ function fail(action: ActionResult['action'], requestId: string, requestedAt: nu
   postResult({ action, requestId, ok: false, requestedAt, completedAt: now(), error });
 }
 
-async function actSearch(requestId: string, filter: FilterCriteria): Promise<void> {
+async function actSearch(requestId: string, filter: FilterCriteria, options: SearchOptions): Promise<void> {
   const requestedAt = now();
   const { result, selection } = runProbeAndReport();
   const shape = selection.shape;
@@ -998,7 +1029,7 @@ async function actSearch(requestId: string, filter: FilterCriteria): Promise<voi
     actSearchesInFlight++;
     let searched: { response: unknown; entries: unknown[] };
     try {
-      searched = await searchHook.unhooked(() => shape.search(services, filter));
+      searched = await searchHook.unhooked(() => shape.search(services, filter, options));
     } finally {
       actSearchesInFlight--;
     }
@@ -1132,6 +1163,161 @@ async function actRefreshPile(requestId: string): Promise<void> {
   }
 }
 
+// ---- Bid mode (automation builds) -------------------------------------------
+//
+// Nova AI's Bid mode bids on auctions in their last minutes, follows them on
+// the watch list (EA's Transfer Targets, where every bid lands), and moves
+// what it won to the transfer list. All through the web app's own calls
+// (main/shapes.ts, `bidding`: ASSUMED SHAPE, verify on day one), like every
+// other act.
+
+/** Auctions this adapter bid on during this page load. Only one of these,
+ * read as won on the watch list, ever becomes a card `actList` / `actMove`
+ * will touch (`boughtItems`). Past the cap the oldest goes. */
+const MAX_BID_ON = 500;
+const bidOn = new Map<string, true>();
+
+/** A watch list holds about 50 auctions; more than this is not one. */
+const MAX_WATCHED = 100;
+/** The shortest gap between two watch list reads, whatever content sends:
+ * they are real requests to EA. Content asks far less often. */
+const WATCHLIST_MIN_GAP_MS = 5_000;
+let lastWatchlistAt = -Infinity;
+
+/** Refuse unless `amount` is exactly the next valid bid on the auction as
+ * the adapter last saw it in one of EA's own answers (a search or a watch
+ * list read: `nextBidPrice`), under its buy-now price, and, when content
+ * names the card, on that card. An `auctions` message, which any page
+ * script can post, can make content believe anything about an auction; it
+ * cannot change what the adapter bids. */
+function bidCheck(tradeId: string, amount: number, at: number, card: CardIds): string | null {
+  const listing = apply(mapGet, lastSeenListings, [tradeId]) as SeenListing | undefined;
+  if (!listing || (listing.expiresAt != null && listing.expiresAt <= at)) return ACT_ERROR.listingUnknown;
+  if (card.resourceId !== undefined && !hasId(listing.resourceIds, card.resourceId)) return ACT_ERROR.resourceMismatch;
+  if (card.assetId !== undefined && !hasId(listing.assetIds, card.assetId)) return ACT_ERROR.resourceMismatch;
+  if (amount !== nextBidPrice(listing.startingBid, listing.currentBid)) return ACT_ERROR.priceMismatch;
+  // At the buy-now price or over it, it is a buy: that goes through `actBuy`.
+  if (listing.buyNow > 0 && amount >= listing.buyNow) return ACT_ERROR.priceMismatch;
+  return null;
+}
+
+/** The selected shape's Bid mode calls, or why there are none. */
+function biddingOf(shape: ServiceShape): { bidding: NonNullable<ServiceShape['bidding']> } | { missing: string } {
+  const bidding = shape.bidding;
+  if (!bidding) return { missing: `the ${shape.name} shape has no bid calls` };
+  const missing = bidding.detect(servicesRoot());
+  return missing === null ? { bidding } : { missing };
+}
+
+async function actBid(requestId: string, tradeId: string, amount: number, card: CardIds): Promise<void> {
+  const requestedAt = now();
+  const { result, selection } = runProbeAndReport();
+  const shape = selection.shape;
+  if (!result.ok || !shape) return fail('bid', requestId, requestedAt, result.reason);
+  const calls = biddingOf(shape);
+  if ('missing' in calls) return fail('bid', requestId, requestedAt, ACT_ERROR.biddingUnsupported, `${ACT_ERROR.biddingUnsupported}: ${calls.missing}`);
+  const refusal = bidCheck(tradeId, amount, requestedAt, card);
+  if (refusal) return fail('bid', requestId, requestedAt, refusal);
+  const seen = apply(mapGet, lastSeenListings, [tradeId]) as SeenListing;
+  if (shape.buysOnEntity && seen.entity === undefined) return fail('bid', requestId, requestedAt, ACT_ERROR.listingEntityUnknown);
+  // Kept before the call: a bid EA takes but answers too late for is still
+  // this adapter's own.
+  setNewest(bidOn, tradeId, true, MAX_BID_ON);
+  try {
+    await calls.bidding.bid(servicesRoot() as Record<string, unknown>, { tradeId, amount, entity: seen.entity });
+    // The bid is the auction's current one now: the same amount again is
+    // refused here, as EA would refuse it.
+    setNewest(lastSeenListings, tradeId, { ...seen, currentBid: amount }, MAX_REMEMBERED_LISTINGS);
+    adapterLog.add(`bid ok (${shape.name})`);
+    postResult({ action: 'bid', requestId, ok: true, requestedAt, completedAt: now() });
+  } catch (err) {
+    // The bid may still have gone through: the next watch list read says.
+    if (err instanceof TimeoutUnknownError) return fail('bid', requestId, requestedAt, ACT_ERROR.timeoutUnknown, `${ACT_ERROR.timeoutUnknown}: ${err.message}`);
+    fail('bid', requestId, requestedAt, errorText(err), describeError(err));
+  }
+}
+
+/** Keeps what a watch list read said about an auction, for the next bid's
+ * check (`bidCheck`), with its entity when the shape bids on one. */
+function rememberWatched(w: WatchedAuction, entity: unknown, seenAt: number): void {
+  const previous = apply(mapGet, lastSeenListings, [w.tradeId]) as SeenListing | undefined;
+  const keep = entity ?? previous?.entity;
+  const seen: SeenListing = {
+    buyNow: w.buyNowPrice,
+    resourceIds: withId(previous?.resourceIds, w.resourceId),
+    assetIds: withId(previous?.assetIds, w.assetId),
+    expiresAt: w.expires != null ? seenAt + w.expires * 1000 : null,
+    startingBid: w.startingBid,
+    currentBid: w.currentBid,
+  };
+  if (keep !== undefined) seen.entity = keep;
+  setNewest(lastSeenListings, w.tradeId, seen, MAX_REMEMBERED_LISTINGS);
+}
+
+/** Reads the watch list through the web app's own service and sends it
+ * back in the (signed) result. Every auction on it refreshes what the
+ * adapter knows about it; one this adapter bid on that EA says it won
+ * (`closed`, the trader's bid `highest`) becomes a card it may list or
+ * move, like a card it bought. Never reported to the trade lifecycle: a
+ * won auction reads `closed` at the price paid, which is a purchase. */
+async function actWatchlist(requestId: string): Promise<void> {
+  const requestedAt = now();
+  const { result, selection } = runProbeAndReport();
+  const shape = selection.shape;
+  if (!result.ok || !shape) return fail('watchlist', requestId, requestedAt, result.reason);
+  const calls = biddingOf(shape);
+  if ('missing' in calls)
+    return fail('watchlist', requestId, requestedAt, ACT_ERROR.biddingUnsupported, `${ACT_ERROR.biddingUnsupported}: ${calls.missing}`);
+  if (requestedAt - lastWatchlistAt < WATCHLIST_MIN_GAP_MS) return fail('watchlist', requestId, requestedAt, 'watchlist_too_soon');
+  lastWatchlistAt = requestedAt;
+  try {
+    const { response, entries } = await calls.bidding.readWatchlist(servicesRoot() as Record<string, unknown>);
+    // For the diagnostics report's key names and types (day-one checklist).
+    lastMarketResponse = { source: 'act:watchlist', at: now(), value: response };
+    const watched = normaliseWatchedItems(entries, skippedEntries('watchlist'));
+    const entities = new Map<string, unknown>();
+    if (shape.buysOnEntity) {
+      for (let i = 0; i < entries.length; i++) {
+        const tradeId = normaliseWatchedItem(entries[i])?.tradeId;
+        if (tradeId) apply(mapSet, entities, [tradeId, entries[i]]);
+      }
+    }
+    const seenAt = now();
+    const out: WatchedAuction[] = [];
+    for (let i = 0; i < watched.length && out.length < MAX_WATCHED; i++) {
+      const w = watched[i]!;
+      out[out.length] = w;
+      const entity = apply(mapGet, entities, [w.tradeId]);
+      rememberWatched(w, entity, seenAt);
+      if (w.tradeState === 'closed' && w.bidState === 'highest' && apply(mapGet, bidOn, [w.tradeId]) === true) rememberBought(w.tradeId, entity);
+    }
+    adapterLog.add(`watchlist ok (${shape.name}): ${out.length} auctions`);
+    postResult({ action: 'watchlist', requestId, ok: true, requestedAt, completedAt: now(), watched: out });
+  } catch (err) {
+    fail('watchlist', requestId, requestedAt, errorText(err), describeError(err));
+  }
+}
+
+/** Moves an auction this adapter won (by its tradeId) to the transfer list.
+ * The card stays one it may list (`boughtItems`). */
+async function actMove(requestId: string, tradeId: string): Promise<void> {
+  const requestedAt = now();
+  const { result, selection } = runProbeAndReport();
+  const shape = selection.shape;
+  if (!result.ok || !shape) return fail('move', requestId, requestedAt, result.reason);
+  const move = shape.bidding?.moveToTransferList;
+  if (!move) return fail('move', requestId, requestedAt, 'move_unsupported');
+  const entity = apply(mapGet, boughtItems, [tradeId]);
+  if (entity === undefined) return fail('move', requestId, requestedAt, 'move_not_bought');
+  try {
+    await apply(move, shape.bidding, [servicesRoot() as Record<string, unknown>, entity]);
+    adapterLog.add(`move ok (${shape.name})`);
+    postResult({ action: 'move', requestId, ok: true, requestedAt, completedAt: now() });
+  } catch (err) {
+    fail('move', requestId, requestedAt, errorText(err), describeError(err));
+  }
+}
+
 async function actReadResult(requestId: string, tradeId: string): Promise<void> {
   const requestedAt = now();
   const { result, selection } = runProbeAndReport();
@@ -1202,13 +1388,21 @@ function actDiagnostics(requestId: string): void {
 const consumedRequestIds = new Set<string>();
 
 type ActRequest =
-  | { action: 'search'; requestId: string; filter: FilterCriteria }
+  | { action: 'search'; requestId: string; filter: FilterCriteria; maxBid?: number }
   | { action: 'buy'; requestId: string; tradeId: string; price: number; resourceId?: number; assetId?: number }
+  | { action: 'bid'; requestId: string; tradeId: string; price: number; resourceId?: number; assetId?: number }
   | { action: 'readResult'; requestId: string; tradeId: string }
   | { action: 'list'; requestId: string; tradeId: string; startPrice: number; buyNowPrice: number }
+  | { action: 'move'; requestId: string; tradeId: string }
   | { action: 'diagnostics'; requestId: string }
   | { action: 'catalog'; requestId: string }
-  | { action: 'pile'; requestId: string };
+  | { action: 'pile'; requestId: string }
+  | { action: 'watchlist'; requestId: string };
+
+/** A whole coin amount within EA's bid limits (150 to 15,000,000). */
+function isBidAmount(value: unknown): boolean {
+  return isInteger(value) && (value as number) >= 150 && (value as number) <= 15_000_000;
+}
 
 // Keep in sync with `adapterActRequestMessageSchema` (packages/shared/src/
 // ext-messages.ts): this file stays zod-free, so it re-checks the same shape
@@ -1216,10 +1410,18 @@ type ActRequest =
 function asActRequest(value: unknown): ActRequest | null {
   const d = value as Record<string, unknown> | null;
   if (!d || typeof d !== 'object' || typeof d.requestId !== 'string' || d.requestId === '') return null;
-  if (d.action === 'search') return d.filter && typeof d.filter === 'object' ? (d as unknown as ActRequest) : null;
-  if (d.action === 'diagnostics' || d.action === 'catalog' || d.action === 'pile') return d as unknown as ActRequest;
+  if (d.action === 'search') {
+    if (!d.filter || typeof d.filter !== 'object') return null;
+    return d.maxBid === undefined || isBidAmount(d.maxBid) ? (d as unknown as ActRequest) : null;
+  }
+  if (d.action === 'diagnostics' || d.action === 'catalog' || d.action === 'pile' || d.action === 'watchlist') return d as unknown as ActRequest;
   if (typeof d.tradeId !== 'string' || d.tradeId === '') return null;
-  if (d.action === 'readResult') return d as unknown as ActRequest;
+  if (d.action === 'readResult' || d.action === 'move') return d as unknown as ActRequest;
+  if (d.action === 'bid') {
+    if (!isBidAmount(d.price)) return null;
+    for (const id of [d.resourceId, d.assetId]) if (id !== undefined && (!isInteger(id) || (id as number) <= 0)) return null;
+    return d as unknown as ActRequest;
+  }
   if (d.action === 'list') {
     // EA's limits, and a starting bid below the buy-now price.
     const start = d.startPrice as number;
@@ -1248,8 +1450,17 @@ async function handleActRequest(data: unknown, mac: unknown): Promise<void> {
   if (!request || apply(setHas, consumedRequestIds, [request.requestId])) return;
   apply(setAdd, consumedRequestIds, [request.requestId]);
 
-  if (request.action === 'search') await actSearch(request.requestId, request.filter);
+  if (request.action === 'search') await actSearch(request.requestId, request.filter, request.maxBid === undefined ? {} : { maxBid: request.maxBid });
   else if (request.action === 'buy') await actBuy(request.requestId, request.tradeId, request.price, { resourceId: request.resourceId, assetId: request.assetId });
+  else if (request.action === 'bid') {
+    if (BIDDING_ENABLED) await actBid(request.requestId, request.tradeId, request.price, { resourceId: request.resourceId, assetId: request.assetId });
+  }
+  else if (request.action === 'watchlist') {
+    if (BIDDING_ENABLED) await actWatchlist(request.requestId);
+  }
+  else if (request.action === 'move') {
+    if (BIDDING_ENABLED) await actMove(request.requestId, request.tradeId);
+  }
   else if (request.action === 'readResult') await actReadResult(request.requestId, request.tradeId);
   else if (request.action === 'list') {
     if (LISTING_ENABLED) await actList(request.requestId, request.tradeId, request.startPrice, request.buyNowPrice);

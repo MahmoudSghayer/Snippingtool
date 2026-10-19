@@ -56,14 +56,33 @@
  * through `governor.allow()`, the server kill switch stops the loop, and so
  * does an adapter probe failure or market-shape change — acting on an EA
  * app that no longer looks the way `main/adapter.ts` expects is never safe.
+ *
+ * Bid mode (`BotModeSettings`, picked before Start): the same engine runs a
+ * second loop (`runBids`) instead of the search -> buy one, bidding on
+ * auctions in their last minutes up to the search's max price, re-bidding
+ * when outbid while the next bid stays at or under it, and buying with Buy
+ * Now when that is at or under it (engine/bidder.ts has how it decides).
+ * One engine, so one set of rails: the search delay, breaks, rests, active
+ * hours a day, searches an hour, the kill switch, plan, account and engine
+ * lease checks, and EA's rate-limit backoff, slow-down, rests and soft-ban
+ * stop all apply to it unchanged. Its own: bids an hour (a sliding window,
+ * `bidding.maxBidsPerHour`, every bid EA saw), which the governor's actions
+ * an hour also counts (raised by that many in Bid mode); and the coins its
+ * standing bids hold, which count against the session coin budget, the
+ * coins EA says the trader has, and the governor's coin flow. It follows
+ * its bids on the watch list, and refuses to run where Nova AI cannot read
+ * it. What it wins is a purchase like any snipe (telemetry, sale tracking),
+ * listed by auto-sell when that is on, else moved to the transfer list.
  */
 import {
   BOT_GOVERNOR_BOUNDS,
+  DEFAULT_BOT_MODE_SETTINGS,
   MAX_COIN_PRICE,
   MIN_SALE_PRICE,
   MIN_START_PRICE,
   botGovernorSettings,
   botRiskLevel,
+  clampBotModeSettings,
   clampBotSettings,
   eaErrorCategory,
   roundToPriceStep,
@@ -72,9 +91,11 @@ import {
 
 import { ACT_ERROR, isAdapterRefusal } from '../lib/act-auth.js';
 
+import { BidBook, WATCHLIST_SIZE, nextBid, pickAuctions, timeLeft } from './bidder.js';
 import { Governor } from './governor.js';
 import { attemptErrorCode } from './types.js';
 
+import type { BidEvent, BidPick, TrackedBid } from './bidder.js';
 import type { GovernorDecision, GovernorState, RatioCounts, RiskBudgetEventInput } from './governor.js';
 import type { AttemptInput, TradeInput } from './types.js';
 import type { AdapterClient } from '../content/adapter-client.js';
@@ -82,9 +103,12 @@ import type {
   AdapterEaError,
   BotBudgetState,
   BotDailyUsage,
+  BotMode,
+  BotModeSettings,
   BotPace,
   BotSettings,
   FilterCriteria,
+  GovernorSettings,
   RiskEventKind,
   SnipeOutcome,
   TrimmedAuction,
@@ -128,6 +152,32 @@ export function missReason(error: string | undefined): string {
   if (error === ACT_ERROR.unauthenticated) return 'Nova AI lost its link to the page: reload it';
   if (/timed out/i.test(error)) return 'EA did not answer in time';
   return 'EA did not accept the buy';
+}
+
+/** Why a bid was not accepted, in the user's words (like `missReason`). EA's
+ * codes on a bid as traders report them: 461 / 478 when someone else's bid
+ * (or buy) got there first or the auction ended. */
+export function bidMissReason(error: string | undefined): string {
+  if (!error) return 'EA did not say why';
+  const status = /status (\d{3})/.exec(error)?.[1];
+  if (status === '403' || status === '461' || status === '478') return 'someone else bid first, or the auction ended';
+  if (status) return missReason(error);
+  if (error === ACT_ERROR.priceMismatch) return 'the bid had changed';
+  if (error === ACT_ERROR.listingUnknown) return 'the auction had ended';
+  if (error === ACT_ERROR.listingEntityUnknown) return 'Nova AI had not seen this auction in its own search';
+  if (error === ACT_ERROR.biddingUnsupported) return 'this EA web app does not let Nova AI bid';
+  const reason = missReason(error);
+  return reason === 'EA did not accept the buy' ? 'EA did not accept the bid' : reason;
+}
+
+/** Why a won card was not moved to the transfer list, in the user's words. */
+export function moveMissReason(error: string | undefined): string {
+  if (error === 'move_unsupported') return 'Nova AI cannot move cards on this EA web app';
+  if (error === 'move_not_bought') return 'Nova AI did not win it on this page load';
+  const status = error ? /status (\d{3})/.exec(error)?.[1] : undefined;
+  if (status) return `EA refused the move (error ${status}): your transfer list may be full`;
+  if (error && /timed out/i.test(error)) return 'EA did not answer in time';
+  return 'EA did not move it';
 }
 
 /** What an EA rate limit or server error means, for the bot's log. */
@@ -247,6 +297,11 @@ function plural(n: number, one: string, many = `${one}s`): string {
 function coins(n: number): string {
   return `${n.toLocaleString('en-US')} coins`;
 }
+
+/** A coin amount as the log writes it in a sentence: "12,250". */
+function amount(n: number): string {
+  return n.toLocaleString('en-US');
+}
 const ONE_HOUR_MS = 3_600_000;
 /** How often the day's active time is written back while running. */
 const USAGE_SAVE_EVERY_MS = 30_000;
@@ -262,6 +317,26 @@ function startOfLocalDay(t: number): number {
   const d = new Date(t);
   d.setHours(0, 0, 0, 0);
   return d.getTime();
+}
+
+/** Takes one entry at `at` back out of a sliding window. */
+function dropTime(times: number[], at: number): void {
+  const i = times.lastIndexOf(at);
+  if (i !== -1) times.splice(i, 1);
+}
+
+/** An auction as a match a buy (or the profit check, at `price`) works on. */
+function bidMatch(
+  a: { tradeId: string; resourceId: number; assetId: number; rating: number; expiresAt: number | null },
+  price: number,
+): SniperMatch {
+  return { tradeId: a.tradeId, resourceId: a.resourceId, assetId: a.assetId, rating: a.rating, buyNow: price, expiresAt: a.expiresAt };
+}
+
+/** A Bid mode pick as the search results show it, and as a buy takes it. */
+function pickMatch(p: BidPick): SniperMatch {
+  const m = bidMatch(p.auction, p.auction.buyNow);
+  return p.action === 'bid' ? { ...m, bid: p.price } : m;
 }
 
 /** The union of two saved copies of one window: each entry as many times
@@ -296,6 +371,10 @@ export type SniperPhase =
   | 'idle'
   | 'searching'
   | 'buying'
+  /** Bid mode: placing a bid. */
+  | 'bidding'
+  /** Bid mode: reading the watch list to follow its bids. */
+  | 'checking'
   | 'cooldown'
   | 'waiting'
   | 'break'
@@ -330,14 +409,26 @@ export type SniperStopReason =
   | 'ea_session_ended'
   | 'ea_verification'
   /** EA kept rate limiting the bot after its protective rests. */
-  | 'ea_rate_limited';
+  | 'ea_rate_limited'
+  /** Bid mode: the search has no max price, which is its max bid. */
+  | 'no_max_bid'
+  /** Bid mode: the page cannot bid or read the watch list for Nova AI. */
+  | 'bid_unavailable'
+  /** Bid mode: the watch list could not be read, again and again. */
+  | 'watchlist_failing'
+  /** Bid mode: EA's watch list is full and no bid is left to follow. */
+  | 'watchlist_full';
 
 export interface SniperLogEntry {
   id: number;
   at: number;
   /** `listed`: auto-sell put a bought card on the market (`price` is its
-   * buy-now, `message` how that price was chosen). */
-  kind: 'bought' | 'listed' | 'failed' | 'blocked' | 'info';
+   * buy-now, `message` how that price was chosen). Bid mode adds `bid` (a
+   * bid or re-bid went in), `won`, `moved` (a won card went to the transfer
+   * list) and `dropped` (an auction the bot stopped bidding on, or lost).
+   * A message that names the card says `{card}` where the page puts its
+   * name. */
+  kind: 'bought' | 'listed' | 'failed' | 'blocked' | 'info' | 'bid' | 'won' | 'moved' | 'dropped';
   resourceId?: number;
   assetId?: number;
   rating?: number;
@@ -350,6 +441,8 @@ export interface SniperLogEntry {
    * going out, in ms (bought and missed buys). */
   reactionMs?: number;
   message: string;
+  /** A second line under the message, when it needs one. */
+  detail?: string;
 }
 
 export interface SniperMatch {
@@ -361,6 +454,8 @@ export interface SniperMatch {
   rating: number;
   buyNow: number;
   expiresAt: number | null;
+  /** Bid mode: the bid it would take (absent: bought with Buy Now). */
+  bid?: number;
 }
 
 export interface SniperSearchResult {
@@ -399,8 +494,9 @@ export interface SniperState {
 
 /** A budget holding buying back (`Sniper.noteBlock`). */
 interface BuyBlock {
-  /** Which limit: the attempt's `errorCode`, and what tells two blocks apart. */
-  code: 'coin_flow' | 'buys_per_hour' | 'buy_search_ratio' | 'actions_per_hour';
+  /** Which limit: the attempt's `errorCode`, and what tells two blocks apart.
+   * `bids_per_hour`: Bid mode's own window. */
+  code: 'coin_flow' | 'buys_per_hour' | 'buy_search_ratio' | 'actions_per_hour' | 'bids_per_hour';
   /** The risk event it reports, with the value that went past `threshold`. */
   kind: Extract<RiskEventKind, 'coin_flow' | 'actions_per_hour' | 'buy_search_ratio'>;
   value: number;
@@ -480,6 +576,53 @@ interface SearchRun {
 /** Where the time before a buy went (`AttemptInput.searchMs`/`reactionMs`). */
 type Timings = Pick<AttemptInput, 'searchMs' | 'reactionMs'>;
 
+/** What a buy needs of the search that found its listing: when it went out
+ * and when each listing arrived (the timings). */
+type SearchTimes = Pick<SearchRun, 'sentAt' | 'arrivedAt'>;
+
+/** A Bid mode search's answer (`Sniper.bidSearch`). */
+type BidSearch =
+  | ({ ok: true; at: number; auctions: TrimmedAuction[] } & SearchTimes)
+  | { ok: false; error: string; at: number };
+
+/** The breaks and rests between searches, for either mode's loop. */
+interface Pacing {
+  searchesSinceBreak: number;
+  nextBreakAfter: number;
+  restAt: number;
+}
+
+/** How a bid went (`Sniper.placeBid`): `placed` (it went in, or may have),
+ * `skipped` (not this one: `why` says, when the user should hear it),
+ * `dropped` (a limit holds bidding back: no more bids this cycle), or
+ * `stopped`. */
+type BidEnd = { end: 'placed' } | { end: 'skipped'; why?: string } | { end: 'dropped' } | { end: 'stopped' };
+
+/** What a bid is on: an auction from a search, or one of the bot's own
+ * open bids (a re-bid). */
+interface BidTarget {
+  tradeId: string;
+  resourceId: number;
+  assetId: number;
+  rating: number;
+  startingBid: number;
+  currentBid: number;
+  buyNow: number;
+  expiresAt: number;
+  maxBid: number;
+  itemId: string | null;
+}
+
+/** Bid mode's watch list reads: at most every WATCH_MIN_GAP_MS, at least
+ * every WATCH_MAX_AGE_MS while bids are open, and every cycle (within the
+ * gap) once a bid ends within WATCH_NEAR_MS, is outbid or has no answer
+ * yet (`Sniper.watchlistDue`). */
+const WATCH_MIN_GAP_MS = 15_000;
+const WATCH_MAX_AGE_MS = 60_000;
+const WATCH_NEAR_MS = 90_000;
+/** Failed watch list reads in a row before Bid mode gives up. */
+const MAX_WATCH_FAILURES_IN_A_ROW = 3;
+
 /** How a batch of matches ended (`Sniper.buyMatches`): `dropped` when it
  * left the rest (a pause after a buy made them stale, or a budget holds
  * buying back). */
@@ -493,9 +636,15 @@ export interface SniperAccountIssue {
 }
 
 export interface SniperDeps {
+  /** `bid`, `watchlist` and `move` are Bid mode's: without the first two it
+   * refuses to start in Bid mode (`bid_unavailable`). */
   adapter: Pick<AdapterClient, 'search' | 'buy' | 'list' | 'onAuctions' | 'onBuyable' | 'onProbe' | 'onShape'> &
-    Partial<Pick<AdapterClient, 'onEaError'>>;
+    Partial<Pick<AdapterClient, 'onEaError' | 'bid' | 'watchlist' | 'move'>>;
   getFilters: () => SniperFilter[];
+  /** The coin balance EA's own answers last stated (null: none seen). Bid
+   * mode bids only what it leaves after the coins its other bids hold.
+   * Omitted = unknown. */
+  credits?: () => number | null;
   /** What a card sells for on the market now, or null if unknown. Used
    * where the user set no sell price of their own. */
   estimateSellPrice: (resourceId: number) => Promise<number | null>;
@@ -639,6 +788,23 @@ export class Sniper {
    * `searchMaxBuy`. */
   private readonly searchRounds = new Map<string, number>();
 
+  /** Snipe or Bid and Bid mode's settings (clamped into `BID_LIMITS`), and
+   * the mode the current (or last) start runs: a change applies at the next
+   * Start. */
+  private modeSettings: BotModeSettings;
+  private runMode: BotMode = 'snipe';
+  /** Bid mode: the sliding one-hour window of bids EA saw. */
+  private bidTimes: number[] = [];
+  /** Bid mode: the auctions holding one of the bot's bids. Kept across
+   * Stop/Start: EA keeps the bids until their auctions end, and the next
+   * start in Bid mode follows them again. */
+  private readonly book = new BidBook();
+  /** Bid mode's watch list: when it was last read, failed reads in a row,
+   * how many auctions it holds, and whether "it is full" has been said. */
+  private watch = { at: -Infinity, failures: 0, size: 0, fullNoted: false };
+  /** What the last watch list read said, for `settleBids`. */
+  private bidEvents: BidEvent[] = [];
+
   private readonly now: () => number;
   private readonly random: () => number;
   private readonly sleep: (ms: number, signal: AbortSignal) => Promise<void>;
@@ -646,8 +812,10 @@ export class Sniper {
   constructor(
     private readonly deps: SniperDeps,
     settings: BotSettings,
+    modeSettings: BotModeSettings = DEFAULT_BOT_MODE_SETTINGS,
   ) {
     this.settings = clampBotSettings(settings);
+    this.modeSettings = clampBotModeSettings(modeSettings);
     this.now = deps.now ?? Date.now;
     this.random = deps.random ?? Math.random;
     this.sleep = deps.sleep ?? abortableSleep;
@@ -845,10 +1013,43 @@ export class Sniper {
    * running governor straight away. */
   setSettings(settings: BotSettings): void {
     this.settings = clampBotSettings(settings);
-    this.governor?.setSettings(botGovernorSettings(this.settings), BOT_GOVERNOR_BOUNDS);
+    this.governor?.setSettings(this.governorSettings(), BOT_GOVERNOR_BOUNDS);
     // Settings raised above low while running, with no acknowledgment: the
     // same rule as start(), enforced here, not only on the page.
     if (this.isRunning() && this.riskUnacknowledged()) this.stop('risk_unacknowledged');
+  }
+
+  /** Snipe or Bid, and Bid mode's settings. The mode applies at the next
+   * Start; Bid mode's limits apply at once. */
+  setModeSettings(modeSettings: BotModeSettings): void {
+    this.modeSettings = clampBotModeSettings(modeSettings);
+    this.governor?.setSettings(this.governorSettings(), BOT_GOVERNOR_BOUNDS);
+  }
+
+  getModeSettings(): BotModeSettings {
+    return this.modeSettings;
+  }
+
+  /** The mode the bot runs (or last ran). */
+  getRunMode(): BotMode {
+    return this.runMode;
+  }
+
+  /** While Bid mode runs: its open bids out of the user's max, and the
+   * coins they hold. Null otherwise. */
+  getBidStatus(): { active: number; max: number; committed: number } | null {
+    if (!this.isRunning() || this.runMode !== 'bid') return null;
+    return { active: this.book.size(), max: this.modeSettings.bidding.maxActiveBids, committed: this.book.committed() };
+  }
+
+  /** The governor's thresholds: the user's own (`botGovernorSettings`),
+   * with Bid mode's bids an hour added to the actions an hour while it
+   * runs — every bid is a request EA sees, and the bids' own window holds
+   * them to their limit. */
+  private governorSettings(): GovernorSettings {
+    const g = botGovernorSettings(this.settings);
+    if (this.runMode !== 'bid') return g;
+    return { ...g, actionsPerHour: g.actionsPerHour + this.modeSettings.bidding.maxBidsPerHour };
   }
 
   private riskUnacknowledged(): boolean {
@@ -904,15 +1105,34 @@ export class Sniper {
       });
       return;
     }
+    const mode = this.modeSettings.mode;
+    if (mode === 'bid') {
+      // Bid mode follows its bids on the watch list: without the calls for
+      // that it never starts (and the first read must work, `runBids`).
+      // The max price is the max bid: without one there is no limit.
+      const reason: SniperStopReason | null =
+        !this.deps.adapter.bid || !this.deps.adapter.watchlist
+          ? 'bid_unavailable'
+          : filters.some((f) => this.priceCap(f.filter) == null)
+            ? 'no_max_bid'
+            : null;
+      if (reason) {
+        this.setState({ phase: 'stopped', phaseEndsAt: null, stopReason: reason, stopDetail: STOP_MESSAGES[reason] });
+        return;
+      }
+    }
+    this.runMode = mode;
     this.abort = new AbortController();
     this.budgetHydrated = false;
     // One governor for the life of this object: Stop/Start keeps its
     // windows (and the search/buy windows below) rather than refilling them.
     if (this.governor) {
-      this.governor.setSettings(botGovernorSettings(this.settings), BOT_GOVERNOR_BOUNDS);
+      this.governor.setSettings(this.governorSettings(), BOT_GOVERNOR_BOUNDS);
     } else {
       this.governor = this.newGovernor();
     }
+    this.watch = { at: -Infinity, failures: 0, size: 0, fullNoted: false };
+    this.bidEvents = [];
     this.buyBlock = null;
     this.stats.startedAt = this.now();
     this.runTotals = { purchases: 0, coinsSpent: 0 };
@@ -922,7 +1142,13 @@ export class Sniper {
     // The sell prices the minimum-profit check reads, looked up now so the
     // first matches find them: a buy never waits for one.
     this.prefetchPrices(filters.map((f) => f.filter.resourceId).filter((id): id is number => id != null));
-    this.addLog({ kind: 'info', message: 'Bot started' });
+    if (mode === 'bid') {
+      const b = this.modeSettings.bidding;
+      this.addLog({
+        kind: 'info',
+        message: `Bot started in Bid mode: bids on auctions with ${plural(b.windowMinutes, 'minute')} or less left, up to ${plural(b.maxActiveBids, 'bid')} at a time, never above your max price`,
+      });
+    } else this.addLog({ kind: 'info', message: 'Bot started' });
     const timing = this.deps.timingMode?.();
     if (timing === 'worker') this.addLog({ kind: 'info', message: 'Background searching is on: the bot keeps its pace in another tab' });
     else if (timing === 'page')
@@ -942,6 +1168,14 @@ export class Sniper {
     this.persistBudget();
     const message = detail ?? STOP_MESSAGES[reason];
     this.addLog({ kind: 'info', message: `Bot stopped: ${message}` });
+    // EA keeps a bid until its auction ends: say so, rather than let the
+    // user think stopping took them back.
+    const open = this.runMode === 'bid' ? this.book.size() : 0;
+    if (open > 0)
+      this.addLog({
+        kind: 'info',
+        message: `${plural(open, 'bid')} still open: EA keeps bids until their auctions end, and Bid mode follows them again when you start it`,
+      });
     this.setState({ phase: 'stopped', phaseEndsAt: null, stopReason: reason, stopDetail: message });
   }
 
@@ -958,14 +1192,17 @@ export class Sniper {
   // ---- the loop -----------------------------------------------------------
 
   private async run(signal: AbortSignal): Promise<void> {
-    const s = () => this.settings;
-    let searchesSinceBreak = 0;
-    let nextBreakAfter = this.pickInt(s().breaks.searches);
-    let restAt = this.now() + this.pickInt(s().rest.afterMinutes) * 60_000;
-    let failuresInRow = 0;
+    const pacing = this.newPacing();
+    if (!(await this.loadRunState(signal))) return;
+    return this.runMode === 'bid' ? this.runBids(signal, pacing) : this.runSnipes(signal, pacing);
+  }
 
+  /** Today's active time and the saved hourly budgets, before anything
+   * acts. False when the bot stopped meanwhile, or could not read the
+   * budgets (it then stops). */
+  private async loadRunState(signal: AbortSignal): Promise<boolean> {
     const saved = await this.deps.loadUsage?.().catch(() => null);
-    if (signal.aborted) return;
+    if (signal.aborted) return false;
     this.usage =
       saved && saved.day === localDay(this.now()) ? { ...saved } : { day: localDay(this.now()), activeMs: 0 };
     this.activeSince = this.now();
@@ -978,31 +1215,54 @@ export class Sniper {
       try {
         budget = await this.deps.loadBudget();
       } catch {
-        if (signal.aborted) return;
-        return this.stop('budget_unavailable');
+        if (!signal.aborted) this.stop('budget_unavailable');
+        return false;
       }
-      if (signal.aborted) return;
+      if (signal.aborted) return false;
       if (budget) this.hydrateBudget(budget);
     }
     this.budgetHydrated = true;
+    return true;
+  }
+
+  private newPacing(): Pacing {
+    return {
+      searchesSinceBreak: 0,
+      nextBreakAfter: this.pickInt(this.settings.breaks.searches),
+      restAt: this.now() + this.pickInt(this.settings.rest.afterMinutes) * 60_000,
+    };
+  }
+
+  /** Takes the rest or the break that is due, if any. True when it took
+   * one (or the bot stopped during it): the loop then starts over. */
+  private async takeBreakIfDue(p: Pacing, signal: AbortSignal): Promise<boolean> {
+    const s = this.settings;
+    if (s.rest.enabled && this.now() >= p.restAt) {
+      const restMs = this.pickInt(s.rest.minutes) * 60_000;
+      this.pauseActive(true);
+      await this.wait('rest', restMs, signal);
+      if (signal.aborted) return true;
+      this.activeSince = this.now();
+      p.restAt = this.now() + this.pickInt(this.settings.rest.afterMinutes) * 60_000;
+      return true;
+    }
+    if (s.breaks.enabled && p.searchesSinceBreak >= p.nextBreakAfter) {
+      await this.wait('break', this.pickInt(s.breaks.seconds) * 1000, signal);
+      p.searchesSinceBreak = 0;
+      p.nextBreakAfter = this.pickInt(this.settings.breaks.searches);
+      return true;
+    }
+    return false;
+  }
+
+  /** Snipe mode: search, buy what is at or under the price cap, wait. */
+  private async runSnipes(signal: AbortSignal, p: Pacing): Promise<void> {
+    const s = () => this.settings;
+    let failuresInRow = 0;
 
     while (!signal.aborted) {
       if (this.dailyLimitReached()) return this.stop('daily_limit');
-      if (s().rest.enabled && this.now() >= restAt) {
-        const restMs = this.pickInt(s().rest.minutes) * 60_000;
-        this.pauseActive(true);
-        await this.wait('rest', restMs, signal);
-        if (signal.aborted) return;
-        this.activeSince = this.now();
-        restAt = this.now() + this.pickInt(s().rest.afterMinutes) * 60_000;
-        continue;
-      }
-      if (s().breaks.enabled && searchesSinceBreak >= nextBreakAfter) {
-        await this.wait('break', this.pickInt(s().breaks.seconds) * 1000, signal);
-        searchesSinceBreak = 0;
-        nextBreakAfter = this.pickInt(s().breaks.searches);
-        continue;
-      }
+      if (await this.takeBreakIfDue(p, signal)) continue;
 
       const filters = this.deps.getFilters();
       if (filters.length === 0) return this.stop('no_filters');
@@ -1022,7 +1282,7 @@ export class Sniper {
       if (signal.aborted) return;
       this.stats.searches++;
       this.searchSeq++;
-      searchesSinceBreak++;
+      p.searchesSinceBreak++;
       // What the bot can buy is bought the moment it arrives, before the
       // search's own answer is in: the adapter checks every buy against the
       // listing it saw itself (price, card and expiry, main/adapter.ts
@@ -1074,8 +1334,18 @@ export class Sniper {
       await this.waitBlocked(pause.resumeAt!, signal);
       return signal.aborted ? 'stopped' : 'wait';
     }
+    const gate = await this.searchWindowGate(signal, false);
+    return gate === 'skip' ? 'wait' : gate;
+  }
+
+  /** The user's searches-per-hour window and the governor, for a search
+   * about to go out. `following` (Bid mode, with bids to follow): a full
+   * search window skips this cycle's search rather than sleeping, so the
+   * bids are still followed. */
+  private async searchWindowGate(signal: AbortSignal, following: boolean): Promise<'go' | 'skip' | 'wait' | 'stopped'> {
     const searchWait = this.windowWait(this.searchTimes, this.settings.safety.maxSearchesPerHour);
     if (searchWait > 0) {
+      if (following) return 'skip';
       this.addLog({
         kind: 'blocked',
         message: `Search paused: ${this.searchTimes.length} searches in the last hour (your limit)`,
@@ -1086,7 +1356,7 @@ export class Sniper {
     const decision = this.governor!.allow({ kind: 'search' });
     if (decision.allowed) {
       // The windows have room again (the buy:search ratio: once a buy would pass it).
-      if (this.buyBlock && (this.buyBlock.code !== 'buy_search_ratio' || this.governor!.ratioAllowsBuy())) this.endBlock();
+      if (this.buyBlock && this.blockLifted(this.buyBlock)) this.endBlock();
       return 'go';
     }
     this.persistBudget(); // a hard stop's cooldown is part of the budget
@@ -1109,6 +1379,22 @@ export class Sniper {
     this.addLog({ kind: 'blocked', message: `Search paused by safety limits (${decision.detail ?? decision.reason})` });
     await this.wait('blocked', Math.max(this.governor!.snapshot().cooldownRemainingMs, MIN_BLOCKED_WAIT_MS), signal);
     return signal.aborted ? 'stopped' : 'wait';
+  }
+
+  /** Whether the budget holding buying (or bidding) back has room again,
+   * once a search has been allowed. Snipe mode only gets here after
+   * `searchPause` found the buy window and the coin flow free, so for it
+   * this is the ratio check alone; Bid mode, which bids on its own windows,
+   * checks each. */
+  private blockLifted(b: BuyBlock): boolean {
+    if (b.code === 'buy_search_ratio') return this.governor!.ratioAllowsBuy();
+    if (b.code === 'bids_per_hour') return this.windowWait(this.bidTimes, this.modeSettings.bidding.maxBidsPerHour) === 0;
+    if (b.code === 'buys_per_hour') return this.windowWait(this.buyTimes, this.settings.safety.maxBuysPerHour) === 0;
+    if (b.code === 'coin_flow' && b.coins != null) {
+      const at = this.governor!.coinFlowFreesAt(b.coins);
+      return at == null || at <= this.now();
+    }
+    return true;
   }
 
   /** What holds buying back now, when a search would be wasted on it: the
@@ -1179,7 +1465,9 @@ export class Sniper {
     };
   }
 
-  private coinFlowBlock(price: number, resumeAt: number): BuyBlock {
+  /** `verb`: what the limit holds back ("Bidding" for a bid, whose standing
+   * bids count in the coin flow). */
+  private coinFlowBlock(price: number, resumeAt: number, verb = 'Buying'): BuyBlock {
     const { coinFlowLastHour: flow, coinFlowLimit: limit } = this.governor!.snapshot();
     return {
       code: 'coin_flow',
@@ -1188,7 +1476,21 @@ export class Sniper {
       threshold: limit,
       resumeAt,
       coins: price,
-      message: `Buying paused: coin-flow limit (${flow.toLocaleString('en-US')} of ${coins(limit)} in the last hour) — resumes about ${clockTime(resumeAt)}`,
+      message: `${verb} paused: coin-flow limit (${flow.toLocaleString('en-US')} of ${coins(limit)} in the last hour) — resumes about ${clockTime(resumeAt)}`,
+    };
+  }
+
+  private bidsPerHourBlock(waitMs: number): BuyBlock {
+    const limit = this.modeSettings.bidding.maxBidsPerHour;
+    const n = this.bidTimes.length;
+    const resumeAt = this.now() + waitMs;
+    return {
+      code: 'bids_per_hour',
+      kind: 'actions_per_hour',
+      value: n + 1,
+      threshold: limit,
+      resumeAt,
+      message: `Bidding paused: bid limit (${n} of ${plural(limit, 'bid')} in the last hour) — resumes about ${clockTime(resumeAt)}`,
     };
   }
 
@@ -1212,13 +1514,14 @@ export class Sniper {
     const { actionsLastHour: n, actionsPerHourLimit: limit } = this.governor!.snapshot();
     const resumeAt = this.governor!.actionsFreeAt();
     const event = decision.events.find((e) => e.kind === 'actions_per_hour');
+    const what = this.runMode === 'bid' ? plural(limit, 'search, bid and buy', 'searches, bids and buys') : plural(limit, 'search and buy', 'searches and buys');
     return {
       code: 'actions_per_hour',
       kind: 'actions_per_hour',
       value: event?.value ?? n + 1,
       threshold: limit,
       resumeAt,
-      message: `Paused: safety limit of ${plural(limit, 'search and buy', 'searches and buys')} an hour (${n} in the last hour) — resumes about ${clockTime(resumeAt)}`,
+      message: `Paused: safety limit of ${what} an hour (${n} in the last hour) — resumes about ${clockTime(resumeAt)}`,
     };
   }
 
@@ -1325,7 +1628,7 @@ export class Sniper {
   /** Buys `matches`, cheapest first (each one added to `tried`). */
   private async buyMatches(
     matches: SniperMatch[],
-    search: SearchRun,
+    search: SearchTimes,
     tried: Set<string>,
     signal: AbortSignal,
   ): Promise<BatchEnd> {
@@ -1514,8 +1817,494 @@ export class Sniper {
   }
 
   private dropBuyTime(at: number): void {
-    const i = this.buyTimes.lastIndexOf(at);
-    if (i !== -1) this.buyTimes.splice(i, 1);
+    dropTime(this.buyTimes, at);
+  }
+
+  // ---- Bid mode -------------------------------------------------------------
+
+  /** Bid mode's loop (engine/bidder.ts has how it decides). Each cycle: the
+   * watch list when a bid needs it, then what it said (collect what was
+   * won, re-bid where outbid while the max allows, else drop), then a
+   * search for more auctions while there is room. Paced like Snipe mode —
+   * the search delay start to start, slower after EA limits it, breaks
+   * every N searches, rests — and under every limit it has. */
+  private async runBids(signal: AbortSignal, p: Pacing): Promise<void> {
+    let failuresInRow = 0;
+    // Bid mode follows its bids on the watch list: where Nova AI cannot
+    // read it, it places none (fail closed). The read is a request EA sees,
+    // so it waits on the same checks as any other.
+    if (this.applyKillSwitch() || this.applyEntitlement() || this.applyExclusive()) return;
+    if ((await this.waitOutEaBackoff(signal)) && signal.aborted) return;
+    if (!(await this.readWatchlist(signal, true))) return;
+
+    while (!signal.aborted) {
+      if (this.dailyLimitReached()) return this.stop('daily_limit');
+      if (await this.takeBreakIfDue(p, signal)) continue;
+      const filters = this.deps.getFilters();
+      if (filters.length === 0) return this.stop('no_filters');
+      // The search can be edited while the bot runs; its max price is the max bid.
+      if (filters.some((f) => this.priceCap(f.filter) == null)) return this.stop('no_max_bid');
+      if (this.applyKillSwitch() || this.applyEntitlement() || this.applyExclusive()) return;
+      if (await this.waitOutEaBackoff(signal)) continue;
+      const startedAt = this.now();
+
+      if (this.watchlistDue(startedAt) && !(await this.readWatchlist(signal, false))) return;
+      if ((await this.settleBids(signal)) === 'stopped') return;
+      if (this.watchlistFull()) return this.stop('watchlist_full');
+
+      if (this.bidRoom() > 0) {
+        // With bids to follow, a full search window skips the search
+        // rather than sleeping through their last minutes.
+        const gate = await this.searchWindowGate(signal, this.book.size() > 0);
+        if (gate === 'stopped') return;
+        if (gate === 'wait') continue;
+        if (gate === 'go') {
+          const target = filters[this.filterIndex++ % filters.length]!;
+          const found = await this.bidSearch(target);
+          if (signal.aborted) return;
+          this.stats.searches++;
+          this.searchSeq++;
+          p.searchesSinceBreak++;
+          this.pace.searches++;
+          if (!found.ok) {
+            this.pace.failed++;
+            if (!this.eaExcused(found.error, startedAt)) failuresInRow++;
+            this.addLog({ kind: 'failed', message: `Search "${target.name}" failed: ${found.error}` });
+            if (failuresInRow >= MAX_SEARCH_FAILURES_IN_A_ROW) return this.stop('search_failing');
+          } else {
+            failuresInRow = 0;
+            this.pace.searchMs.push(found.at - startedAt);
+            if (found.auctions.length > 0) this.pace.withResults++;
+            if ((await this.takeAuctions(target, found, signal)) === 'stopped') return;
+          }
+        }
+      }
+      this.deps.onChange();
+
+      const delayMs = this.pickSeconds(this.settings.searchDelay) * 1000 * this.eaPaceFactor();
+      await this.wait('waiting', Math.max(0, delayMs - (this.now() - startedAt)), signal);
+    }
+  }
+
+  /** How many more auctions Bid mode may bid on now: the user's max open
+   * bids, and room on EA's watch list. */
+  private bidRoom(): number {
+    const open = this.modeSettings.bidding.maxActiveBids - this.book.size();
+    return Math.max(0, Math.min(open, WATCHLIST_SIZE - this.watch.size));
+  }
+
+  /** EA's watch list is full: a new bid would not fit. True when no bid of
+   * the bot's is left on it to follow (the bot then stops); otherwise it
+   * says so once, and bids again once there is room (`bidRoom`). */
+  private watchlistFull(): boolean {
+    if (this.watch.size < WATCHLIST_SIZE) {
+      this.watch.fullNoted = false;
+      return false;
+    }
+    if (this.book.size() === 0) return true;
+    if (!this.watch.fullNoted) {
+      this.watch.fullNoted = true;
+      this.addLog({
+        kind: 'blocked',
+        message: `Your EA watch list is full (${WATCHLIST_SIZE} cards): no new bids until there is room. Clear expired items in EA's Transfer Targets`,
+      });
+    }
+    return false;
+  }
+
+  /** Whether this cycle reads the watch list: only while bids are open, at
+   * most every WATCH_MIN_GAP_MS, at least every WATCH_MAX_AGE_MS, and every
+   * cycle (within that gap) once a bid ends within WATCH_NEAR_MS, was
+   * outbid or has no answer yet. */
+  private watchlistDue(now: number): boolean {
+    const bids = this.book.bids();
+    if (bids.length === 0) return false;
+    const age = now - this.watch.at;
+    if (age < WATCH_MIN_GAP_MS) return false;
+    if (age >= WATCH_MAX_AGE_MS) return true;
+    return bids.some((b) => b.state !== 'leading' || b.expiresAt - now <= WATCH_NEAR_MS);
+  }
+
+  /** Reads the watch list, and keeps what it said for `settleBids`. False
+   * when the bot stopped: the page cannot read it for Nova AI
+   * (`bid_unavailable`), the first read failed (Bid mode does not start
+   * without one), reads keep failing, or EA ended the session. EA limiting
+   * requests backs off as it does for a search, never a stop by itself. */
+  private async readWatchlist(signal: AbortSignal, first: boolean): Promise<boolean> {
+    this.setState({ phase: 'checking', phaseEndsAt: null, stopReason: null, stopDetail: null });
+    const startedAt = this.now();
+    this.watch.at = startedAt;
+    const res = await this.deps.adapter.watchlist!();
+    if (signal.aborted) return false;
+    if (res.ok) {
+      this.watch.failures = 0;
+      const watched = res.watched ?? [];
+      this.watch.size = watched.length;
+      this.bidEvents.push(...this.book.reconcile(watched, this.now()));
+      return true;
+    }
+    const error = res.error ?? 'unknown error';
+    if (error === ACT_ERROR.biddingUnsupported) {
+      this.stop('bid_unavailable');
+      return false;
+    }
+    // The adapter's own minimum gap between reads: nothing new to read yet.
+    if (error === 'watchlist_too_soon') return true;
+    this.addLog({ kind: 'failed', message: `Could not read your watch list: ${error}` });
+    if (this.watchlistEaError(error, startedAt)) return this.isRunning();
+    this.watch.failures++;
+    if (first || this.watch.failures >= MAX_WATCH_FAILURES_IN_A_ROW) {
+      this.stop('watchlist_failing');
+      return false;
+    }
+    return true;
+  }
+
+  /** EA's status in a failed watch list read, handled as the adapter's
+   * `ea_error` is for a search (it files none for the watch list's own
+   * request): an ended session or a captcha stops the bot, a rate limit or
+   * an outage backs off (`eaExcused`). True when it was one of those. */
+  private watchlistEaError(error: string, startedAt: number): boolean {
+    const status = Number(/status (\d{3})/.exec(error)?.[1]);
+    if (!Number.isInteger(status)) return false;
+    const category = eaErrorCategory(status);
+    if (category === 'session_ended' || category === 'verification') {
+      this.onEaError({ status, category, endpoint: 'market', seenAt: this.now() });
+      return true;
+    }
+    return this.eaExcused(error, startedAt);
+  }
+
+  /** What the last watch list read said about the bot's bids. A won auction
+   * is a purchase (`onWon`); a lost one, or one that left the list, gives
+   * its coins back; an outbid one gives its coins back (EA did) and is
+   * re-bid or dropped, soonest-ending first. */
+  private async settleBids(signal: AbortSignal): Promise<'done' | 'stopped'> {
+    const events = this.bidEvents;
+    this.bidEvents = [];
+    for (const e of events) {
+      if (e.kind === 'won') this.onWon(e.bid, e.price);
+      else if (e.kind === 'lost')
+        this.dropBid(e.bid, { message: 'Lost {card} to a higher bid', detail: e.price > 0 ? `it went for ${amount(e.price)}` : undefined, outcome: 'too_slow', errorCode: 'outbid' });
+      else if (e.kind === 'gone') this.dropBid(e.bid, { message: 'Stopped following {card}: it is no longer on your watch list' });
+      else this.releaseBid(e.bid);
+    }
+    if (signal.aborted) return 'stopped';
+    for (const e of events) {
+      if (e.kind !== 'outbid' || !this.book.get(e.bid.tradeId)) continue;
+      const r = await this.rebid(e.bid, signal);
+      if (r === 'stopped') return 'stopped';
+      // A limit holds bidding back: the rest wait for the next read.
+      if (r === 'dropped') break;
+    }
+    return 'done';
+  }
+
+  /** An open bid that was outbid: re-bid the next step while that stays at
+   * or under the max and under the buy-now price, else drop the auction.
+   * One whose buy-now price is at or under the max is bought instead. */
+  private async rebid(b: TrackedBid, signal: AbortSignal): Promise<'done' | 'dropped' | 'stopped'> {
+    // Ended: the next read says whether it was won.
+    if (b.expiresAt <= this.now()) return 'done';
+    if (b.buyNow > 0 && b.buyNow <= b.maxBid) {
+      this.book.close(b.tradeId);
+      const end = await this.buyMatches([bidMatch(b, b.buyNow)], { sentAt: this.now(), arrivedAt: () => undefined }, new Set(), signal);
+      return end === 'stopped' ? 'stopped' : 'done';
+    }
+    const next = nextBid(b);
+    if (next > b.maxBid || (b.buyNow > 0 && next >= b.buyNow)) {
+      this.dropBid(b, {
+        message: 'Max bid reached on {card} — dropping it',
+        detail: `the next bid would be ${amount(next)}, your max is ${amount(b.maxBid)}`,
+        errorCode: 'max_bid_reached',
+      });
+      return 'done';
+    }
+    const r = await this.placeBid(b, next, b, signal);
+    if (r.end === 'stopped' || r.end === 'dropped') return r.end;
+    if (r.end === 'skipped' && r.why) this.dropBid(b, { message: 'Not re-bidding on {card} — dropping it', detail: r.why, errorCode: 'rebid_skipped' });
+    return 'done';
+  }
+
+  /** One Bid mode search: auctions whose current bid is at most the max
+   * (EA's own `maxBid` criterion, stepped down EA's grid like Snipe mode's
+   * max buy-now price so EA never answers it from its cache), whatever
+   * their buy-now price. Waits for EA's answer: an auction's last minutes
+   * are not a race to the millisecond the way a snipe is. */
+  private async bidSearch(target: SniperFilter): Promise<BidSearch> {
+    this.setState({ phase: 'searching', phaseEndsAt: null, stopReason: null, stopDetail: null });
+    const cap = this.priceCap(target.filter)!;
+    const collected = new Map<string, TrimmedAuction>();
+    const arrived = new Map<string, number>();
+    const take = (a: TrimmedAuction): void => {
+      collected.set(a.tradeId, a);
+      if (a.buyable !== false && !arrived.has(a.tradeId)) arrived.set(a.tradeId, this.now());
+    };
+    const off = this.deps.adapter.onAuctions((raw) => {
+      for (const a of raw as TrimmedAuction[]) take(a);
+    });
+    const offBuyable = this.deps.adapter.onBuyable((tradeIds) => {
+      for (const id of tradeIds) {
+        const a = collected.get(id);
+        if (a) take({ ...a, buyable: true });
+      }
+    });
+    const round = this.searchRounds.get(target.id) ?? 0;
+    this.searchRounds.set(target.id, round + 1);
+    // Not by buy-now price: an auction worth bidding on is one whose
+    // buy-now price is over the max.
+    const criteria: FilterCriteria = { ...target.filter };
+    delete criteria.maxPrice;
+    const maxBid = Math.max(MIN_START_PRICE, searchMaxBuy(round, undefined, cap)!);
+    const sentAt = this.now();
+    this.searchTimes.push(sentAt);
+    const searching = this.deps.adapter.search(criteria, { maxBid });
+    // Saved once the search is on its way, not before it.
+    this.persistBudget();
+    let outcome: Awaited<typeof searching>;
+    try {
+      outcome = await searching;
+    } finally {
+      off();
+      offBuyable();
+    }
+    const at = this.now();
+    if (!outcome.ok) return { ok: false, error: outcome.error ?? 'unknown error', at };
+    return { ok: true, at, auctions: [...collected.values()], sentAt, arrivedAt: (tradeId) => arrived.get(tradeId) };
+  }
+
+  /** A Bid mode search's auctions (`pickAuctions`): buys first, through
+   * Snipe mode's own buy path and limits, then bids, soonest-ending first,
+   * while there is room. */
+  private async takeAuctions(target: SniperFilter, found: Extract<BidSearch, { ok: true }>, signal: AbortSignal): Promise<'done' | 'stopped'> {
+    const maxBid = this.priceCap(target.filter)!;
+    const picks = pickAuctions(found.auctions, {
+      now: this.now(),
+      windowMs: this.modeSettings.bidding.windowMinutes * 60_000,
+      maxBid,
+      filter: target.filter,
+      skip: (tradeId) => this.book.knows(tradeId),
+    });
+    const prices = found.auctions.map((a) => a.buyNow).filter((n) => n > 0);
+    this.addSearchResult(target.name, picks.map(pickMatch), found.auctions.length, prices.length ? Math.min(...prices) : null, found.at);
+    this.prefetchPrices(found.auctions.map((a) => a.resourceId));
+    const buys = picks.filter((pick) => pick.action === 'buy').map(pickMatch);
+    if (buys.length > 0) {
+      const end = await this.buyMatches(buys, found, new Set(), signal);
+      if (end === 'stopped') return 'stopped';
+      // A pause after a buy left the rest stale, or a limit holds buying back.
+      if (end === 'dropped') return 'done';
+    }
+    for (const pick of picks) {
+      if (pick.action !== 'bid') continue;
+      if (this.bidRoom() <= 0) break;
+      const a = pick.auction;
+      const auction: BidTarget = {
+        tradeId: a.tradeId,
+        resourceId: a.resourceId,
+        assetId: a.assetId,
+        rating: a.rating,
+        startingBid: a.startingBid,
+        currentBid: a.currentBid,
+        buyNow: a.buyNow,
+        expiresAt: a.expiresAt!,
+        maxBid,
+        itemId: a.itemId ?? null,
+      };
+      const r = await this.placeBid(auction, pick.price, null, signal);
+      if (r.end === 'stopped') return 'stopped';
+      if (r.end === 'dropped') break;
+      if (r.end === 'skipped' && r.why) this.logBidSkip(auction, pick.price, r.why);
+    }
+    return 'done';
+  }
+
+  /**
+   * One bid, through every check of a buy that applies to one: the kill
+   * switch, plan, account and lease; EA's backoff; the minimum profit; the
+   * session coin budget and the coins EA says the trader has, both net of
+   * what the bot's other bids hold; the bids-per-hour window; and the
+   * governor (actions an hour, and the coin flow with every standing bid in
+   * it). `rebid`: the bot's own open bid on this auction, outbid.
+   */
+  private async placeBid(t: BidTarget, bid: number, rebid: TrackedBid | null, signal: AbortSignal): Promise<BidEnd> {
+    this.setState({ phase: 'bidding', phaseEndsAt: null, stopReason: null, stopDetail: null });
+    if (this.applyKillSwitch() || this.applyEntitlement() || this.applyExclusive()) return { end: 'stopped' };
+    // EA is limiting requests or erroring: the next cycle waits it out.
+    if (this.eaBackoff.until > this.now()) return { end: 'dropped' };
+    const th = this.settings.thresholds;
+    if (th.minProfit > 0) {
+      const estimate = this.knownEstimate(bidMatch(t, bid));
+      if (estimate?.profit != null && estimate.profit < th.minProfit)
+        return { end: 'skipped', why: `estimated profit ${coins(estimate.profit)} is under your minimum profit (${coins(th.minProfit)})` };
+    }
+    const held = this.book.committed();
+    if (th.sessionCoinBudget > 0 && this.runTotals.coinsSpent + held + bid > th.sessionCoinBudget) {
+      if (this.runTotals.coinsSpent >= th.sessionCoinBudget) {
+        this.stop('coin_budget');
+        return { end: 'stopped' };
+      }
+      return {
+        end: 'skipped',
+        why: held > 0 ? `it would go over your session coin budget (${coins(held)} are held in your other bids)` : 'it would go over your session coin budget',
+      };
+    }
+    // EA's own stated balance. Whether it already leaves out what the bot's
+    // bids hold is unverified (day-one checklist): counting them again can
+    // only skip a bid EA would have taken, never send one it refuses.
+    const credits = this.deps.credits?.() ?? null;
+    if (credits != null && held + bid > credits)
+      return { end: 'skipped', why: `not enough coins (${coins(Math.max(0, credits - held))} free after your other bids)` };
+    const bidWait = this.windowWait(this.bidTimes, this.modeSettings.bidding.maxBidsPerHour);
+    if (bidWait > 0) {
+      this.noteBlock(this.bidsPerHourBlock(bidWait), null);
+      return { end: 'dropped' };
+    }
+    const decision = this.governor!.allow({ kind: 'bid', coins: bid });
+    if (!decision.allowed) {
+      this.persistBudget(); // a hard stop's cooldown is part of the budget
+      if (decision.reason === 'kill_switch') {
+        this.stop('kill_switch', decision.detail);
+        return { end: 'stopped' };
+      }
+      if (decision.reason === 'coin_flow') {
+        const at = this.governor!.coinFlowFreesAt(bid);
+        if (at == null) return { end: 'skipped', why: `it is more than your coins per hour (${coins(this.settings.safety.maxCoinFlowPerHour)})` };
+        this.noteBlock(this.coinFlowBlock(bid, at, 'Bidding'), null);
+        return { end: 'dropped' };
+      }
+      this.noteBlock(this.actionsBlock(decision), null);
+      return { end: 'dropped' };
+    }
+    if (this.buyBlock && this.blockLifted(this.buyBlock)) this.endBlock();
+
+    // Counted in the bid window now, and taken back below only if the
+    // adapter refused it before it reached EA.
+    const at = this.now();
+    this.bidTimes.push(at);
+    const bidding = this.deps.adapter.bid!(t.tradeId, bid, { resourceId: t.resourceId, assetId: t.assetId });
+    // Saved once the bid is on its way, not before it.
+    this.persistBudget();
+    const result = await bidding;
+    const card = { resourceId: t.resourceId, assetId: t.assetId, rating: t.rating, price: bid };
+    if (result.ok || result.error === ACT_ERROR.timeoutUnknown || !result.signed) {
+      // In, or perhaps in (EA did not answer in time, or no signed answer
+      // came): it holds its coins until the watch list says otherwise, and
+      // a bid that never landed leaves the book after two reads without it.
+      const tracked: TrackedBid = rebid ?? { ...t, amount: bid, state: 'pending', decision: null, missing: 0 };
+      if (!rebid) this.watch.size++;
+      tracked.amount = bid;
+      tracked.state = result.ok ? 'leading' : 'pending';
+      tracked.decision = decision;
+      tracked.missing = 0;
+      this.book.place(tracked);
+      if (result.ok)
+        this.addLog({
+          kind: 'bid',
+          ...card,
+          message: rebid ? `Outbid on {card} — re-bidding ${amount(bid)}` : `Bid ${amount(bid)} on {card} (${timeLeft(t.expiresAt - at)})`,
+        });
+      else this.addLog({ kind: 'failed', ...card, message: `No answer from EA in time for the ${amount(bid)} bid on {card}: the next watch list check will tell` });
+      this.deps.onChange();
+      // Kept in the book even when the bot stopped meanwhile: EA holds it.
+      return signal.aborted ? { end: 'stopped' } : { end: 'placed' };
+    }
+    // A signed answer that it did not go in. An adapter refusal never
+    // reached EA: everything it took comes back. EA's own refusal gives its
+    // coins back and stays a request EA saw (and a bid in the hour).
+    if (isAdapterRefusal(result.error)) {
+      this.governor!.refund(decision);
+      dropTime(this.bidTimes, at);
+    } else this.governor!.releaseSpend(decision);
+    if (rebid) rebid.decision = null;
+    this.book.close(t.tradeId);
+    this.stats.failures++;
+    this.addLog({ kind: 'failed', ...card, message: `${rebid ? 'Re-bid' : 'Bid'} ${amount(bid)} on {card} not accepted: ${bidMissReason(result.error)}` });
+    this.deps.onAttempt?.({
+      resourceId: t.resourceId,
+      tradeId: t.tradeId,
+      targetPrice: bid,
+      listedPrice: t.currentBid || t.startingBid || null,
+      outcome: missOutcome(result.error),
+      latencyMs: result.latencyMs,
+      errorCode: attemptErrorCode(result.error),
+    });
+    this.deps.onChange();
+    return signal.aborted ? { end: 'stopped' } : { end: 'skipped' };
+  }
+
+  /** An auction the bot won: a purchase like a snipe (the counters, its
+   * profit, the attempt and the trade report the sale tracking follows),
+   * then off the watch list (`collectWon`). Its coins stay spent in the
+   * coin flow. */
+  private onWon(b: TrackedBid, price: number): void {
+    const m = bidMatch(b, price > 0 ? price : b.amount);
+    this.recordBought(m, null, this.knownEstimate(m), {}, { itemId: b.itemId });
+    void this.collectWon(m).catch((err: unknown) => {
+      this.addLog({ kind: 'blocked', resourceId: m.resourceId, assetId: m.assetId, rating: m.rating, message: `{card} stays in your watch list: ${String(err)}` });
+      this.deps.onChange();
+    });
+    const t = this.settings.thresholds;
+    if (t.stopAfterPurchases > 0 && this.runTotals.purchases >= t.stopAfterPurchases) this.stop('purchase_limit');
+  }
+
+  /** A won card off the watch list, without holding up the bot: moved to
+   * the transfer list (through EA's own call), then listed by auto-sell at
+   * the same price a sniped card gets when it is on. Where it cannot be
+   * moved it stays in the watch list, as EA leaves it. Never throws for EA's
+   * answers: every outcome is in the log. */
+  private async collectWon(m: SniperMatch): Promise<void> {
+    const card = { resourceId: m.resourceId, assetId: m.assetId, rating: m.rating };
+    const moved = this.deps.adapter.move ? await this.deps.adapter.move(m.tradeId) : { ok: false, error: 'move_unsupported', latencyMs: 0 };
+    if (!moved.ok) {
+      this.addLog({ kind: 'blocked', ...card, message: `{card} stays in your watch list: ${moveMissReason(moved.error)}` });
+      this.deps.onChange();
+      return;
+    }
+    this.watch.size = Math.max(0, this.watch.size - 1);
+    if (this.settings.autoSell.enabled && !this.deps.killSwitch().active) return this.autoSell(m);
+    this.addLog({ kind: 'moved', ...card, message: 'Moved {card} to your transfer list' });
+    this.deps.onChange();
+  }
+
+  /** An outbid bid's coins back: EA gave them back. */
+  private releaseBid(b: TrackedBid): void {
+    if (b.decision) this.governor?.releaseSpend(b.decision);
+    b.decision = null;
+  }
+
+  /** The bot stops bidding on one of its auctions (or lost it). It stays on
+   * the watch list as EA keeps it (engine/bidder.ts says why), its coins
+   * come back, and with an `errorCode` it counts as a miss. */
+  private dropBid(
+    b: TrackedBid,
+    o: { message: string; detail?: string; errorCode?: string; outcome?: Extract<SnipeOutcome, 'too_slow' | 'failed'> },
+  ): void {
+    this.releaseBid(b);
+    this.book.close(b.tradeId);
+    this.addLog({ kind: 'dropped', resourceId: b.resourceId, assetId: b.assetId, rating: b.rating, price: b.amount, message: o.message, detail: o.detail });
+    if (o.errorCode) {
+      this.stats.failures++;
+      this.deps.onAttempt?.({
+        resourceId: b.resourceId,
+        tradeId: b.tradeId,
+        targetPrice: b.amount,
+        listedPrice: b.currentBid || null,
+        outcome: o.outcome ?? 'failed',
+        latencyMs: null,
+        errorCode: o.errorCode,
+      });
+    }
+    this.deps.onChange();
+  }
+
+  /** Why an auction was not bid on, once per auction (like `logSkip`). */
+  private logBidSkip(t: BidTarget, bid: number, why: string): void {
+    const remembered = `bid:${t.tradeId}`;
+    if (this.skipped.has(remembered)) return;
+    this.skipped.add(remembered);
+    if (this.skipped.size > MAX_SKIPS_REMEMBERED) this.skipped.delete(this.skipped.values().next().value!);
+    this.addLog({ kind: 'blocked', resourceId: t.resourceId, assetId: t.assetId, rating: t.rating, price: bid, message: `not bidding ${coins(bid)}: ${why}` });
   }
 
   // ---- helpers --------------------------------------------------------------
@@ -1635,14 +2424,22 @@ export class Sniper {
 
   /** Counts a buy at once. Its sell price and profit come from `known`
    * when the buy already had them, else they are filled in (with the
-   * Profit figure and Top snipes) when the lookup answers. */
-  private recordBought(m: SniperMatch, latencyMs: number, known: Estimate | null, timings: Timings = {}): void {
+   * Profit figure and Top snipes) when the lookup answers. `won`: an
+   * auction Bid mode won (`m.buyNow` is the winning bid), with the item id
+   * the watch list gave for the sale tracking. */
+  private recordBought(
+    m: SniperMatch,
+    latencyMs: number | null,
+    known: Estimate | null,
+    timings: Timings = {},
+    won?: { itemId: string | null },
+  ): void {
     this.stats.purchases++;
     this.stats.coinsSpent += m.buyNow;
     this.runTotals.purchases++;
     this.runTotals.coinsSpent += m.buyNow;
     const entry = this.addLog({
-      kind: 'bought',
+      kind: won ? 'won' : 'bought',
       resourceId: m.resourceId,
       assetId: m.assetId,
       rating: m.rating,
@@ -1650,7 +2447,7 @@ export class Sniper {
       sellPrice: known?.sellPrice ?? null,
       profit: known?.profit ?? null,
       reactionMs: timings.reactionMs,
-      message: 'bought',
+      message: won ? `Won {card} for ${amount(m.buyNow)}` : 'bought',
     });
     const settle = (e: Estimate) => {
       entry.sellPrice = e.sellPrice;
@@ -1671,7 +2468,12 @@ export class Sniper {
       latencyMs,
       errorCode: null,
     });
-    this.deps.onTrade?.({ tradeId: m.tradeId, resourceId: m.resourceId, buyPrice: m.buyNow });
+    this.deps.onTrade?.({
+      tradeId: m.tradeId,
+      resourceId: m.resourceId,
+      buyPrice: m.buyNow,
+      ...(won ? { itemId: won.itemId, assetId: m.assetId, rating: m.rating } : {}),
+    });
   }
 
   private attemptBase(
@@ -1734,7 +2536,7 @@ export class Sniper {
   /** The bot's governor, on the user's limits; its buy:search ratio runs on
    * this file's own rolling windows (`ratioCounts`). */
   private newGovernor(state?: GovernorState): Governor {
-    return new Governor(botGovernorSettings(this.settings), {
+    return new Governor(this.governorSettings(), {
       now: this.now,
       bounds: BOT_GOVERNOR_BOUNDS,
       state,
@@ -1800,6 +2602,7 @@ export class Sniper {
       governor: this.governor.serialize(),
       searchTimes: this.searchTimes.filter((t) => t > cutoff),
       buyTimes: this.buyTimes.filter((t) => t > cutoff),
+      bidTimes: this.bidTimes.filter((t) => t > cutoff),
     };
   }
 
@@ -1847,6 +2650,7 @@ export class Sniper {
     // idle hour leaves nothing to start over.
     this.searchTimes = merge(this.searchTimes, budget.searchTimes);
     this.buyTimes = merge(this.buyTimes, budget.buyTimes);
+    this.bidTimes = merge(this.bidTimes, budget.bidTimes ?? []);
   }
 
   private applyKillSwitch(): boolean {
@@ -1938,4 +2742,11 @@ const STOP_MESSAGES: Record<SniperStopReason, string> = {
   ea_verification: 'EA wants a verification (captcha) — solve it in the web app, then Start again',
   ea_rate_limited:
     'EA kept limiting your searches after two rests: your account is likely soft banned (EA has blocked transfer market searches for a while). Do not search for a few hours, then Start again with a longer search delay',
+  no_max_bid: 'set a max price in Search first: in Bid mode it is the most Nova AI bids for a player',
+  bid_unavailable:
+    "Bid mode needs to bid and read your watch list through EA's web app, and this page does not let Nova AI do that — use Snipe mode",
+  watchlist_failing:
+    'Nova AI could not read your EA watch list, which Bid mode needs to follow its bids — try Start again in a moment',
+  watchlist_full:
+    "your EA watch list is full: clear the expired items in EA's Transfer Targets, then Start again",
 };

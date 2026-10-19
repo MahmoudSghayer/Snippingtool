@@ -55,6 +55,9 @@ export const ACT_ERROR = {
   resourceMismatch: 'resource_mismatch',
   /** No nonce was handed off, so no act request can be authenticated. */
   unauthenticated: 'adapter_unauthenticated',
+  /** Nova AI's Bid mode: the page lacks the web app functions a bid or a
+   * watch list read goes through (main/shapes.ts, `bidding`). */
+  biddingUnsupported: 'bidding_unsupported',
   /** Not a refusal: the buy reached EA, and EA had not answered when the
    * adapter stopped waiting. It may have gone through; a late answer is
    * reported as a second, `late: true` result. Never retried. */
@@ -71,6 +74,7 @@ const REFUSALS: ReadonlySet<string> = new Set([
   ACT_ERROR.listingUnknown,
   ACT_ERROR.listingEntityUnknown,
   ACT_ERROR.unauthenticated,
+  ACT_ERROR.biddingUnsupported,
 ]);
 
 export function isAdapterRefusal(error: string | undefined): boolean {

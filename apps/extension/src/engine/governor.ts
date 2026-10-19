@@ -63,11 +63,17 @@ import { DEFAULT_GOVERNOR_SETTINGS, GOVERNOR_ABSOLUTE_LIMITS } from '@sl/shared'
 
 import type { GovernorSettings, RiskEventKind } from '@sl/shared';
 
-export type ActionKind = 'search' | 'buy';
+/** `bid`: one of Nova AI's bids (its Bid mode, engine/bidder.ts). A request
+ * EA sees, so it counts toward `actionsPerHour`; its coins are held in the
+ * coin-flow window while the bid stands (EA holds them too), and given back
+ * through `releaseSpend` once it is outbid or lost. Never a buy for the
+ * buy:search ratio: an auction it wins is counted by the caller. */
+export type ActionKind = 'search' | 'buy' | 'bid';
 
 export interface ActionRequest {
   kind: ActionKind;
-  /** Coins the `buy` would spend — required for `buy`, ignored for `search`. */
+  /** Coins the `buy` would spend (required), or the `bid` would hold;
+   * ignored for `search`. */
   coins?: number;
 }
 
@@ -385,11 +391,24 @@ export class Governor {
       }
     }
 
+    if (action.kind === 'bid') {
+      // A bid's coins count in the coin flow while it stands: the hour's
+      // spend plus every standing bid stays within the budget.
+      const coins = action.coins ?? 0;
+      const projectedFlow = this.state.coinFlow.reduce((sum, c) => sum + c.coins, 0) + coins;
+      if (projectedFlow > this.settings.maxCoinFlowPerHour) {
+        events.push({ kind: 'coin_flow', value: projectedFlow, threshold: this.settings.maxCoinFlowPerHour });
+        return { allowed: false, reason: 'coin_flow', detail: 'coin flow/hour budget exhausted', events };
+      }
+    }
+
     // Allowed — record it.
     this.state.actionTimestamps.push(now);
     if (action.kind === 'search') {
       this.state.searchCount++;
       this.lastSearchAt = now;
+    } else if (action.kind === 'bid') {
+      if (action.coins) this.state.coinFlow.push({ at: now, coins: action.coins });
     } else {
       this.state.buyCount++;
       if (action.coins) {
@@ -417,6 +436,7 @@ export class Governor {
       this.state.searchCount = Math.max(0, this.state.searchCount - 1);
       return;
     }
+    if (charge.kind === 'bid') return this.takeBackCoins(charge);
     this.takeBackBuy(charge);
   }
 
@@ -426,12 +446,15 @@ export class Governor {
    * coin-flow budget or the buy:search ratio. The action itself stays in
    * `actionsPerHour` — EA saw the request, and that window is the ban-risk
    * backstop. Only for an answer known not to have bought (a timeout stays
-   * charged); once per decision, and never after `refund()`. */
+   * charged); once per decision, and never after `refund()`. A `bid`'s
+   * coins come back the same way once it no longer stands (outbid, lost,
+   * or refused by EA). */
   releaseSpend(decision: GovernorDecision): void {
     const charge = decision.charge;
-    if (!decision.allowed || charge?.kind !== 'buy' || this.refunded.has(decision)) return;
+    if (!decision.allowed || (charge?.kind !== 'buy' && charge?.kind !== 'bid') || this.refunded.has(decision)) return;
     this.refunded.add(decision);
-    this.takeBackBuy(charge);
+    if (charge.kind === 'bid') this.takeBackCoins(charge);
+    else this.takeBackBuy(charge);
   }
 
   /** buys / searches with `extraBuys` more buys: the session's counts, or
@@ -477,14 +500,18 @@ export class Governor {
 
   private takeBackBuy(charge: NonNullable<GovernorDecision['charge']>): void {
     this.state.buyCount = Math.max(0, this.state.buyCount - 1);
-    if (charge.coins) {
-      this.state.sessionCoinsSpent = Math.max(0, (this.state.sessionCoinsSpent ?? 0) - charge.coins);
-      for (let i = this.state.coinFlow.length - 1; i >= 0; i--) {
-        const entry = this.state.coinFlow[i]!;
-        if (entry.at === charge.at && entry.coins === charge.coins) {
-          this.state.coinFlow.splice(i, 1);
-          break;
-        }
+    if (charge.coins) this.state.sessionCoinsSpent = Math.max(0, (this.state.sessionCoinsSpent ?? 0) - charge.coins);
+    this.takeBackCoins(charge);
+  }
+
+  /** The charge's entry in the coin-flow window, removed. */
+  private takeBackCoins(charge: NonNullable<GovernorDecision['charge']>): void {
+    if (!charge.coins) return;
+    for (let i = this.state.coinFlow.length - 1; i >= 0; i--) {
+      const entry = this.state.coinFlow[i]!;
+      if (entry.at === charge.at && entry.coins === charge.coins) {
+        this.state.coinFlow.splice(i, 1);
+        break;
       }
     }
   }

@@ -217,12 +217,14 @@ export function errorEnvelopeStatus(body: unknown): number | null {
 /** The list of entries in a search response, wherever the envelope keeps
  * it: `auctionInfo` (UTAS JSON), `items`, `data.items` (the observable
  * shape), `data.auctionInfo`. Throws — never returns `[]` — when there is
- * no list, so a changed envelope is an error, not "no results". */
-export function extractListingArray(response: unknown, options: { requireSuccess?: boolean } = {}): unknown[] {
-  const r = assertSucceeded(response, 'search', options.requireSuccess);
+ * no list, so a changed envelope is an error, not "no results". `what`
+ * names the call in the error (a watch list read answers the same way). */
+export function extractListingArray(response: unknown, options: { requireSuccess?: boolean; what?: string } = {}): unknown[] {
+  const what = options.what ?? 'search';
+  const r = assertSucceeded(response, what, options.requireSuccess);
   const data = asObject(r.data);
   const candidates = [r.auctionInfo, r.items, data?.items, data?.auctionInfo];
   for (const candidate of candidates) if (isArray(candidate)) return candidate;
   const keys = objectKeys(r).slice(0, 12).join(', ');
-  throw new ShapeError(`search response has no auctionInfo / items / data.items list (keys: ${keys || 'none'})`);
+  throw new ShapeError(`${what} response has no auctionInfo / items / data.items list (keys: ${keys || 'none'})`);
 }

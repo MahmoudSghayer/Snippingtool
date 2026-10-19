@@ -25,6 +25,7 @@
  */
 import {
   DEFAULT_ASSIST_HOTKEYS,
+  DEFAULT_BOT_MODE_SETTINGS,
   DEFAULT_BOT_SETTINGS,
   extContentKillSwitchMessageSchema,
   extContentResetSessionMessageSchema,
@@ -71,6 +72,7 @@ import type {
   AdapterEaError,
   BotBudgetState,
   BotDailyUsage,
+  BotModeSettings,
   BotSettings,
   BootstrapResponse,
   FeatureKey,
@@ -663,6 +665,9 @@ async function main(): Promise<void> {
   // the page's Safety limits; the server kill switch still stops it.
   if (AUTOMATION_ENABLED) {
     let botSettings: BotSettings | null = await send<BotSettings>('bot.settingsGet');
+    // Snipe or Bid, and Bid mode's settings (this browser's own; null: the
+    // service worker did not answer, which reads as the defaults: Snipe).
+    let botMode: BotModeSettings = (await send<BotModeSettings>('bot.modeGet')) ?? DEFAULT_BOT_MODE_SETTINGS;
     let unavailableReason: string | null = null;
     // The search filled in on the bot page: the only one the bot runs. Never
     // written to the saved filters (assist and the dashboard use those).
@@ -764,12 +769,24 @@ async function main(): Promise<void> {
               if (listed.ok) pileRefresher.listed();
               return listed;
             },
+            // Bid mode: bids, the watch list it follows them on, and a won
+            // card moved to the transfer list (which the counts follow).
+            bid: adapter.bid,
+            watchlist: adapter.watchlist,
+            move: async (tradeId) => {
+              const moved = await adapter.move(tradeId);
+              if (moved.ok) pileRefresher.listed();
+              return moved;
+            },
             onAuctions: adapter.onAuctions,
             onBuyable: adapter.onBuyable,
             onProbe: adapter.onProbe,
             onShape: adapter.onShape,
             onEaError: adapter.onEaError,
           },
+          // The balance EA's own answers stated: Bid mode bids only what it
+          // leaves after the coins its other bids hold.
+          credits: () => eaCredits?.credits ?? null,
           sleep: timer.sleep,
           timingMode: timer.mode,
           getFilters: () => (liveSearch ? [liveSearch] : []),
@@ -802,6 +819,7 @@ async function main(): Promise<void> {
           onRiskEvent: (event) => recordRiskEvents([event]),
         },
         botSettings,
+        botMode,
       );
     };
     await prepareSniper(false);
@@ -875,6 +893,11 @@ async function main(): Promise<void> {
         botSettings = next;
         await send('bot.settingsSet', next);
         if (modeEvent) void send('telemetry.enqueue', { kind: 'activity', items: [modeEvent] });
+      },
+      getModeSettings: () => botMode,
+      saveModeSettings: async (next) => {
+        botMode = next;
+        await send('bot.modeSet', next);
       },
       setLiveSearch: (search) => {
         liveSearch = search;
@@ -1035,7 +1058,7 @@ async function main(): Promise<void> {
 const EA_ENDPOINT_WORDS: Record<AdapterEaError['endpoint'], string> = {
   market: 'market search',
   pile: 'transfer list request',
-  bid: 'buy',
+  bid: 'buy or bid',
   other: 'request',
 };
 

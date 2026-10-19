@@ -53,4 +53,14 @@ describe('buildBoughtTrade', () => {
     const without = buildBoughtTrade({ tradeId: '5001', resourceId: 7, buyPrice: 500 }, listing({ itemId: undefined }), BOUGHT_AT).trade;
     expect(without).not.toHaveProperty('itemId');
   });
+
+  it("follows an auction Nova AI won by what the watch list said, when its listing is forgotten, and prefers the listing's own", () => {
+    const won = { tradeId: '5001', resourceId: 50_331_700, buyPrice: 12_500, itemId: '900777', assetId: 231_747, rating: 88 };
+    const { trade, lifecycle } = buildBoughtTrade(won, undefined, BOUGHT_AT);
+    expect(trade).toMatchObject({ itemId: '900777', assetId: 231_747, rating: 88, buyPrice: 12_500 });
+    expect(lifecycle.itemId).toBe('900777');
+    expect(tradeIngestSchema.safeParse({ ...trade, boughtAt: new Date().toISOString() }).success).toBe(true);
+    expect(buildBoughtTrade(won, listing({ rating: 91 }), BOUGHT_AT).trade).toMatchObject({ itemId: '900001', rating: 91 });
+    expect(buildBoughtTrade({ ...won, rating: 120, itemId: null }, undefined, BOUGHT_AT).trade).toMatchObject({ rating: null });
+  });
 });

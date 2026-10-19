@@ -14,6 +14,12 @@
  * running applies from the next one. It is never written to the user's
  * saved filters.
  *
+ * Snipe or Bid, picked above Start (and locked while the bot runs): Bid
+ * mode bids in auctions' last minutes up to the search's max price, so the
+ * page says what the max price means there, shows the Bidding settings
+ * while it is picked, and the open bids while it runs. Saved apart from the
+ * other settings (`deps.saveModeSettings`, see `botModeSettingsSchema`).
+ *
  * Risk: the settings start on the recommended limits and every number is
  * the user's to change within `BOT_LIMITS`. A risk meter (`botRiskLevel` in
  * @sl/shared) shows the level, the projected searches and buys a day, and
@@ -35,10 +41,12 @@
 import {
   BOT_LIMITS,
   BOT_RISK_LABELS,
+  DEFAULT_BOT_MODE_SETTINGS,
   MIN_SALE_PRICE,
   RECENT_SEARCHES_MAX,
   RISK_ACKNOWLEDGMENT,
   SEARCH_DELAY_PRESETS,
+  botModeSettingsSchema,
   botRiskLevel,
   botSettingsSchema,
   computeTradeProfit,
@@ -47,6 +55,8 @@ import {
   stepPrice,
   withRecommendedLimits,
   withShortBurstLimits,
+  type BotMode,
+  type BotModeSettings,
   type BotRiskLevel,
   type BotSettings,
   type FilterCriteria,
@@ -91,6 +101,10 @@ export interface BotPageDeps {
   prepare: () => Promise<void>;
   getSettings: () => BotSettings;
   saveSettings: (settings: BotSettings) => Promise<void>;
+  /** Snipe or Bid, and Bid mode's settings (kept apart from `BotSettings`:
+   * see `botModeSettingsSchema`). Omitted: Snipe, the defaults, not saved. */
+  getModeSettings?: () => BotModeSettings;
+  saveModeSettings?: (settings: BotModeSettings) => Promise<void>;
   /** The search the bot should run from now on (null: none). */
   setLiveSearch: (search: LiveSearch | null) => void;
   resolveNames: (resourceIds: number[]) => Promise<Record<string, string | null>>;
@@ -348,10 +362,29 @@ const TL_WAITING = 'Open your Transfer List in EA once and Nova AI will keep the
 const SHORT_BURSTS_HINT =
   'fast 10-15 minute sessions (4-6 seconds between searches), each followed by a 10-20 minute rest, at most 450 searches an hour';
 
+/** The Snipe / Bid choice beside Start: each mode in a few words. */
+const MODES: { mode: BotMode; label: string; hint: string }[] = [
+  { mode: 'snipe', label: 'Snipe', hint: 'Buy Now at or under your max price' },
+  { mode: 'bid', label: 'Bid', hint: 'Bid in the last minutes, up to your max price' },
+];
+
+/** Under the Buy Now price in Bid mode: what the max price means there. */
+const BID_MAX_HINT =
+  "In Bid mode, Max is the most Nova AI bids for this player. When a card's Buy Now price is at or under it, Nova AI buys it with Buy Now instead.";
+
+/** In the Auto-sell card: it covers both modes. */
+const AUTO_SELL_MODES_HINT =
+  'Applies in both modes: to cards bought with Buy Now and to auctions won in Bid mode. With auto-sell off, cards won in Bid mode are moved to your transfer list without a listing.';
+
+/** Without a max price, Bid mode has no limit to bid up to. */
+const BID_NEEDS_MAX = 'Set a Max price: in Bid mode it is the most Nova AI bids for a player';
+
 const PHASE_LABEL: Record<SniperPhase, string> = {
   idle: 'Ready',
   searching: 'Searching',
   buying: 'Buying',
+  bidding: 'Bidding',
+  checking: 'Checking your bids',
   cooldown: 'Pausing after a buy',
   waiting: 'Next search',
   break: 'On a break',
@@ -632,6 +665,15 @@ const CSS = `
   .start.stop { background: var(--ea-danger); color: var(--ea-danger-ink); }
   .start.stop:hover:not(:disabled) { background: color-mix(in srgb, var(--ea-danger) 80%, var(--ea-bg)); }
   .start:disabled { background: #4f504c; color: #787873; }
+  /* Snipe / Bid, above Reset and Start */
+  .modes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+  .mode { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 8px 12px; border: 1px solid var(--ea-btn-line); border-radius: 6px;
+    background: var(--ea-btn); color: var(--ea-text); text-align: left; font-size: 15px; font-weight: 600; }
+  .mode small { color: var(--ea-muted); font-size: 12px; font-weight: 400; }
+  .mode:hover:not(:disabled) { background: var(--ea-row-hover); }
+  .mode[aria-checked='true'] { border-color: var(--ea-mint); background: var(--ea-float); }
+  .mode:disabled { opacity: .55; }
+  .mode:disabled[aria-checked='true'] { opacity: 1; }
   .run-status { margin-top: 8px; min-height: 18px; color: var(--ea-muted); font-size: 13px; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .run-status.bad { color: var(--ea-warning); }
   .run-status.wrap { white-space: normal; }
@@ -683,6 +725,7 @@ const CSS = `
   .feed .list { flex: 1; overflow-y: auto; padding: 8px; }
   .log { display: flex; align-items: center; gap: 10px; padding: 8px 12px; margin-bottom: 6px; border-radius: var(--ea-radius); background: var(--ea-surface); border-left: 3px solid var(--ea-line-strong); }
   .log.bought { border-left-color: var(--ea-success); } .log.failed { border-left-color: var(--ea-danger); } .log.blocked { border-left-color: var(--ea-warning); } .log.listed { border-left-color: var(--ea-accent); }
+  .log.won { border-left-color: var(--ea-success); } .log.bid, .log.moved { border-left-color: var(--ea-accent); } .log.dropped { border-left-color: var(--ea-warning); }
   .log .main { flex: 1; min-width: 0; }
   .log .main b { font-weight: 500; }
   .log .sub { color: var(--ea-muted); font-size: 12px; }
@@ -728,6 +771,10 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   const openListeners = new Set<(open: boolean) => void>();
   let settings = deps.getSettings();
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Snipe or Bid, and Bid mode's settings: saved apart from `settings`. */
+  let modeSettings = deps.getModeSettings?.() ?? DEFAULT_BOT_MODE_SETTINGS;
+  let modeSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  const bidMode = (): boolean => modeSettings.mode === 'bid';
   let ringFrame: number | null = null;
   let refreshQueued = false;
   let catalog: Catalog | null = null;
@@ -772,6 +819,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         </div>
         <div class="settings-scroll"><div id="targets"></div><div id="recent"></div><div id="knobs"></div></div>
         <div class="runbar">
+          <div class="modes" id="modes" role="radiogroup" aria-label="What Nova AI does"></div>
           <div class="run-actions">
             <button class="reset-search" id="nf-reset" type="button">Reset</button>
             <button class="start" id="start" type="button">${PLAY}<span>Start</span></button>
@@ -934,8 +982,88 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         'Never sell at a loss',
         "Don't list a card for less than it cost, after EA's 5% tax",
         toggle('as-noloss', a.noLoss, 'Never sell at a loss'),
-      );
+      ) +
+      `<div class="hint" id="as-modes">${esc(AUTO_SELL_MODES_HINT)}</div>`;
     return section('Auto-sell', body, `&nbsp;${toggle('as-on', a.enabled, 'Auto-sell')}`, a.enabled);
+  }
+
+  /** Bid mode's own settings, on the Settings tab while Bid is picked. */
+  function biddingSection(): string {
+    const b = modeSettings.bidding;
+    return section(
+      'Bidding',
+      field(
+        'Bid in the last',
+        'Minutes left on an auction when Nova AI may bid on it',
+        stepper('bd-window', String(b.windowMinutes), 'min', 'Bid in the last'),
+      ) +
+        field(
+          'Bids at once',
+          'Most auctions holding one of your bids at the same time',
+          stepper('bd-active', String(b.maxActiveBids), 'bids', 'Bids at once'),
+        ) +
+        field(
+          'Bids per hour',
+          'Most bids and re-bids in any hour',
+          stepper('bd-bph', String(b.maxBidsPerHour), 'per hr', 'Bids per hour'),
+        ) +
+        `<div class="hint">Your max price in Search is the most Nova AI bids for a player. When someone outbids it, it bids again one step higher, up to that max.</div>`,
+    );
+  }
+
+  /** Whether the search has a price Bid mode can bid up to: its max price,
+   * or "Most you'll pay". */
+  function hasMaxBid(filter: FilterCriteria): boolean {
+    return (filter.maxPrice ?? 0) > 0 || shown().thresholds.maxBuyPrice > 0;
+  }
+
+  /** Reads Bid mode's fields; null (and the bad one marked) if one is invalid. */
+  function readModeSettings(): BotModeSettings | null {
+    const num = (id: string, fallback: number) => {
+      const el = root.getElementById(id) as HTMLInputElement | null;
+      if (!el) return fallback;
+      const v = Number(el.value.replace(/[,\s]/g, ''));
+      return el.value.trim() !== '' && Number.isFinite(v) ? v : NaN;
+    };
+    const b = modeSettings.bidding;
+    const ids = { windowMinutes: 'bd-window', maxActiveBids: 'bd-active', maxBidsPerHour: 'bd-bph' } as const;
+    const next = {
+      mode: modeSettings.mode,
+      bidding: {
+        windowMinutes: num(ids.windowMinutes, b.windowMinutes),
+        maxActiveBids: num(ids.maxActiveBids, b.maxActiveBids),
+        maxBidsPerHour: num(ids.maxBidsPerHour, b.maxBidsPerHour),
+      },
+    };
+    const parsed = botModeSettingsSchema.safeParse(next);
+    for (const [key, id] of Object.entries(ids)) {
+      const bad = !parsed.success && parsed.error.issues.some((i) => i.path[1] === key);
+      root.getElementById(id)?.setAttribute('aria-invalid', String(bad));
+    }
+    if (!parsed.success) {
+      say(parsed.error.issues[0]?.message ? `Not saved: ${parsed.error.issues[0].message}` : 'Not saved');
+      return null;
+    }
+    return parsed.data;
+  }
+
+  /** Applies a change of mode or of Bid mode's settings: given to the bot at
+   * once (the mode itself applies at the next Start) and saved. */
+  function commitMode(next: BotModeSettings, rerender: boolean): void {
+    modeSettings = next;
+    deps.getSniper()?.setModeSettings(next);
+    if (rerender) {
+      renderKnobs();
+      renderTargets();
+    }
+    renderRunbar();
+    if (modeSaveTimer) clearTimeout(modeSaveTimer);
+    modeSaveTimer = setTimeout(() => {
+      void deps.saveModeSettings?.(modeSettings).then(() => {
+        say('Saved', false);
+        setTimeout(() => ($('saved').textContent = ''), 1500);
+      });
+    }, 400);
   }
 
   function signedSteps(n: number): string {
@@ -985,6 +1113,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
 
     $('knobs').innerHTML =
       riskBoxHtml() +
+      (bidMode() ? biddingSection() : '') +
       section(
         'Search speed',
         field(
@@ -1377,7 +1506,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       html +=
         p.profit == null || buy == null
           ? ' Set a max buy price to see your profit.'
-          : ` Profit <b class="${p.profit < 0 ? 'neg' : 'pos'}">${p.profit < 0 ? '−' : '+'}${fmt(Math.abs(p.profit))}</b>${COIN} per card at your max buy (${fmt(buy)}), more when it buys cheaper.`;
+          : ` Profit <b class="${p.profit < 0 ? 'neg' : 'pos'}">${p.profit < 0 ? '−' : '+'}${fmt(Math.abs(p.profit))}</b>${COIN} per card at your max ${bidMode() ? 'bid' : 'buy'} (${fmt(buy)}), more when it buys cheaper.`;
     }
     if (!a.enabled) html += ' <span class="muted">Auto-sell is off: turn it on below to list cards at this price.</span>';
     out.innerHTML = html;
@@ -1439,6 +1568,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         </div>
         ${secHead('Buy Now Price:', 'buy')}
         <div class="mm">${priceHtml('minBuy', 'Min')}${priceHtml('maxBuy', 'Max')}</div>
+        ${bidMode() ? `<div class="search-hint" id="bid-hint">${esc(BID_MAX_HINT)}</div>` : ''}
         ${secHead('Sell Price:', 'sell')}
         ${sellHtml()}
         <div class="search-hint">${esc(hint)}</div>
@@ -1816,7 +1946,13 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     's-ratio': 0.05,
     's-cooldown': 5,
     's-flow': 100_000,
+    'bd-window': 1,
+    'bd-active': 1,
+    'bd-bph': 5,
   };
+
+  /** Bid mode's fields save apart from the rest (`commitMode`). */
+  const isModeField = (id: string): boolean => id.startsWith('bd-');
 
   onTrusted($('knobs'), 'click', (e) => {
     const el = (e.target as HTMLElement).closest('button');
@@ -1842,8 +1978,13 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
             ? String(round(r.min + step))
             : `${round(r.min + step)}-${round(r.max + step)}`;
       }
-      const next = readSettings();
-      if (next) commit(next, false);
+      if (isModeField(el.dataset.step)) {
+        const next = readModeSettings();
+        if (next) commitMode(next, false);
+      } else {
+        const next = readSettings();
+        if (next) commit(next, false);
+      }
     } else if (el.dataset.asMode || el.dataset.asPlatform) {
       const s = shown();
       const autoSell = el.dataset.asMode
@@ -1886,11 +2027,34 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       return;
     }
     if (!input.id) return;
+    if (isModeField(input.id)) {
+      const next = readModeSettings();
+      if (next) commitMode(next, false);
+      return;
+    }
     const next = readSettings();
     if (next) commit(next, false);
   });
 
   // ---- Start bar ------------------------------------------------------------
+
+  /** What the Snipe / Bid choice shows now, so a render that would write the
+   * same buttons does nothing. */
+  let modesShown = '';
+
+  /** The Snipe / Bid choice beside Start. Locked while the bot runs: the
+   * mode applies at Start. */
+  function renderModes(running: boolean): void {
+    const html = MODES.map(
+      (m) =>
+        `<button type="button" class="mode" role="radio" data-mode="${m.mode}" aria-checked="${modeSettings.mode === m.mode}"${
+          running ? ' disabled' : ''
+        } title="${esc(running ? 'Stop Nova AI to switch' : m.hint)}"><span>${esc(m.label)}</span> <small>${esc(m.hint)}</small></button>`,
+    ).join('');
+    if (html === modesShown) return;
+    modesShown = html;
+    $('modes').innerHTML = html;
+  }
 
   function renderRunbar(): void {
     const start = root.getElementById('start') as HTMLButtonElement | null;
@@ -1898,6 +2062,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     if (!start || !status) return;
     const sniper = deps.getSniper();
     const running = sniper?.isRunning() ?? false;
+    renderModes(running);
     const r = currentSearch();
     let text: string;
     let bad = false;
@@ -1911,6 +2076,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     } else if (running) {
       const startedAt = sniper.getStats().startedAt;
       text = `Running for ${clock(startedAt ? Date.now() - startedAt : 0)}`;
+      const bids = sniper.getBidStatus();
+      if (bids) text += ` · Active bids: ${bids.active}/${bids.max}`;
       if ('error' in r) text += `. Search not updated: ${r.error}`;
     } else if (ackNeeded()) {
       text = 'Confirm the risk level on the Settings tab to start';
@@ -1918,8 +2085,11 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     } else if ('error' in r) {
       text = r.error;
       bad = true;
+    } else if (bidMode() && !hasMaxBid(r.search.filter)) {
+      text = BID_NEEDS_MAX;
+      bad = true;
     } else {
-      text = `Searches for ${r.search.name}`;
+      text = `${bidMode() ? 'Bids on' : 'Searches for'} ${r.search.name}`;
     }
     const label = running ? 'Stop' : 'Start';
     if (start.dataset.label !== label) {
@@ -2162,6 +2332,13 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     ringFrame = requestAnimationFrame(animate);
   }
 
+  /** A buy's (or a won auction's) estimated profit, as a pill. */
+  function profitPill(e: SniperLogEntry): string {
+    return e.profit == null
+      ? ''
+      : `<span class="pill ${e.profit < 0 ? 'neg' : ''}">${e.profit >= 0 ? '+' : ''}${fmt(e.profit)}${COIN}</span>`;
+  }
+
   function logHtml(e: SniperLogEntry): string {
     const when = timeOfDay(e.at);
     if (e.kind === 'info')
@@ -2169,13 +2346,16 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     const who = `${e.rating ?? ''} ${esc(nameOf(e.assetId ?? e.resourceId))}`.trim();
     // How fast the bot went for it, from the listing arriving to the buy.
     const reacted = e.reactionMs != null ? `, reacted in ${fmt(e.reactionMs)} ms` : '';
+    // Bid mode's lines name the card inside the sentence ("Bid 12,250 on
+    // {card} (3 min left)"): its name goes where `{card}` is.
+    if (e.message.includes('{card}')) {
+      const sells = e.kind === 'won' && e.sellPrice != null ? `, sells for <span class="amt">${fmt(e.sellPrice)}${COIN}</span>` : '';
+      return `<div class="log ${e.kind}"><div class="main">${esc(e.message).replace('{card}', `<b>${who}</b>`)}
+        <div class="sub">${when}${sells}${e.detail ? `, ${esc(e.detail)}` : ''}</div></div>${e.kind === 'won' ? profitPill(e) : ''}</div>`;
+    }
     if (e.kind === 'bought') {
-      const pill =
-        e.profit == null
-          ? ''
-          : `<span class="pill ${e.profit < 0 ? 'neg' : ''}">${e.profit >= 0 ? '+' : ''}${fmt(e.profit)}${COIN}</span>`;
       return `<div class="log bought"><div class="main"><b>${who}</b> bought for <span class="amt">${fmt(e.price ?? 0)}${COIN}</span>
-        <div class="sub">${when}${e.sellPrice != null ? `, sells for <span class="amt">${fmt(e.sellPrice)}${COIN}</span>` : ''}${reacted}</div></div>${pill}</div>`;
+        <div class="sub">${when}${e.sellPrice != null ? `, sells for <span class="amt">${fmt(e.sellPrice)}${COIN}</span>` : ''}${reacted}</div></div>${profitPill(e)}</div>`;
     }
     if (e.kind === 'listed') {
       return `<div class="log listed"><div class="main"><b>${who}</b> listed for <span class="amt">${fmt(e.price ?? 0)}${COIN}</span>
@@ -2202,7 +2382,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     const rows = r.matches
       .map(
         (m) =>
-          `<div class="res item"><span>${m.rating} ${esc(nameOf(m.assetId))}</span><span>${fmt(m.buyNow)}${COIN}${
+          `<div class="res item"><span>${m.rating} ${esc(nameOf(m.assetId))}</span><span>${m.bid != null ? 'bid ' : ''}${fmt(m.bid ?? m.buyNow)}${COIN}${
             m.expiresAt ? `, ${clock(m.expiresAt - r.at)} left` : ''
           }</span></div>`,
       )
@@ -2239,7 +2419,9 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       state?.phase === 'stopped' && state.stopDetail
         ? `Stopped: ${state.stopDetail}`
         : running && state?.notice
-          ? 'Buying paused'
+          ? state.notice.startsWith('Bidding paused')
+            ? 'Bidding paused'
+            : 'Buying paused'
           : PHASE_LABEL[state?.phase ?? 'idle'];
     phase.title = running ? (state?.notice ?? '') : '';
     phase.className = `chip ${running ? 'running' : state?.phase === 'stopped' ? 'stopped' : ''}`;
@@ -2314,8 +2496,14 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         renderRunbar();
         return;
       }
+      if (bidMode() && !hasMaxBid(r.search.filter)) {
+        say(BID_NEEDS_MAX);
+        renderRunbar();
+        return;
+      }
       deps.setLiveSearch(r.search);
       sniper.setSettings(settings);
+      sniper.setModeSettings(modeSettings);
       sniper.start();
       if (sniper.isRunning()) rememberSearch(r.search.name);
     }
@@ -2335,6 +2523,14 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   onTrusted($('run-status'), 'click', () => {
     if ($('run-status').classList.contains('go')) showTab('settings');
   });
+  // Snipe or Bid: saved at once, applied at the next Start.
+  onTrusted($('modes'), 'click', (e) => {
+    const el = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-mode]');
+    const mode = el?.dataset.mode;
+    if (!el || el.disabled || (mode !== 'snipe' && mode !== 'bid') || mode === modeSettings.mode) return;
+    if (deps.getSniper()?.isRunning()) return;
+    commitMode({ ...modeSettings, mode }, true);
+  });
   onTrusted(root.querySelector('.tabs')!, 'click', (e) => {
     const tab = (e.target as HTMLElement).closest<HTMLElement>('[data-tab]')?.dataset.tab;
     if (tab === 'search' || tab === 'settings') showTab(tab);
@@ -2351,6 +2547,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     open() {
       if (!page.hidden) return;
       settings = deps.getSettings();
+      modeSettings = deps.getModeSettings?.() ?? modeSettings;
       pending = null;
       renderSettings();
       page.hidden = false;

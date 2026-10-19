@@ -20,13 +20,25 @@
  * Stricter than the promise shape on purpose: a call must return an
  * observable (or a promise), and only an explicit `success: true` is a
  * success. Anything else is an error, never a silent `ok`.
+ *
+ * Nova AI's Bid mode (`bidding`), ASSUMED SHAPE — verify on day one:
+ *
+ *   window.services.Item.bid(item, amount)
+ *     -> the buy call above with a bid amount instead of the buy-now price.
+ *   window.services.Item.requestWatchedItems()
+ *     -> observable; { success: true, data: { items: ItemEntity[] } }, each
+ *        item's auction carrying `bidState` and `tradeState` (community
+ *        autobuyers read the watch list this way).
+ *   window.services.Item.move(item, ItemPile.TRANSFER)
+ *     -> observable; `success: true` once the won item is on the transfer
+ *        list (`ItemPile` is the web app's own enum of item piles).
  */
 import { ACT_ERROR } from '../lib/act-auth.js';
 
 import { normaliseListing } from './ea-listing.js';
 import { ShapeError, assertSucceeded, extractListingArray, settle } from './ea-response.js';
 
-import type { BuyTarget, ListTarget, ServiceShape } from './shapes.js';
+import type { BidTarget, BiddingShape, BuyTarget, ListTarget, SearchOptions, ServiceShape } from './shapes.js';
 import type { FilterCriteria } from '@sl/shared';
 
 const apply = Reflect.apply;
@@ -55,7 +67,8 @@ function method(services: unknown, name: string): { target: Obj; fn: (...args: u
  * position group (`zone`), `nation`, `league`, `club`, chemistry style
  * (`playStyle`), rarity (`rarities`, a one-element list) and quality as
  * `level`. `minBid`/`maxBid` exist on the DTO but no filter field feeds
- * them. */
+ * them: Bid mode's search sets `maxBid` from its own option
+ * (`SearchOptions`). */
 const CRITERIA_FIELDS: Record<string, string> = {
   resourceId: 'maskedDefId',
   minPrice: 'minBuy',
@@ -143,6 +156,46 @@ function bidSucceeded(response: unknown): boolean {
   return response !== null && typeof response === 'object' && (response as Obj).success === true;
 }
 
+/** The web app's own id for the transfer list pile (`ItemPile.TRANSFER`),
+ * or null when the page has no such enum. */
+function transferPile(): number | string | null {
+  const pile = ((window as unknown as Obj).ItemPile as Obj | undefined)?.TRANSFER;
+  return typeof pile === 'number' || (typeof pile === 'string' && pile !== '') ? pile : null;
+}
+
+/** Bid mode on this shape (see the header: ASSUMED SHAPE). */
+function createBidding(timeoutMs: number): BiddingShape {
+  return {
+    detect(services) {
+      if (!method(services, 'bid')) return 'window.services.Item.bid is not a function';
+      if (!method(services, 'requestWatchedItems')) return 'window.services.Item.requestWatchedItems is not a function';
+      return null;
+    },
+    async bid(services, target: BidTarget) {
+      // The entity is what `bid` acts on: it must be this very auction.
+      const listing = normaliseListing(target.entity);
+      if (!listing || listing.tradeId !== target.tradeId) throw new ShapeError(ACT_ERROR.priceMismatch);
+      // A TimeoutUnknownError propagates as-is: the bid may have gone
+      // through, and the next watch list read says whether it did.
+      const response = await call(services, 'bid', [target.entity, target.amount], timeoutMs);
+      const r = assertSucceeded(response, 'bid', true);
+      if (!bidSucceeded(r)) throw new ShapeError('bid did not report success: true');
+    },
+    async readWatchlist(services) {
+      const response = await call(services, 'requestWatchedItems', [], timeoutMs);
+      return { response, entries: extractListingArray(response, { requireSuccess: true, what: 'requestWatchedItems' }) };
+    },
+    async moveToTransferList(services, entity) {
+      if (!method(services, 'move')) throw new ShapeError('window.services.Item.move is not a function');
+      const pile = transferPile();
+      if (pile === null) throw new ShapeError('window.ItemPile.TRANSFER is not available');
+      const response = await call(services, 'move', [entity, pile], timeoutMs);
+      const r = assertSucceeded(response, 'move', true);
+      if (!bidSucceeded(r)) throw new ShapeError('move did not report success: true');
+    },
+  };
+}
+
 export function createObservableShape(timeoutMs: number): ServiceShape {
   return {
     name: 'observable',
@@ -152,8 +205,9 @@ export function createObservableShape(timeoutMs: number): ServiceShape {
       if (!method(services, 'bid')) return 'window.services.Item.bid is not a function';
       return null;
     },
-    async search(services, filter) {
+    async search(services, filter, options: SearchOptions = {}) {
       const criteria = observableSearchCriteria(filter);
+      if (options.maxBid !== undefined) criteria.maxBid = options.maxBid;
       clearMarketCache(services);
       const response = await call(services, 'searchTransferMarket', [criteria, 1], timeoutMs);
       // `success` must be there and true: a list with no verdict is not one.
@@ -205,5 +259,7 @@ export function createObservableShape(timeoutMs: number): ServiceShape {
       const r = assertSucceeded(response, 'requestTransferItems', true);
       if (!bidSucceeded(r)) throw new ShapeError('requestTransferItems did not report success: true');
     },
+    // Automation builds only: the listable build carries no Bid mode code.
+    bidding: import.meta.env.VITE_AUTOMATION === '1' ? createBidding(timeoutMs) : undefined,
   };
 }

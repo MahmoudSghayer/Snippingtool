@@ -2,7 +2,8 @@
  * bot.ts — background handlers for the Sniping Bot page: its settings
  * (`bot.settingsGet` / `bot.settingsSet`: `storage.local`, and the signed-in
  * account's copy at `/api/v1/extension/bot-settings`, so every browser the
- * trader signs in on starts with the same ones), EA's
+ * trader signs in on starts with the same ones), Snipe or Bid and Bid
+ * mode's settings (`bot.modeGet` / `bot.modeSet`, this browser only), EA's
  * player/club/league/nation lists for the Snipe Targets form
  * (`catalog.get` / `catalog.save`, see `model/catalog.ts`), and player names
  * for the log (`cards.names`).
@@ -14,14 +15,17 @@
  * search.
  */
 import {
+  DEFAULT_BOT_MODE_SETTINGS,
   DEFAULT_BOT_SETTINGS,
   adapterCatalogSchema,
+  botModeSettingsSchema,
   botSettingsSyncResponseSchema,
   botDailyUsageSchema,
   extBackgroundBotBudgetSetPayloadSchema,
   botSettingsSchema,
   type BotBudgetState,
   type BotDailyUsage,
+  type BotModeSettings,
   type BotSettings,
   type MarketCardHistoryResponse,
 } from '@sl/shared';
@@ -34,6 +38,9 @@ import { getLocal, setLocal } from '../lib/storage.js';
 import type { Catalog } from '../model/catalog.js';
 
 const SETTINGS_KEY = 'sl.bot.settings.v1';
+/** Snipe or Bid, and Bid mode's settings: this browser only (see
+ * `botModeSettingsSchema` for why they are not synced yet). */
+const MODE_KEY = 'sl.bot.mode.v1';
 /** Set (to the save's time) while a save has not reached the account yet. */
 const SETTINGS_PENDING_KEY = 'sl.bot.settings.pending.v1';
 /** A burst of edits (a slider dragged) goes up as one save. */
@@ -133,6 +140,20 @@ export async function handleBotSettingsSet(settings: BotSettings): Promise<BotSe
 /** Clears the pending mark, unless a later save has set it again. */
 async function clearPendingIf(savedAt: number): Promise<void> {
   if ((await getLocal<number | null>(SETTINGS_PENDING_KEY, null)) === savedAt) await setLocal(SETTINGS_PENDING_KEY, null);
+}
+
+/** Snipe or Bid, and Bid mode's settings, as saved in this browser. Kept
+ * out of the account's bot settings: the API validates those strictly, so
+ * a field added there needs the API deployed first. A stored value that no
+ * longer parses reads as the defaults (Snipe). */
+export async function handleBotModeGet(): Promise<BotModeSettings> {
+  const parsed = botModeSettingsSchema.safeParse(await getLocal<unknown>(MODE_KEY, null));
+  return parsed.success ? parsed.data : DEFAULT_BOT_MODE_SETTINGS;
+}
+
+export async function handleBotModeSet(settings: BotModeSettings): Promise<BotModeSettings> {
+  await setLocal(MODE_KEY, settings);
+  return settings;
 }
 
 /** Today's active time for the bot's hours-per-day limit (engine/sniper.ts). */

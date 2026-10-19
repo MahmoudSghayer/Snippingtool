@@ -4,10 +4,19 @@
 // item entities — either becomes a list of normalised listings or an error.
 // Never an `ok` with nothing in it because the envelope was not understood.
 
-import { MAX_COIN_PRICE as SHARED_MAX_COIN_PRICE } from '@sl/shared';
+import { MAX_COIN_PRICE as SHARED_MAX_COIN_PRICE, stepPrice } from '@sl/shared';
 import { describe, expect, it, vi } from 'vitest';
 
-import { MAX_COIN_PRICE, normaliseListing, normaliseListings, normalisePileItem, normalisePileItems } from '../../src/main/ea-listing.js';
+import {
+  MAX_COIN_PRICE,
+  nextBidPrice,
+  normaliseListing,
+  normaliseListings,
+  normalisePileItem,
+  normalisePileItems,
+  normaliseWatchedItem,
+  normaliseWatchedItems,
+} from '../../src/main/ea-listing.js';
 import { ShapeError, TimeoutUnknownError, describeError, errorEnvelopeStatus, extractListingArray, isOkStatus, settle } from '../../src/main/ea-response.js';
 import { itemEntity, observable, utasAuction } from '../fixtures/ea-shapes.js';
 
@@ -289,5 +298,81 @@ describe('isOkStatus / errorEnvelopeStatus', () => {
     for (const body of [null, 'x', [], {}, { auctionInfo: [] }, { code: 200 }, { code: 'abc' }, { code: '4010' }, { code: 99 }]) {
       expect(errorEnvelopeStatus(body)).toBeNull();
     }
+  });
+});
+
+// Nova AI's Bid mode reads the watch list (EA's Transfer Targets) through
+// the same layouts as a search listing, plus EA's `bidState`. ASSUMED SHAPE
+// until the market opens (docs/06-extension.md, day-one checklist).
+describe('normaliseWatchedItem', () => {
+  const utasWatched = (extra: Record<string, unknown> = {}) => ({
+    tradeId: 501,
+    buyNowPrice: 20_000,
+    startingBid: 10_000,
+    currentBid: 12_250,
+    offers: 3,
+    expires: 95,
+    tradeState: 'active',
+    bidState: 'outbid',
+    itemData: { id: 9001, resourceId: 7, assetId: 7, rating: 86 },
+    ...extra,
+  });
+
+  it('reads a UTAS watch list entry: the trade, the card, where the bid stands', () => {
+    expect(normaliseWatchedItem(utasWatched())).toEqual({
+      tradeId: '501',
+      itemId: '9001',
+      resourceId: 7,
+      assetId: 7,
+      rating: 86,
+      bidState: 'outbid',
+      tradeState: 'active',
+      currentBid: 12_250,
+      startingBid: 10_000,
+      buyNowPrice: 20_000,
+      expires: 95,
+    });
+  });
+
+  it("reads an entity's auction half, also under a leading underscore", () => {
+    const entity = Object.create({
+      getAuctionData: () => ({ tradeId: 502, buyNowPrice: 20_000, startingBid: 10_000, currentBid: 10_000, expires: -1, _tradeState: 'closed', _bidState: 'highest' }),
+    });
+    Object.assign(entity, { id: 9002, definitionId: 8, databaseId: 8, rating: 85 });
+    expect(normaliseWatchedItem(entity)).toMatchObject({ tradeId: '502', itemId: '9002', resourceId: 8, tradeState: 'closed', bidState: 'highest' });
+  });
+
+  it('leaves a state it was not told as null, and refuses one it does not know', () => {
+    expect(normaliseWatchedItem(utasWatched({ bidState: undefined, tradeState: null }))).toMatchObject({ bidState: null, tradeState: null });
+    expect(normaliseWatchedItem(utasWatched({ bidState: 'winning' }))).toBeNull();
+    expect(normaliseWatchedItem(utasWatched({ tradeState: 'sold' }))).toBeNull();
+  });
+
+  it("refuses an entry with no trade, no card id, or a price outside EA's limits", () => {
+    expect(normaliseWatchedItem(utasWatched({ tradeId: 0 }))).toBeNull();
+    expect(normaliseWatchedItem(utasWatched({ itemData: { id: 1, resourceId: 0 } }))).toBeNull();
+    expect(normaliseWatchedItem(utasWatched({ currentBid: SHARED_MAX_COIN_PRICE + 1 }))).toBeNull();
+    expect(normaliseWatchedItem(utasWatched({ currentBid: 12.5 }))).toBeNull();
+    expect(normaliseWatchedItem(null)).toBeNull();
+  });
+
+  it('a list none of whose entries can be read is a shape change, not an empty watch list', () => {
+    expect(normaliseWatchedItems([])).toEqual([]);
+    expect(() => normaliseWatchedItems([{ nope: 1 }])).toThrow(ShapeError);
+    const skipped = vi.fn();
+    expect(normaliseWatchedItems([utasWatched(), { nope: 1 }], skipped)).toHaveLength(1);
+    expect(skipped).toHaveBeenCalledWith(1);
+  });
+});
+
+describe("nextBidPrice (the adapter's check on every bid)", () => {
+  it('is the starting bid while nobody has bid', () => {
+    expect(nextBidPrice(10_000, 0)).toBe(10_000);
+  });
+
+  it("is @sl/shared's stepPrice(bid, 1) for every current bid, on EA's grid or not", () => {
+    const bids = [150, 200, 950, 999, 1_000, 1_049, 1_050, 9_900, 9_950, 10_000, 12_345, 49_750, 49_999, 50_000, 99_500, 100_000, 123_456, 14_999_000, 15_000_000];
+    for (let p = 150; p < 200_000; p += 137) bids.push(p);
+    for (const bid of bids) expect(nextBidPrice(150, bid), `after ${bid}`).toBe(stepPrice(bid, 1));
   });
 });
