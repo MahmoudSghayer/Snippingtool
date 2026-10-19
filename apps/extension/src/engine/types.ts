@@ -46,4 +46,10 @@ export interface TradeInput {
   tradeId: string;
   resourceId: number;
   buyPrice: number;
+  /** Nova AI's Bid mode: what the watch list said about the auction it won,
+   * for when the listing it was found in has been forgotten
+   * (lib/trade-report.ts prefers the listing's). */
+  itemId?: string | null;
+  assetId?: number;
+  rating?: number | null;
 }

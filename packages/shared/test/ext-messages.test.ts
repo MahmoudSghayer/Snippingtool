@@ -173,9 +173,78 @@ describe('adapterActRequestMessageSchema', () => {
     const result = adapterActRequestMessageSchema.safeParse({
       channel: 'ledger:v2',
       kind: 'act_request',
-      data: { action: 'bid', requestId: 'r3' },
+      data: { action: 'cancelBid', requestId: 'r3', tradeId: 't1' },
     });
     expect(result.success).toBe(false);
+  });
+
+  it("accepts Bid mode's requests: a bid on EA's price limits, a watch list read, a move", () => {
+    const parse = (data: Record<string, unknown>) =>
+      adapterActRequestMessageSchema.safeParse({ channel: 'ledger:v2', kind: 'act_request', data })
+        .success;
+    expect(
+      parse({ action: 'bid', requestId: 'b1', tradeId: 't1', price: 12_250, resourceId: 7 }),
+    ).toBe(true);
+    expect(parse({ action: 'bid', requestId: 'b2', tradeId: 't1', price: 100 })).toBe(false);
+    expect(parse({ action: 'bid', requestId: 'b3', tradeId: 't1', price: 15_000_001 })).toBe(false);
+    expect(parse({ action: 'bid', requestId: 'b4', tradeId: 't1' })).toBe(false);
+    expect(parse({ action: 'watchlist', requestId: 'w1' })).toBe(true);
+    expect(parse({ action: 'move', requestId: 'm1', tradeId: 't1' })).toBe(true);
+    expect(parse({ action: 'move', requestId: 'm2' })).toBe(false);
+  });
+
+  it("takes a search's max bid outside the filter, so saved filters never carry one", () => {
+    const parse = (data: Record<string, unknown>) =>
+      adapterActRequestMessageSchema.safeParse({ channel: 'ledger:v2', kind: 'act_request', data })
+        .success;
+    expect(parse({ action: 'search', requestId: 's1', filter: {}, maxBid: 12_500 })).toBe(true);
+    expect(parse({ action: 'search', requestId: 's2', filter: {}, maxBid: 0 })).toBe(false);
+    expect(parse({ action: 'search', requestId: 's3', filter: { maxBid: 12_500 } })).toBe(false);
+  });
+});
+
+describe('watch list in a signed action result (Bid mode)', () => {
+  const watched = {
+    tradeId: '501',
+    itemId: '9001',
+    resourceId: 7,
+    assetId: 7,
+    rating: 86,
+    bidState: 'highest',
+    tradeState: 'active',
+    currentBid: 12_250,
+    startingBid: 10_000,
+    buyNowPrice: 20_000,
+    expires: 120,
+  };
+  const result = (items: unknown[]) =>
+    adapterActionResultMessageSchema.safeParse({
+      channel: 'ledger:v2',
+      kind: 'action_result',
+      data: {
+        action: 'watchlist',
+        requestId: 'w1',
+        ok: true,
+        requestedAt: 1,
+        completedAt: 2,
+        watched: items,
+      },
+    }).success;
+
+  it('carries the watched auctions, field by field', () => {
+    expect(result([watched])).toBe(true);
+    expect(
+      result([{ ...watched, itemId: null, rating: null, bidState: null, expires: null }]),
+    ).toBe(true);
+  });
+
+  it("refuses anything that is not one: an unknown state, a price off EA's limits, an extra key", () => {
+    expect(result([{ ...watched, bidState: 'winning' }])).toBe(false);
+    expect(result([{ ...watched, tradeState: 'sold' }])).toBe(false);
+    expect(result([{ ...watched, currentBid: 15_000_001 }])).toBe(false);
+    expect(result([{ ...watched, currentBid: 12.5 }])).toBe(false);
+    expect(result([{ ...watched, name: 'Kika' }])).toBe(false);
+    expect(result(Array.from({ length: 101 }, () => watched))).toBe(false);
   });
 });
 
@@ -569,6 +638,13 @@ describe('automation message types', () => {
     );
     expect(
       extBackgroundBotBudgetSetPayloadSchema.safeParse({ ...budget, searchTimes: [-1] }).success,
+    ).toBe(false);
+    // Bid mode's window of bids: optional, so a budget saved before it loads.
+    expect(
+      extBackgroundBotBudgetSetPayloadSchema.safeParse({ ...budget, bidTimes: [4, 5] }).success,
+    ).toBe(true);
+    expect(
+      extBackgroundBotBudgetSetPayloadSchema.safeParse({ ...budget, bidTimes: [-1] }).success,
     ).toBe(false);
   });
 });

@@ -22,12 +22,44 @@
 
 import { ShapeError } from './ea-response.js';
 
-import type { TradePileItem } from '@sl/shared';
+import type { TradePileItem, WatchedAuction } from '@sl/shared';
 
 /** `MAX_COIN_PRICE` from `@sl/shared`, restated: this file runs in the
  * MAIN world and imports nothing from the zod-carrying barrel (see
  * adapter.ts's header). Pinned equal by test/unit/ea-listing.test.ts. */
 export const MAX_COIN_PRICE = 15_000_000;
+
+/** EA's lowest starting bid (`MIN_START_PRICE` in @sl/shared), restated. */
+const MIN_START_PRICE = 150;
+
+/** EA's price grid (`priceStep` in @sl/shared's coins.ts), restated for the
+ * same reason: the step between a price and the next one up. */
+const PRICE_BANDS: readonly { below: number; step: number }[] = [
+  { below: 1_000, step: 50 },
+  { below: 10_000, step: 100 },
+  { below: 50_000, step: 250 },
+  { below: 100_000, step: 500 },
+  { below: Infinity, step: 1_000 },
+];
+
+/** The lowest bid EA takes on an auction: its starting bid while nobody has
+ * bid, else one step of EA's grid above the current bid (the current bid
+ * rounded onto the grid first). Pinned to @sl/shared's `stepPrice(bid, 1)`
+ * by test/unit/ea-listing.test.ts; content computes the same with that
+ * (engine/bidder.ts), and the adapter refuses any other amount. */
+export function nextBidPrice(startingBid: number, currentBid: number): number {
+  if (!(currentBid > 0)) return startingBid;
+  const clamp = (p: number) => Math.min(MAX_COIN_PRICE, Math.max(MIN_START_PRICE, p));
+  const p = clamp(currentBid);
+  const onGrid = clamp(Math.round(p / stepAbove(p)) * stepAbove(p));
+  return clamp(onGrid + stepAbove(onGrid));
+}
+
+/** The step between `price` and the next price up on EA's grid. */
+function stepAbove(price: number): number {
+  for (let i = 0; i < PRICE_BANDS.length; i++) if (price < PRICE_BANDS[i]!.below) return PRICE_BANDS[i]!.step;
+  return 1_000;
+}
 
 const toNumber = Number;
 const toStr = String;
@@ -221,6 +253,84 @@ export function normalisePileItems(entries: unknown[], onSkipped?: (count: numbe
   }
   if (entries.length > 0 && out.length === 0) {
     throw new ShapeError(`none of the ${entries.length} trade-pile entries could be read as an item`);
+  }
+  if (out.length < entries.length) onSkipped?.(entries.length - out.length);
+  return out;
+}
+
+const BID_STATES: ReadonlySet<string> = new Set(['highest', 'outbid', 'none', 'buyNow']);
+
+/**
+ * One auction on the trader's watch list (EA's Transfer Targets), for Nova
+ * AI's Bid mode: the same UTAS entry / entity layouts as a search listing,
+ * plus EA's `bidState` (`highest`, `outbid`, `none`, `buyNow`) beside the
+ * `tradeState`. ASSUMED SHAPE — verify on day one (docs/06-extension.md,
+ * day-one checklist): UTAS JSON watch list entries are said to carry
+ * `bidState` beside `tradeState`; on an entity both are read from its
+ * auction half (`getAuctionData()` or `_auction`), also under a leading
+ * underscore. An entry without a tradeId, a positive card id or whole
+ * prices within EA's limits, or with a state outside those lists, is
+ * `null`: the bot then neither re-bids on it nor believes it won it.
+ */
+export function normaliseWatchedItem(entry: unknown): WatchedAuction | null {
+  const e = asObject(entry);
+  if (!e) return null;
+  const auction = auctionPart(e);
+  if (!auction) return null;
+  const item = asObject(e.itemData) ?? e;
+
+  const tradeIdRaw = auction.tradeId;
+  if (typeof tradeIdRaw !== 'number' && typeof tradeIdRaw !== 'string') return null;
+  const tradeId = toStr(tradeIdRaw);
+  if (tradeId === '' || tradeId === '0' || tradeId.length > 40) return null;
+  const resourceId = num(firstPresent(item.resourceId, item.definitionId, item.maskedDefId), 0);
+  if (!(resourceId > 0) || !isInteger(resourceId)) return null;
+  const assetId = num(firstPresent(item.assetId, item.databaseId), 0);
+  if (!isInteger(assetId) || assetId < 0) return null;
+
+  // null: the entry did not say; undefined: it said something unknown.
+  const state = (value: unknown, allowed: ReadonlySet<string>): string | null | undefined => {
+    if (value === undefined || value === null) return null;
+    return typeof value === 'string' && allowed.has(value) ? value : undefined;
+  };
+  const bidState = state(firstPresent(auction.bidState, auction._bidState), BID_STATES);
+  const tradeState = state(firstPresent(auction.tradeState, auction._tradeState), PILE_STATES);
+  if (bidState === undefined || tradeState === undefined) return null;
+
+  const currentBid = num(auction.currentBid, 0);
+  const startingBid = num(auction.startingBid, 0);
+  const buyNowPrice = num(auction.buyNowPrice, 0);
+  for (const price of [currentBid, startingBid, buyNowPrice]) {
+    if (!isFiniteNumber(price) || price < 0 || price > MAX_COIN_PRICE || !isInteger(price)) return null;
+  }
+  const rating = num(item.rating, NaN);
+  const expires = num(auction.expires, NaN);
+  return {
+    tradeId,
+    itemId: readItemId(item),
+    resourceId,
+    assetId,
+    rating: isInteger(rating) && rating >= 0 && rating <= 99 ? rating : null,
+    bidState: bidState as WatchedAuction['bidState'],
+    tradeState: tradeState as WatchedAuction['tradeState'],
+    currentBid,
+    startingBid,
+    buyNowPrice,
+    expires: isFiniteNumber(expires) ? expires : null,
+  };
+}
+
+/** Every readable auction on a watch list, with the same rules as
+ * `normaliseListings`: empty is empty, none readable throws, some
+ * unreadable are counted through `onSkipped`. */
+export function normaliseWatchedItems(entries: unknown[], onSkipped?: (count: number) => void): WatchedAuction[] {
+  const out: WatchedAuction[] = [];
+  for (let i = 0; i < entries.length; i++) {
+    const item = normaliseWatchedItem(entries[i]);
+    if (item) out[out.length] = item;
+  }
+  if (entries.length > 0 && out.length === 0) {
+    throw new ShapeError(`none of the ${entries.length} watch list entries could be read as an auction`);
   }
   if (out.length < entries.length) onSkipped?.(entries.length - out.length);
   return out;

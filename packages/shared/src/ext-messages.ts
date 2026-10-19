@@ -8,7 +8,7 @@ import {
 } from './adapter-channel.js';
 import { activityEventSchema } from './schemas/activity.js';
 import { emailSchema, passwordSchema } from './schemas/auth.js';
-import { botDailyUsageSchema, botSettingsSchema } from './schemas/bot.js';
+import { botDailyUsageSchema, botModeSettingsSchema, botSettingsSchema } from './schemas/bot.js';
 import { filterCriteriaSchema, filterStatsSchema, savedFilterSchema } from './schemas/filters.js';
 import { coinPriceSchema, MAX_COIN_PRICE } from './schemas/ingest-bounds.js';
 import { riskBudgetEventSchema } from './schemas/risk.js';
@@ -238,6 +238,36 @@ export const tradePileItemSchema = z.object({
 });
 export type TradePileItem = z.infer<typeof tradePileItemSchema>;
 
+/** One auction on the trader's watch list (EA's Transfer Targets, where
+ * every bid lands), as main/ea-listing.ts's `normaliseWatchedItem` reads it
+ * for Nova AI's Bid mode. Keyed by the trade, unlike a trade-pile item.
+ * `bidState` is EA's word for the trader's place in the auction: `highest`
+ * (their bid leads, or won once `tradeState` is `closed`), `outbid`, `none`
+ * (watched without a bid) or `buyNow` (bought outright); null when the entry
+ * did not say. `tradeState`: `active` (running), `closed` (ended with a
+ * buyer), `expired` (ended without one). Every field is an assumption until
+ * the market opens (docs/06-extension.md, day-one checklist). Only ever
+ * carried inside a signed `action_result`; never forwarded to the trade
+ * lifecycle, where a won auction's `closed` would read as a sale. */
+export const WATCHED_BID_STATES = ['highest', 'outbid', 'none', 'buyNow'] as const;
+export const watchedAuctionSchema = z
+  .object({
+    tradeId: z.string().min(1).max(40),
+    itemId: z.string().min(1).max(40).nullable(),
+    resourceId: z.number().int().positive(),
+    assetId: z.number().int().min(0),
+    rating: z.number().int().min(0).max(99).nullable(),
+    bidState: z.enum(WATCHED_BID_STATES).nullable(),
+    tradeState: z.enum(TRADE_PILE_STATES).nullable(),
+    currentBid: coinPriceSchema,
+    startingBid: coinPriceSchema,
+    buyNowPrice: coinPriceSchema,
+    /** Seconds left when read, or null if unknown. */
+    expires: z.number().nullable(),
+  })
+  .strict();
+export type WatchedAuction = z.infer<typeof watchedAuctionSchema>;
+
 /** The trader's own items, read passively from an EA trade-pile response
  * (main/adapter.ts). Not a search: content counts nothing for it, and
  * forwards the items to background's trade lifecycle. Unsigned, like
@@ -332,7 +362,17 @@ export const adapterActionResultMessageSchema = z.object({
   channel: z.literal(ADAPTER_CHANNEL),
   kind: z.literal('action_result'),
   data: z.object({
-    action: z.enum(['search', 'buy', 'readResult', 'diagnostics', 'list', 'pile']),
+    action: z.enum([
+      'search',
+      'buy',
+      'readResult',
+      'diagnostics',
+      'list',
+      'pile',
+      'bid',
+      'watchlist',
+      'move',
+    ]),
     requestId: z.string().min(1).optional(),
     ok: z.boolean(),
     requestedAt: z.number(),
@@ -344,6 +384,11 @@ export const adapterActionResultMessageSchema = z.object({
     stillListed: z.boolean().optional(),
     /** Only present for `action: 'diagnostics'`. */
     diagnostics: adapterDiagnosticsSchema.optional(),
+    /** Only present for a successful `action: 'watchlist'`: the auctions on
+     * the trader's watch list (Nova AI's Bid mode). Signed with the rest of
+     * the result, so a page script cannot tell the bot it won or was
+     * outbid. */
+    watched: z.array(watchedAuctionSchema).max(100).optional(),
     /** A second result for a `buy` whose first result was
      * `error: 'timeout_unknown'`: EA's answer arrived after the adapter
      * stopped waiting, and `ok` says whether it bought. */
@@ -367,6 +412,11 @@ export const adapterActRequestMessageSchema = z.object({
       action: z.literal('search'),
       requestId: z.string().min(1),
       filter: filterCriteriaSchema,
+      /** Nova AI's Bid mode: search auctions whose current bid is at most
+       * this (EA's own `maxBid` search criterion), instead of a max buy-now
+       * price. Not a filter field: saved filters (and the API's filter
+       * schema) never carry it. */
+      maxBid: z.number().int().min(150).max(15_000_000).optional(),
     }),
     z.object({
       action: z.literal('buy'),
@@ -414,6 +464,38 @@ export const adapterActRequestMessageSchema = z.object({
     z.object({
       action: z.literal('pile'),
       requestId: z.string().min(1),
+    }),
+    /** Automation builds (Nova AI's Bid mode): bid `price` on an auction,
+     * through the web app's own bid call. The adapter refuses
+     * (`price_mismatch` / `listing_unknown`) unless `price` is exactly the
+     * next valid bid on the auction as it last saw it (the starting bid
+     * when nobody has bid, else one EA price step above the current bid),
+     * and below its buy-now price; `resourceId` / `assetId` bind it to the
+     * card, as for a buy. `main/adapter.ts`'s `asActRequest` re-checks this
+     * shape by hand. */
+    z.object({
+      action: z.literal('bid'),
+      requestId: z.string().min(1),
+      tradeId: z.string().min(1),
+      price: z.number().int().min(150).max(15_000_000),
+      resourceId: z.number().int().positive().optional(),
+      assetId: z.number().int().positive().optional(),
+    }),
+    /** Automation builds (Bid mode): read the trader's watch list through
+     * the web app's own service; the result carries it (`watched`). The
+     * adapter refuses one within a few seconds of the last
+     * (`watchlist_too_soon`). */
+    z.object({
+      action: z.literal('watchlist'),
+      requestId: z.string().min(1),
+    }),
+    /** Automation builds (Bid mode): move an auction the adapter itself won
+     * on this page load (named by its tradeId) from the watch list to the
+     * transfer list; anything else is refused (`move_not_bought`). */
+    z.object({
+      action: z.literal('move'),
+      requestId: z.string().min(1),
+      tradeId: z.string().min(1),
     }),
     /** Read-only: the adapter's diagnostics report (options page, "Copy
      * diagnostics"). Authenticated like every other act request, so no page
@@ -755,6 +837,7 @@ export const extBackgroundLicenseHeartbeatPayloadSchema = z
 /** `filters.save` — the *locally-persisted* `SavedFilter[]` (id, filterHash,
  * etc. already computed), not a creation request. */
 export const extBackgroundBotSettingsSetPayloadSchema = botSettingsSchema;
+export const extBackgroundBotModeSetPayloadSchema = botModeSettingsSchema;
 export const extBackgroundBotUsageSetPayloadSchema = botDailyUsageSchema;
 
 /** `catalog.save`: the Snipe Targets form's choices, as the EA web app's own
@@ -918,12 +1001,15 @@ export type ExtEngineStateSetPayload = z.infer<typeof extBackgroundEngineStateSe
  * its own governor's state (`Governor.serialize()`) and its sliding
  * one-hour search and buy windows (apps/extension `engine/sniper.ts`).
  * Kept in `storage.local` and hydrated on every start, so Stop/Start and a
- * page reload never refill them. Bounded by `BOT_LIMITS`' hourly maxima. */
+ * page reload never refill them. Bounded by `BOT_LIMITS`' hourly maxima.
+ * `bidTimes`: Bid mode's own one-hour window of bids (optional, so a budget
+ * saved before Bid mode existed still loads). */
 export const extBackgroundBotBudgetSetPayloadSchema = z
   .object({
     governor: extBackgroundEngineStateSetPayloadSchema,
     searchTimes: z.array(z.number().min(0)).max(10_000),
     buyTimes: z.array(z.number().min(0)).max(10_000),
+    bidTimes: z.array(z.number().min(0)).max(10_000).optional(),
   })
   .strict();
 export type BotBudgetState = z.infer<typeof extBackgroundBotBudgetSetPayloadSchema>;

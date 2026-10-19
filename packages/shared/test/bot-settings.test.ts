@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  BID_LIMITS,
   BOT_LIMITS,
+  DEFAULT_BOT_MODE_SETTINGS,
   DEFAULT_BOT_SETTINGS,
   RECOMMENDED_BOT_SETTINGS,
   botGovernorSettings,
+  botModeSettingsSchema,
   botRiskLevel,
   botSettingsSchema,
   botSettingsSyncResponseSchema,
+  clampBotModeSettings,
   clampBotSettings,
   effectiveSearchPace,
   projectedActiveHoursPerDay,
@@ -434,5 +438,60 @@ describe('bot settings sync schemas (/extension/bot-settings)', () => {
     });
     const saved = { settings: DEFAULT_BOT_SETTINGS, updatedAt: '2026-10-18T07:00:00.000Z' };
     expect(botSettingsSyncResponseSchema.parse(saved)).toEqual(saved);
+  });
+});
+
+describe('Bid mode settings (kept out of the account-synced bot settings)', () => {
+  it('defaults to Snipe, and to bids in the last 5 minutes, 10 at once, 60 an hour', () => {
+    expect(DEFAULT_BOT_MODE_SETTINGS).toEqual({
+      mode: 'snipe',
+      bidding: { windowMinutes: 5, maxActiveBids: 10, maxBidsPerHour: 60 },
+    });
+    expect(botModeSettingsSchema.parse({ mode: 'bid' }).bidding).toEqual(
+      DEFAULT_BOT_MODE_SETTINGS.bidding,
+    );
+  });
+
+  it('reads a missing or unknown mode as Snipe, so no bot changes what it does on its own', () => {
+    expect(botModeSettingsSchema.parse({}).mode).toBe('snipe');
+    expect(botModeSettingsSchema.parse({ mode: 'auction' }).mode).toBe('snipe');
+    expect(botModeSettingsSchema.parse({ mode: 'bid' }).mode).toBe('bid');
+  });
+
+  it('holds each Bid mode setting to its bounds', () => {
+    const parse = (bidding: Record<string, unknown>) =>
+      botModeSettingsSchema.safeParse({ mode: 'bid', bidding }).success;
+    expect(parse({ windowMinutes: 1, maxActiveBids: 1, maxBidsPerHour: 1 })).toBe(true);
+    expect(parse({ windowMinutes: 60, maxActiveBids: 50, maxBidsPerHour: 300 })).toBe(true);
+    expect(parse({ windowMinutes: 0 })).toBe(false);
+    expect(parse({ windowMinutes: 61 })).toBe(false);
+    expect(parse({ maxActiveBids: 51 })).toBe(false);
+    expect(parse({ maxBidsPerHour: 301 })).toBe(false);
+    expect(parse({ maxActiveBids: 2.5 })).toBe(false);
+    expect(parse({ extra: 1 })).toBe(false);
+  });
+
+  it('clamps what the engine runs on into the bounds', () => {
+    const wild = {
+      mode: 'bid',
+      bidding: { windowMinutes: 0, maxActiveBids: 1e9, maxBidsPerHour: Number.NaN },
+    } as never;
+    expect(clampBotModeSettings(wild)).toEqual({
+      mode: 'bid',
+      bidding: {
+        windowMinutes: BID_LIMITS.windowMinutes.min,
+        maxActiveBids: BID_LIMITS.maxActiveBids.max,
+        maxBidsPerHour: DEFAULT_BOT_MODE_SETTINGS.bidding.maxBidsPerHour,
+      },
+    });
+    expect(clampBotModeSettings({ mode: 'x' } as never).mode).toBe('snipe');
+  });
+
+  it('is not part of the settings the API stores: a PUT carrying it is refused', () => {
+    expect(
+      putBotSettingsRequestSchema.safeParse({
+        settings: { ...DEFAULT_BOT_SETTINGS, mode: 'bid' },
+      }).success,
+    ).toBe(false);
   });
 });

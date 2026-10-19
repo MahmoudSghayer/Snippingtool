@@ -13,6 +13,11 @@ export const AUTOMATION_BACKGROUND_MESSAGE_TYPES = [
    * only: nothing about how a user paces their bot goes to the server. */
   'bot.settingsGet',
   'bot.settingsSet',
+  /** Snipe or Bid, and Bid mode's settings (`BotModeSettings`,
+   * `storage.local`). Local only: not synced with the account until the
+   * API's bot-settings schema carries them (see `botModeSettingsSchema`). */
+  'bot.modeGet',
+  'bot.modeSet',
   /** The bot's active time today, for its hours-per-day limit
    * (`BotDailyUsage`, `storage.local`). Local only. */
   'bot.usageGet',

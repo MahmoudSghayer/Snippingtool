@@ -288,6 +288,43 @@ describe('transfer list reload (Nova AI counts)', () => {
   });
 });
 
+describe("Bid mode's acts", () => {
+  it('signs a bid (with only real card ids) and resolves on its signed answer', async () => {
+    const promise = client.bid('t1', 12_250, { resourceId: 7, assetId: 0 });
+    const req = await lastRequest();
+    expect(req.data).toMatchObject({ action: 'bid', tradeId: 't1', price: 12_250, resourceId: 7 });
+    expect(req.data).not.toHaveProperty('assetId');
+    expect(await signer.verify(canonicalActMessage('act_request', req.data), req.mac!)).toBe(true);
+    deliver(await signedResult({ action: 'bid', requestId: req.data.requestId, ok: true, requestedAt: 1, completedAt: 2 }));
+    await expect(promise).resolves.toMatchObject({ ok: true, signed: true });
+  });
+
+  it('hands back the watch list only from a signed answer', async () => {
+    const watched = [
+      { tradeId: 't1', itemId: '9', resourceId: 7, assetId: 7, rating: 86, bidState: 'outbid', tradeState: 'active', currentBid: 12_000, startingBid: 10_000, buyNowPrice: 20_000, expires: 40 },
+    ];
+    const promise = client.watchlist();
+    const req = await lastRequest();
+    expect(Object.keys(req.data).sort()).toEqual(['action', 'requestId']);
+    const result = { action: 'watchlist', requestId: req.data.requestId, ok: true, requestedAt: 1, completedAt: 2, watched };
+    // Unsigned (a page script's): dropped.
+    deliver({ channel: ADAPTER_CHANNEL, kind: 'action_result', data: { ...result, watched: [] } });
+    deliver(await signedResult(result));
+    await expect(promise).resolves.toMatchObject({ ok: true, signed: true, watched });
+  });
+
+  it('signs a move, and a search by max bid outside the filter', async () => {
+    void client.move('t1');
+    expect((await lastRequest()).data).toMatchObject({ action: 'move', tradeId: 't1' });
+    void client.search({ resourceId: 7 }, { maxBid: 12_500 });
+    await flush();
+    expect(sent[sent.length - 1]!.data).toMatchObject({ action: 'search', filter: { resourceId: 7 }, maxBid: 12_500 });
+    void client.search({ resourceId: 7 });
+    await flush();
+    expect(sent[sent.length - 1]!.data).not.toHaveProperty('maxBid');
+  });
+});
+
 describe('a buy whose answer came after the adapter stopped waiting', () => {
   it('resolves timeout_unknown with a late promise that a signed late result settles', async () => {
     const promise = client.buy('t1', 1000);

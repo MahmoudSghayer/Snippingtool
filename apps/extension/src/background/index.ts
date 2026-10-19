@@ -15,6 +15,7 @@ import {
   extBackgroundEngineLockPayloadSchema,
   extBackgroundEngineStatePayloadSchema,
   extBackgroundBotBudgetSetPayloadSchema,
+  extBackgroundBotModeSetPayloadSchema,
   extBackgroundBotSettingsSetPayloadSchema,
   extBackgroundBotUsageSetPayloadSchema,
   extBackgroundCardNamesPayloadSchema,
@@ -48,6 +49,8 @@ import { handleAuthLogin, handleAuthLogout, handleAuthMfaVerify, handleAuthRegis
 import {
   handleBotBudgetGet,
   handleBotBudgetSet,
+  handleBotModeGet,
+  handleBotModeSet,
   handleBotSettingsGet,
   handleBotSettingsSet,
   handleBotUsageGet,
@@ -187,6 +190,8 @@ if (AUTOMATION_ENABLED) {
   Object.assign(handlers, {
     'bot.settingsGet': () => handleBotSettingsGet(),
     'bot.settingsSet': (payload) => handleBotSettingsSet(payload as never),
+    'bot.modeGet': () => handleBotModeGet(),
+    'bot.modeSet': (payload) => handleBotModeSet(payload as never),
     'bot.usageGet': () => handleBotUsageGet(),
     'bot.usageSet': (payload) => handleBotUsageSet(payload as never),
     'bot.budgetGet': () => handleBotBudgetGet(),
@@ -241,6 +246,7 @@ const payloadSchemas: Partial<Record<string, { safeParse: (v: unknown) => { succ
 if (AUTOMATION_ENABLED) {
   Object.assign(payloadSchemas, {
     'bot.settingsSet': extBackgroundBotSettingsSetPayloadSchema,
+    'bot.modeSet': extBackgroundBotModeSetPayloadSchema,
     'bot.usageSet': extBackgroundBotUsageSetPayloadSchema,
     'bot.budgetSet': extBackgroundBotBudgetSetPayloadSchema,
     'cards.names': extBackgroundCardNamesPayloadSchema,

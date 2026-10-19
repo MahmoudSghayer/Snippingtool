@@ -3,10 +3,10 @@
 // (background/bot.ts), so a browser the trader signs in on (another PC, a
 // cloud machine) starts with the settings they chose.
 
-import { DEFAULT_BOT_SETTINGS, type BotSettings, type BotSettingsSyncResponse } from '@sl/shared';
+import { DEFAULT_BOT_MODE_SETTINGS, DEFAULT_BOT_SETTINGS, type BotSettings, type BotSettingsSyncResponse } from '@sl/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { handleBotSettingsGet, handleBotSettingsSet } from '../../src/background/bot.js';
+import { handleBotModeGet, handleBotModeSet, handleBotSettingsGet, handleBotSettingsSet } from '../../src/background/bot.js';
 import { clearTokens } from '../../src/lib/auth.js';
 import { getLocal, setLocal, setSession } from '../../src/lib/storage.js';
 
@@ -140,4 +140,34 @@ describe('background/bot.ts: bot settings follow the account', () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(200, onAccount(withDelay(7, 8))));
     expect(await handleBotSettingsGet()).toEqual(withDelay(7, 8));
   }, 15_000);
+});
+
+// Snipe or Bid, and Bid mode's settings, stay in this browser: the API
+// validates the account's bot settings strictly, so they cannot ride along
+// until it carries them (`botModeSettingsSchema`).
+describe('background/bot.ts: Snipe or Bid stays in this browser', () => {
+  useRealChromeStorage();
+  const MODE_KEY = 'sl.bot.mode.v1';
+
+  beforeEach(async () => {
+    await clearTokens();
+    await setLocal(MODE_KEY, null);
+    vi.stubGlobal('fetch', vi.fn());
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('starts on Snipe, keeps what is saved, and sends nothing to the account', async () => {
+    expect(await handleBotModeGet()).toEqual(DEFAULT_BOT_MODE_SETTINGS);
+    await setSession('sl.accessToken', 'access-token');
+    const bid = { mode: 'bid' as const, bidding: { windowMinutes: 3, maxActiveBids: 8, maxBidsPerHour: 40 } };
+    await handleBotModeSet(bid);
+    expect(await handleBotModeGet()).toEqual(bid);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('reads a stored value that no longer parses as the defaults (Snipe)', async () => {
+    await setLocal(MODE_KEY, { mode: 'bid', bidding: { maxActiveBids: 500 } });
+    expect(await handleBotModeGet()).toEqual(DEFAULT_BOT_MODE_SETTINGS);
+  });
 });

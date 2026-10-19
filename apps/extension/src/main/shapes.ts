@@ -17,7 +17,10 @@
  *
  * Tried in that order (the observable shape has the better evidence). None
  * present means act is disabled, with a reason naming what each candidate
- * was missing. Adding a third shape is a new module plus one line in
+ * was missing. Each shape may also carry Nova AI's Bid mode calls
+ * (`bidding`: a bid, a watch list read, a move to the transfer list),
+ * checked on their own so a page without them still snipes. Adding a
+ * third shape is a new module plus one line in
  * `SHAPES`; nothing outside `src/main/` knows shapes exist beyond the
  * probe's `shape` field.
  *
@@ -57,6 +60,41 @@ export interface ListTarget {
   durationSeconds: number;
 }
 
+export interface BidTarget {
+  tradeId: string;
+  /** The bid, already checked against the auction as the adapter last saw
+   * it (`bidCheck` in main/adapter.ts): exactly the next valid bid. */
+  amount: number;
+  /** The item entity a search or watch list read returned for this
+   * tradeId, for shapes that bid on the entity. */
+  entity: unknown;
+}
+
+/** Nova AI's Bid mode on a shape (automation builds). Separate from the
+ * shape's own `detect`: a page without these functions still snipes, and
+ * only Bid mode refuses to run (`watchlist_unsupported`). */
+export interface BiddingShape {
+  /** `null` when the page has every function Bid mode needs, otherwise the
+   * first one it lacks. Reads properties only. */
+  detect(services: unknown): string | null;
+  /** Bid `target.amount` through the web app's own bid call. Resolves only
+   * when EA's service says it was accepted. */
+  bid(services: Record<string, unknown>, target: BidTarget): Promise<void>;
+  /** The watch list through the web app's own service: the raw response
+   * (for diagnostics) and its entries. Rejects on anything it cannot read,
+   * never resolves with a list it did not see. */
+  readWatchlist(services: Record<string, unknown>): Promise<{ response: unknown; entries: unknown[] }>;
+  /** Move a won item (its entity) from the watch list to the transfer
+   * list. Absent on a shape with no known call. */
+  moveToTransferList?(services: Record<string, unknown>, entity: unknown): Promise<void>;
+}
+
+/** Search options that are not filter fields. */
+export interface SearchOptions {
+  /** Bid mode: auctions whose current bid is at most this (EA's `maxBid`). */
+  maxBid?: number;
+}
+
 export interface ServiceShape {
   readonly name: ShapeName;
   /** `null` when this shape's functions are all present on `services`,
@@ -69,7 +107,7 @@ export interface ServiceShape {
   /** Run a search through EA's own service. Resolves with the raw response
    * (for diagnostics) and its list of entries; rejects on any response it
    * cannot read — never resolves with an empty list it did not see. */
-  search(services: Record<string, unknown>, filter: FilterCriteria): Promise<{ response: unknown; entries: unknown[] }>;
+  search(services: Record<string, unknown>, filter: FilterCriteria, options?: SearchOptions): Promise<{ response: unknown; entries: unknown[] }>;
   /** Buy at `target.price`. Resolves only when EA's service says it
    * worked; rejects otherwise. */
   buy(services: Record<string, unknown>, target: BuyTarget): Promise<void>;
@@ -83,6 +121,8 @@ export interface ServiceShape {
    * Resolves when EA answered; the list itself reaches passive observation
    * like any trade-pile load. Absent on a shape with no known call. */
   refreshPile?(services: Record<string, unknown>): Promise<void>;
+  /** Bid mode's calls. Absent on a shape with none known. */
+  readonly bidding?: BiddingShape;
 }
 
 export const SHAPES: readonly ServiceShape[] = [createObservableShape(SERVICE_CALL_TIMEOUT_MS), createPromiseShape(SERVICE_CALL_TIMEOUT_MS)];

@@ -109,7 +109,11 @@ Three channels, none of which overlap in purpose:
    requests are ignored, and content schema-validates every inbound
    message and drops unsigned or unmatched results. A `buy` is refused
    (`price_mismatch` / `listing_unknown`) unless its price equals the
-   buy-now price the adapter itself last saw for that `tradeId`.
+   buy-now price the adapter itself last saw for that `tradeId`. Automation
+   builds add `list`, `pile` and Nova AI's Bid mode acts (`bid`, `watchlist`,
+   `move`; "The Sniping Bot page" below): a `bid` is refused unless it is
+   exactly the next valid bid on the auction as the adapter last saw it, and
+   the watch list comes back only inside the signed `action_result`.
 2. **`content/index.ts` ↔ `background/index.ts`**, `browser.runtime.sendMessage`,
    typed by `backgroundMessageTypeSchema`
    (`packages/shared/src/ext-messages.ts`). Content sends `record` (raw
@@ -522,6 +526,87 @@ transfer list reload is the adapter's `pile` act
 web app is said to call when its Transfer List opens, UNVERIFIED; the
 promise shape answers `pile_unsupported`).
 
+**Bid mode** (`engine/bidder.ts`, run by `engine/sniper.ts`'s `runBids`).
+Above Start the user picks **Snipe** (what the bot always did, the
+default) or **Bid**; only one runs at a time, and the choice is locked while
+the bot runs (it applies at the next Start). Bid mode bids on auctions in
+their last minutes and never above the search's own max price, which in
+Bid mode is the max bid (the page says so under the Buy Now price, and
+asks for one before Start; "Most you'll pay" caps it too):
+
+- **What it goes for** (`pickAuctions`): an auction whose buy-now price is
+  at or under the max is bought with Buy Now, through Snipe mode's own buy
+  path and limits, whatever its time left. Otherwise it bids only on an
+  auction with at most `bidding.windowMinutes` left (5 by default, 1–60),
+  and only when the next valid bid is at or under the max and under the
+  buy-now price: the starting bid while nobody has bid, else one step of
+  EA's price grid above the current bid (`nextBid`, `stepPrice(bid, 1)`: 50
+  coins under 1,000, 100 up to 10,000, 250 up to 50,000, 500 up to 100,000,
+  then 1,000). Soonest-ending first, while fewer than `bidding.maxActiveBids`
+  auctions hold one of its bids (10 by default, 1–50; EA's watch list holds
+  about 50 cards) and the watch list has room.
+- **Searching**: by current bid, not buy-now price: the search's max price
+  goes out as EA's own `maxBid` criterion (a separate field of the `search`
+  act, never a filter field), stepped down EA's grid like Snipe mode's max
+  buy-now price so EA never answers from its cache, with no max buy-now.
+- **Following its bids**: every bid lands on the watch list (EA's Transfer
+  Targets), which the bot reads through the adapter's `watchlist` act while
+  it has open bids: at least every minute, at most every 15 s, and every
+  cycle (within that) once a bid ends within 90 s, was outbid or has no
+  answer yet. Outbid: it re-bids the next step while that stays at or under
+  the max ("Outbid on … — re-bidding 12,500"), else drops the auction ("Max
+  bid reached on … — dropping it"). A dropped or lost auction is left on the
+  watch list as EA keeps it: no web app call to take one off is known, and
+  the trader clears them with EA's own "Clear expired". A full watch list
+  stops new bids (and the bot, once none of its bids is left on it).
+- **What it wins** is a purchase like any snipe: the Bought, Coins spent and
+  Profit figures, a `success` attempt and a `bought` trade (with the item id
+  the watch list gave, `TradeInput.itemId`), which the sale tracking follows.
+  It is then moved to the transfer list (the adapter's `move` act) and, when
+  auto-sell is on, listed exactly like a sniped card; with auto-sell off it
+  stays there unlisted ("Moved … to your transfer list"). Where it cannot be
+  moved (the promise shape has no move call) it stays where EA puts it, in
+  the watch list, and the log says so. A lost or dropped auction is a miss
+  (one `too_slow` / `failed` attempt with `errorCode` `outbid` or
+  `max_bid_reached`); the bids themselves are not attempts. No API or
+  telemetry schema changed.
+- **Limits**: every Snipe mode rail applies unchanged (the search delay
+  start to start, breaks, rests, active hours a day, searches an hour, the
+  kill switch, plan, account and engine lease checks, and EA's rate-limit
+  backoff, slow-down, protective rests and soft-ban stop, for errors on its
+  bids and watch list reads too). Its own: **bids an hour**
+  (`bidding.maxBidsPerHour`, 60 by default, 1–300: every bid and re-bid EA
+  saw, on its own sliding window saved with the hourly budgets as
+  `bidTimes`), which the governor's actions an hour also counts (raised by
+  that many while Bid mode runs: kind `bid`, §5). EA holds a bid's coins
+  while it leads, so the coins the bot's standing bids hold count against
+  the session coin budget, against the balance EA's own answers last stated
+  (whether that balance already leaves them out is unverified, so they may
+  be counted twice: that can only skip a bid, never send one EA refuses for
+  coins) and in the governor's coin flow until a bid is outbid or lost; the
+  minimum profit is checked at the bid. Bids are not buys for the buy:search
+  ratio or buys an hour.
+- **Fails closed**: without the Bid mode calls (`bid` and `watchlist`) the
+  bot will not start in Bid mode, and its first act is a watch list read: if
+  the page cannot do it for Nova AI (`bidding_unsupported`) or it fails, the
+  bot stops with a plain message before bidding at all; three failed reads
+  in a row later stop it too. Snipe mode never needs them. Stopping leaves
+  the open bids with EA (the log says so); a later start in Bid mode on the
+  same page follows them again.
+- **Settings**: the mode and the Bidding settings (window, bids at once,
+  bids an hour; the Settings tab shows them while Bid is picked) are
+  `BotModeSettings` (`botModeSettingsSchema` in `@sl/shared`), kept in this
+  browser (`bot.modeGet` / `bot.modeSet`, `sl.bot.mode.v1`), **not** synced
+  with the account: `PUT /extension/bot-settings` validates `BotSettings`
+  strictly, so adding fields there needs the API deployed first (and an
+  older extension then refuses the API's answer). A missing or unknown mode
+  reads as Snipe.
+
+The page shows the open bids while Bid mode runs ("Running for 3:21 ·
+Active bids: 4/10") and Bid mode's log lines name the card in the sentence
+("Bid 12,250 on Kika Nazareth (3 min left)", "Won Kika Nazareth for
+12,500"); the Auto-sell card says it covers both modes.
+
 **The page is laid out like EA's "Search the Transfer Market" screen**: a
 back arrow and title on EA's navy bar, the pitch artwork behind two floating
 panels, and on the left one EA's tab row (Search / Settings; Start waiting on
@@ -642,6 +727,25 @@ Shape-specific limits, all to confirm on day one:
   fails loud. (Nothing calls `readResult` today.)
 - The promise shape treats a resolved `buyNow` as success unless it says
   `success: false`; the observable shape needs an explicit `success: true`.
+- Nova AI's Bid mode (automation builds only: `bidding` on each shape, which
+  the listable build does not carry) is checked on its own, so a page
+  without it still snipes and only Bid mode refuses (`bidding_unsupported`).
+  Observable shape: `services.Item.bid(item, amount)` to bid (the buy call
+  with a bid amount), `services.Item.requestWatchedItems()` for the watch
+  list (`{ success, data: { items } }`), `services.Item.move(item,
+ItemPile.TRANSFER)` to move a won card. Promise shape:
+  `services.Transfer.repository.bid(tradeId, amount)` and
+  `services.Item.repository.watchlist() -> { auctionInfo }` (a pure guess),
+  no move. Watch list entries are read like listings plus EA's `bidState`
+  (`highest` / `outbid` / `none` / `buyNow`) beside `tradeState`, also
+  under a leading underscore on an entity (`normaliseWatchedItem`). The
+  adapter bids only exactly the next valid bid on an auction it saw in one
+  of EA's own answers (a search or a watch list read: `bidCheck`,
+  `nextBidPrice`), under its buy-now price; refuses a second watch list read
+  within 5 s (`watchlist_too_soon`); and moves or lists only an auction it
+  bid on itself on that page load that the watch list says it won
+  (`closed`, `highest`). The watch list is never forwarded to the trade
+  lifecycle.
 
 **Day-one checklist**, once the market unlocks and the real web app is
 reachable:
@@ -741,6 +845,34 @@ installed`; after the human's own search the log shows no `hook:`
    card bought outside the extension is never followed (no buy price to
    close it with).
 
+9. **Bid mode (Nova AI, automation builds).** All assumed:
+   - With a test account, bid on one cheap auction by hand in EA's UI, then
+     start Nova AI in Bid mode on a search with a low max price and **Copy
+     diagnostics**: `servicesKeys.Item` should list `bid`,
+     `requestWatchedItems` and `move` as `"function"`, the log
+     `watchlist ok (<shape>): N auctions` (N matching EA's Transfer
+     Targets) and, after a bid, `bid ok (<shape>)`. `lastMarketResponse`
+     with `source: "act:watchlist"` shows the watch list's keys: each item's
+     auction should carry `bidState` and `tradeState` (or `_bidState` /
+     `_tradeState`), `currentBid`, `startingBid`, `expires`, and the item
+     its `id`. `skipped N unreadable entries` under `watchlist` means a
+     state or field differs: fix `normaliseWatchedItem`.
+   - The search's `maxBid` criterion: Bid mode's searches should find the
+     same auctions as EA's own search with only "Max Bid" set. An auction
+     nobody has bid on must read `currentBid: 0` (the bot then bids its
+     starting bid; were EA to report the starting bid there, it would bid
+     one step more than it needs to).
+   - A bid at exactly the next step must go in, and EA's answer to a bid
+     that lost the race must show as `bid failed` (461 / 478 expected), never
+     `bid ok`. Confirm whether EA's stated coin balance (`credits`) drops by
+     a bid's amount when it is placed: if it does, Bid mode's coin check can
+     stop counting the coins its bids hold a second time.
+   - Win one auction: the watch list must show it `closed` with `bidState:
+"highest"`, `move ok` must follow (`ItemPile.TRANSFER` is the web app's
+     own pile id), then the listing when auto-sell is on. A full transfer
+     list makes the move fail: the log says the card stays in the watch
+     list.
+
 ## 5. Safety governor: thresholds and math
 
 `engine/governor.ts`'s `Governor.allow(action)` is the single gate every
@@ -798,6 +930,15 @@ falls back to the shipped default:
   threshold) — `setMaxCoinsPerBuy()`: a buy above it is a soft deny
   (`coin_flow`, "above your max coins per snipe"). The Sniping Bot's
   governor has none; its price cap is `thresholds.maxBuyPrice`.
+- **Bids** (`allow({ kind: 'bid', coins })`, Nova AI's Bid mode only): a
+  request EA sees, so it counts toward `actionsPerHour` (the bot's governor
+  adds `bidding.maxBidsPerHour` to it while Bid mode runs) and passes the
+  same hard stops; its coins are held in the `maxCoinFlowPerHour` window
+  while the bid stands (a soft deny when the hour's spend plus the standing
+  bids has no room) and come back through `releaseSpend` once it is outbid
+  or lost, or EA refused it (`refund` when the adapter refused it before it
+  reached EA). Never a buy for `buyToSearchRatio` or the buy count; a won
+  auction's coins simply stay spent.
 
 An allowed buy the adapter then _refuses_ before calling EA (price
 mismatch, unknown listing, no entity, no act key), in a result whose MAC
