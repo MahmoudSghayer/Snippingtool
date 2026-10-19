@@ -444,14 +444,14 @@ describe('Bid mode — pace', () => {
     expect(h.searches).toHaveLength(3);
     const requests = [...h.searchTimes, ...bidTimes, ...readTimes].sort((x, y) => x - y);
     const gaps = requests.slice(1).map((t, i) => t - requests[i]!);
-    // Never two at once: after a watch list read the next request waits the
-    // quick gap, 40% of the test's 10 s search delay.
+    // Never two at once: every request waits at least the quick gap, 40% of
+    // the test's 10 s search delay.
     expect(Math.min(...gaps)).toBeGreaterThanOrEqual(4 * SEC);
     // Searches keep the full search delay between them...
     const searchGaps = h.searchTimes.slice(1).map((t, i) => t - h.searchTimes[i]!);
     expect(Math.min(...searchGaps)).toBeGreaterThanOrEqual(10 * SEC);
-    // ...and each bid waits its turn after the search that found it.
-    for (const t of bidTimes) expect(t - Math.max(...h.searchTimes.filter((s) => s < t))).toBeGreaterThanOrEqual(10 * SEC);
+    // ...and each bid goes a quick gap after the search that found it.
+    for (const t of bidTimes) expect(t - Math.max(...h.searchTimes.filter((s) => s < t))).toBe(4 * SEC);
   });
 
   it('says searches and bids when EA limits Bid mode', async () => {
@@ -616,7 +616,7 @@ describe('Bid mode — guards the bids it holds first', () => {
     await h.done();
     expect(h.bids.map(([id]) => id)).toEqual(['a']);
     expect(h.searches).toHaveLength(1);
-    const bidAt = h.searchTimes[0]! + 10 * SEC;
+    const bidAt = h.searchTimes[0]! + 4 * SEC;
     const after = readTimes.filter((t) => t > bidAt);
     const gaps = after.slice(1).map((t, i) => t - after[i]!);
     expect(after.length).toBeGreaterThanOrEqual(8);
@@ -625,11 +625,15 @@ describe('Bid mode — guards the bids it holds first', () => {
     expect(waits.filter((w) => w.t > bidAt && w.phase === 'waiting')).toEqual([]);
   });
 
-  it('a bid near its end holds the search back until it is settled', async () => {
+  // Live: with bids near their end it only checked them for minutes, and
+  // 10 of 10 open bids became 3, then none, with auctions left to bid on.
+  it('below the max, keeps searching while a bid nears its end, reading the watch list in between', async () => {
+    const readTimes: number[] = [];
     const h = setup({
       bidding: { maxActiveBids: 5 },
       results: (n) => [auction('a', 45), auction(`late${n}`, 250)],
       beforeRead: (_n, ea, now) => {
+        readTimes.push(now);
         const a = ea.get('a');
         if (a && now >= a.a.expiresAt!) a.tradeState = 'closed';
       },
@@ -637,13 +641,93 @@ describe('Bid mode — guards the bids it holds first', () => {
     });
     h.sniper.start();
     await h.done();
-    // The soonest-ending auction first, then nothing new until it is won.
     expect(h.bids[0]![0]).toBe('a');
-    const bidAt = h.searchTimes[0]!;
+    const bidAt = h.searchTimes[0]! + 4 * SEC;
     const end = START + 45 * SEC;
-    expect(h.searchTimes.filter((t) => t > bidAt && t < end)).toEqual([]);
+    // Searching on for more auctions while 'a' runs out ...
+    expect(h.searchTimes.filter((t) => t > bidAt && t < end).length).toBeGreaterThanOrEqual(2);
+    expect(h.bids.map(([id]) => id)).toEqual(expect.arrayContaining(['late2', 'late3']));
+    // ... with its last minute still read every three quick gaps (a search,
+    // its bid, the read), and the win collected.
+    const near = readTimes.filter((t) => t > bidAt && t <= end + 10 * SEC);
+    expect(near.length).toBeGreaterThanOrEqual(3);
+    expect(Math.max(...near.slice(1).map((t, i) => t - near[i]!))).toBeLessThanOrEqual(12 * SEC);
     expect(h.moves).toEqual(['a']);
-    expect(h.searchTimes.filter((t) => t > end).length).toBeGreaterThan(0);
+  });
+
+  it('replaces a bid it lost from the market at the next search', async () => {
+    let lostAt = 0;
+    const h = setup({
+      bidding: { maxActiveBids: 2 },
+      results: (n) => [auction(`x${n}`, 200 + n * 10)],
+      beforeRead: (_n, ea, now) => {
+        const x1 = ea.get('x1');
+        if (lostAt || !x1 || !ea.has('x2')) return;
+        Object.assign(x1, { tradeState: 'closed', bidState: 'outbid', currentBid: 11_000 });
+        lostAt = now;
+      },
+      stopWhen: (x) => x.bids.length >= 3 && x.sniper.state.phase !== 'bidding',
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.bids.map(([id]) => id)).toEqual(['x1', 'x2', 'x3']);
+    expect(h.log()).toContain('Lost {card} to a higher bid | it went for 11,000');
+    // Full at two, so no search until the loss; then one within a search delay.
+    const after = h.searchTimes.filter((t) => t >= lostAt);
+    expect(after[0]! - lostAt).toBeLessThanOrEqual(10 * SEC);
+    expect(h.statuses.at(-1)).toMatchObject({ active: 2, max: 2 });
+  });
+
+  it('a re-bid someone else beat is checked again and re-bid at the new price', async () => {
+    const h: Harness = setup({
+      results: (n) => (n === 1 ? [auction('a', 200)] : []),
+      bidResult: (_id, price) => {
+        if (price !== 11_250) return { ok: true, signed: true, latencyMs: 5 };
+        // Someone else's 11,250 got there first.
+        Object.assign(h.ea.get('a')!, { bidState: 'outbid', currentBid: 11_250 });
+        return { ok: false, signed: true, error: 'bid reported success: false (status 403)', latencyMs: 5 };
+      },
+      beforeRead: (n, ea) => {
+        if (n === 2) Object.assign(ea.get('a')!, { bidState: 'outbid', currentBid: 11_000 });
+      },
+      stopWhen: (x) => x.bids.length >= 3 && x.sniper.state.phase !== 'bidding',
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.bids.map(([id, p]) => [id, p])).toEqual([
+      ['a', 10_000],
+      ['a', 11_250],
+      ['a', 11_500],
+    ]);
+    expect(h.log()).toEqual(
+      expect.arrayContaining([
+        'Re-bid 11,250 on {card} not accepted: someone else bid first, or the auction ended — checking it again',
+        'Outbid on {card} at 11,250 — re-bidding 11,500',
+      ]),
+    );
+    // Still followed, not dropped, and no miss counted for it.
+    expect(h.sniper.getLog().some((e) => e.kind === 'dropped')).toBe(false);
+    expect(h.attempts).toEqual([]);
+    expect(h.statuses.at(-1)).toMatchObject({ active: 1, committed: 11_500 });
+  });
+
+  it('lets a re-bid go once EA has refused it three times in a row', async () => {
+    const h = setup({
+      results: (n) => (n === 1 ? [auction('a', 200)] : []),
+      bidResult: (_id, price) =>
+        price === 10_000 ? { ok: true, signed: true, latencyMs: 5 } : { ok: false, signed: true, error: 'bid reported success: false (status 461)', latencyMs: 5 },
+      beforeRead: (n, ea) => {
+        if (n === 2) Object.assign(ea.get('a')!, { bidState: 'outbid', currentBid: 11_000 });
+      },
+      stopWhen: (x) => x.clock.t > START + 2 * MIN,
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.bids.map(([, p]) => p)).toEqual([10_000, 11_250, 11_250, 11_250]);
+    expect(h.log().filter((m) => m.endsWith('— checking it again'))).toHaveLength(2);
+    expect(h.log()).toContain('Re-bid 11,250 on {card} not accepted: someone else bid first, or the auction ended');
+    expect(h.attempts).toEqual([expect.objectContaining({ tradeId: 'a', outcome: 'too_slow' })]);
+    expect(h.statuses.at(-1)).toMatchObject({ active: 0 });
   });
 
   it('re-bids several outbid leads within seconds, soonest-ending first', async () => {
