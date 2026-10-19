@@ -351,7 +351,29 @@ reaches the counts through passive observation like any other load (and the
 trade lifecycle sees each sale the same way). Until a whole list has been
 seen they show "—" and ask the user to open it in EA. The page checks for
 new figures on every refresh and on its one-second wallet tick, writing only
-when they changed. Kept in memory only, never stored or sent.
+when they changed. Kept in memory only, never stored or sent. A sold card
+missing from the next full list was cleared (EA's Clear Sold, in EA or on
+Nova AI's page): the Sold counter keeps counting it (`soldCleared`, since
+the page loaded), so clearing never takes sales off it, while the panel
+shows only what is still on the list.
+
+The **Transfer list** panel has two small tools (automation builds,
+`content/transfer-tools.ts`), one at a time, each saying what it did under
+the panel:
+
+- **Clear sold** (when the list has sold cards): the adapter's `clearSold`
+  act, the web app's own Clear Sold, then a reload of the list.
+- **Relist unsold** (when it has unsold cards): **Same** is the adapter's
+  `relistAll` act, the web app's own Re-list All (one request, every
+  expired card at its last prices), then a reload. **−1 step** / **+1 step**
+  read the list's unsold cards (the `unsold` act, which keeps their
+  entities) and list each again with the `relist` act, one at a time 2.5–4.5
+  s apart (never a burst EA answers with its limits): the buy-now price one
+  step of EA's grid from the card's last one (never under 200), the starting
+  bid one step under it, for an hour, as auto-sell lists. The adapter only
+  relists a card that read returned as unsold, once (`relist_not_unsold`
+  otherwise). A card listed without a buy-now price is left as it is; three
+  refusals in a row stop the run. The counts follow with the reload after.
 
 The Profit, Searches, Bought, Missed and Coins spent figures and Top snipes
 count everything since the page loaded, across Stop and Start, like the
@@ -524,7 +546,10 @@ it bought itself on that page load (`list_not_bought` otherwise). The
 transfer list reload is the adapter's `pile` act
 (`services.Item.requestTransferItems()` in the observable shape, what the
 web app is said to call when its Transfer List opens, UNVERIFIED; the
-promise shape answers `pile_unsupported`).
+promise shape answers `pile_unsupported`). The Transfer list panel's tools
+use `services.Item.clearSoldItems()`, `services.Item.relistExpiredAuctions()`
+and the same `requestTransferItems()` for the list's item entities
+(UNVERIFIED as well; the promise shape has none of them).
 
 **Bid mode** (`engine/bidder.ts`, run by `engine/sniper.ts`'s `runBids`).
 Above Start the user picks **Snipe** (what the bot always did, the
@@ -662,7 +687,12 @@ probe, and builds the catalog then.
 
 The transfer list, sold and unsold counts on the Nova AI page do not use the
 web app's services: they come passively from its trade-pile responses (see
-"The Sniping Bot page" above).
+"The Sniping Bot page" above). The reload that keeps them current and the
+Transfer list panel's Clear sold and Relist tools do, through calls not in
+this table yet (`requestTransferItems`, `clearSoldItems`,
+`relistExpiredAuctions`, `list`): check `servicesKeys.Item` in **Copy
+diagnostics** lists them as `"function"`, and the log `clear sold ok`,
+`relist all ok`, `unsold read ok` and `relist ok` after using each.
 
 ## 4. The ASSUMED SHAPE and the day-one verification checklist
 

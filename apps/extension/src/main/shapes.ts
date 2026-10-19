@@ -121,6 +121,16 @@ export interface ServiceShape {
    * Resolves when EA answered; the list itself reaches passive observation
    * like any trade-pile load. Absent on a shape with no known call. */
   refreshPile?(services: Record<string, unknown>): Promise<void>;
+  /** The transfer list's entries (the web app's item entities), through its
+   * own service: what a relist at new prices lists. Rejects on anything it
+   * cannot read. Absent on a shape with no known call. */
+  readPile?(services: Record<string, unknown>): Promise<unknown[]>;
+  /** The web app's "Clear Sold": every sold card off the transfer list.
+   * Resolves only when EA's service says it worked. */
+  clearSold?(services: Record<string, unknown>): Promise<void>;
+  /** The web app's "Re-list All": every unsold (expired) card back on the
+   * market at its last prices. Resolves only when EA's service says so. */
+  relistAll?(services: Record<string, unknown>): Promise<void>;
   /** Bid mode's calls. Absent on a shape with none known. */
   readonly bidding?: BiddingShape;
 }

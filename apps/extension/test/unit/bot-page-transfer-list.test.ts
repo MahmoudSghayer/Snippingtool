@@ -11,7 +11,7 @@ import {
   createTransferListTracker,
   type TransferListSummary,
 } from '../../src/lib/transfer-list.js';
-import { createBotPage } from '../../src/ui/bot-page.js';
+import { createBotPage, type BotPageDeps } from '../../src/ui/bot-page.js';
 
 import { captureShadowRoots, trustTestEvents, untrustedEvents } from './ui-test-helpers.js';
 
@@ -32,7 +32,7 @@ const card = (itemId: string, tradeState: TradePileItem['tradeState']): TradePil
 const cards = (from: number, n: number, state: TradePileItem['tradeState']): TradePileItem[] =>
   Array.from({ length: n }, (_, i) => card(String(from + i), state));
 
-function mount(getTransferList?: () => TransferListSummary | null) {
+function mount(getTransferList?: () => TransferListSummary | null, extra: Partial<BotPageDeps> = {}) {
   const shadows = captureShadowRoots();
   const page = createBotPage({
     getSniper: () => null,
@@ -44,6 +44,7 @@ function mount(getTransferList?: () => TransferListSummary | null) {
     resolveNames: async () => ({}),
     getCatalog: async () => null,
     ...(getTransferList ? { getTransferList } : {}),
+    ...extra,
   });
   shadows.restore();
   const root = shadows.rootOf(document.getElementById('ledger-bot-page')!);
@@ -155,6 +156,7 @@ describe('the Sold / Unsold counters and the Transfer list panel', () => {
     const summary: TransferListSummary = {
       total: 120,
       sold: 0,
+      soldCleared: 0,
       unsold: 0,
       listed: 100,
       unlisted: 20,
@@ -188,5 +190,108 @@ describe('the Sold / Unsold counters and the Transfer list panel', () => {
     expect(shown()).toMatchObject({ unsold: '1', total: '4', sub: '3 listed · 1 unsold · 0 not listed' });
     observer.disconnect();
     page.close();
+  });
+});
+
+describe('the Transfer list buttons', () => {
+  function withTools(list = createTransferListTracker()) {
+    let finishClear: (r: { ok: boolean; message: string }) => void = () => undefined;
+    let relistProgress: (done: number, total: number) => void = () => undefined;
+    let finishRelist: (r: { ok: boolean; message: string }) => void = () => undefined;
+    const transferTools = {
+      clearSold: vi.fn(() => new Promise<{ ok: boolean; message: string }>((resolve) => (finishClear = resolve))),
+      relist: vi.fn((_step: -1 | 0 | 1, onProgress: (done: number, total: number) => void) => {
+        relistProgress = onProgress;
+        return new Promise<{ ok: boolean; message: string }>((resolve) => (finishRelist = resolve));
+      }),
+    };
+    const m = mount(() => list.summary(), { transferTools });
+    const relistButtons = () => [...m.$('d-tl-relist').querySelectorAll('button')];
+    return {
+      ...m,
+      list,
+      transferTools,
+      finishClear: (r: { ok: boolean; message: string }) => finishClear(r),
+      progress: (done: number, total: number) => relistProgress(done, total),
+      finishRelist: (r: { ok: boolean; message: string }) => finishRelist(r),
+      clearButton: () => m.$('d-tl-clear') as HTMLButtonElement,
+      relistButtons,
+      message: () => m.$('d-tl-msg').textContent,
+    };
+  }
+
+  it('are not there on a page given no tools', () => {
+    const { page, $ } = mount(() => null);
+    page.open();
+    expect($('d-tl')).toBeTruthy();
+    expect(document.getElementById('ledger-bot-page')).toBeTruthy();
+    expect(() => $('d-tl-clear').id).toThrow();
+    page.close();
+  });
+
+  it('work only on what the list has: Clear sold with sold cards, Relist with unsold ones', () => {
+    const t = withTools();
+    t.page.open();
+    // The list not loaded yet: nothing to act on.
+    expect(t.clearButton().disabled).toBe(true);
+    expect(t.relistButtons().map((b) => [b.textContent, b.disabled])).toEqual([
+      ['−1 step', true],
+      ['Same', true],
+      ['+1 step', true],
+    ]);
+    t.list.update([...cards(1, 2, 'active')], true);
+    vi.advanceTimersByTime(1_000);
+    expect(t.clearButton().disabled).toBe(true);
+    expect(t.relistButtons().every((b) => b.disabled)).toBe(true);
+    t.list.update([card('1', 'closed'), card('2', 'expired')], false);
+    vi.advanceTimersByTime(1_000);
+    expect(t.clearButton().disabled).toBe(false);
+    expect(t.relistButtons().every((b) => !b.disabled)).toBe(true);
+    t.page.close();
+  });
+
+  it('Clear sold: one press at a time, then says what happened while the counts follow the list', async () => {
+    const list = createTransferListTracker();
+    list.update([...cards(1, 3, 'closed'), ...cards(10, 2, 'active')], true);
+    const t = withTools(list);
+    t.page.open();
+    t.clearButton().click();
+    expect(t.transferTools.clearSold).toHaveBeenCalledTimes(1);
+    expect(t.message()).toBe('Clearing the sold cards…');
+    expect(t.clearButton().disabled).toBe(true);
+    expect(t.relistButtons().every((b) => b.disabled)).toBe(true);
+    t.clearButton().click();
+    expect(t.transferTools.clearSold).toHaveBeenCalledTimes(1);
+
+    // The reload after EA's Clear Sold shows the list without them.
+    list.update(cards(10, 2, 'active'), true);
+    t.finishClear({ ok: true, message: 'Cleared 3 sold cards' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.message()).toBe('Cleared 3 sold cards');
+    expect(t.$('d-tl-msg').classList.contains('bad')).toBe(false);
+    // Cleared cards are still sales: the Sold counter keeps them.
+    expect(t.shown()).toMatchObject({ sold: '3', total: '2', sub: '2 listed · 0 not listed' });
+    expect(t.clearButton().disabled).toBe(true);
+    t.page.close();
+  });
+
+  it('Relist: the step it was pressed for, how far it has got, and what EA refused', async () => {
+    const list = createTransferListTracker();
+    list.update(cards(1, 4, 'expired'), true);
+    const t = withTools(list);
+    t.page.open();
+    t.relistButtons()[0]!.click();
+    expect(t.transferTools.relist.mock.calls[0]![0]).toBe(-1);
+    expect(t.message()).toBe('Relisting the unsold cards…');
+    t.progress(1, 4);
+    expect(t.message()).toBe('Relisting 1 of 4…');
+    t.finishRelist({ ok: false, message: 'Relisted 3 of 4 unsold cards one step lower; EA refused 1: EA did not answer in time' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.message()).toBe('Relisted 3 of 4 unsold cards one step lower; EA refused 1: EA did not answer in time');
+    expect(t.$('d-tl-msg').classList.contains('bad')).toBe(true);
+
+    t.relistButtons()[2]!.click();
+    expect(t.transferTools.relist.mock.calls[1]![0]).toBe(1);
+    t.page.close();
   });
 });

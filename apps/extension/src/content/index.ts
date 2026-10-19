@@ -60,6 +60,7 @@ import { EngineLease, engineStateOf } from './engine-lease.js';
 import { applySettingsToEngine, watchLiveSettings } from './live-settings.js';
 import { createRecentSearchesSync } from './recent-searches.js';
 import { createSearchObserver } from './search-observer.js';
+import { clearSold as clearSoldCards, relistUnsold } from './transfer-tools.js';
 import { createWatchdog } from './watchdog.js';
 
 import type { Autobuyer, StopReason } from '../engine/autobuyer.js';
@@ -701,6 +702,7 @@ async function main(): Promise<void> {
     // bot lists, and every few minutes while it runs or the page is open
     // (lib/pile-refresh.ts). The list arrives through `onTradePile` above.
     const pileRefresher = createPileRefresher({ refresh: () => adapter.refreshPile() });
+    const transferTools = { adapter, sleep: (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)) };
 
     const prepareSniper = async (fresh: boolean): Promise<void> => {
       if (sniper) {
@@ -918,6 +920,18 @@ async function main(): Promise<void> {
       // Read from the trade-pile responses EA's page fetched (above), never
       // from a request of the extension's own.
       getTransferList: () => transferList.summary(),
+      // The Transfer list card's buttons, through the adapter's acts
+      // (content/transfer-tools.ts). The adapter reloads the list after a
+      // Clear Sold or a Re-list All; after a card-by-card relist the counts
+      // follow with the reload soon after.
+      transferTools: {
+        clearSold: () => clearSoldCards(transferTools, transferList.summary()?.sold),
+        relist: async (step, onProgress) => {
+          const result = await relistUnsold(transferTools, step, onProgress);
+          if (step !== 0) pileRefresher.listed();
+          return result;
+        },
+      },
       getCredits: () => eaCredits,
     });
     const nav = installNavItem({

@@ -53,6 +53,7 @@ describe('lib/transfer-list.ts', () => {
     expect(list.summary()).toEqual({
       total: 8,
       sold: 2,
+      soldCleared: 0,
       unsold: 1,
       listed: 3,
       unlisted: 2,
@@ -79,11 +80,25 @@ describe('lib/transfer-list.ts', () => {
     expect(list.summary()).toEqual({
       total: 4,
       sold: 1,
+      soldCleared: 0,
       unsold: 1,
       listed: 1,
       unlisted: 1,
       seenAt: 2_000,
     });
+  });
+
+  it('keeps counting a sold card as sold once it is cleared off the list', () => {
+    const list = createTransferListTracker();
+    list.update([card('1', 'closed'), card('2', 'closed'), card('3', 'expired'), card('4', 'active')], true);
+    // EA's Clear Sold, then the next load of the list: the two sold cards
+    // are gone, and so is the unsold one, moved off by hand (not a sale).
+    list.update([card('4', 'active')], true);
+    expect(list.summary()).toMatchObject({ total: 1, sold: 0, soldCleared: 2, unsold: 0, listed: 1 });
+    // The listed card sells and is cleared in turn.
+    list.update([card('4', 'closed')], false);
+    list.update([], true);
+    expect(list.summary()).toMatchObject({ total: 0, sold: 0, soldCleared: 3 });
   });
 
   it('drops a partial seen before the first full list', () => {

@@ -33,6 +33,12 @@
  *   window.services.Item.move(item, ItemPile.TRANSFER)
  *     -> observable; `success: true` once the won item is on the transfer
  *        list (`ItemPile` is the web app's own enum of item piles).
+ *
+ * The Nova AI page's transfer list tools, ASSUMED SHAPE as well:
+ * `services.Item.clearSoldItems()` (Clear Sold),
+ * `services.Item.relistExpiredAuctions()` (Re-list All) and
+ * `services.Item.requestTransferItems()` for the list's item entities, each
+ * answering through an observable with `success: true`.
  */
 import { ACT_ERROR } from '../lib/act-auth.js';
 
@@ -259,6 +265,26 @@ export function createObservableShape(timeoutMs: number): ServiceShape {
       const response = await call(services, 'requestTransferItems', [], timeoutMs);
       const r = assertSucceeded(response, 'requestTransferItems', true);
       if (!bidSucceeded(r)) throw new ShapeError('requestTransferItems did not report success: true');
+    },
+    async readPile(services) {
+      // The same call, for its items: the entities `list` takes.
+      if (!method(services, 'requestTransferItems')) throw new ShapeError('window.services.Item.requestTransferItems is not a function');
+      const response = await call(services, 'requestTransferItems', [], timeoutMs);
+      return extractListingArray(response, { requireSuccess: true, what: 'requestTransferItems' });
+    },
+    async clearSold(services) {
+      // The Transfer List's "Clear Sold", as community autobuyers describe
+      // it: services.Item.clearSoldItems() -> observable. UNVERIFIED.
+      if (!method(services, 'clearSoldItems')) throw new ShapeError('window.services.Item.clearSoldItems is not a function');
+      const r = assertSucceeded(await call(services, 'clearSoldItems', [], timeoutMs), 'clearSoldItems', true);
+      if (!bidSucceeded(r)) throw new ShapeError('clearSoldItems did not report success: true');
+    },
+    async relistAll(services) {
+      // Its "Re-list All": services.Item.relistExpiredAuctions() ->
+      // observable, every expired card at its last prices. UNVERIFIED.
+      if (!method(services, 'relistExpiredAuctions')) throw new ShapeError('window.services.Item.relistExpiredAuctions is not a function');
+      const r = assertSucceeded(await call(services, 'relistExpiredAuctions', [], timeoutMs), 'relistExpiredAuctions', true);
+      if (!bidSucceeded(r)) throw new ShapeError('relistExpiredAuctions did not report success: true');
     },
     // Automation builds only: the listable build carries no Bid mode code.
     bidding: import.meta.env.VITE_AUTOMATION === '1' ? createBidding(timeoutMs) : undefined,
