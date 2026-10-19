@@ -139,6 +139,9 @@ export interface TrackedBid {
   decision: GovernorDecision | null;
   /** Watch list reads in a row it was missing from. */
   missing: number;
+  /** Re-bids in a row EA refused because someone else's bid got there
+   * first (`Sniper.placeBid` lets the auction go at MAX_REBID_REFUSALS). */
+  refused?: number;
   /** The current bid the search results last showed it outbid at, so each
    * time the trader loses the lead shows once (`Sniper.rebid`). */
   outbidShown?: number;

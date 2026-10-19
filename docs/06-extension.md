@@ -582,16 +582,29 @@ asks for one before Start; "Most you'll pay" caps it too):
   90 s, was outbid or has no answer yet, or every open bid is taken.
   Outbid: it re-bids the next step while that stays at or under the max
   ("Outbid on … — re-bidding 12,500"), else drops the auction ("Max bid
-  reached on … — dropping it"); several at once go soonest-ending first.
-- **The bids it holds come first**: while one ends within 60 s, was outbid
-  or has no answer yet, or every open bid is taken (`bidding.maxActiveBids`
-  or a full watch list), a cycle only checks the watch list and re-bids: no
-  search, and its wait says "Checking your bids", not a search countdown. No
-  break or rest starts while a bid needs that; a rest that comes due lets
-  the open bids finish and what they won reach the transfer list first,
-  with no new bids, then starts. Live, with 12 of 12 bids open, the bot read
-  the watch list once a minute, re-bid one search delay at a time and kept
-  searching, and lost 10 leads at once. It keeps the watch list clear of finished auctions the trader did
+  reached on … — dropping it"); several at once go soonest-ending first. A
+  re-bid EA refuses because someone else's bid got there first (403, 461 or
+  478, or the adapter's `price_mismatch`) is still followed ("… not
+  accepted: … — checking it again"): the next read gives its new price and
+  it bids again while the max allows. After three such refusals in a row it
+  lets the auction go, counted as a miss.
+- **Balance between the bids and the market**: with every open bid taken
+  (`bidding.maxActiveBids` or a full watch list) a cycle only checks the
+  watch list and re-bids: no search, and its wait says "Checking your bids",
+  not a search countdown. Below the max, a lost or dropped bid is replaced
+  from the market at the next search: searches go a search delay apart,
+  start to start, and the bid on a search's results, the watch list reads
+  and the re-bids go in between, each a quick gap (40% of the search delay,
+  at least 2 s, never more than the delay) after the request before. A bid
+  in its last minute is then read every three quick gaps or so (a search,
+  its bid, the read) instead of every 6 s. Live, holding the search back
+  whenever any bid was in its last minute left the bot only checking for
+  minutes, and 10 of 10 open bids became 3, then none. No break or rest
+  starts while a bid ends within 60 s, was outbid or has no answer yet; a
+  rest that comes due lets the open bids finish and what they won reach the
+  transfer list first, with no new bids, then starts. Live, with 12 of 12
+  bids open, the bot read the watch list once a minute, re-bid one search
+  delay at a time and kept searching, and lost 10 leads at once. It keeps the watch list clear of finished auctions the trader did
   not win (expired, or lost to another bid), as Transfer Targets' "Clear
   expired" does: the adapter's `clearExpired` act takes off only what its
   last watch list read saw that way, never a won or running auction

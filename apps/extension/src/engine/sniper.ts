@@ -170,6 +170,14 @@ export function bidMissReason(error: string | undefined): string {
   return reason === 'EA did not accept the buy' ? 'EA did not accept the bid' : reason;
 }
 
+/** Whether a refused re-bid lost to someone else's bid (EA's 403 / 461 /
+ * 478, or the adapter had already seen a newer price): the auction may still
+ * run, and the next watch list read says at what price. */
+function rebidBeaten(error: string | undefined): boolean {
+  const status = error ? /status (\d{3})/.exec(error)?.[1] : undefined;
+  return status === '403' || status === '461' || status === '478' || error === ACT_ERROR.priceMismatch;
+}
+
 /** Why a won card was not moved to the transfer list, in the user's words. */
 export function moveMissReason(error: string | undefined): string {
   if (error === 'move_unsupported') return 'Nova AI cannot move cards on this EA web app';
@@ -633,14 +641,21 @@ const WATCH_MIN_GAP_MS = 6_000;
 const WATCH_MAX_AGE_MS = 20_000;
 const WATCH_NEAR_MS = 90_000;
 /** A bid this close to its end (or outbid, or without an answer yet) holds
- * the search back: the cycle checks the watch list and re-bids instead
- * (`Sniper.bidsNeedGuard`). A search then never costs a lead. */
+ * a break or rest back (`Sniper.bidsNeedGuard`): none starts while one of
+ * the bot's bids is about to be settled. */
 const GUARD_MS = 60_000;
-/** After a watch list read or a re-bid, Bid mode's next EA request waits
- * this share of the search delay, never under QUICK_GAP_MIN_MS: an outbid
- * lead is answered within seconds, not a full search delay per bid. */
+/** Between Bid mode's EA requests: this share of the search delay, never
+ * under QUICK_GAP_MIN_MS. Searches stay a full search delay apart, start to
+ * start (`Sniper.nextSearchAt`); the bid on a search's results, watch list
+ * reads and re-bids go in between, so an outbid lead is answered within
+ * seconds and a lost one is replaced at the next search. */
 const QUICK_GAP_SHARE = 0.4;
 const QUICK_GAP_MIN_MS = 2_000;
+/** EA refusals in a row of re-bids on one auction (someone else's bid got
+ * there first) before Bid mode lets it go. Until then it still follows the
+ * auction: the next watch list read gives its new price, and the bot bids
+ * again while the max allows. */
+const MAX_REBID_REFUSALS = 3;
 /** Bid mode keeps the watch list clear of finished auctions it did not
  * win (expired, or lost to another bid), as Transfer Targets' "Clear
  * expired" does: when a session starts, every CLEAR_EVERY_MS while it runs,
@@ -649,8 +664,8 @@ const CLEAR_EVERY_MS = 5 * 60_000;
 const CLEAR_NEAR_FULL = 10;
 /** Failed watch list reads in a row before Bid mode gives up. */
 const MAX_WATCH_FAILURES_IN_A_ROW = 3;
-/** New bids Bid mode places on one search's results: one, so bids go out
- * one at a time, each after the search delay, like a person's. EA answered
+/** New bids Bid mode places on one search's results: one, a quick gap after
+ * the search, so bids go out one at a time like a person's. EA answered
  * three bids sent within a second of a search with 521, 429 and 512. */
 const NEW_BIDS_PER_SEARCH = 1;
 /** Tries at moving a won card to the transfer list, and at listing it, before
@@ -830,6 +845,9 @@ export class Sniper {
   /** Bid mode: when the next request to EA (a search, a bid or re-bid, a
    * watch list read) may go (`paceEaRequest`). */
   private nextEaRequestAt = -Infinity;
+  /** Bid mode: when the next search may go, a search delay after the last
+   * one started. */
+  private nextSearchAt = -Infinity;
   /** Bid mode: bids and re-bids sent to EA, for `NEW_BIDS_PER_SEARCH`. */
   private bidRequestsSent = 0;
   /** Bid mode: won cards still to move to the transfer list (and list, with
@@ -1176,6 +1194,7 @@ export class Sniper {
     this.watch = { at: -Infinity, failures: 0, size: 0, fullNoted: false, finished: 0, clearedAt: -Infinity, clearOff: false };
     this.bidEvents = [];
     this.nextEaRequestAt = -Infinity;
+    this.nextSearchAt = -Infinity;
     this.buyBlock = null;
     this.stats.startedAt = this.now();
     this.runTotals = { purchases: 0, coinsSpent: 0 };
@@ -1911,11 +1930,13 @@ export class Sniper {
       if ((await this.clearExpired(signal, false)) === 'stopped') return;
       if (this.watchlistFull()) return this.stop('watchlist_full');
 
-      // The bids it holds come first: while one is near its end, outbid or
-      // unanswered, or no new bid fits, the cycle only checks and re-bids.
-      const guarding = winding || this.bidRoom() <= 0 || this.bidsNeedGuard(this.now());
+      // With every open bid taken (or a rest due) the cycle only checks and
+      // re-bids. Below the max, a bid lost or dropped is replaced from the
+      // market at the next search, the watch list reads and re-bids the
+      // open bids need going in between.
+      const guarding = winding || this.bidRoom() <= 0;
       let searched = false;
-      if (!guarding) {
+      if (!guarding && this.now() >= this.nextSearchAt) {
         // With bids to follow, a full search window skips the search
         // rather than sleeping through their last minutes.
         const gate = await this.searchWindowGate(signal, this.book.size() > 0);
@@ -1946,14 +1967,14 @@ export class Sniper {
       }
       this.deps.onChange();
 
-      if (searched) {
-        const delayMs = this.pickSeconds(this.settings.searchDelay) * 1000 * this.eaPaceFactor();
-        await this.wait('waiting', Math.max(0, delayMs - (this.now() - startedAt)), signal);
-      } else {
-        // Guarding (or nothing to search): back as soon as the watch list
-        // may be read again, not a search delay later.
-        await this.wait('checking', Math.max(1_000, this.watch.at + WATCH_MIN_GAP_MS - this.now()), signal);
-      }
+      // Back for whichever comes first: the next search, or the next watch
+      // list read the open bids need. A cycle that sent nothing waits at
+      // least a second.
+      const now = this.now();
+      const searchAt = guarding ? Infinity : this.nextSearchAt;
+      const at = Math.min(searchAt, this.watchlistDueAt(now));
+      const floor = searched ? 0 : 1_000;
+      await this.wait(!guarding && at === searchAt ? 'waiting' : 'checking', Number.isFinite(at) ? Math.max(floor, at - now) : floor, signal);
     }
   }
 
@@ -2033,12 +2054,16 @@ export class Sniper {
    * cycle (within that gap) once a bid ends within WATCH_NEAR_MS, was
    * outbid or has no answer yet. */
   private watchlistDue(now: number): boolean {
+    return now >= this.watchlistDueAt(now);
+  }
+
+  /** When the next watch list read is due (`watchlistDue`): never while no
+   * bid is open. */
+  private watchlistDueAt(now: number): number {
     const bids = this.book.bids();
-    if (bids.length === 0) return false;
-    const age = now - this.watch.at;
-    if (age < WATCH_MIN_GAP_MS) return false;
-    if (age >= WATCH_MAX_AGE_MS || this.bidRoom() <= 0) return true;
-    return bids.some((b) => b.state !== 'leading' || b.expiresAt - now <= WATCH_NEAR_MS);
+    if (bids.length === 0) return Infinity;
+    const close = this.bidRoom() <= 0 || bids.some((b) => b.state !== 'leading' || b.expiresAt - now <= WATCH_NEAR_MS);
+    return this.watch.at + (close ? WATCH_MIN_GAP_MS : WATCH_MAX_AGE_MS);
   }
 
   /** Bid mode sends EA one request at a time: each search, bid, re-bid and
@@ -2053,11 +2078,12 @@ export class Sniper {
   }
 
   /** A request just went to EA: the next one waits a fresh search delay,
-   * or (`quick`: a watch list read or a re-bid) a share of it, so an
-   * outbid lead is answered in seconds. */
+   * or (`quick`: Bid mode's searches, bids, re-bids and watch list reads) a
+   * share of it, so an outbid lead is answered in seconds. */
   private noteEaRequest(quick = false): void {
     const delay = this.pickSeconds(this.settings.searchDelay) * 1000;
-    const gap = quick ? Math.max(QUICK_GAP_MIN_MS, delay * QUICK_GAP_SHARE) : delay;
+    // Never longer than the search delay itself.
+    const gap = quick ? Math.min(delay, Math.max(QUICK_GAP_MIN_MS, delay * QUICK_GAP_SHARE)) : delay;
     this.nextEaRequestAt = this.now() + gap * this.eaPaceFactor();
   }
 
@@ -2215,7 +2241,9 @@ export class Sniper {
     const sentAt = this.now();
     this.searchTimes.push(sentAt);
     const searching = this.deps.adapter.search(criteria, { maxBid });
-    this.noteEaRequest();
+    // The next search a search delay on; its bid, or a read, a quick gap.
+    this.nextSearchAt = sentAt + this.pickSeconds(this.settings.searchDelay) * 1000 * this.eaPaceFactor();
+    this.noteEaRequest(true);
     // Saved once the search is on its way, not before it.
     this.persistBudget();
     let outcome: Awaited<typeof searching>;
@@ -2345,7 +2373,7 @@ export class Sniper {
     const at = this.now();
     this.bidTimes.push(at);
     const bidding = this.deps.adapter.bid!(t.tradeId, bid, { resourceId: t.resourceId, assetId: t.assetId });
-    this.noteEaRequest(rebid !== null);
+    this.noteEaRequest(true);
     this.bidRequestsSent++;
     // Saved once the bid is on its way, not before it.
     this.persistBudget();
@@ -2361,6 +2389,7 @@ export class Sniper {
       tracked.state = result.ok ? 'leading' : 'pending';
       tracked.decision = decision;
       tracked.missing = 0;
+      tracked.refused = 0;
       this.book.place(tracked);
       if (result.ok)
         this.addLog({
@@ -2385,6 +2414,14 @@ export class Sniper {
       dropTime(this.bidTimes, at);
     } else this.governor!.releaseSpend(decision);
     if (rebid) rebid.decision = null;
+    // A re-bid someone else's bid beat: the auction still runs on the watch
+    // list, so the bot follows it on and bids again at its new price.
+    if (rebid && rebidBeaten(result.error) && (rebid.refused ?? 0) + 1 < MAX_REBID_REFUSALS) {
+      rebid.refused = (rebid.refused ?? 0) + 1;
+      this.addLog({ kind: 'failed', ...card, message: `Re-bid ${amount(bid)} on {card} not accepted: ${bidMissReason(result.error)} — checking it again` });
+      this.deps.onChange();
+      return signal.aborted ? { end: 'stopped' } : { end: 'skipped' };
+    }
     this.book.close(t.tradeId);
     this.stats.failures++;
     this.addLog({ kind: 'failed', ...card, message: `${rebid ? 'Re-bid' : 'Bid'} ${amount(bid)} on {card} not accepted: ${bidMissReason(result.error)}` });
