@@ -216,15 +216,21 @@ export function errorEnvelopeStatus(body: unknown): number | null {
 
 /** The list of entries in a search response, wherever the envelope keeps
  * it: `auctionInfo` (UTAS JSON), `items`, `data.items` (the observable
- * shape), `data.auctionInfo`. Throws — never returns `[]` — when there is
- * no list, so a changed envelope is an error, not "no results". `what`
- * names the call in the error (a watch list read answers the same way). */
+ * shape), `data.auctionInfo`, or the same under `response` (the live web
+ * app's watch list answers `{ success, status, error, response, maxAge,
+ * retryAfter }`, its list inside `response`). Throws — never returns `[]`
+ * — when there is no list, so a changed envelope is an error, not "no
+ * results"; the error names the keys it found, `response`'s too. `what`
+ * names the call in the error. */
 export function extractListingArray(response: unknown, options: { requireSuccess?: boolean; what?: string } = {}): unknown[] {
   const what = options.what ?? 'search';
   const r = assertSucceeded(response, what, options.requireSuccess);
   const data = asObject(r.data);
-  const candidates = [r.auctionInfo, r.items, data?.items, data?.auctionInfo];
+  const inner = asObject(r.response);
+  const innerData = asObject(inner?.data);
+  const candidates = [r.auctionInfo, r.items, data?.items, data?.auctionInfo, r.response, inner?.items, inner?.auctionInfo, innerData?.items];
   for (const candidate of candidates) if (isArray(candidate)) return candidate;
   const keys = objectKeys(r).slice(0, 12).join(', ');
-  throw new ShapeError(`${what} response has no auctionInfo / items / data.items list (keys: ${keys || 'none'})`);
+  const innerKeys = inner ? `; response keys: ${objectKeys(inner).slice(0, 12).join(', ') || 'none'}` : '';
+  throw new ShapeError(`${what} response has no auctionInfo / items / data.items list (keys: ${keys || 'none'}${innerKeys})`);
 }
