@@ -780,6 +780,7 @@ async function main(): Promise<void> {
               if (moved.ok) pileRefresher.listed();
               return moved;
             },
+            clearExpired: adapter.clearExpired,
             onAuctions: adapter.onAuctions,
             onBuyable: adapter.onBuyable,
             onProbe: adapter.onProbe,

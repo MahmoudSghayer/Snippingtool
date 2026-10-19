@@ -33,6 +33,9 @@
  *   window.services.Item.move(item, ItemPile.TRANSFER)
  *     -> observable; `success: true` once the won item is on the transfer
  *        list (`ItemPile` is the web app's own enum of item piles).
+ *   window.services.Item.untarget(items)
+ *     -> observable; Transfer Targets' "Clear expired": finished auctions
+ *        off the watch list.
  *
  * The Nova AI page's transfer list tools, ASSUMED SHAPE as well:
  * `services.Item.clearSoldItems()` (Clear Sold),
@@ -199,6 +202,13 @@ function createBidding(timeoutMs: number): BiddingShape {
       const response = await call(services, 'move', [entity, pile], timeoutMs);
       const r = assertSucceeded(response, 'move', true);
       if (!bidSucceeded(r)) throw new ShapeError('move did not report success: true');
+    },
+    async untarget(services, entities) {
+      // Transfer Targets' "Clear expired", as community autobuyers describe
+      // it: services.Item.untarget(items) -> observable. UNVERIFIED.
+      if (!method(services, 'untarget')) throw new ShapeError('window.services.Item.untarget is not a function');
+      const r = assertSucceeded(await call(services, 'untarget', [entities], timeoutMs), 'untarget', true);
+      if (!bidSucceeded(r)) throw new ShapeError('untarget did not report success: true');
     },
   };
 }

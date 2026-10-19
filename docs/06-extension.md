@@ -591,10 +591,17 @@ asks for one before Start; "Most you'll pay" caps it too):
   the open bids finish and what they won reach the transfer list first,
   with no new bids, then starts. Live, with 12 of 12 bids open, the bot read
   the watch list once a minute, re-bid one search delay at a time and kept
-  searching, and lost 10 leads at once. A dropped or lost auction is left on the
-  watch list as EA keeps it: no web app call to take one off is known, and
-  the trader clears them with EA's own "Clear expired". A full watch list
-  stops new bids (and the bot, once none of its bids is left on it).
+  searching, and lost 10 leads at once. It keeps the watch list clear of finished auctions the trader did
+  not win (expired, or lost to another bid), as Transfer Targets' "Clear
+  expired" does: the adapter's `clearExpired` act takes off only what its
+  last watch list read saw that way, never a won or running auction
+  (`services.Item.untarget(items)` in the observable shape, UNVERIFIED; the
+  promise shape has none). It clears when a session starts, every 5 minutes
+  while it runs, and at once when the list is within 10 of EA's 50 ("Cleared
+  N expired items from your watch list (Transfer Targets)"). A page without
+  the call says so once and leaves them for the trader's own "Clear
+  expired". A watch list still full (of running or won auctions) stops new
+  bids, and the bot once none of its bids is left on it.
 - **What it wins** is a purchase like any snipe: the Bought, Coins spent and
   Profit figures, a `success` attempt and a `bought` trade (with the item id
   the watch list gave, `TradeInput.itemId`), which the sale tracking follows.

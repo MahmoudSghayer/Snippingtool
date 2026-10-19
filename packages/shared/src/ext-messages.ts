@@ -376,6 +376,7 @@ export const adapterActionResultMessageSchema = z.object({
       'relistAll',
       'unsold',
       'relist',
+      'clearExpired',
     ]),
     requestId: z.string().min(1).optional(),
     ok: z.boolean(),
@@ -397,6 +398,9 @@ export const adapterActionResultMessageSchema = z.object({
      * (expired) cards on the trader's transfer list, for a relist at new
      * prices. Signed with the rest of the result. */
     unsold: z.array(tradePileItemSchema).max(100).optional(),
+    /** Only present for a successful `action: 'clearExpired'`: how many
+     * finished auctions went off the watch list. */
+    cleared: z.number().int().min(0).max(100).optional(),
     /** A second result for a `buy` whose first result was
      * `error: 'timeout_unknown'`: EA's answer arrived after the adapter
      * stopped waiting, and `ok` says whether it bought. */
@@ -534,6 +538,14 @@ export const adapterActRequestMessageSchema = z.object({
       itemId: z.string().min(1).max(40),
       startPrice: z.number().int().min(150).max(15_000_000),
       buyNowPrice: z.number().int().min(200).max(15_000_000),
+    }),
+    /** Automation builds (Bid mode): take the finished auctions the last
+     * watch list read saw (expired, or ended with someone else's bid) off
+     * the watch list, as Transfer Targets' "Clear expired" does. Never a
+     * won or running auction: the adapter picks them, not the request. */
+    z.object({
+      action: z.literal('clearExpired'),
+      requestId: z.string().min(1),
     }),
     /** Read-only: the adapter's diagnostics report (options page, "Copy
      * diagnostics"). Authenticated like every other act request, so no page
