@@ -577,11 +577,21 @@ asks for one before Start; "Most you'll pay" caps it too):
   buy-now price so EA never answers from its cache, with no max buy-now.
 - **Following its bids**: every bid lands on the watch list (EA's Transfer
   Targets), which the bot reads through the adapter's `watchlist` act while
-  it has open bids: at least every minute, at most every 15 s, and every
-  cycle (within that) once a bid ends within 90 s, was outbid or has no
-  answer yet. Outbid: it re-bids the next step while that stays at or under
-  the max ("Outbid on … — re-bidding 12,500"), else drops the auction ("Max
-  bid reached on … — dropping it"). A dropped or lost auction is left on the
+  it has open bids: at least every 20 s, at most every 6 s (the adapter's
+  own floor is 5 s), and every cycle (within that) once a bid ends within
+  90 s, was outbid or has no answer yet, or every open bid is taken.
+  Outbid: it re-bids the next step while that stays at or under the max
+  ("Outbid on … — re-bidding 12,500"), else drops the auction ("Max bid
+  reached on … — dropping it"); several at once go soonest-ending first.
+- **The bids it holds come first**: while one ends within 60 s, was outbid
+  or has no answer yet, or every open bid is taken (`bidding.maxActiveBids`
+  or a full watch list), a cycle only checks the watch list and re-bids: no
+  search, and its wait says "Checking your bids", not a search countdown. No
+  break or rest starts while a bid needs that; a rest that comes due lets
+  the open bids finish and what they won reach the transfer list first,
+  with no new bids, then starts. Live, with 12 of 12 bids open, the bot read
+  the watch list once a minute, re-bid one search delay at a time and kept
+  searching, and lost 10 leads at once. A dropped or lost auction is left on the
   watch list as EA keeps it: no web app call to take one off is known, and
   the trader clears them with EA's own "Clear expired". A full watch list
   stops new bids (and the bot, once none of its bids is left on it).
@@ -617,9 +627,11 @@ asks for one before Start; "Most you'll pay" caps it too):
   minimum profit is checked at the bid. Bids are not buys for the buy:search
   ratio or buys an hour.
 - **One request at a time**: every request Bid mode sends EA (a search, a
-  bid or re-bid, a watch list read, a Buy Now) waits the search delay
-  (slowed after EA limits it) after the one before (`paceEaRequest`), and it
-  places at most one new bid per search (`NEW_BIDS_PER_SEARCH`). The first
+  bid or re-bid, a watch list read, a Buy Now) waits its turn after the one
+  before (`paceEaRequest`): the search delay (slowed after EA limits it)
+  after a search, a new bid or a Buy Now; 40% of it, never under 2 s, after
+  a watch list read or a re-bid, so an outbid lead is answered in seconds.
+  It places at most one new bid per search (`NEW_BIDS_PER_SEARCH`). The first
   live run sent three bids within a second of a search, and EA answered with
   521, 429 and 512.
 - **Search results** never show an auction the trader leads. Each time a
