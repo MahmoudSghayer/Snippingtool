@@ -21,7 +21,7 @@
     "@sl/ui": "workspace:*",
     "@tanstack/react-query": "^5.104.3",
     "@tanstack/react-router": "^1.170.44",
-    "lucide-react": "^1.57.0",
+    "lucide-react": "^1.58.0",
     "openapi-fetch": "^0.17.0",
     "qrcode": "^1.5.4",
     "react": "^19.3.1",
