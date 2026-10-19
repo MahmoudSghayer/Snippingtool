@@ -460,7 +460,11 @@ describe('Bid mode — what it wins', () => {
     expect(h.lists).toEqual([['w', 14_750, 15_000]]);
     expect(h.log()).toContain('Won {card} for 10,000');
     expect(h.sniper.getLog().find((e) => e.kind === 'listed')).toMatchObject({ price: 15_000, message: 'your fixed price' });
-    expect(h.sniper.getStats()).toMatchObject({ purchases: 1, coinsSpent: 10_000 });
+    // Counted exactly like a Buy Now snipe: Bought, Coins spent (the winning
+    // bid), Profit at the auto-sell price after EA's 5% (15,000 → 14,250,
+    // less 10,000) and Top snipes.
+    expect(h.sniper.getStats()).toMatchObject({ purchases: 1, coinsSpent: 10_000, profit: 4_250 });
+    expect(h.sniper.getStats().topSnipes).toEqual([expect.objectContaining({ kind: 'won', price: 10_000, sellPrice: 15_000, profit: 4_250 })]);
     // A purchase like a snipe: the attempt, and the trade the sale tracking follows.
     expect(h.attempts.find((a) => a.outcome === 'success')).toMatchObject({ tradeId: 'w', targetPrice: 10_000 });
     expect(h.trades).toEqual([{ tradeId: 'w', resourceId: 100, buyPrice: 10_000, itemId: 'item-w', assetId: 100, rating: 85 }]);
