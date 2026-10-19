@@ -37,6 +37,12 @@ updates:
     schedule:
       interval: 'weekly'
       day: 'monday'
+    groups:
+      # CodeQL's init and analyze steps must run the same version (the
+      # analyze step refuses a config written by another), so they move
+      # together in one PR.
+      codeql-action:
+        patterns: ['github/codeql-action*']
     labels: ['dependencies', 'ci']
     commit-message:
       prefix: 'chore(ci)'
