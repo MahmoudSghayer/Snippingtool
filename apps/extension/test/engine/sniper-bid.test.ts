@@ -486,12 +486,67 @@ describe('Bid mode — what it wins', () => {
   });
 
   it('leaves a won card in the watch list, saying why, when it cannot be moved', async () => {
-    const h = setup({ results: (n) => (n === 1 ? [auction('w', 60)] : []), beforeRead: won, stopWhen: (x) => x.reads >= 2 });
+    const h = setup({
+      results: (n) => (n === 1 ? [auction('w', 60)] : []),
+      beforeRead: won,
+      stopWhen: (x) => x.log().some((m) => m.includes('stays in your watch list')),
+    });
     // The promise shape has no move call.
     (h.sniper as unknown as { deps: SniperDeps }).deps.adapter.move = async () => ({ ok: false, signed: true, error: 'move_unsupported', latencyMs: 1 });
     h.sniper.start();
     await h.done();
     expect(h.log()).toContain('{card} stays in your watch list: Nova AI cannot move cards on this EA web app');
+  });
+
+  it('moves and lists several wins one step at a time, each a search delay after the last request', async () => {
+    const times: number[] = [];
+    const h: Harness = setup({
+      settings: { autoSell: { ...DEFAULT_BOT_SETTINGS.autoSell, enabled: true, mode: 'fixed', fixedPrice: 15_000 } },
+      bidding: { maxActiveBids: 3 },
+      results: (n) => (n <= 3 ? [auction('w1', 200), auction('w2', 210), auction('w3', 220)] : []),
+      // All three end on the bot's bid by the same read.
+      beforeRead: (_n, ea) => {
+        if (ea.size === 3) for (const a of ea.values()) Object.assign(a, { tradeState: 'closed', bidState: 'highest' });
+      },
+      stopWhen: (x) => x.lists.length >= 3,
+    });
+    const adapter = (h.sniper as unknown as { deps: SniperDeps }).deps.adapter;
+    const move = adapter.move!;
+    const list = adapter.list;
+    adapter.move = (id) => (times.push(h.clock.t), move(id));
+    adapter.list = (id, s, b) => (times.push(h.clock.t), list(id, s, b));
+    h.sniper.start();
+    await h.done();
+    expect(h.moves).toEqual(['w1', 'w2', 'w3']);
+    expect(h.lists.map(([id]) => id)).toEqual(['w1', 'w2', 'w3']);
+    // Six requests, never two within the 10 s search delay.
+    const gaps = times.slice(1).map((t, i) => t - times[i]!);
+    expect(Math.min(...gaps)).toBeGreaterThanOrEqual(10 * SEC);
+  });
+
+  it('tries a listing EA refused again on a later turn', async () => {
+    let refusals = 1;
+    const h = setup({
+      settings: { autoSell: { ...DEFAULT_BOT_SETTINGS.autoSell, enabled: true, mode: 'fixed', fixedPrice: 15_000 } },
+      results: (n) => (n === 1 ? [auction('w', 60)] : []),
+      beforeRead: won,
+      stopWhen: (x) => x.log().some((m) => m.includes('listed for') || m.startsWith('not listed')) || x.lists.length >= 2,
+    });
+    const adapter = (h.sniper as unknown as { deps: SniperDeps }).deps.adapter;
+    const list = adapter.list;
+    adapter.list = async (id, s, b) => {
+      if (refusals-- > 0) {
+        h.lists.push([id, s, b]);
+        return { ok: false, signed: true, error: 'list reported success: false (status 512)', latencyMs: 5 };
+      }
+      return list(id, s, b);
+    };
+    h.sniper.start();
+    await h.done();
+    expect(h.lists.map(([id]) => id)).toEqual(['w', 'w']);
+    expect(h.sniper.getLog().find((e) => e.kind === 'listed')).toMatchObject({ price: 15_000 });
+    // The refusal that was tried again is not in the log as a failure.
+    expect(h.log().some((m) => m.startsWith('not listed'))).toBe(false);
   });
 
   it('counts a lost auction as a miss and gives its coins back', async () => {

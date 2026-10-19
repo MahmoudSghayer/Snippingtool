@@ -564,7 +564,11 @@ asks for one before Start; "Most you'll pay" caps it too):
   the watch list gave, `TradeInput.itemId`), which the sale tracking follows.
   It is then moved to the transfer list (the adapter's `move` act) and, when
   auto-sell is on, listed exactly like a sniped card; with auto-sell off it
-  stays there unlisted ("Moved … to your transfer list"). Where it cannot be
+  stays there unlisted ("Moved … to your transfer list"). Won cards queue
+  (`collecting`): one step (a move, or a listing) per cycle, each waiting its
+  turn like any other request, and a step EA refuses is tried again on a
+  later cycle, up to three times. Stopping the bot says which won cards were
+  not moved or listed yet, and where they are. Where it cannot be
   moved (the promise shape has no move call) it stays where EA puts it, in
   the watch list, and the log says so. A lost or dropped auction is a miss
   (one `too_slow` / `failed` attempt with `errorCode` `outbid` or
