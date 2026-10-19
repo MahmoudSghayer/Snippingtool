@@ -257,7 +257,9 @@ function setup(opts: Opts = {}): Harness {
       h.notices.push(h.sniper.state.notice);
       h.statuses.push(h.sniper.getBidStatus());
       clock.t += ms;
-      if (h.sniper.isRunning() && (opts.stopWhen?.(h) ?? h.searches.length >= 1)) h.sniper.stop('manual');
+      // By default it stops at the first wait after a search that is not its
+      // turn to bid on that search's results (`paceEaRequest`).
+      if (h.sniper.isRunning() && (opts.stopWhen?.(h) ?? (h.searches.length >= 1 && h.sniper.state.phase !== 'bidding'))) h.sniper.stop('manual');
       await Promise.resolve();
     },
   };
@@ -278,7 +280,7 @@ describe('Bid mode — bidding', () => {
     expect(h.log()).toContain(
       'Bot started in Bid mode: bids on auctions with 5 minutes or less left, up to 10 bids at a time, never above your max price',
     );
-    expect(h.statuses[0]).toEqual({ active: 1, max: 10, committed: 10_000 });
+    expect(h.statuses.at(-1)).toEqual({ active: 1, max: 10, committed: 10_000 });
     // The watch list was read before anything else: Bid mode follows its bids there.
     expect(h.reads).toBeGreaterThanOrEqual(1);
   });
@@ -337,9 +339,10 @@ describe('Bid mode — bidding', () => {
     });
     h.sniper.start();
     await h.done();
+    // One new bid per search: two searches fill the two open bids, then none.
     expect(h.bids.map(([id]) => id)).toEqual(['a', 'b']);
-    expect(h.searches).toHaveLength(1);
-    expect(h.statuses[0]).toEqual({ active: 2, max: 2, committed: 20_000 });
+    expect(h.searches).toHaveLength(2);
+    expect(h.statuses.at(-1)).toEqual({ active: 2, max: 2, committed: 20_000 });
   });
 
   it('checks the minimum profit at the bid, as for a buy', async () => {
@@ -361,11 +364,54 @@ describe('Bid mode — bidding', () => {
     const h = setup({
       bidding: { maxBidsPerHour: 2 },
       results: () => [auction('a', 60), auction('b', 120), auction('c', 180)],
+      stopWhen: (x) => x.searches.length >= 3 && x.sniper.state.phase !== 'bidding',
     });
     h.sniper.start();
     await h.done();
     expect(h.bids.map(([id]) => id)).toEqual(['a', 'b']);
-    expect(h.notices[0]).toMatch(/^Bidding paused: bid limit \(2 of 2 bids in the last hour\) — resumes about \d{1,2}:\d\d/);
+    expect(h.notices.find((n) => n)).toMatch(/^Bidding paused: bid limit \(2 of 2 bids in the last hour\) — resumes about \d{1,2}:\d\d/);
+  });
+});
+
+describe('Bid mode — pace', () => {
+  it('sends EA one request at a time, each a search delay after the last, and one new bid per search', async () => {
+    // Live, three bids sent within a second of a search drew EA's 521, 429
+    // and 512: a burst no person makes.
+    const bidTimes: number[] = [];
+    const readTimes: number[] = [];
+    const h: Harness = setup({
+      results: () => [auction('a', 60), auction('b', 120), auction('c', 180)],
+      bidResult: () => {
+        bidTimes.push(h.clock.t);
+        return { ok: true, signed: true, latencyMs: 5 };
+      },
+      beforeRead: (_n, _ea, now) => void readTimes.push(now),
+      stopWhen: (x) => x.bids.length >= 3 && x.sniper.state.phase !== 'bidding',
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.bids.map(([id]) => id)).toEqual(['a', 'b', 'c']);
+    expect(h.searches).toHaveLength(3);
+    const requests = [...h.searchTimes, ...bidTimes, ...readTimes].sort((x, y) => x - y);
+    const gaps = requests.slice(1).map((t, i) => t - requests[i]!);
+    // The test's search delay is 10 s.
+    expect(Math.min(...gaps)).toBeGreaterThanOrEqual(10 * SEC);
+    // Each bid waits its turn after the search that found it.
+    for (const t of bidTimes) expect(t - Math.max(...h.searchTimes.filter((s) => s < t))).toBeGreaterThanOrEqual(10 * SEC);
+  });
+
+  it('says searches and bids when EA limits Bid mode', async () => {
+    const h = setup({
+      settings: { searchDelay: { min: 1, max: 1 } },
+      searchEaError: () => ({ status: 512, category: 'rate_limited', endpoint: 'market' }),
+      stopWhen: (x) => x.log().some((m) => m.startsWith('EA limited')),
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.log()).toContain('Searching and bidding at half your normal speed for the next 15 minutes so EA\'s limit can reset');
+    expect(h.log()).toContain(
+      'EA limited your searches and bids 3 times in 10 minutes (error 512): resting 15 min to protect your account, then searching and bidding at a third of your normal speed',
+    );
   });
 });
 
@@ -438,9 +484,15 @@ describe('Bid mode — what it wins', () => {
 
 describe('Bid mode — coins its bids hold', () => {
   const two = () => [auction('a', 60, { startingBid: 10_000 }), auction('b', 120, { startingBid: 12_000 })];
+  // One new bid per search: the second auction is tried on the second search.
+  const secondSearchDone = (x: Harness) => x.searches.length >= 2 && x.sniper.state.phase !== 'bidding';
 
   it('counts them against the session coin budget', async () => {
-    const h = setup({ settings: { thresholds: { ...DEFAULT_BOT_SETTINGS.thresholds, minProfit: 0, sessionCoinBudget: 20_000 } }, results: two });
+    const h = setup({
+      settings: { thresholds: { ...DEFAULT_BOT_SETTINGS.thresholds, minProfit: 0, sessionCoinBudget: 20_000 } },
+      results: two,
+      stopWhen: secondSearchDone,
+    });
     h.sniper.start();
     await h.done();
     expect(h.bids.map(([id]) => id)).toEqual(['a']);
@@ -448,7 +500,7 @@ describe('Bid mode — coins its bids hold', () => {
   });
 
   it('counts them against the coins EA says the trader has', async () => {
-    const h = setup({ credits: () => 20_000, results: two });
+    const h = setup({ credits: () => 20_000, results: two, stopWhen: secondSearchDone });
     h.sniper.start();
     await h.done();
     expect(h.bids.map(([id]) => id)).toEqual(['a']);
@@ -459,12 +511,12 @@ describe('Bid mode — coins its bids hold', () => {
     const h = setup({
       settings: { safety: { ...DEFAULT_BOT_SETTINGS.safety, maxSearchesPerHour: 7_200, buyToSearchRatio: 1, cooldownSeconds: 0, maxCoinFlowPerHour: 20_000 } },
       filter: { resourceId: 100, maxPrice: 12_000 },
-      results: (n) => (n === 1 ? two() : []),
+      results: (n) => (n <= 2 ? two() : []),
       beforeRead: (n, ea) => {
         const a = ea.get('a');
-        if (a && n === 2) Object.assign(a, { bidState: 'outbid', currentBid: 12_000 });
+        if (a && n === 3) Object.assign(a, { bidState: 'outbid', currentBid: 12_000 });
       },
-      stopWhen: (x) => x.reads >= 2,
+      stopWhen: (x) => x.reads >= 3,
     });
     h.sniper.start();
     await h.done();
@@ -577,7 +629,7 @@ describe('Bid mode — fails closed', () => {
     await h.done();
     expect(h.log()).toContain('No answer from EA in time for the 10,000 bid on {card}: the next watch list check will tell');
     // Held while unknown, and confirmed leading by the read.
-    expect(h.statuses[0]).toEqual({ active: 1, max: 10, committed: 10_000 });
+    expect(h.statuses.at(-1)).toEqual({ active: 1, max: 10, committed: 10_000 });
     expect(h.sniper.getLog().some((e) => e.kind === 'dropped')).toBe(false);
   });
 });
@@ -635,7 +687,8 @@ describe('Bid mode — the same rails as Snipe mode', () => {
     h.sniper.start();
     await h.done();
     expect(h.sniper.state.stopReason).toBe('kill_switch');
-    expect(h.bids.map(([id]) => id)).toEqual(['a', 'b']);
+    // Bids go one at a time, each after a wait: the switch stops the second.
+    expect(h.bids.map(([id]) => id)).toEqual(['a']);
     expect(h.searches).toHaveLength(1);
     expect(h.reads).toBe(1);
   });

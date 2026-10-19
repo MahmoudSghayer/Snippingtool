@@ -586,6 +586,12 @@ asks for one before Start; "Most you'll pay" caps it too):
   coins) and in the governor's coin flow until a bid is outbid or lost; the
   minimum profit is checked at the bid. Bids are not buys for the buy:search
   ratio or buys an hour.
+- **One request at a time**: every request Bid mode sends EA (a search, a
+  bid or re-bid, a watch list read, a Buy Now) waits the search delay
+  (slowed after EA limits it) after the one before (`paceEaRequest`), and it
+  places at most one new bid per search (`NEW_BIDS_PER_SEARCH`). The first
+  live run sent three bids within a second of a search, and EA answered with
+  521, 429 and 512.
 - **Fails closed**: without the Bid mode calls (`bid` and `watchlist`) the
   bot will not start in Bid mode, and its first act is a watch list read: if
   the page cannot do it for Nova AI (`bidding_unsupported`) or it fails, the
