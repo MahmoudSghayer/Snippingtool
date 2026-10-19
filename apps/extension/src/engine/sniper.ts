@@ -637,7 +637,7 @@ interface Pacing {
  * `skipped` (not this one: `why` says, when the user should hear it),
  * `dropped` (a limit holds bidding back: no more bids this cycle), or
  * `stopped`. */
-type BidEnd = { end: 'placed' } | { end: 'skipped'; why?: string } | { end: 'dropped' } | { end: 'stopped' };
+type BidEnd = { end: 'placed' } | { end: 'skipped'; why?: string } | { end: 'beaten' } | { end: 'dropped' } | { end: 'stopped' };
 
 /** What a bid is on: an auction from a search, or one of the bot's own
  * open bids (a re-bid). */
@@ -659,7 +659,7 @@ interface BidTarget {
  * 5 s), at least every WATCH_MAX_AGE_MS while bids are open, and every
  * cycle (within the gap) once a bid ends within WATCH_NEAR_MS, is outbid,
  * has no answer yet, or no new bid fits (`Sniper.watchlistDue`). */
-const WATCH_MIN_GAP_MS = 6_000;
+const WATCH_MIN_GAP_MS = 5_200;
 const WATCH_MAX_AGE_MS = 20_000;
 const WATCH_NEAR_MS = 90_000;
 /** A bid this close to its end (or outbid, or without an answer yet) holds
@@ -673,6 +673,18 @@ const GUARD_MS = 60_000;
  * seconds and a lost one is replaced at the next search. */
 const QUICK_GAP_SHARE = 0.4;
 const QUICK_GAP_MIN_MS = 2_000;
+/** After a watch list read or a re-bid, the next request (a re-bid, or the
+ * next read) waits only this, whatever the search delay: live, re-bids went
+ * out 4 to 5 s apart on a long search delay, and the last ones of a batch
+ * were refused on prices 20 s old. */
+const REBID_GAP_MS = 1_200;
+/** A re-bid goes out only on a watch list read at most this old (from when
+ * it came back); past it, the rest wait for the next read, which is due at
+ * once. */
+const REBID_FRESH_MS = 4_000;
+/** An auction the bot was outbid on, this long past its end, is lost: its
+ * slot frees at once instead of waiting for a read to say so. */
+const ENDED_GRACE_MS = 2_000;
 /** Bid mode keeps the watch list clear of finished auctions it did not
  * win (expired, or lost to another bid), as Transfer Targets' "Clear
  * expired" does: when a session starts, every CLEAR_EVERY_MS while it runs,
@@ -862,6 +874,9 @@ export class Sniper {
   /** Bid mode: when the next request to EA (a search, a bid or re-bid, a
    * watch list read) may go (`paceEaRequest`). */
   private nextEaRequestAt = -Infinity;
+  /** Bid mode: when the next re-bid or watch list read may go: REBID_GAP_MS
+   * after any request (`paceEaRequest` with `short`). */
+  private nextShortAt = -Infinity;
   /** Bid mode: when the next search may go, a search delay after the last
    * one started. */
   private nextSearchAt = -Infinity;
@@ -878,7 +893,7 @@ export class Sniper {
   private readonly book = new BidBook();
   /** Bid mode's watch list: when it was last read, failed reads in a row,
    * how many auctions it holds, and whether "it is full" has been said. */
-  private watch = { at: -Infinity, failures: 0, size: 0, fullNoted: false, finished: 0, clearedAt: -Infinity, clearOff: false, stale: false, staleNoted: false };
+  private watch = { at: -Infinity, doneAt: -Infinity, failures: 0, size: 0, fullNoted: false, finished: 0, clearedAt: -Infinity, clearOff: false, stale: false, staleNoted: false };
   /** What the last watch list read said, for `settleBids`. */
   private bidEvents: BidEvent[] = [];
 
@@ -1120,7 +1135,7 @@ export class Sniper {
   }
 
   /** Bid mode's open bids, soonest-ending first, as the last watch list
-   * read saw them, when that read went out (`checkedAt`, null before the
+   * read saw them, when that read came back (`checkedAt`, null before the
    * first), and whether EA answered it from its cache (`stale`). Kept after a stop (EA keeps the bids, and the next start
    * follows them again); empty after a run in Snipe mode. */
   getActiveBids(): { bids: ActiveBid[]; checkedAt: number | null; max: number; stale: boolean } {
@@ -1143,7 +1158,7 @@ export class Sniper {
         overMax: next > b.maxBid || (b.buyNow > 0 && next >= b.buyNow),
       };
     });
-    return { bids, checkedAt: Number.isFinite(this.watch.at) ? this.watch.at : null, max, stale: this.watch.stale };
+    return { bids, checkedAt: Number.isFinite(this.watch.doneAt) ? this.watch.doneAt : null, max, stale: this.watch.stale };
   }
 
   /** The governor's thresholds: the user's own (`botGovernorSettings`),
@@ -1235,9 +1250,10 @@ export class Sniper {
     } else {
       this.governor = this.newGovernor();
     }
-    this.watch = { at: -Infinity, failures: 0, size: 0, fullNoted: false, finished: 0, clearedAt: -Infinity, clearOff: false, stale: false, staleNoted: false };
+    this.watch = { at: -Infinity, doneAt: -Infinity, failures: 0, size: 0, fullNoted: false, finished: 0, clearedAt: -Infinity, clearOff: false, stale: false, staleNoted: false };
     this.bidEvents = [];
     this.nextEaRequestAt = -Infinity;
+    this.nextShortAt = -Infinity;
     this.nextSearchAt = -Infinity;
     this.buyBlock = null;
     this.stats.startedAt = this.now();
@@ -2115,20 +2131,31 @@ export class Sniper {
    * `eaPaceFactor`) after the one before, rather than a burst of bids on
    * one search's results. `phase`: what the wait is for. False when the
    * bot stopped meanwhile. */
-  private async paceEaRequest(signal: AbortSignal, phase: 'waiting' | 'bidding' | 'checking'): Promise<boolean> {
-    const wait = this.nextEaRequestAt - this.now();
-    if (wait > 0) await this.wait(phase, wait, signal, this.nextEaRequestAt);
+  private async paceEaRequest(signal: AbortSignal, phase: 'waiting' | 'bidding' | 'checking', short = false): Promise<boolean> {
+    // `short`: a re-bid or a watch list read, which waits only REBID_GAP_MS.
+    const at = short ? this.nextShortAt : Math.max(this.nextEaRequestAt, this.nextShortAt);
+    const wait = at - this.now();
+    if (wait > 0) await this.wait(phase, wait, signal, at);
     return !signal.aborted;
   }
 
   /** A request just went to EA: the next one waits a fresh search delay,
-   * or (`quick`: Bid mode's searches, bids, re-bids and watch list reads) a
-   * share of it, so an outbid lead is answered in seconds. */
+   * or (`quick`: Bid mode's searches, bids and watch list reads) a share of
+   * it, so an outbid lead is answered in seconds. A re-bid or a read waits
+   * REBID_GAP_MS after any request (`noteRebidGap`). */
   private noteEaRequest(quick = false): void {
     const delay = this.pickSeconds(this.settings.searchDelay) * 1000;
     // Never longer than the search delay itself.
     const gap = quick ? Math.min(delay, Math.max(QUICK_GAP_MIN_MS, delay * QUICK_GAP_SHARE)) : delay;
     this.nextEaRequestAt = this.now() + gap * this.eaPaceFactor();
+    this.noteRebidGap();
+  }
+
+  /** A request went out, or a watch list read came back: the next re-bid
+   * or read waits REBID_GAP_MS (slower after EA limits it), whatever the
+   * search delay. */
+  private noteRebidGap(): void {
+    this.nextShortAt = this.now() + REBID_GAP_MS * this.eaPaceFactor();
   }
 
   /** Reads the watch list, and keeps what it said for `settleBids`. False
@@ -2137,7 +2164,7 @@ export class Sniper {
    * without one), reads keep failing, or EA ended the session. EA limiting
    * requests backs off as it does for a search, never a stop by itself. */
   private async readWatchlist(signal: AbortSignal, first: boolean): Promise<boolean> {
-    if (!(await this.paceEaRequest(signal, 'checking'))) return false;
+    if (!(await this.paceEaRequest(signal, 'checking', true))) return false;
     this.setState({ phase: 'checking', phaseEndsAt: null, stopReason: null, stopDetail: null });
     const startedAt = this.now();
     this.watch.at = startedAt;
@@ -2146,6 +2173,10 @@ export class Sniper {
     const res = await reading;
     if (signal.aborted) return false;
     if (res.ok) {
+      // What it said is acted on at once: the re-bids it calls for wait
+      // only REBID_GAP_MS.
+      this.noteRebidGap();
+      this.watch.doneAt = this.now();
       this.watch.failures = 0;
       const watched = res.watched ?? [];
       this.watch.size = watched.length;
@@ -2207,6 +2238,12 @@ export class Sniper {
       else this.releaseBid(e.bid);
     }
     if (signal.aborted) return 'stopped';
+    // Ended while the trader was outbid: lost, whatever the next read says,
+    // and its slot is free for a new bid now.
+    for (const b of this.book.bids()) {
+      if (b.state === 'outbid' && b.expiresAt + ENDED_GRACE_MS < this.now())
+        this.dropBid(b, { message: 'Lost {card} to a higher bid', detail: `it ended at ${amount(b.currentBid)} or more`, outcome: 'too_slow', errorCode: 'outbid' });
+    }
     // Soonest-ending first: it has the least time left to win back.
     const outbid = events.filter((e) => e.kind === 'outbid').sort((x, y) => x.bid.expiresAt - y.bid.expiresAt);
     for (const e of outbid) {
@@ -2243,7 +2280,22 @@ export class Sniper {
       });
       return 'done';
     }
-    const r = await this.placeBid(b, next, b, signal);
+    let r = await this.placeBid(b, next, b, signal);
+    if (r.end === 'beaten') {
+      // EA refused it: someone's bid is at least that. One step over it at
+      // once, rather than a read later; refused again, the next read says.
+      b.currentBid = Math.max(b.currentBid, next);
+      const again = nextBid(b);
+      if (again > b.maxBid || (b.buyNow > 0 && again >= b.buyNow)) {
+        this.dropBid(b, {
+          message: 'Max bid reached on {card} — dropping it',
+          detail: `the next bid would be ${amount(again)}, your max is ${amount(b.maxBid)}`,
+          errorCode: 'max_bid_reached',
+        });
+        return 'done';
+      }
+      r = await this.placeBid(b, again, b, signal, true);
+    }
     if (r.end === 'stopped' || r.end === 'dropped') return r.end;
     if (r.end === 'skipped' && r.why) this.dropBid(b, { message: 'Not re-bidding on {card} — dropping it', detail: r.why, errorCode: 'rebid_skipped' });
     return 'done';
@@ -2365,10 +2417,13 @@ export class Sniper {
    * governor (actions an hour, and the coin flow with every standing bid in
    * it). `rebid`: the bot's own open bid on this auction, outbid.
    */
-  private async placeBid(t: BidTarget, bid: number, rebid: TrackedBid | null, signal: AbortSignal): Promise<BidEnd> {
-    if (!(await this.paceEaRequest(signal, 'bidding'))) return { end: 'stopped' };
+  private async placeBid(t: BidTarget, bid: number, rebid: TrackedBid | null, signal: AbortSignal, fresh = false): Promise<BidEnd> {
+    if (!(await this.paceEaRequest(signal, 'bidding', rebid !== null))) return { end: 'stopped' };
     // Ended while it waited its turn: the next watch list read says how.
     if (t.expiresAt <= this.now()) return { end: 'skipped' };
+    // A re-bid on a read gone stale waits for the next read (`fresh`: the
+    // price comes from EA's refusal just now, not from the read).
+    if (rebid && !fresh && this.now() - this.watch.doneAt > REBID_FRESH_MS) return { end: 'dropped' };
     this.setState({ phase: 'bidding', phaseEndsAt: null, stopReason: null, stopDetail: null });
     if (this.applyKillSwitch() || this.applyEntitlement() || this.applyExclusive()) return { end: 'stopped' };
     // EA is limiting requests or erroring: the next cycle waits it out.
@@ -2467,12 +2522,13 @@ export class Sniper {
     } else this.governor!.releaseSpend(decision);
     if (rebid) rebid.decision = null;
     // A re-bid someone else's bid beat: the auction still runs on the watch
-    // list, so the bot follows it on and bids again at its new price. It
-    // lets an auction go only when the next bid would pass the max.
+    // list, so the bot follows it on and bids again (`rebid` goes one step
+    // over at once). It lets an auction go only when the next bid would pass
+    // the max.
     if (rebid && rebidBeaten(result.error) && rebid.expiresAt > this.now()) {
-      this.addLog({ kind: 'failed', ...card, message: `Re-bid ${amount(bid)} on {card} not accepted: ${bidMissReason(result.error)} — checking it again` });
+      this.addLog({ kind: 'failed', ...card, message: `Re-bid ${amount(bid)} on {card} not accepted: ${bidMissReason(result.error)}` });
       this.deps.onChange();
-      return signal.aborted ? { end: 'stopped' } : { end: 'skipped' };
+      return signal.aborted ? { end: 'stopped' } : { end: 'beaten' };
     }
     this.book.close(t.tradeId);
     this.stats.failures++;

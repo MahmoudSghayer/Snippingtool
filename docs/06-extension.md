@@ -577,7 +577,7 @@ asks for one before Start; "Most you'll pay" caps it too):
   buy-now price so EA never answers from its cache, with no max buy-now.
 - **Following its bids**: every bid lands on the watch list (EA's Transfer
   Targets), which the bot reads through the adapter's `watchlist` act while
-  it has open bids: at least every 20 s, at most every 6 s (the adapter's
+  it has open bids: at least every 20 s, at most every 5.2 s (the adapter's
   own floor is 5 s), and every cycle (within that) once a bid ends within
   90 s, was outbid or has no answer yet, or every open bid is taken.
   Outbid: it re-bids the next step while that stays at or under the max
@@ -588,7 +588,23 @@ asks for one before Start; "Most you'll pay" caps it too):
   accepted: … — checking it again"): the next read gives its new price and
   it bids again. It lets an auction go only when the next bid would pass the
   max (or the auction ended). A bid EA takes makes the trader's own bid the
-  auction's current bid at once.
+  auction's current bid at once. A refused re-bid means someone's bid is at
+  least that amount, so the bot bids one step over it at once ("Outbid on …
+  at 7,600 — re-bidding 7,700") rather than a read later; refused again,
+  the next read says where it stands.
+- **Re-bids on fresh prices, fast**: after a watch list read comes back, and
+  between re-bids, the next re-bid or read waits only 1.2 s
+  (`REBID_GAP_MS`, slower after EA limits it), whatever the search delay.
+  Searches and new bids keep their own pacing. A re-bid goes out only on a
+  read at most 4 s old (`REBID_FRESH_MS`); the rest wait for the next read,
+  which is due at once (5.2 s after the last one started). Live, eight bids
+  outbid at once were re-bid 4 to 5 s apart on a long search delay, and the
+  last ones were refused on prices 20 s old while the Active bids tab said
+  "checked 42 s ago". An auction the trader was outbid on is lost once it
+  is 2 s past its end, and its slot frees for a new bid at once ("Lost … |
+  it ended at 9,800 or more"). One that ended while leading reads "Ended,
+  confirming" until the next read says won (moved, listed, counted) or lost;
+  either way it leaves the tab.
 - **A live watch list**: `requestWatchedItems` answers from the web app's
   cache. Live, five bids read "leading, 0:24 left" for minutes while they
   were outbid and ended, and all showed lost at once when the cache ran out
@@ -596,7 +612,8 @@ asks for one before Start; "Most you'll pay" caps it too):
   observable shape clears the market cache, reads the list, has EA refresh
   the running auctions (`services.Item.refreshAuctions(items)`, what
   community autobuyers call between two reads; UNVERIFIED), and reads it
-  again; without that call, or when it fails, the first read stands. The
+  again; without that call, when it fails, or when it has not answered in
+  4 s, the first read stands. The
   bot also tells a cached answer apart: a running auction with the same
   seconds left as the read before keeps counting down from where the last
   fresh read put it, rather than jumping back. When every running auction
@@ -611,7 +628,7 @@ asks for one before Start; "Most you'll pay" caps it too):
   and the re-bids go in between, each a quick gap (40% of the search delay,
   at least 2 s, never more than the delay) after the request before. A bid
   in its last minute is then read every three quick gaps or so (a search,
-  its bid, the read) instead of every 6 s. Live, holding the search back
+  its bid, the read) instead of every 5.2 s. Live, holding the search back
   whenever any bid was in its last minute left the bot only checking for
   minutes, and 10 of 10 open bids became 3, then none. No break or rest
   starts while a bid ends within 60 s, was outbid or has no answer yet; a

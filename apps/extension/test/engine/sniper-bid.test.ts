@@ -444,9 +444,9 @@ describe('Bid mode — pace', () => {
     expect(h.searches).toHaveLength(3);
     const requests = [...h.searchTimes, ...bidTimes, ...readTimes].sort((x, y) => x - y);
     const gaps = requests.slice(1).map((t, i) => t - requests[i]!);
-    // Never two at once: every request waits at least the quick gap, 40% of
-    // the test's 10 s search delay.
-    expect(Math.min(...gaps)).toBeGreaterThanOrEqual(4 * SEC);
+    // Never two at once: a watch list read or a re-bid waits REBID_GAP_MS
+    // (1.2 s) after any request, anything else the quick gap (4 s here).
+    expect(Math.min(...gaps)).toBeGreaterThanOrEqual(1.2 * SEC);
     // Searches keep the full search delay between them...
     const searchGaps = h.searchTimes.slice(1).map((t, i) => t - h.searchTimes[i]!);
     expect(Math.min(...searchGaps)).toBeGreaterThanOrEqual(10 * SEC);
@@ -678,10 +678,12 @@ describe('Bid mode — guards the bids it holds first', () => {
     expect(h.statuses.at(-1)).toMatchObject({ active: 2, max: 2 });
   });
 
-  it('a re-bid someone else beat is checked again and re-bid at the new price', async () => {
+  it('a re-bid someone else beat goes one step over at once, without waiting for a read', async () => {
+    const readsAtBid: number[] = [];
     const h: Harness = setup({
       results: (n) => (n === 1 ? [auction('a', 200)] : []),
       bidResult: (_id, price) => {
+        readsAtBid.push(h.reads);
         if (price !== 11_250) return { ok: true, signed: true, latencyMs: 5 };
         // Someone else's 11,250 got there first.
         Object.assign(h.ea.get('a')!, { bidState: 'outbid', currentBid: 11_250 });
@@ -701,10 +703,12 @@ describe('Bid mode — guards the bids it holds first', () => {
     ]);
     expect(h.log()).toEqual(
       expect.arrayContaining([
-        'Re-bid 11,250 on {card} not accepted: someone else bid first, or the auction ended — checking it again',
+        'Re-bid 11,250 on {card} not accepted: someone else bid first, or the auction ended',
         'Outbid on {card} at 11,250 — re-bidding 11,500',
       ]),
     );
+    // The 11,500 went straight after the refusal, on the same read.
+    expect(readsAtBid[2]).toBe(readsAtBid[1]);
     // Still followed, not dropped, and no miss counted for it.
     expect(h.sniper.getLog().some((e) => e.kind === 'dropped')).toBe(false);
     expect(h.attempts).toEqual([]);
@@ -727,13 +731,61 @@ describe('Bid mode — guards the bids it holds first', () => {
     });
     h.sniper.start();
     await h.done();
+    // Each read: one step over its 11,000, then (refused) one more at once.
     const rebids = h.bids.slice(1).map(([, p]) => p);
     expect(rebids.length).toBeGreaterThanOrEqual(8);
-    expect(new Set(rebids)).toEqual(new Set([11_250]));
-    expect(h.log().filter((m) => m.endsWith('— checking it again'))).toHaveLength(rebids.length);
+    expect(new Set(rebids)).toEqual(new Set([11_250, 11_500]));
+    expect(h.log().filter((m) => m.startsWith('Re-bid') && m.includes('not accepted'))).toHaveLength(rebids.length);
     expect(h.sniper.getLog().some((e) => e.kind === 'dropped')).toBe(false);
     expect(h.attempts).toEqual([]);
     expect(h.statuses.at(-1)).toMatchObject({ active: 1 });
+  });
+
+  // Live: eight bids outbid at once were re-bid 4 to 5 s apart, and the last
+  // ones refused on prices 20 s old.
+  it('re-bids only on a fresh read: the rest wait for the next one', async () => {
+    const readTimes: number[] = [];
+    const rebidTimes: number[] = [];
+    let outbid = false;
+    const h: Harness = setup({
+      bidding: { maxActiveBids: 5 },
+      results: (n) => (n <= 5 ? [auction(`x${n}`, 280 - n * 10)] : []),
+      bidResult: (_id, price) => {
+        if (price > 10_000) rebidTimes.push(h.clock.t);
+        return { ok: true, signed: true, latencyMs: 5 };
+      },
+      beforeRead: (_n, ea, now) => {
+        readTimes.push(now);
+        if (outbid || ea.size < 5) return;
+        outbid = true;
+        for (const a of ea.values()) Object.assign(a, { bidState: 'outbid', currentBid: 10_000 });
+      },
+      stopWhen: (x) => x.bids.length >= 10 && x.sniper.state.phase !== 'bidding',
+    });
+    h.sniper.start();
+    await h.done();
+    expect(rebidTimes).toHaveLength(5);
+    // Each within 4 s of the read it acted on, so more than one read served them.
+    for (const t of rebidTimes) expect(t - Math.max(...readTimes.filter((r) => r <= t))).toBeLessThanOrEqual(4 * SEC);
+    expect(new Set(rebidTimes.map((t) => Math.max(...readTimes.filter((r) => r <= t)))).size).toBeGreaterThan(1);
+  });
+
+  it('frees the slot of an auction that ended while the trader was outbid, without waiting for a read', async () => {
+    const h = setup({
+      // One bid an hour: the re-bid is held back, so it ends outbid.
+      bidding: { maxBidsPerHour: 1 },
+      results: (n) => (n === 1 ? [auction('a', 70)] : []),
+      beforeRead: (n, ea) => {
+        if (n === 2) Object.assign(ea.get('a')!, { bidState: 'outbid', currentBid: 11_000 });
+      },
+      stopWhen: (x) => x.clock.t > START + 80 * SEC,
+    });
+    h.sniper.start();
+    await h.done();
+    // EA still lists it as running (the fake never closes it): the end itself frees it.
+    expect(h.log()).toContain('Lost {card} to a higher bid | it ended at 11,000 or more');
+    expect(h.sniper.getActiveBids().bids).toEqual([]);
+    expect(h.attempts.at(-1)).toMatchObject({ tradeId: 'a', outcome: 'too_slow', errorCode: 'outbid' });
   });
 
   // Live: five bids read "leading, 0:24 left" for minutes while EA's cached
@@ -783,9 +835,9 @@ describe('Bid mode — guards the bids it holds first', () => {
       ['x2', 10_250],
       ['x1', 10_250],
     ]);
-    // The quick gap (40% of the 10 s search delay), not a search delay each.
+    // REBID_GAP_MS apart, whatever the search delay (10 s here).
     const gaps = rebids.slice(1).map(([, , t], i) => t - rebids[i]![2]);
-    expect(gaps).toEqual([4 * SEC, 4 * SEC]);
+    expect(gaps).toEqual([1.2 * SEC, 1.2 * SEC]);
   });
 
   it('a rest that is due lets the open bids finish first, with no new bids', async () => {
@@ -1146,7 +1198,8 @@ describe('Bid mode — the open bids, for the page', () => {
     expect(view.max).toBe(4);
     expect(view.checkedAt).toEqual(expect.any(Number));
     expect(view.bids).toEqual([
-      expect.objectContaining({ tradeId: 'a', rating: 85, amount: 10_000, currentBid: 11_000, maxBid: 12_500, state: 'outbid', nextBid: 11_250, overMax: false }),
+      // 11,250 was refused, so someone's bid is at least that; 11,500 too.
+      expect.objectContaining({ tradeId: 'a', rating: 85, amount: 10_000, currentBid: 11_250, maxBid: 12_500, state: 'outbid', nextBid: 11_500, overMax: false }),
     ]);
   });
 

@@ -179,6 +179,9 @@ function transferPile(): number | string | null {
   return typeof pile === 'number' || (typeof pile === 'string' && pile !== '') ? pile : null;
 }
 
+/** Longest a watch list read waits on `refreshAuctions`. */
+const REFRESH_TIMEOUT_MS = 4_000;
+
 /** Bid mode on this shape (see the header: ASSUMED SHAPE). */
 function createBidding(timeoutMs: number): BiddingShape {
   return {
@@ -214,7 +217,9 @@ function createBidding(timeoutMs: number): BiddingShape {
       const running = first.entries.filter((e) => normaliseWatchedItem(e)?.tradeState === 'active');
       if (running.length === 0 || !method(services, 'refreshAuctions')) return first;
       try {
-        assertSucceeded(await call(services, 'refreshAuctions', [running], timeoutMs), 'refreshAuctions');
+        // A refresh that hangs must not hold the read: past REFRESH_TIMEOUT_MS
+        // the first read stands.
+        assertSucceeded(await call(services, 'refreshAuctions', [running], Math.min(timeoutMs, REFRESH_TIMEOUT_MS)), 'refreshAuctions');
       } catch {
         return first;
       }
