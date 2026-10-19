@@ -259,4 +259,25 @@ describe("the shapes' Bid mode calls (ASSUMED SHAPE)", () => {
     svc.requestWatchedItems.mockReturnValueOnce(observable({ success: true, data: {} }));
     await expect(shape.bidding!.readWatchlist(svc.services)).rejects.toThrow(/requestWatchedItems response has no/);
   });
+
+  it("observable shape: reads the live web app's watch list, its list inside `response`", async () => {
+    const shape = createObservableShape(1_000);
+    const svc = biddingServices();
+    const watched = [itemEntity(auctionSpec(901, { currentBid: 10_000, bidState: 'highest' }))];
+    // The envelope keys the live web app answered with (keys: error, maxAge,
+    // response, retryAfter, status, success).
+    const envelope = (response: unknown) => ({ success: true, status: 200, error: null, response, maxAge: 0, retryAfter: 0 });
+    svc.requestWatchedItems.mockReturnValueOnce(observable(envelope({ items: watched })));
+    expect((await shape.bidding!.readWatchlist(svc.services)).entries).toEqual(watched);
+    svc.requestWatchedItems.mockReturnValueOnce(observable(envelope({ auctionInfo: watched })));
+    expect((await shape.bidding!.readWatchlist(svc.services)).entries).toEqual(watched);
+    svc.requestWatchedItems.mockReturnValueOnce(observable(envelope(watched)));
+    expect((await shape.bidding!.readWatchlist(svc.services)).entries).toEqual(watched);
+    // An empty watch list is empty, not an error.
+    svc.requestWatchedItems.mockReturnValueOnce(observable(envelope({ items: [] })));
+    expect((await shape.bidding!.readWatchlist(svc.services)).entries).toEqual([]);
+    // Still no list anywhere: the error names what `response` held.
+    svc.requestWatchedItems.mockReturnValueOnce(observable(envelope({ total: 0 })));
+    await expect(shape.bidding!.readWatchlist(svc.services)).rejects.toThrow(/response keys: total/);
+  });
 });

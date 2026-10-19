@@ -26,9 +26,10 @@
  *   window.services.Item.bid(item, amount)
  *     -> the buy call above with a bid amount instead of the buy-now price.
  *   window.services.Item.requestWatchedItems()
- *     -> observable; { success: true, data: { items: ItemEntity[] } }, each
- *        item's auction carrying `bidState` and `tradeState` (community
- *        autobuyers read the watch list this way).
+ *     -> observable; seen live (Oct 2026) answering { success: true, status,
+ *        error, response, maxAge, retryAfter } with the list inside
+ *        `response` (read wherever it sits there: main/ea-response.ts), each
+ *        item's auction carrying `bidState` and `tradeState`.
  *   window.services.Item.move(item, ItemPile.TRANSFER)
  *     -> observable; `success: true` once the won item is on the transfer
  *        list (`ItemPile` is the web app's own enum of item piles).

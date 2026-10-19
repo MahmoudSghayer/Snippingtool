@@ -732,7 +732,8 @@ Shape-specific limits, all to confirm on day one:
   without it still snipes and only Bid mode refuses (`bidding_unsupported`).
   Observable shape: `services.Item.bid(item, amount)` to bid (the buy call
   with a bid amount), `services.Item.requestWatchedItems()` for the watch
-  list (`{ success, data: { items } }`), `services.Item.move(item,
+  list (seen live answering `{ success, status, error, response, maxAge,
+retryAfter }`, the list inside `response`), `services.Item.move(item,
 ItemPile.TRANSFER)` to move a won card. Promise shape:
   `services.Transfer.repository.bid(tradeId, amount)` and
   `services.Item.repository.watchlist() -> { auctionInfo }` (a pure guess),
