@@ -19,7 +19,7 @@
     "@sl/shared": "workspace:*"
   },
   "devDependencies": {
-    "@playwright/test": "^1.64.0",
+    "@playwright/test": "^1.64.1",
     "autocannon": "^8.0.0",
     "@sl/api": "workspace:*",
     "@sl/config": "workspace:*",
