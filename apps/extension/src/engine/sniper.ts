@@ -95,7 +95,7 @@ import { BidBook, WATCHLIST_SIZE, nextBid, pickAuctions, timeLeft } from './bidd
 import { Governor } from './governor.js';
 import { attemptErrorCode } from './types.js';
 
-import type { BidEvent, BidPick, TrackedBid } from './bidder.js';
+import type { BidEvent, BidPick, BidState, TrackedBid } from './bidder.js';
 import type { GovernorDecision, GovernorState, RatioCounts, RiskBudgetEventInput } from './governor.js';
 import type { AttemptInput, TradeInput } from './types.js';
 import type { AdapterClient } from '../content/adapter-client.js';
@@ -484,6 +484,28 @@ export interface SniperSearchResult {
    * from "listed, but not what the search is for". */
   listings?: number;
   cheapest?: number | null;
+}
+
+/** One of Bid mode's open bids, for the page's Active bids tab
+ * (`Sniper.getActiveBids`). */
+export interface ActiveBid {
+  tradeId: string;
+  resourceId: number;
+  assetId: number;
+  rating: number;
+  /** The bot's own last bid. */
+  amount: number;
+  /** The auction's current bid as the last watch list read saw it (0:
+   * nobody has bid yet). */
+  currentBid: number;
+  maxBid: number;
+  buyNow: number;
+  expiresAt: number;
+  state: BidState;
+  /** What a re-bid would be, and whether that passes the max (or reaches
+   * the buy-now price). */
+  nextBid: number;
+  overMax: boolean;
 }
 
 export interface SniperStats {
@@ -1100,6 +1122,33 @@ export class Sniper {
   getBidStatus(): { active: number; max: number; committed: number } | null {
     if (!this.isRunning() || this.runMode !== 'bid') return null;
     return { active: this.book.size(), max: this.modeSettings.bidding.maxActiveBids, committed: this.book.committed() };
+  }
+
+  /** Bid mode's open bids, soonest-ending first, as the last watch list
+   * read saw them, and when that read went out (`checkedAt`, null before
+   * the first). Kept after a stop (EA keeps the bids, and the next start
+   * follows them again); empty after a run in Snipe mode. */
+  getActiveBids(): { bids: ActiveBid[]; checkedAt: number | null; max: number } {
+    const max = this.modeSettings.bidding.maxActiveBids;
+    if (this.runMode !== 'bid') return { bids: [], checkedAt: null, max };
+    const bids = this.book.bids().map((b): ActiveBid => {
+      const next = nextBid(b);
+      return {
+        tradeId: b.tradeId,
+        resourceId: b.resourceId,
+        assetId: b.assetId,
+        rating: b.rating,
+        amount: b.amount,
+        currentBid: b.currentBid,
+        maxBid: b.maxBid,
+        buyNow: b.buyNow,
+        expiresAt: b.expiresAt,
+        state: b.state,
+        nextBid: next,
+        overMax: next > b.maxBid || (b.buyNow > 0 && next >= b.buyNow),
+      };
+    });
+    return { bids, checkedAt: Number.isFinite(this.watch.at) ? this.watch.at : null, max };
   }
 
   /** The governor's thresholds: the user's own (`botGovernorSettings`),

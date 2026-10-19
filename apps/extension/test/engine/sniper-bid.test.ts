@@ -1098,6 +1098,38 @@ describe('Bid mode — the same rails as Snipe mode', () => {
   });
 });
 
+describe('Bid mode — the open bids, for the page', () => {
+  it('lists each open bid as the last watch list read saw it, kept after a stop', async () => {
+    const h = setup({
+      results: (n) => (n === 1 ? [auction('a', 200)] : []),
+      // Its re-bid is beaten, so it waits outbid for the next read.
+      bidResult: (_id, price) =>
+        price === 10_000 ? { ok: true, signed: true, latencyMs: 5 } : { ok: false, signed: true, error: 'bid reported success: false (status 461)', latencyMs: 5 },
+      beforeRead: (n, ea) => {
+        if (n === 2) Object.assign(ea.get('a')!, { bidState: 'outbid', currentBid: 11_000 });
+      },
+      stopWhen: (x) => x.reads >= 2 && x.sniper.state.phase !== 'bidding',
+      bidding: { maxActiveBids: 4 },
+    });
+    expect(h.sniper.getActiveBids()).toEqual({ bids: [], checkedAt: null, max: 4 });
+    h.sniper.start();
+    await h.done();
+    const view = h.sniper.getActiveBids();
+    expect(view.max).toBe(4);
+    expect(view.checkedAt).toEqual(expect.any(Number));
+    expect(view.bids).toEqual([
+      expect.objectContaining({ tradeId: 'a', rating: 85, amount: 10_000, currentBid: 11_000, maxBid: 12_500, state: 'outbid', nextBid: 11_250, overMax: false }),
+    ]);
+  });
+
+  it('is empty after a run in Snipe mode', async () => {
+    const h = setup({ mode: 'snipe' });
+    h.sniper.start();
+    await h.done();
+    expect(h.sniper.getActiveBids().bids).toEqual([]);
+  });
+});
+
 describe('Snipe mode is unchanged', () => {
   it('never reads the watch list or bids, and searches by max buy-now price', async () => {
     const h = setup({ mode: 'snipe', results: () => [auction('a', 60, { buyNow: 9_000 })] });

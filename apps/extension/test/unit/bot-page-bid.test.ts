@@ -227,6 +227,61 @@ it('shows the bid a search result would take', async () => {
   expect(text).toContain('bid 800 (start)');
 });
 
+it('shows the open bids in an Active bids tab beside Search results, the one it opens on in Bid mode', async () => {
+  const { root, sniper, refresh, $ } = mount({ ...DEFAULT_BOT_MODE_SETTINGS, mode: 'bid' });
+  const now = Date.now();
+  const card = { resourceId: 100, assetId: 100, rating: 85, maxBid: 12_500, buyNow: 20_000 };
+  vi.spyOn(sniper, 'isRunning').mockReturnValue(true);
+  vi.spyOn(sniper, 'getActiveBids').mockReturnValue({
+    max: 10,
+    checkedAt: now - 3_000,
+    bids: [
+      { ...card, tradeId: 'a', amount: 12_000, currentBid: 12_000, expiresAt: now + 25_500, state: 'leading', nextBid: 12_250, overMax: false },
+      { ...card, tradeId: 'b', amount: 12_000, currentBid: 12_250, expiresAt: now + 51_500, state: 'outbid', nextBid: 12_500, overMax: false },
+      { ...card, tradeId: 'c', amount: 12_250, currentBid: 12_500, expiresAt: now + 95_000, state: 'outbid', nextBid: 12_750, overMax: true },
+      { ...card, tradeId: 'd', amount: 11_000, currentBid: 0, expiresAt: now + 200_000, state: 'pending', nextBid: 11_000, overMax: false },
+    ],
+  });
+  await refresh();
+  const selected = () => root.querySelector('.ftab[aria-selected="true"]')!.getAttribute('data-feed');
+  expect(selected()).toBe('bids');
+  expect($('results')!.hidden).toBe(true);
+  expect($('bids-count')!.textContent).toBe('4/10');
+  const text = () => $('bids')!.textContent!.replace(/\s+/g, ' ');
+  expect(text()).toContain('4 of 10 open · 1 leading · 2 outbid · 1 waiting for EA · 23,000 held · checked 3 s ago');
+  expect(text()).toContain('85 Kika Nazareth');
+  expect([...root.querySelectorAll('#bids .bidrow')].map((r) => r.className)).toEqual(['bidrow leading', 'bidrow outbid', 'bidrow outbid', 'bidrow pending']);
+  expect(text()).toContain('Leading Your bid is the highest · max 12,500');
+  expect(text()).toContain('Outbid Your bid 12,000 · re-bidding 12,500 · max 12,500');
+  expect(text()).toContain('Outbid Next bid 12,750 is over your max 12,500');
+  expect(text()).toContain('Waiting for EA Your bid 11,000 · the next check says if it leads');
+  expect([...root.querySelectorAll('#bids .cur .v')].map((v) => v.textContent)).toEqual(['12,000', '12,250', '12,500', '—']);
+  // The time left counts down, red in the last 30 s and amber in the last minute.
+  const times = () => [...root.querySelectorAll('#bids .left')].map((t) => [t.querySelector('.v')!.textContent, t.className]);
+  expect(times().slice(0, 2)).toEqual([
+    ['0:25', 'left now'],
+    ['0:51', 'left soon'],
+  ]);
+  vi.advanceTimersByTime(1_000);
+  expect(times()[0]).toEqual(['0:24', 'left now']);
+
+  (root.querySelector('.ftab[data-feed="results"]') as HTMLElement).click();
+  expect(selected()).toBe('results');
+  expect($('results')!.hidden).toBe(false);
+  expect($('bids')!.hidden).toBe(true);
+});
+
+it('opens on Search results in Snipe mode, with Active bids a click away', async () => {
+  const { root, refresh, $ } = mount();
+  await refresh();
+  expect(root.querySelector('.ftab[aria-selected="true"]')!.getAttribute('data-feed')).toBe('results');
+  (root.querySelector('.ftab[data-feed="bids"]') as HTMLElement).click();
+  expect($('bids')!.hidden).toBe(false);
+  expect($('bids')!.textContent).toBe(
+    'Your open bids appear here while Bid mode runs: your bid, the current bid, whether you lead, and the time left.',
+  );
+});
+
 it('shows a lost lead in the search results as a re-bid, or as over the max', async () => {
   const { sniper, refresh, $ } = mount({ ...DEFAULT_BOT_MODE_SETTINGS, mode: 'bid' });
   const lost = (id: number, outbid: 'rebid' | 'over_max', bid: number): SniperSearchResult => ({
