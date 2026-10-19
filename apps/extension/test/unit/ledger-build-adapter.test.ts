@@ -136,6 +136,7 @@ describe('dist/ledger contents', () => {
       'bot.modeGet',
       'bot.modeSet',
       'requestWatchedItems',
+      'refreshAuctions',
       'watchlist_too_soon',
       'move_not_bought',
       'move_unsupported',

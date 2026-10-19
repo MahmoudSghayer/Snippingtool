@@ -260,6 +260,36 @@ describe("the shapes' Bid mode calls (ASSUMED SHAPE)", () => {
     await expect(shape.bidding!.readWatchlist(svc.services)).rejects.toThrow(/requestWatchedItems response has no/);
   });
 
+  // Live: requestWatchedItems answered from the web app's cache, the same
+  // time left and bids read after read, while the auctions were outbid.
+  it('observable shape: has EA refresh the running auctions between two reads of the watch list', async () => {
+    const shape = createObservableShape(1_000);
+    const svc = biddingServices();
+    const running = itemEntity(auctionSpec(901, { currentBid: 8_400, bidState: 'highest' }));
+    const ended = itemEntity(auctionSpec(902, { currentBid: 9_000, bidState: 'outbid', tradeState: 'closed' }));
+    const fresh = itemEntity(auctionSpec(901, { currentBid: 8_500, bidState: 'outbid', expires: 20 }));
+    const refreshAuctions = vi.fn((_items: unknown[]): unknown => observable({ success: true }));
+    const services = { Item: { ...svc.services.Item, refreshAuctions } };
+    svc.requestWatchedItems.mockReturnValueOnce(observable({ success: true, data: { items: [running, ended] } }));
+    svc.requestWatchedItems.mockReturnValueOnce(observable({ success: true, data: { items: [fresh, ended] } }));
+    const read = await shape.bidding!.readWatchlist(services);
+    // Only the running auction is refreshed, then the list read again.
+    expect(refreshAuctions).toHaveBeenCalledWith([running]);
+    expect(services.Item.clearTransferMarketCache).toHaveBeenCalled();
+    expect(svc.requestWatchedItems).toHaveBeenCalledTimes(2);
+    expect(read.entries).toEqual([fresh, ended]);
+
+    // A refresh that fails leaves the first read standing.
+    refreshAuctions.mockReturnValueOnce(observable({ success: false }));
+    svc.requestWatchedItems.mockReturnValueOnce(observable({ success: true, data: { items: [running] } }));
+    expect((await shape.bidding!.readWatchlist(services)).entries).toEqual([running]);
+    // A page without refreshAuctions reads the list once.
+    svc.requestWatchedItems.mockClear();
+    svc.requestWatchedItems.mockReturnValueOnce(observable({ success: true, data: { items: [running] } }));
+    expect((await shape.bidding!.readWatchlist(svc.services)).entries).toEqual([running]);
+    expect(svc.requestWatchedItems).toHaveBeenCalledTimes(1);
+  });
+
   it("observable shape: reads the live web app's watch list, its list inside `response`", async () => {
     const shape = createObservableShape(1_000);
     const svc = biddingServices();

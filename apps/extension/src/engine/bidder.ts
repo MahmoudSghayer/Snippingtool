@@ -139,9 +139,9 @@ export interface TrackedBid {
   decision: GovernorDecision | null;
   /** Watch list reads in a row it was missing from. */
   missing: number;
-  /** Re-bids in a row EA refused because someone else's bid got there
-   * first (`Sniper.placeBid` lets the auction go at MAX_REBID_REFUSALS). */
-  refused?: number;
+  /** The seconds left the last watch list read said, to tell a fresh
+   * answer from one EA served from its cache (`BidBook.reconcile`). */
+  seenExpires?: number;
   /** The current bid the search results last showed it outbid at, so each
    * time the trader loses the lead shows once (`Sniper.rebid`). */
   outbidShown?: number;
@@ -157,6 +157,9 @@ export type BidEvent =
 
 export class BidBook {
   private readonly open = new Map<string, TrackedBid>();
+  /** Whether the last read gave every running auction the same seconds
+   * left as the read before: EA answered it from its cache. */
+  lastReadStale = false;
   /** Auctions won, lost or dropped: never bid on again. */
   private readonly done = new Set<string>();
 
@@ -208,6 +211,8 @@ export class BidBook {
   reconcile(watched: readonly WatchedAuction[], now: number): BidEvent[] {
     const byTrade = new Map(watched.map((w) => [w.tradeId, w]));
     const events: BidEvent[] = [];
+    let running = 0;
+    let unchanged = 0;
     for (const bid of this.bids()) {
       const w = byTrade.get(bid.tradeId);
       if (!w) {
@@ -222,7 +227,16 @@ export class BidBook {
       bid.startingBid = w.startingBid;
       bid.currentBid = w.currentBid;
       bid.buyNow = w.buyNowPrice;
-      if (w.expires != null) bid.expiresAt = now + w.expires * 1000;
+      if (w.expires != null) {
+        if (w.tradeState === 'active') {
+          running++;
+          if (w.expires === bid.seenExpires) unchanged++;
+        }
+        // The same seconds left as the last read is EA's cache talking: the
+        // auction still ends where the last fresh read put it.
+        if (w.expires !== bid.seenExpires) bid.expiresAt = now + w.expires * 1000;
+        bid.seenExpires = w.expires;
+      }
       if (w.itemId) bid.itemId = w.itemId;
       if (w.tradeState === 'closed' || w.tradeState === 'expired') {
         this.close(bid.tradeId);
@@ -239,6 +253,7 @@ export class BidBook {
       bid.state = 'outbid';
       events.push({ kind: 'outbid', bid });
     }
+    this.lastReadStale = running > 0 && unchanged === running;
     return events;
   }
 }

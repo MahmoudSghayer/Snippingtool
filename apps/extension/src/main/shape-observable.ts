@@ -29,7 +29,13 @@
  *     -> observable; seen live (Oct 2026) answering { success: true, status,
  *        error, response, maxAge, retryAfter } with the list inside
  *        `response` (read wherever it sits there: main/ea-response.ts), each
- *        item's auction carrying `bidState` and `tradeState`.
+ *        item's auction carrying `bidState` and `tradeState`. Seen live too:
+ *        answered from the web app's cache, the same time left and bids
+ *        read after read.
+ *   window.services.Item.refreshAuctions(items)
+ *     -> observable; EA's fresh status for those auctions, onto the web
+ *        app's own items (community autobuyers call it between two
+ *        requestWatchedItems reads). UNVERIFIED.
  *   window.services.Item.move(item, ItemPile.TRANSFER)
  *     -> observable; `success: true` once the won item is on the transfer
  *        list (`ItemPile` is the web app's own enum of item piles).
@@ -45,7 +51,7 @@
  */
 import { ACT_ERROR } from '../lib/act-auth.js';
 
-import { normaliseListing } from './ea-listing.js';
+import { normaliseListing, normaliseWatchedItem } from './ea-listing.js';
 import { ShapeError, assertSucceeded, extractListingArray, settle } from './ea-response.js';
 
 import type { BidTarget, BiddingShape, BuyTarget, ListTarget, SearchOptions, ServiceShape } from './shapes.js';
@@ -192,8 +198,27 @@ function createBidding(timeoutMs: number): BiddingShape {
       if (!bidSucceeded(r)) throw new ShapeError('bid did not report success: true');
     },
     async readWatchlist(services) {
-      const response = await call(services, 'requestWatchedItems', [], timeoutMs);
-      return { response, entries: extractListingArray(response, { requireSuccess: true, what: 'requestWatchedItems' }) };
+      // requestWatchedItems answers from the web app's own cache: live, five
+      // bids read "leading, 0:24 left" for minutes while they were outbid
+      // and ended, and all showed lost at once when the cache ran out. So,
+      // as community autobuyers do: clear the market cache, read the list,
+      // have EA refresh its running auctions (refreshAuctions, what Transfer
+      // Targets uses to keep its timers and bids live), and read it again.
+      // Without refreshAuctions, or when it fails, the first read stands.
+      clearMarketCache(services);
+      const read = async () => {
+        const response = await call(services, 'requestWatchedItems', [], timeoutMs);
+        return { response, entries: extractListingArray(response, { requireSuccess: true, what: 'requestWatchedItems' }) };
+      };
+      const first = await read();
+      const running = first.entries.filter((e) => normaliseWatchedItem(e)?.tradeState === 'active');
+      if (running.length === 0 || !method(services, 'refreshAuctions')) return first;
+      try {
+        assertSucceeded(await call(services, 'refreshAuctions', [running], timeoutMs), 'refreshAuctions');
+      } catch {
+        return first;
+      }
+      return read();
     },
     async moveToTransferList(services, entity) {
       if (!method(services, 'move')) throw new ShapeError('window.services.Item.move is not a function');
