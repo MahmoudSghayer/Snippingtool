@@ -58,7 +58,7 @@ function Wordmark({ size }: { size: 'sm' | 'lg' }) {
         className={`font-mono font-semibold tracking-tight text-ink ${size === 'lg' ? 'text-lg' : 'text-sm'}`}
       >
         Nova Trade
-      </span>
+      </span>{' '}
       <span className="rounded-full border border-gold/30 bg-gold/10 px-1.5 py-0.5 text-[10px] font-medium uppercase leading-none tracking-wide text-gold">
         AI Powered
       </span>
@@ -197,7 +197,7 @@ export function AppLayout() {
   ];
 
   const brand = (
-    <Link to="/admin" aria-label="Nova Trade admin: go to overview">
+    <Link to="/admin">
       <Wordmark size="sm" />
     </Link>
   );

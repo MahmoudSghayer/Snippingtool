@@ -3,7 +3,6 @@
   "extends": "@sl/config/tsconfig.web.json",
   "compilerOptions": {
     "types": ["chrome", "webextension-polyfill", "vite/client"],
-    "baseUrl": ".",
     "paths": {
       "@sl/shared": ["../../packages/shared/src/index.ts"],
       "@sl/shared/*": ["../../packages/shared/src/*"]

@@ -81,7 +81,7 @@ export function observable(response: unknown, respond = true) {
     observe: vi.fn((scope: unknown, callback: (sender: unknown, response: unknown) => void) => {
       if (respond) setTimeout(() => callback.call(scope, obs, response), 0);
     }),
-    unobserve: vi.fn(),
+    unobserve: vi.fn<() => void>(),
   };
   return obs;
 }
@@ -109,5 +109,5 @@ export function observableServices() {
 export function promiseServices() {
   const search = vi.fn(async (_criteria: Record<string, unknown>): Promise<unknown> => ({ auctionInfo: [] }));
   const buyNow = vi.fn(async (_tradeId: string): Promise<unknown> => ({ success: true }));
-  return { services: { Item: { repository: { search } }, Transfer: { repository: { buyNow, bid: vi.fn() } } }, search, buyNow };
+  return { services: { Item: { repository: { search } }, Transfer: { repository: { buyNow, bid: vi.fn<(...args: unknown[]) => unknown>() } } }, search, buyNow };
 }
