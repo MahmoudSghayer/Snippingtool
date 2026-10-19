@@ -3,7 +3,7 @@
 // None of that may duplicate stats, 500 a batch, or put a row somewhere
 // `partitions.maintain` cannot cope with.
 
-import { profits, snipingActivity, trades, userActivity, users } from '@sl/db';
+import { profits, riskBudgetEvents, snipingActivity, trades, userActivity, users } from '@sl/db';
 import { resetDatabase } from '@sl/db/test-utils';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -188,6 +188,33 @@ describe('ingest correctness', () => {
         where: eq(profits.userId, userId),
       });
       expect(profitRow?.coinsSpent).toBe(500);
+    });
+  });
+
+  describe('risk events', () => {
+    it("stores events whose device and session ids are not this user's, without them", async () => {
+      // The extension sends its own bot-run id as `sessionId`, never a row
+      // in `sessions`: that used to 500 the batch on the foreign key.
+      const { userId, token } = await createUser(app, 'risk-ids@example.com');
+      const event = {
+        deviceId: newId(),
+        sessionId: newId(),
+        kind: 'actions_per_hour',
+        value: 120,
+        threshold: 100,
+        occurredAt: new Date(Date.now() - MINUTE).toISOString(),
+      };
+      const res = await post('/api/v1/risk-events', token, { events: [event, event] });
+      expect(res.statusCode, res.body).toBe(200);
+      expect(res.json()).toEqual({ accepted: 2 });
+      const rows = await app.db.query.riskBudgetEvents.findMany({
+        where: eq(riskBudgetEvents.userId, userId),
+      });
+      expect(rows).toHaveLength(2);
+      expect(rows.map((r) => [r.deviceId, r.sessionId, r.kind])).toEqual([
+        [null, null, 'actions_per_hour'],
+        [null, null, 'actions_per_hour'],
+      ]);
     });
   });
 
