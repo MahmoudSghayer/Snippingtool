@@ -135,11 +135,22 @@ export interface GovernorState {
   /** Coins spent on buys this session. Optional so state saved by an older
    * build still hydrates (it then reads as 0). */
   sessionCoinsSpent?: number;
+  /** When the last action was counted, for `SESSION_IDLE_RESET_MS`.
+   * Optional so state saved by an older build still hydrates (its newest
+   * action timestamp stands in). */
+  lastActionAt?: number;
   killSwitchActive: boolean;
   killSwitchReason?: string;
 }
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
+
+/** A pause this long ends the session: the next action starts a new one
+ * (`allow`), as a trader's session ends when they stop for a while. Longer
+ * than any of the bot's rests. Live, a page left open overnight still
+ * counted the previous morning's session, and the first buy the next
+ * morning tripped the 90-minute session length at minute 1,115. */
+export const SESSION_IDLE_RESET_MS = 30 * 60 * 1000;
 
 /** EA's search response reaches the content script more than once — the
  * patched XHR and `emitAuctionInfo` both report it (src/main/adapter.ts) —
@@ -272,6 +283,13 @@ export class Governor {
     return this.state.killSwitchActive;
   }
 
+  /** Whether the session has sat idle past SESSION_IDLE_RESET_MS: it had
+   * an action, and none since. A session with no action yet never is. */
+  private idleSession(now: number): boolean {
+    const last = this.state.lastActionAt ?? (this.state.actionTimestamps.length > 0 ? Math.max(...this.state.actionTimestamps) : undefined);
+    return last !== undefined && now - last > SESSION_IDLE_RESET_MS;
+  }
+
   private prune(now: number): void {
     const cutoff = now - ONE_HOUR_MS;
     this.state.actionTimestamps = this.state.actionTimestamps.filter((t) => t > cutoff);
@@ -309,6 +327,7 @@ export class Governor {
     if (now - this.lastSearchAt < OBSERVED_SEARCH_DEDUPE_MS) return false;
     this.prune(now);
     this.state.actionTimestamps.push(now);
+    this.state.lastActionAt = now;
     this.state.searchCount++;
     this.lastSearchAt = now;
     return true;
@@ -347,13 +366,17 @@ export class Governor {
       return { allowed: false, reason: 'hard_stop', detail: 'in cooldown', events };
     }
 
+    // Read before pruning: an idle pause longer than an hour leaves no
+    // action timestamp behind, only `lastActionAt`.
+    const idle = this.idleSession(now);
     this.prune(now);
 
     // Session length is a hard stop: once tripped, every action is denied
     // for the cooldown. The first action after that cooldown starts a new
     // session — without this, the elapsed time stays over the limit and the
-    // stop re-trips forever (docs/06-extension.md §5).
-    if (this.state.sessionExpired) this.resetSession(now);
+    // stop re-trips forever (docs/06-extension.md §5). A long idle pause
+    // ends the session too (SESSION_IDLE_RESET_MS).
+    if (this.state.sessionExpired || idle) this.resetSession(now);
     const sessionElapsedMinutes = (now - this.state.sessionStartedAt) / 60_000;
     if (sessionElapsedMinutes > this.settings.sessionLengthMinutes) {
       this.state.sessionExpired = true;
@@ -404,6 +427,7 @@ export class Governor {
 
     // Allowed — record it.
     this.state.actionTimestamps.push(now);
+    this.state.lastActionAt = now;
     if (action.kind === 'search') {
       this.state.searchCount++;
       this.lastSearchAt = now;
@@ -520,11 +544,13 @@ export class Governor {
    * risk budget meter reads (docs/01-architecture.md, "visible risk budget
    * meter"). Never denies anything itself; `allow()` is the only gate. */
   snapshot(now: number = this.now()): RiskSnapshot {
+    const idle = this.idleSession(now);
     this.prune(now);
-    // A session the length stop ended, whose cooldown is over, is already
-    // gone: the next `allow()` starts a new one. Show that new session now,
-    // rather than the old one's ever-growing elapsed time until then.
-    const pendingReset = this.state.sessionExpired === true && now >= this.state.cooldownUntil;
+    // A session the length stop ended, whose cooldown is over, or that sat
+    // idle too long, is already gone: the next `allow()` starts a new one.
+    // Show that new session now, rather than the old one's ever-growing
+    // elapsed time until then.
+    const pendingReset = (this.state.sessionExpired === true && now >= this.state.cooldownUntil) || idle;
     const sessionElapsedMinutes = pendingReset ? 0 : (now - this.state.sessionStartedAt) / 60_000;
     const coinFlowLastHour = this.state.coinFlow.reduce((sum, c) => sum + c.coins, 0);
     // Rolling counts are the hour's, whatever the session did.

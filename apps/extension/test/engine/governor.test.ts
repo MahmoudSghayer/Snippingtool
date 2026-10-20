@@ -1,7 +1,7 @@
 import { DEFAULT_GOVERNOR_SETTINGS, GOVERNOR_ABSOLUTE_LIMITS, type GovernorSettings } from '@sl/shared';
 import { describe, expect, it } from 'vitest';
 
-import { Governor, OBSERVED_SEARCH_DEDUPE_MS } from '../../src/engine/governor.js';
+import { Governor, OBSERVED_SEARCH_DEDUPE_MS, SESSION_IDLE_RESET_MS } from '../../src/engine/governor.js';
 
 const settings: GovernorSettings = {
   ...DEFAULT_GOVERNOR_SETTINGS,
@@ -324,6 +324,35 @@ describe('Governor — session reset', () => {
     expect(gov.serialize()).toMatchObject({ searchCount: 1, buyCount: 0, sessionExpired: false });
     // …but the hourly window did not: the 2 searches from before still count.
     expect(snap.actionsLastHour).toBe(3);
+  });
+
+  // Live: a page left open overnight still counted the previous morning's
+  // session, and the first buy the next morning tripped the 90-minute
+  // session length at minute 1,115.
+  it('starts a new session after a pause longer than SESSION_IDLE_RESET_MS, and only then', () => {
+    const { gov, setNow } = governorAt(START, { sessionLengthMinutes: 90, actionsPerHour: 120 });
+    expect(gov.allow({ kind: 'search' }, START).allowed).toBe(true);
+    // A 20-minute pause (a rest) keeps the session.
+    setNow(START + 20 * 60_000);
+    expect(gov.allow({ kind: 'search' }).allowed).toBe(true);
+    expect(gov.snapshot().sessionElapsedMinutes).toBe(20);
+    // Then a night off, reloaded from saved state the next morning.
+    const morning = START + 18 * 60 * 60_000;
+    const reloaded = Governor.hydrate({ ...settings, sessionLengthMinutes: 90, actionsPerHour: 120 }, gov.serialize(), { now: () => morning });
+    expect(reloaded.snapshot().sessionElapsedMinutes).toBe(0);
+    const decision = reloaded.allow({ kind: 'search' });
+    expect(decision.allowed).toBe(true);
+    expect(decision.events.some((e) => e.kind === 'session_length')).toBe(false);
+    expect(reloaded.serialize()).toMatchObject({ sessionStartedAt: morning, searchCount: 1, lastActionAt: morning });
+  });
+
+  it('reads an older saved state, without lastActionAt, by its newest action', () => {
+    const saved = new Governor({ ...settings, sessionLengthMinutes: 90 }, { now: () => START }).serialize();
+    const old = { ...saved, sessionStartedAt: START, actionTimestamps: [START + 60_000] };
+    const later = START + 60_000 + SESSION_IDLE_RESET_MS + 1;
+    const g = Governor.hydrate({ ...settings, sessionLengthMinutes: 90 }, old, { now: () => later });
+    expect(g.allow({ kind: 'search' }).allowed).toBe(true);
+    expect(g.serialize().sessionStartedAt).toBe(later);
   });
 
   it('carries a tripped session across serialize/hydrate so the reset still happens after a reload', () => {
