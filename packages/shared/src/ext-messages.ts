@@ -1041,6 +1041,9 @@ export const extBackgroundEngineStateSetPayloadSchema = z
     sessionExpired: z.boolean().optional(),
     // Optional for the same reason: coins spent this session.
     sessionCoinsSpent: z.number().min(0).optional(),
+    // Optional for the same reason: when the last action was counted (a
+    // long idle pause starts a new session).
+    lastActionAt: z.number().min(0).optional(),
     killSwitchActive: z.boolean(),
     killSwitchReason: z.string().max(500).optional(),
   })

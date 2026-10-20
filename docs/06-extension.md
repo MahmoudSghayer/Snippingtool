@@ -1025,9 +1025,15 @@ falls back to the shipped default:
   cooldown, the one-hour windows and the kill switch do not. `resetSession()`
   does the same on demand: background's `engine.resetSession` message passes
   it to the EA tab holding the engine lease (a "New session" control, which
-  no UI shows yet). `snapshot()` already shows the new session once a
-  tripped one's cooldown is over, rather than the stale elapsed time until
-  the next `allow()`.
+  no UI shows yet). A pause of more than 30 minutes with no action
+  (`SESSION_IDLE_RESET_MS`, longer than any rest) ends the session too: the
+  next `allow()` starts a new one. Live, a page left open overnight still
+  counted the previous morning's session, and the first buy the next morning
+  tripped the 90-minute length at minute 1,115. The state keeps
+  `lastActionAt` for this (optional; an older saved state's newest action
+  stands in). `snapshot()` already shows the new session once a tripped
+  one's cooldown is over, or a session has sat idle that long, rather than
+  the stale elapsed time until the next `allow()`.
 - **`buyToSearchRatio`** — `(buys + 1) / max(searches, 1)` must stay under
   the ratio for a `buy` to be allowed. A human who only ever buys and never
   searches is about the single most suspicious shape there is. Searches are
