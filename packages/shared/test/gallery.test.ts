@@ -13,6 +13,8 @@ const card = {
   rating: 85,
   playerId: 257289,
   resourceId: 257289,
+  rarity: 52,
+  version: 'Signature',
   set: 'Ligue 1',
   status: 'listed',
   price: 3_700,

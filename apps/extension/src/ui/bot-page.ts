@@ -395,7 +395,7 @@ const MODES: { mode: BotMode; label: string; hint: string }[] = [
 
 /** Over the Gallery list: how to write it, and what Nova does with it. */
 const GALLERY_HELP =
-  'One card a line: the player\'s name and the card\'s rating ("Hugo Ekitiké 85"). A line starting with # names the Set the cards under it belong to. Nova buys each card (under its market price for 2 minutes, then at the market price, up to 10% over it), sends it to your club, and lists it again one step under its market price.';
+  'One card a line: the player\'s name and the card\'s rating ("Hugo Ekitiké 85"). When two versions share a rating, add the version after it ("Hugo Ekitiké 85 Signature"), named as in the Rarity list on the Search tab: only that version is bought. A line starting with # names the Set the cards under it belong to. Nova buys each card (under its market price for 2 minutes, then at the market price, up to 10% over it), sends it to your club, and lists it again one step under its market price.';
 
 const GALLERY_STATUS: Record<GalleryCard['status'], string> = {
   todo: 'To buy',
@@ -984,7 +984,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         set = c.set;
         lines.push(set ? `# ${set}` : '#');
       }
-      lines.push(`${c.name} ${c.rating}`);
+      lines.push(`${c.name} ${c.rating}${c.version ? ` ${c.version}` : ''}`);
     }
     return lines.join('\n');
   }
@@ -1043,7 +1043,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     const g = currentGallery();
     if (id === 'g-load') {
       const text = (root.getElementById('g-list') as HTMLTextAreaElement | null)?.value ?? galleryDraft ?? '';
-      const parsed = parseGalleryList(text, catalog?.players ?? [], g.cards);
+      const parsed = parseGalleryList(text, catalog?.players ?? [], g.cards, catalog?.rarities ?? []);
       galleryProblems = parsed.problems;
       galleryDraft = text;
       commitGallery({ ...g, cards: parsed.cards }, `Loaded ${parsed.cards.length} cards`);
@@ -2770,7 +2770,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     const sub = [c.set, detail].filter((x): x is string => !!x).map(esc).join(' · ');
     const paid = c.price != null ? `${fmt(c.price)}${COIN}` : '—';
     const listed = c.listPrice != null ? `${fmt(c.listPrice)}${COIN}` : '—';
-    return `<div class="bidrow ${state}"><div class="main"><b>${c.rating} ${esc(c.name)}</b><span class="st ${state}">${label}</span>
+    const version = c.version ? ` <span class="sub">${esc(c.version)}</span>` : '';
+    return `<div class="bidrow ${state}"><div class="main"><b>${c.rating} ${esc(c.name)}</b>${version}<span class="st ${state}">${label}</span>
       <div class="sub">${sub}</div></div>
       <div class="cur"><span class="k">Paid</span><span class="v">${paid}</span></div>
       <div class="cur"><span class="k">Listed at</span><span class="v">${listed}</span></div></div>`;

@@ -2143,7 +2143,10 @@ export class Sniper {
       this.searchSeq++;
       p.searchesSinceBreak++;
       const tried = new Set<string>();
-      const first = plan.buy ? search.matches() : [];
+      // A version asked for: only that card (its own id, once a search has
+      // named it), never another version of the player at the rating.
+      const wanted = (m: SniperMatch) => card.rarity === undefined || card.resourceId === undefined || m.resourceId === card.resourceId;
+      const first = plan.buy ? search.matches().filter(wanted) : [];
       const end = first.length > 0 ? await this.buyMatches(first, search, tried, signal) : 'done';
       if (end === 'stopped') return;
       const found = await search.done;
@@ -2162,9 +2165,10 @@ export class Sniper {
       } else {
         failuresInRow = 0;
         this.addSearchResult(plan.target.name, found.matches, found.listings, found.cheapest, found.at);
-        const rest = plan.buy && end === 'done' && !bought() ? found.matches.filter((m) => !tried.has(m.tradeId)) : [];
+        const matches = found.matches.filter(wanted);
+        const rest = plan.buy && end === 'done' && !bought() ? matches.filter((m) => !tried.has(m.tradeId)) : [];
         if (rest.length > 0 && (await this.buyMatches(rest, search, tried, signal)) === 'stopped') return;
-        if (!bought()) this.galleryAfterSearch(card, w, found.matches);
+        if (!bought()) this.galleryAfterSearch(card, w, matches);
       }
       this.deps.onChange();
       // A buy goes straight on to the card's way to the club: those steps
@@ -2236,8 +2240,14 @@ export class Sniper {
     const rounded = roundToPriceStep(Math.max(0, left));
     const leftOnGrid = rounded > left ? stepPrice(rounded, -1) : rounded;
     if (left < MIN_SALE_PRICE || leftOnGrid < MIN_SALE_PRICE) return 'budget';
-    const filter: FilterCriteria = { resourceId: card.playerId, minRating: card.rating, maxRating: card.rating };
-    const name = `${card.name} ${card.rating}`;
+    const filter: FilterCriteria = {
+      resourceId: card.playerId,
+      minRating: card.rating,
+      maxRating: card.rating,
+      // A version asked for: EA's own Rarity filter returns only that version.
+      ...(card.rarity !== undefined ? { rarity: card.rarity } : {}),
+    };
+    const name = `${card.name} ${card.rating}${card.version ? ` ${card.version}` : ''}`;
     if (w.phase === 'resolve') return { target: { id: `gallery:${card.key}:resolve`, name, filter }, buy: false };
     const market = w.market!;
     let cap: number;

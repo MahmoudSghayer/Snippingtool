@@ -15,7 +15,7 @@ import {
   pickResourceId,
 } from '../../src/engine/gallery.js';
 
-import type { CatalogPlayer } from '../../src/model/catalog.js';
+import type { CatalogOption, CatalogPlayer } from '../../src/model/catalog.js';
 import type { GalleryCard } from '@sl/shared';
 
 const PLAYERS: CatalogPlayer[] = [
@@ -27,6 +27,14 @@ const PLAYERS: CatalogPlayer[] = [
   { id: 12, name: 'Rodri', rating: 75 },
   { id: 21, name: 'Lucas Silva', rating: 80 },
   { id: 22, name: 'Bernardo Silva', rating: 86 },
+];
+
+const RARITIES: CatalogOption[] = [
+  { id: 0, value: '0', label: 'Common' },
+  { id: 1, value: '1', label: 'Rare' },
+  { id: 3, value: '3', label: 'Team of the Week' },
+  { id: 52, value: '52', label: 'Signature' },
+  { id: 53, value: '53', label: 'Signature Icon' },
 ];
 
 describe('parseGalleryList', () => {
@@ -69,6 +77,36 @@ describe('parseGalleryList', () => {
     const { cards } = parseGalleryList('# New Set\nHugo Ekitiké 85\nFlorian Wirtz 86', PLAYERS, [done]);
     expect(cards[0]).toEqual({ ...done, set: 'New Set' });
     expect(cards[1]!.status).toBe('todo');
+  });
+
+  it('takes the version after the rating, from EA\'s Rarity list, so two versions of one rating are two cards', () => {
+    const { cards, problems } = parseGalleryList(
+      ['Hugo Ekitiké 85', 'Hugo Ekitiké 85 signature', 'Hugo Ekitiké 85 Team of the Week', 'Florian Wirtz 86 Rare'].join('\n'),
+      PLAYERS,
+      [],
+      RARITIES,
+    );
+    expect(problems).toEqual([]);
+    expect(cards.map((c) => [c.key, c.rarity, c.version, c.resourceId])).toEqual([
+      // No version: any version at 85, the base card's id.
+      ['257289:85', undefined, undefined, 257289],
+      // A version asked for: its own id comes from the first search.
+      ['257289:85:52', 52, 'Signature', undefined],
+      ['257289:85:3', 3, 'Team of the Week', undefined],
+      ['256630:86:1', 1, 'Rare', undefined],
+    ]);
+  });
+
+  it('says when a version is not in EA\'s Rarity list, matches more than one, or the list is not loaded', () => {
+    const lines = ['Hugo Ekitiké 85 Golden', 'Hugo Ekitiké 85 Sig', 'Hugo Ekitiké 85 Signature', 'Hugo Ekitiké 85 Signature'].join('\n');
+    expect(parseGalleryList(lines, PLAYERS, [], RARITIES).problems).toEqual([
+      'Line 1: no version named "Golden" in EA\'s Rarity list — use a name from the Rarity list on the Search tab',
+      'Line 2: "Sig" matches more than one version (Signature, Signature Icon…) — write the full name',
+      'Line 4: Hugo Ekitiké 85 Signature is on the list already',
+    ]);
+    expect(parseGalleryList('Hugo Ekitiké 85 Signature', PLAYERS).problems).toEqual([
+      "Line 1: EA's Rarity list is not loaded yet — open the transfer market search once, then load the list again",
+    ]);
   });
 
   it('needs EA\'s player list', () => {
