@@ -2879,8 +2879,11 @@ export class Sniper {
     return times[n - limit]! + ONE_HOUR_MS - this.now();
   }
 
-  /** The last hour's searches and buys, for the governor's buy:search ratio. */
-  private ratioCounts(): RatioCounts {
+  /** The last hour's searches and buys, for the governor's buy:search ratio:
+   * the bot's own, and assist's alongside its session (content/index.ts,
+   * `sharedRatioCounts`), so your own buys while the bot runs count its
+   * searches. */
+  ratioCounts(): RatioCounts {
     return { searches: this.inWindow(this.searchTimes), buys: this.inWindow(this.buyTimes) };
   }
 

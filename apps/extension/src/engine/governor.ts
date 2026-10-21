@@ -32,7 +32,12 @@
  *                            are counted by `recordObservedSearch()`. A caller
  *                            that keeps rolling one-hour counts of its own
  *                            (the Sniping Bot) hands them in as `ratioCounts`
- *                            instead of the session's.
+ *                            instead of the session's. One that shares the
+ *                            account with another engine (assist, while
+ *                            Nova AI runs) hands that engine's rolling
+ *                            counts in as `sharedRatioCounts`: they add to
+ *                            the session's for this ratio only, never to
+ *                            `actionsPerHour`.
  *   - maxCoinFlowPerHour   — coins spent on `buy` actions, sliding one-hour
  *                            window (added to `GovernorSettings` alongside
  *                            the other three — see packages/shared/src/
@@ -230,6 +235,9 @@ export class Governor {
   /** The caller's rolling counts for the buy:search ratio, or null for the
    * session's own (`searchCount` / `buyCount`). */
   private readonly ratioCounts: (() => RatioCounts) | null;
+  /** Another engine's rolling counts, added to the session's for the ratio
+   * (`sharedRatioCounts`), or null for none. */
+  private readonly sharedRatioCounts: (() => RatioCounts | null) | null;
 
   /**
    * `ratioCounts`: rolling one-hour counts of searches and of buys that
@@ -238,6 +246,14 @@ export class Governor {
    * banking a session's history, and a cold start counts as at least
    * ceil(1 / ratio) searches, so the first buy is not refused for want of
    * searches nobody has had time to run yet: one buy, then the ratio as set.
+   *
+   * `sharedRatioCounts`: the last hour's searches and buys of another engine
+   * on the same account (the Sniping Bot's `ratioCounts`, for assist's
+   * governor), or null when it has none. Added to the session's counts for
+   * the buy:search ratio only: they are that engine's actions, already in
+   * its own governor's `actionsPerHour`. While they hold a search, they
+   * bring that engine's cold-start floor with them, so a buy of yours in the
+   * bot's first seconds is judged as the bot's own first buy would be.
    */
   constructor(
     settings: GovernorSettings,
@@ -246,6 +262,7 @@ export class Governor {
       state?: GovernorState;
       bounds?: GovernorBounds;
       ratioCounts?: () => RatioCounts;
+      sharedRatioCounts?: () => RatioCounts | null;
     } = {},
   ) {
     this.bounds = opts.bounds ?? GOVERNOR_ABSOLUTE_LIMITS;
@@ -253,6 +270,7 @@ export class Governor {
     this.now = opts.now ?? Date.now;
     this.state = opts.state ?? freshState(this.now());
     this.ratioCounts = opts.ratioCounts ?? null;
+    this.sharedRatioCounts = opts.sharedRatioCounts ?? null;
   }
 
   /** `bounds` changes the clamp too; omitted, the current bounds stay. */
@@ -481,12 +499,20 @@ export class Governor {
     else this.takeBackBuy(charge);
   }
 
-  /** buys / searches with `extraBuys` more buys: the session's counts, or
-   * the caller's rolling ones with the cold-start floor (`ratioCounts`). */
-  private buyRatio(extraBuys: number): number {
-    if (!this.ratioCounts) return (this.state.buyCount + extraBuys) / Math.max(this.state.searchCount, 1);
-    const { searches, buys } = this.ratioCounts();
-    return (buys + extraBuys) / Math.max(searches, Math.ceil(1 / this.settings.buyToSearchRatio), 1);
+  /** buys / searches with `extraBuys` more buys: the caller's rolling counts
+   * with the cold-start floor (`ratioCounts`), or the session's (left out
+   * with `session` false: a session about to start over) plus another
+   * engine's (`sharedRatioCounts`, with its floor while it holds a search). */
+  private buyRatio(extraBuys: number, session = true): number {
+    const coldStart = Math.ceil(1 / this.settings.buyToSearchRatio);
+    if (this.ratioCounts) {
+      const { searches, buys } = this.ratioCounts();
+      return (buys + extraBuys) / Math.max(searches, coldStart, 1);
+    }
+    const shared = this.sharedRatioCounts?.() ?? null;
+    const buys = (session ? this.state.buyCount : 0) + (shared?.buys ?? 0) + extraBuys;
+    const searches = (session ? this.state.searchCount : 0) + (shared?.searches ?? 0);
+    return buys / Math.max(searches, shared && shared.searches > 0 ? coldStart : 1, 1);
   }
 
   /** Whether the buy:search ratio would let one more buy through now. */
@@ -554,7 +580,7 @@ export class Governor {
     const sessionElapsedMinutes = pendingReset ? 0 : (now - this.state.sessionStartedAt) / 60_000;
     const coinFlowLastHour = this.state.coinFlow.reduce((sum, c) => sum + c.coins, 0);
     // Rolling counts are the hour's, whatever the session did.
-    const ratio = !this.ratioCounts && pendingReset ? 0 : this.buyRatio(0);
+    const ratio = this.buyRatio(0, !pendingReset);
     return {
       actionsLastHour: this.state.actionTimestamps.length,
       actionsPerHourLimit: this.settings.actionsPerHour,
