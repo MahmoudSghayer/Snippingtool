@@ -2120,6 +2120,15 @@ export class Sniper {
           latencyMs: result.latencyMs,
           errorCode: attemptErrorCode(result.error),
         });
+        // Gallery mode: after a buy EA turned down (someone else's landed
+        // first), no other buy from this search. The next listing went out
+        // about 200 ms later, and EA answered it 429, 521 or 426 (too many
+        // requests) every time on Oct 21; the next search, after the search
+        // delay, looks again.
+        if (galleryKey !== undefined && !isAdapterRefusal(result.error)) {
+          this.deps.onChange();
+          return 'dropped';
+        }
       }
       this.deps.onChange();
     }

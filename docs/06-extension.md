@@ -846,7 +846,11 @@ governor):
    price: "Cheapest listed: 4,000 coins, over the 1,300 coins left of your
    Gallery budget") or not at all (it goes to the end of the list, as
    above). Only one copy is bought; no minimum profit applies (each card is
-   bought to collect and sold back for about what it cost). A buy EA does not
+   bought to collect and sold back for about what it cost). After a buy EA
+   turns down (someone else's landed first), nothing more is bought from that
+   search: the next listing used to go out about 200 ms later, and EA
+   answered it 429, 521 or 426 (too many requests) every time; the next
+   search, a search delay later, looks again. A buy EA does not
    answer in time holds the card until EA's late answer settles it (up to a
    minute), so it is never bought twice.
 4. **To the club, then back on the market**, a step every 3–6 s (about as
