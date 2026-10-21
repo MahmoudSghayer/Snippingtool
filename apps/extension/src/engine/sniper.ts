@@ -99,6 +99,7 @@ import {
   galleryListPrices,
   galleryMarketCap,
   gallerySnipeCap,
+  markCompletedSets,
   markOwned,
   nextGalleryCard,
   pickResourceId,
@@ -765,6 +766,11 @@ interface GalleryJob {
 /** Gallery mode: how long a buy EA did not answer in time holds the card,
  * so no second copy is bought before EA's late answer settles it. */
 const GALLERY_LATE_MS = 60_000;
+/** Gallery mode: a card bought before the page reloaded, which the adapter
+ * can no longer move (it holds only what it bought on this page load). */
+const GALLERY_RELOADED_NOTE =
+  'Bought before the page reloaded, so Nova AI can no longer move it: send it to your club and list it by hand';
+
 /** Gallery mode: how long a club read stays good enough to skip the one
  * before a run's first search. */
 const GALLERY_CLUB_FRESH_MS = 60_000;
@@ -900,6 +906,7 @@ const EA_REST_WINDOW_MS = 2 * 60 * 60_000;
 function copyGallery(g: GalleryState): GalleryState {
   const copy: GalleryState = { budget: g.budget, spent: g.spent, cards: g.cards.map((c) => ({ ...c, ...(c.setIds ? { setIds: [...c.setIds] } : {}) })) };
   if (g.sets) copy.sets = g.sets.map((x) => ({ ...x }));
+  if (g.completed) copy.completed = [...g.completed];
   return copy;
 }
 
@@ -1351,6 +1358,8 @@ export class Sniper {
       return;
     }
     if (mode === 'gallery') {
+      // Cards an earlier run left on their way to the market count as work.
+      this.resumeGalleryJobs();
       const reason: SniperStopReason | null =
         !this.deps.adapter.club || !this.deps.adapter.move
           ? 'gallery_unavailable'
@@ -2349,6 +2358,50 @@ export class Sniper {
     else w.steps++;
   }
 
+  /** Cards bought on an earlier run whose way to the club and the market
+   * did not finish (the bot stopped, EA refused a step): picked up again
+   * from where they were. After a page reload the adapter refuses them (it
+   * no longer holds them), and they say to finish them by hand. */
+  private resumeGalleryJobs(): void {
+    const queued = new Set(this.galleryJobs.map((j) => j.key));
+    for (const card of this.gallery.cards) {
+      if (!card.tradeId || card.price == null || queued.has(card.key) || (card.status !== 'bought' && card.status !== 'club')) continue;
+      const m: SniperMatch = {
+        tradeId: card.tradeId,
+        resourceId: card.resourceId ?? card.playerId,
+        assetId: card.playerId,
+        rating: card.rating,
+        buyNow: card.price,
+        expiresAt: null,
+      };
+      this.galleryJobs.push({ key: card.key, m, step: card.status === 'bought' ? 'club' : 'move', tries: 0 });
+    }
+  }
+
+  /** fut.gg Sets whose cards are all collected now: marked completed, and
+   * the trader told to finish them in the game. */
+  private noteCompletedSets(): void {
+    for (const set of markCompletedSets(this.gallery)) {
+      this.addLog({
+        kind: 'info',
+        message: `Gallery: ${set.name} is complete: every card is collected. Finish it in the game: Gallery, ${set.name}, Autocomplete, then Confirm Changes`,
+      });
+    }
+  }
+
+  /** Which of these cards (EA's card ids) the club holds, for the page as
+   * it adds fut.gg Sets; null when the club could not be read. A Gallery
+   * run that starts right after does not ask again. */
+  async readClub(resourceIds: number[]): Promise<number[] | null> {
+    const owned = this.deps.adapter.owned;
+    if (resourceIds.length === 0) return [];
+    if (!owned || this.isRunning()) return null;
+    const r = await owned(resourceIds.slice(0, 100)).catch(() => null);
+    if (!r?.ok || !r.owned) return null;
+    this.galleryClubAt = this.now();
+    return r.owned;
+  }
+
   /**
    * Gallery mode: which fut.gg lineup cards still to buy the club holds
    * already (EA's own club search), marked `owned` so none is bought. Runs
@@ -2369,6 +2422,7 @@ export class Sniper {
     }
     this.galleryClubAt = this.now();
     const marked = markOwned(this.gallery, r.owned);
+    if (marked > 0) this.noteCompletedSets();
     if (marked > 0) {
       this.addLog({
         kind: 'info',
@@ -2399,6 +2453,7 @@ export class Sniper {
       card.status = 'bought';
       card.price = m.buyNow;
       card.resourceId ??= m.resourceId;
+      card.tradeId = m.tradeId;
       delete card.note;
     }
     this.gallery.spent += m.buyNow;
@@ -2423,15 +2478,22 @@ export class Sniper {
       this.galleryJobs.shift();
       if (card && status) card.status = status;
       if (card && note) card.note = note.slice(0, 200);
+      // Finished, or no longer Nova's to finish.
+      if (card) delete card.tradeId;
+      if (status === 'listed') this.noteCompletedSets();
     };
     if (job.step === 'club') {
       const r = await this.deps.adapter.club!(job.m.tradeId);
-      if (r.ok) {
+      if (!r.ok && r.error === 'club_not_bought') {
+        // Bought before the page reloaded: the adapter no longer holds it.
+        done(null, GALLERY_RELOADED_NOTE);
+        this.addLog({ kind: 'blocked', ...ids, message: `{card}: ${GALLERY_RELOADED_NOTE}` });
+      } else if (r.ok) {
         if (card) card.status = 'club';
         job.step = 'move';
         job.tries = 0;
         this.addLog({ kind: 'moved', ...ids, message: 'Sent {card} to your club' });
-      } else if (++job.tries >= COLLECT_TRIES || r.error === 'club_not_bought' || r.error === 'club_unsupported') {
+      } else if (++job.tries >= COLLECT_TRIES || r.error === 'club_unsupported') {
         const why = clubMissReason(r.error);
         if (card) card.note = `Not sent to your club (${why}): check the Set counted it`.slice(0, 200);
         this.addLog({ kind: 'blocked', ...ids, message: `{card} not sent to your club: ${why} — listing it anyway` });
@@ -2440,10 +2502,13 @@ export class Sniper {
       }
     } else if (job.step === 'move') {
       const r = await this.deps.adapter.move!(job.m.tradeId);
-      if (r.ok) {
+      if (!r.ok && r.error === 'move_not_bought') {
+        done(null, GALLERY_RELOADED_NOTE);
+        this.addLog({ kind: 'blocked', ...ids, message: `{card}: ${GALLERY_RELOADED_NOTE}` });
+      } else if (r.ok) {
         job.step = 'list';
         job.tries = 0;
-      } else if (++job.tries >= COLLECT_TRIES || r.error === 'move_not_bought') {
+      } else if (++job.tries >= COLLECT_TRIES) {
         const why = moveMissReason(r.error);
         done(null, `Not listed: ${why}. It is in your club or unassigned items`);
         this.addLog({ kind: 'blocked', ...ids, message: `{card} not moved to the transfer list: ${why}` });

@@ -27,6 +27,8 @@ export const GALLERY_LIMITS = {
   noteLength: 200,
   /** fut.gg Sets on one list. */
   sets: 40,
+  /** fut.gg Sets marked completed. */
+  completed: 500,
 } as const;
 
 /**
@@ -94,6 +96,10 @@ export const galleryCardSchema = z
     listPrice: coins.optional(),
     /** Why it was skipped, or what went wrong after the buy. */
     note: z.string().max(GALLERY_LIMITS.noteLength).optional(),
+    /** The trade it was bought under, while its way to the club and the
+     * market is not finished: a later Start on the same page load picks it
+     * up again. */
+    tradeId: z.string().min(1).max(40).optional(),
   })
   .strict();
 export type GalleryCard = z.infer<typeof galleryCardSchema>;
@@ -131,6 +137,10 @@ export const galleryStateSchema = z
     cards: z.array(galleryCardSchema).max(GALLERY_LIMITS.cards),
     /** The fut.gg Sets the list's `exact` cards came from. */
     sets: z.array(gallerySetSchema).max(GALLERY_LIMITS.sets).optional(),
+    /** fut.gg Sets (their ids) the trader completed: never offered again,
+     * and their cards still to buy are left alone. Marked when all of a
+     * Set's cards are collected, or by hand. */
+    completed: z.array(z.number().int().positive()).max(GALLERY_LIMITS.completed).optional(),
     /** The most the list may spend on buys (0: nothing is bought). */
     budget: z.number().int().min(GALLERY_LIMITS.budget.min).max(GALLERY_LIMITS.budget.max),
     /** Coins spent on the list's buys so far. */
@@ -193,10 +203,46 @@ export const futggCardSchema = z
     version: z.string().max(GALLERY_LIMITS.versionLength),
     holographic: z.boolean(),
     score: z.number().int().min(0).max(10_000_000),
+    /** fut.gg's price (0 on a card of the Set's card list that is not in
+     * the lineup). */
     price: coins,
+    /** What the Set's bonus tags look at (absent: not known). */
+    nation: z.number().int().min(0).optional(),
+    club: z.number().int().min(0).optional(),
+    league: z.number().int().min(0).optional(),
+    positions: z.array(z.string().max(4)).max(12).optional(),
+    weakFoot: z.number().int().min(0).max(5).optional(),
+    skillMoves: z.number().int().min(0).max(5).optional(),
   })
   .strict();
 export type FutggCard = z.infer<typeof futggCardSchema>;
+
+/** One of fut.gg's Gallery bonus tags: a share of the matching cards'
+ * scores once enough cards match (`tiers`), by one rule. */
+export const futggTagSchema = z
+  .object({
+    id: z.number().int(),
+    name: z.string().max(60),
+    tiers: z
+      .array(
+        z
+          .object({
+            minItems: z.number().int().min(0).max(100),
+            bonus: z.number().min(0).max(1_000),
+          })
+          .strict(),
+      )
+      .max(10),
+    rule: z
+      .object({
+        type: z.string().max(40),
+        attribute: z.string().max(40),
+        values: z.array(z.string().max(20)).max(20),
+      })
+      .strict(),
+  })
+  .strict();
+export type FutggTag = z.infer<typeof futggTagSchema>;
 
 export const futggLineupSchema = z
   .object({
@@ -205,6 +251,10 @@ export const futggLineupSchema = z
     cards: z.array(futggCardSchema).max(100),
     /** Lineup cards fut.gg's card list for the Set does not describe. */
     missing: z.number().int().min(0).max(100),
+    /** The Set's other cards, best scores first (owned ones can stand in
+     * for lineup cards), and the bonus tags its score counts. */
+    others: z.array(futggCardSchema).max(150).optional(),
+    tags: z.array(futggTagSchema).max(40).optional(),
   })
   .strict();
 export type FutggLineup = z.infer<typeof futggLineupSchema>;

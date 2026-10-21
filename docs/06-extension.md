@@ -750,17 +750,41 @@ skipped cards back to buy; **Clear list** empties it.
 **Browse fut.gg Sets** reads fut.gg's Gallery (`background/futgg.ts`,
 `gallery.futggSets`: the JSON fut.gg's own Gallery pages load,
 `/api/fut/gallery/fc27/hub/`; `www.fut.gg` is in the `ledger-auto` host
-permissions and the userscript's `@connect`), which carries, for every Set and grade, the
-cheapest lineup that reaches it from fut.gg's own solver: its cards (EA card
-ids), its price in all, its dearest card and its score, bonus tags included.
-The picker lists each Set at its best grade, cheapest first, with what that
-costs and the Gallery Tokens it gives; **Only Sets that reach grade S** (on
-by default) leaves out the Sets whose best grade is lower, and Sets with
-nothing to buy are never listed. Ticked Sets are added with **Add Sets**:
-for each, background reads the Set's card list (`gallery.futggLineup`,
+permissions and the userscript's `@connect`), which carries, for every Set
+and grade, the cheapest lineup that reaches it from fut.gg's own solver: its
+cards (EA card ids), its price in all, its dearest card and its score, bonus
+tags included. The picker has a tab per grade (**S**, A, B, C, D; S first):
+each lists the Sets fut.gg has a lineup for at that grade, under fut.gg's
+categories in fut.gg's order (Rarities, Premier League / Barclays WSL, …),
+cheapest first, with what that grade costs and the Gallery Tokens it gives.
+Sets with nothing to buy are never listed. Ticked Sets, each at the grade
+of the tab it was ticked on, are added with **Add Sets**: for each,
+background reads the Set's card list (`gallery.futggLineup`,
 `/sets/{id}/pool/`) to name the lineup's cards (player, rating, rarity,
-holographic or not, score), and `addFutggLineup` puts them on the list under
-the Set. These cards are **exact** (`exact: true`): only that card id is
+holographic or not, score, and what the Set's bonus tags look at: nation,
+club, league, positions, weak foot, skill moves), the Set's other cards
+(best scores first), and the Set's bonus tags (`/sets/{category}/{set}/`).
+The page then asks the club (`owned`: the web app's own
+`services.Club.search` with the card ids in `defId`, as its Player Picks
+screen does; loans left out) about every lineup card and then the Sets'
+other cards, 100 ids at most in one read, and `addFutggLineup` puts the Set
+on the list:
+
+- lineup cards the club holds are **In your club** (`owned`): they count for
+  the Set as they are, so none is bought;
+- a player the club holds who is on the Set's card list but not in the
+  lineup **stands in** for a lineup card still to buy, dearest first
+  (`planFutggSwaps`), when he scores at least what that card scores and the
+  Set still makes its grade with him. The Set's score is worked out as
+  fut.gg works it out (`engine/gallery-score.ts`: the cards' scores plus
+  each bonus tag's share of the matching cards' scores, rounded down; it
+  gives fut.gg's own score for 337 of fut.gg's 348 cheapest lineups, Oct
+  2026, the rest being Sets of many special cards), and trusted only when it
+  gives fut.gg's score for fut.gg's lineup: otherwise, or with a tag rule it
+  does not know, nothing is swapped. The page says which player stood in
+  for which card and about what it saves.
+
+The remaining cards are **exact** (`exact: true`): only that card id is
 bought, priced and listed, since a holographic copy shares the rating and
 the rarity and scores more, and the score is what the grade needs. A
 special card's searches carry its rarity when EA's Rarity list has it; a
@@ -768,20 +792,24 @@ gold card's never (fut.gg gives every gold card rarity 0, even a newer one
 with its own id). fut.gg's price is kept as the market price of last resort
 (`guide`: after FUTBIN and Nova). A card two Sets share is on the list once
 and counts for both (`setIds`), as EA counts one card for several Sets.
-Then the page asks the club which of the lineup's cards it holds already
-(`owned`: the web app's own `services.Club.search` with the card ids in
-`defId`, as its Player Picks screen does; loans left out) and marks them
-**In your club** (`owned`): they count for their Sets as they are, so none
-is bought. Every Gallery run asks again before its first search (unless the
-page did in the last minute). A card the club cannot be read for is bought
-as before. Each Set on the list shows under the picker ("Malaga CF · grade S
-· 4 of 15 collected", with **Remove**, which takes off its cards unless
-another Set holds them or they are on their way) and atop the Gallery tab
-("grade S needs 900 points, fut.gg's lineup makes 908 · 4 of 15 collected",
-and, when cards were skipped, their points and that the Set may miss its
-grade). fut.gg's cards stay out of the list box, and **Load list** keeps
-them. fut.gg documents no API: anything it answers that does not read like
-its Gallery JSON is no Sets, and its answers are reused for ten minutes.
+Every Gallery run asks the club again before its first search, for the
+cards still to buy (unless the page did in the last minute); a club that
+cannot be read means every card is bought, as before.
+
+A Set whose cards are all collected (in the club, listed, or owned) is
+marked **completed** (`completed`, the log says to finish it in the game);
+**Mark completed** does it by hand. A completed Set is not offered again (the
+picker shows it with **Undo**, and so does the list), and its cards still to
+buy are left alone ("left out (Set completed)") unless another Set needs
+them. Each Set on the list shows under the picker ("Malaga CF · grade S · 4
+of 15 collected", with **Mark completed** and **Remove**, which takes off its
+cards unless another Set holds them or they are on their way) and atop the
+Gallery tab ("grade S needs 900 points, the lineup makes 908 · 4 of 15
+collected", and, when cards were skipped, their points and that the Set may
+miss its grade). fut.gg's cards stay out of the list box, and **Load list**
+keeps them. fut.gg documents no API: anything it answers that does not read
+like its Gallery JSON is no Sets, and its answers are reused for ten
+minutes.
 
 One card at a time, in the list's order, under every limit Snipe mode has
 (the search delay start to start, breaks, rests, EA's backoff, the
@@ -820,6 +848,12 @@ governor):
    tried three times. A card the club refuses (EA refuses a card the club
    already holds) still goes back on the market, so its coins come back,
    and its row says "Not sent to your club (…): check the Set counted it".
+   A card's trade is kept (`tradeId`) until it is listed: a card the bot
+   stopped on, or one EA refused a step for, is picked up again from that
+   step at the next Start. After a page reload the adapter no longer holds
+   it (`club_not_bought` / `move_not_bought`), and its row says to send it to
+   the club and list it by hand; **Listed it myself** on its row marks it
+   done.
    EA's help ("How do Gallery Sets work in EA SPORTS FC 27?") says a card
    that passes through the club still counts toward the Gallery after it is
    sold, and that one card can count for several Sets. The trader then adds
@@ -842,7 +876,8 @@ reload the adapter can no longer move it, and its row stays at Bought / In
 club for the trader to finish. Beside Search results a **Gallery** tab (the
 one the page opens on in Gallery mode, "3/20" on it) lists every card with
 its step, the price it paid and the price it listed at, the one being bought
-marked "Buying now"; its first line sums the list up ("12 to buy · 6 listed
+marked "Buying now", grouped: To buy, On the way to the market, Skipped,
+Done; its first line sums the list up ("12 to buy · 6 listed
 · 0 on the way · 2 skipped · spent 41,200 of 100,000"). Buys and sales are
 reported like any other (`onAttempt` / `onTrade`), so the trader report
 shows them.
