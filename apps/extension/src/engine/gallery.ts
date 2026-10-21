@@ -450,6 +450,33 @@ export function markCompletedSets(state: GalleryState): GallerySet[] {
   return marked;
 }
 
+/**
+ * The list with what is finished cleared away (Reset stats): the cards that
+ * are done (listed, in the club, or left out for a completed Set) and that
+ * no Set in progress counts, the cards bought on an earlier page load that
+ * Nova can no longer finish, and the completed Sets (they stay marked
+ * completed, so the picker still does not offer them). Cards still to buy,
+ * the cards of Sets in progress and the cards Nova is still finishing stay.
+ * What the list spent goes back to 0.
+ */
+export function clearFinishedGallery(state: GalleryState): GalleryState {
+  const marked: GalleryState = { ...state, cards: state.cards.map((c) => ({ ...c })) };
+  markCompletedSets(marked);
+  const done = new Set(marked.completed ?? []);
+  const inProgress = new Set((marked.sets ?? []).filter((s) => !done.has(s.id)).map((s) => s.id));
+  const cards = marked.cards.filter((c) => {
+    if (c.setIds?.some((id) => inProgress.has(id))) return true;
+    if (c.status === 'todo' || c.status === 'skipped') return galleryCardNeeded(c, marked);
+    if (c.status === 'bought' || c.status === 'club') return c.tradeId !== undefined;
+    return false;
+  });
+  const sets = (marked.sets ?? []).filter((s) => inProgress.has(s.id));
+  const next: GalleryState = { ...marked, cards, spent: 0 };
+  if (sets.length > 0) next.sets = sets;
+  else delete next.sets;
+  return next;
+}
+
 /** The list with a fut.gg Set marked completed, or not. */
 export function setCompleted(state: GalleryState, setId: number, completed: boolean): GalleryState {
   const ids = (state.completed ?? []).filter((id) => id !== setId);

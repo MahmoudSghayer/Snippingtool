@@ -863,7 +863,13 @@ governor):
 The list's **budget** (coins, under the list) caps what its buys spend:
 the bot stops (`gallery_budget`) at a card whose cheapest listing costs more
 than what is left, or once less than EA's lowest price is left. Sales do not
-add back to it; **Reset spent** zeroes it. The bot stops on its own when
+add back to it; **Reset spent** zeroes it. **Reset stats** (over the
+session's numbers) also clears the list of what is finished
+(`clearFinishedGallery`): done cards no Set in progress counts, cards
+bought on an earlier page load that Nova can no longer finish, and the
+completed Sets (still marked completed in the picker), and zeroes spent;
+cards still to buy, the cards of Sets in progress and cards Nova is still
+finishing stay. The bot stops on its own when
 every card is listed or in the club (`gallery_done`), and refuses to start with
 no card left to buy (`no_gallery`) or on a page that cannot send cards to the
 club (`gallery_unavailable`). The list and every card's progress (to buy,

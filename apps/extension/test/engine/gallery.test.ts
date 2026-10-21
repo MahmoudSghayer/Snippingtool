@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   addFutggLineup,
+  clearFinishedGallery,
   clubCheckIds,
   futggClubIds,
   futggSetChoices,
@@ -294,6 +295,30 @@ describe('completed Sets', () => {
     expect(g.completed).toEqual([90]);
     // Once only.
     expect(markCompletedSets(g)).toEqual([]);
+  });
+
+  it('clears what is finished on Reset stats: done cards and completed Sets go, the rest stays, spent goes to 0', () => {
+    const g = state();
+    // Malaga CF: both cards done (not yet marked); Frosinone: in progress.
+    g.cards[0]!.status = 'listed';
+    g.cards[1]!.status = 'owned';
+    g.spent = 4_000;
+    g.cards.push(
+      // Left over from an earlier page load: bought, its Set removed since.
+      { key: '7:72#7', name: 'Leftover', rating: 72, playerId: 7, resourceId: 7, exact: true, status: 'bought', price: 1_300 },
+      // Bought on this page load, still on its way.
+      { key: '8:70#8', name: 'On its way', rating: 70, playerId: 8, resourceId: 8, exact: true, status: 'club', price: 1_200, tradeId: 't8' },
+      // A typed card, done.
+      { key: '9:80', name: 'Typed', rating: 80, playerId: 9, resourceId: 9, status: 'listed' },
+    );
+    const next = clearFinishedGallery(g);
+    // 'Shared' stays: Frosinone, in progress, counts it too.
+    expect(next.cards.map((c) => c.name)).toEqual(['Shared', 'Frosinone only', 'On its way']);
+    expect(next.sets!.map((x) => x.name)).toEqual(['Frosinone']);
+    expect(next.completed).toEqual([90]);
+    expect(next.spent).toBe(0);
+    // Nothing left to clear: the list stays as it is.
+    expect(clearFinishedGallery(next).cards).toEqual(next.cards);
   });
 
   it('leaves the cards of a Set marked completed alone, unless another Set needs them', () => {

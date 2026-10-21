@@ -383,3 +383,27 @@ it("names the card in Gallery mode's notes in the Activity feed, never {card}", 
   expect(text).toContain('Gallery: 85 Hugo Ekitiké — fut.gg price 1,400 coins');
   expect(text).not.toContain('{card}');
 });
+
+it('clears the finished Gallery cards and completed Sets on Reset stats', async () => {
+  const set = { id: 90, name: 'Malaga CF', path: 'laliga/malaga-cf', grade: 'S' as const, threshold: 900, score: 908, tokens: 28, cost: 3_700 };
+  const gallery: GalleryState = {
+    budget: 100_000,
+    spent: 3_700,
+    sets: [set],
+    cards: [
+      { key: '1:80#1', name: 'Done one', rating: 80, playerId: 1, resourceId: 1, exact: true, setIds: [90], status: 'listed', price: 3_700 },
+      { key: '2:72#2', name: 'Leftover', rating: 72, playerId: 2, resourceId: 2, exact: true, status: 'bought', price: 1_300 },
+      { key: '3:80', name: 'Still to buy', rating: 80, playerId: 3, status: 'todo' },
+    ],
+  };
+  const { root, sniper } = await mount({ ...DEFAULT_BOT_MODE_SETTINGS, mode: 'gallery' }, gallery);
+  (root.getElementById('reset') as HTMLButtonElement).click();
+  // The message follows the save.
+  await vi.advanceTimersByTimeAsync(10);
+  const g = sniper.getGallery();
+  expect(g.cards.map((c) => c.name)).toEqual(['Still to buy']);
+  expect(g.sets).toBeUndefined();
+  expect(g.completed).toEqual([90]);
+  expect(g.spent).toBe(0);
+  expect(root.getElementById('saved')!.textContent).toBe('Stats reset · 2 finished Gallery cards cleared');
+});

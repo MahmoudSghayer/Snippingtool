@@ -72,6 +72,7 @@ import {
 
 import {
   addFutggLineup,
+  clearFinishedGallery,
   futggClubIds,
   futggSetChoices,
   galleryCardNeeded,
@@ -3160,7 +3161,16 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     refreshLive();
   });
   onTrusted($('reset'), 'click', () => {
-    deps.getSniper()?.reset();
+    const sniper = deps.getSniper();
+    sniper?.reset();
+    // A fresh start for the Gallery list too: its finished cards and
+    // completed Sets go (they stay marked completed), and spent goes to 0.
+    const g = currentGallery();
+    if (sniper && !sniper.isRunning() && (g.cards.length > 0 || g.spent > 0)) {
+      const next = clearFinishedGallery(g);
+      const gone = g.cards.length - next.cards.length;
+      commitGallery(next, gone > 0 ? `Stats reset · ${gone} finished Gallery ${gone === 1 ? 'card' : 'cards'} cleared` : 'Stats reset');
+    }
     refreshLive();
   });
   // EA's Reset, beside the Start button: empties the whole search.
