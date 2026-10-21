@@ -768,7 +768,16 @@ The page then asks the club (`owned`: the web app's own
 `services.Club.search` with the card ids in `defId`, as its Player Picks
 screen does; loans left out) about every lineup card and then the Sets'
 other cards, 100 ids at most in one read, and `addFutggLineup` puts the Set
-on the list:
+on the list. The read always says what it found: "Added 1 Set: 15 cards ·
+2 in your club already", "· none in your club", or "· your club was not
+checked" with the reason under the picker. An answer that holds a player
+not asked about (EA's ids: a special version is its player's base id plus a
+multiple of 2^24, so other versions of a player asked about do not count)
+means the search ignored the card filter and answered with the club's
+first page: the adapter refuses it (`owned_unfiltered`) instead of reading
+it as "none owned", and every card stays to buy. A Gallery run's own check
+at Start logs its result the same way ("Gallery: checked your club: none of
+the 12 cards still to buy are in it").
 
 - lineup cards the club holds are **In your club** (`owned`): they count for
   the Set as they are, so none is bought;

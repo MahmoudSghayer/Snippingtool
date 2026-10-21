@@ -444,6 +444,24 @@ describe('Gallery mode — fut.gg lineup cards', () => {
     expect(h.sniper.state.stopReason).toBe('gallery_done');
   });
 
+  it('says so when the club holds none of the cards still to buy', async () => {
+    const h = setup({
+      gallery: { budget: 100_000, spent: 0, cards: [exact()] },
+      owned: () => ({ ok: true, owned: [], signed: true, latencyMs: 5 }),
+    });
+    expect(await h.sniper.checkGalleryClub()).toBe(0);
+    expect(h.log()).toContain('Gallery: checked your club: none of the 1 card still to buy is in it');
+  });
+
+  it("says EA's club search ignored the cards asked about, and buys every card", async () => {
+    const h = setup({
+      gallery: { budget: 100_000, spent: 0, cards: [exact()] },
+      owned: () => ({ ok: false, error: 'owned_unfiltered: Club.search answered with players not asked about', signed: true, latencyMs: 5 }),
+    });
+    expect(await h.sniper.checkGalleryClub()).toBeNull();
+    expect(h.log()).toContain("Gallery: could not check your club (EA's club search answered with other players than the ones asked about) — buying every card on the list");
+  });
+
   it('buys every card when the club cannot be read', async () => {
     const h = setup({
       gallery: { budget: 100_000, spent: 0, cards: [exact()] },
@@ -521,13 +539,13 @@ describe('Gallery mode — cards bought on an earlier run, and Sets done', () =>
     expect(h.log()).toContain('Gallery: Malaga CF is complete: every card is collected. Finish it in the game: Gallery, Malaga CF, Autocomplete, then Confirm Changes');
   });
 
-  it('reads the club for the page, and says null when it cannot', async () => {
+  it('reads the club for the page, and says why when it cannot', async () => {
     const h = setup({ owned: (ids) => ({ ok: true, owned: ids.slice(0, 1), signed: true, latencyMs: 5 }) });
-    expect(await h.sniper.readClub([7, 8])).toEqual([7]);
-    expect(await h.sniper.readClub([])).toEqual([]);
+    expect(await h.sniper.readClub([7, 8])).toEqual({ ok: true, owned: [7] });
+    expect(await h.sniper.readClub([])).toEqual({ ok: true, owned: [] });
     const off = setup({ owned: () => ({ ok: false, error: 'owned_too_soon', signed: true, latencyMs: 5 }) });
-    expect(await off.sniper.readClub([7])).toBeNull();
-    expect(await setup().sniper.readClub([7])).toBeNull();
+    expect(await off.sniper.readClub([7])).toEqual({ ok: false, why: 'it was checked a moment ago' });
+    expect(await setup().sniper.readClub([7])).toEqual({ ok: false, why: 'this EA web app has no club search Nova AI knows' });
   });
 });
 

@@ -1197,10 +1197,12 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     let swapped = 0;
     let sets = 0;
     let cost = 0;
+    let clubRead = false;
     if (lineups.length > 0) {
       const club = sniper ? await sniper.readClub(futggClubIds(lineups)) : null;
-      const held = new Set(club ?? []);
-      if (club == null) futggProblems.push('Could not check your club: every card is bought (a Start checks again)');
+      const held = new Set(club?.ok ? club.owned : []);
+      clubRead = club?.ok === true;
+      if (!club?.ok) futggProblems.push(`Could not check your club (${club?.why ?? 'Nova AI is not ready'}): Nova buys every card (a Start checks again)`);
       for (const lineup of lineups) {
         const r = addFutggLineup(g, lineup, catalog?.rarities ?? [], held);
         futggProblems.push(...r.problems);
@@ -1222,6 +1224,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       const parts = [`${added} cards`];
       if (owned > 0) parts.push(`${owned} in your club already`);
       if (swapped > 0) parts.push(`${swapped} swapped for players you own`);
+      if (!clubRead) parts.push('your club was not checked');
+      else if (owned === 0 && swapped === 0) parts.push('none in your club');
       const over = cost > left;
       if (over) parts.push(`fut.gg prices them at ${fmt(cost)}, more than the ${fmt(left)} left of your budget`);
       say(`Added ${sets === 1 ? '1 Set' : `${sets} Sets`}: ${parts.join(' · ')}`, over);

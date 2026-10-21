@@ -783,6 +783,7 @@ const GALLERY_STEP_GAP = { min: 1.5, max: 3 };
 export function ownedMissReason(error: string | undefined): string {
   if (error === 'owned_unsupported') return 'this EA web app has no club search Nova AI knows';
   if (error === 'owned_too_soon') return 'it was checked a moment ago';
+  if (error?.startsWith('owned_unfiltered')) return "EA's club search answered with other players than the ones asked about";
   if (error === undefined || /timed out/.test(error)) return 'EA did not answer in time';
   const status = /status (\d{3})/.exec(error)?.[1];
   return status ? `EA refused it (error ${status})` : 'EA did not answer as expected';
@@ -2391,16 +2392,17 @@ export class Sniper {
   }
 
   /** Which of these cards (EA's card ids) the club holds, for the page as
-   * it adds fut.gg Sets; null when the club could not be read. A Gallery
-   * run that starts right after does not ask again. */
-  async readClub(resourceIds: number[]): Promise<number[] | null> {
+   * it adds fut.gg Sets, or why the club could not be read. A Gallery run
+   * that starts right after does not ask again. */
+  async readClub(resourceIds: number[]): Promise<{ ok: true; owned: number[] } | { ok: false; why: string }> {
     const owned = this.deps.adapter.owned;
-    if (resourceIds.length === 0) return [];
-    if (!owned || this.isRunning()) return null;
+    if (resourceIds.length === 0) return { ok: true, owned: [] };
+    if (!owned) return { ok: false, why: ownedMissReason('owned_unsupported') };
+    if (this.isRunning()) return { ok: false, why: 'the bot is running' };
     const r = await owned(resourceIds.slice(0, 100)).catch(() => null);
-    if (!r?.ok || !r.owned) return null;
+    if (!r?.ok || !r.owned) return { ok: false, why: ownedMissReason(r?.error) };
     this.galleryClubAt = this.now();
-    return r.owned;
+    return { ok: true, owned: r.owned };
   }
 
   /**
@@ -2430,6 +2432,9 @@ export class Sniper {
         message: `Gallery: ${plural(marked, 'card')} of your list ${marked === 1 ? 'is' : 'are'} in your club already — ${marked === 1 ? 'it counts' : 'they count'} for ${marked === 1 ? 'its Set' : 'their Sets'}, so Nova will not buy ${marked === 1 ? 'it' : 'them'}`,
       });
       this.saveGallery();
+    } else {
+      // Said too, so a check that worked is never mistaken for none at all.
+      this.addLog({ kind: 'info', message: `Gallery: checked your club: none of the ${plural(ids.length, 'card')} still to buy ${ids.length === 1 ? 'is' : 'are'} in it` });
     }
     this.deps.onChange();
     return marked;
