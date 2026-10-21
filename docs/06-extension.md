@@ -849,7 +849,11 @@ governor):
    bought to collect and sold back for about what it cost). A buy EA does not
    answer in time holds the card until EA's late answer settles it (up to a
    minute), so it is never bought twice.
-4. **To the club, then back on the market**, a step every 1.5–3 s: the
+4. **To the club, then back on the market**, a step every 3–6 s (about as
+   long as doing it by hand: at 1.5–3 s a buy and its three steps came as a
+   burst, and EA limited the account), each waiting out any EA backoff or
+   rest first, and a rate limit EA answers a step with (429, 512, 521)
+   counting like a search's (backoff, slower searches, rests): the
    adapter's `club` act (`Item.move(item, ItemPile.CLUB)`, the web app's own
    "Send to My Club"), then `move` to the transfer list and `list` one EA
    price step over what it cost (`galleryListPrices`), with a starting bid

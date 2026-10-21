@@ -306,6 +306,28 @@ describe('Gallery mode — buying and listing', () => {
     });
   });
 
+  it('a card step EA rate-limits makes the bot back off: the next step waits it out, and the steps go at a hand-made pace', async () => {
+    const clubAt: number[] = [];
+    let limited = true;
+    const h = setup({
+      results: () => [listing('t1', 3_700)],
+      clubResult: () => {
+        clubAt.push(h.clock.t);
+        if (!limited) return { ok: true, signed: true, latencyMs: 5 };
+        limited = false;
+        return { ok: false, signed: true, error: 'move to club did not report success: false (status 429)', latencyMs: 5 };
+      },
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.calls).toEqual(['buy t1', 'club t1', 'club t1', 'move t1', 'list t1']);
+    expect(h.log()).toContain('EA says too many requests (error 429): waiting 5 s before the next search');
+    // 5 s of EA backoff, then the 3 s pause before the step again (the
+    // pause alone was 1.5 s).
+    expect(clubAt[1]! - clubAt[0]!).toBeGreaterThanOrEqual(8 * SEC);
+    expect(h.gallery().cards[0]).toMatchObject({ status: 'listed', listPrice: 3_900 });
+  });
+
   it('a buy EA did not answer in time is never bought twice: its late answer settles it', async () => {
     let first = true;
     const h = setup({

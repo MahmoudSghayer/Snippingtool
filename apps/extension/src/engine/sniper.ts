@@ -776,8 +776,10 @@ const GALLERY_RELOADED_NOTE =
 const GALLERY_CLUB_FRESH_MS = 60_000;
 
 /** Gallery mode: the pause before each step of a card's way to the club and
- * back on the market, in seconds: no script-fast burst of calls. */
-const GALLERY_STEP_GAP = { min: 1.5, max: 3 };
+ * back on the market, in seconds: about as long as doing it by hand, so a
+ * buy and its three steps are no burst of calls (EA limited the trader's
+ * account at 1.5-3 s, Oct 21). */
+const GALLERY_STEP_GAP = { min: 3, max: 6 };
 
 /** Why the club could not be read for the list, in the user's words. */
 export function ownedMissReason(error: string | undefined): string {
@@ -2440,6 +2442,16 @@ export class Sniper {
     return marked;
   }
 
+  /** A card step (to the club, to the transfer list, listed) EA refused
+   * with a rate limit (429, 512, 521): those calls are not on the market
+   * the adapter watches, so it is counted here like a search's limit (the
+   * bot backs off, slows down and, after repeated ones, rests). */
+  private noteStepLimit(error: string | undefined): void {
+    const status = Number(/status (\d{3})/.exec(error ?? '')?.[1]);
+    if (!Number.isInteger(status) || eaErrorCategory(status) !== 'rate_limited') return;
+    this.onEaError({ status, category: 'rate_limited', endpoint: 'bid', seenAt: this.now() });
+  }
+
   /** A card none of is listed: never skipped, it goes to the end of the
    * list (still to buy, with the reason) and the next card comes first. */
   private galleryLater(card: GalleryCard, why: string): void {
@@ -2478,6 +2490,8 @@ export class Sniper {
   private async collectGallery(signal: AbortSignal): Promise<void> {
     await this.wait('waiting', this.pickSeconds(GALLERY_STEP_GAP) * 1000, signal);
     if (signal.aborted || this.applyKillSwitch() || this.applyEntitlement() || this.applyExclusive()) return;
+    // EA asked the bot to slow down: these calls wait it out like searches.
+    if (await this.waitOutEaBackoff(signal)) return;
     const job = this.galleryJobs[0]!;
     const card = this.gallery.cards.find((c) => c.key === job.key);
     const ids = { resourceId: job.m.resourceId, assetId: job.m.assetId, rating: job.m.rating };
@@ -2491,6 +2505,7 @@ export class Sniper {
     };
     if (job.step === 'club') {
       const r = await this.deps.adapter.club!(job.m.tradeId);
+      if (!r.ok) this.noteStepLimit(r.error);
       if (!r.ok && r.error === 'club_not_bought') {
         // Bought before the page reloaded: the adapter no longer holds it.
         done(null, GALLERY_RELOADED_NOTE);
@@ -2509,6 +2524,7 @@ export class Sniper {
       }
     } else if (job.step === 'move') {
       const r = await this.deps.adapter.move!(job.m.tradeId);
+      if (!r.ok) this.noteStepLimit(r.error);
       if (!r.ok && r.error === 'move_not_bought') {
         done(null, GALLERY_RELOADED_NOTE);
         this.addLog({ kind: 'blocked', ...ids, message: `{card}: ${GALLERY_RELOADED_NOTE}` });
@@ -2524,6 +2540,7 @@ export class Sniper {
       // One step over what it cost, or the lowest price that covers EA's tax.
       const { startPrice, buyNowPrice, coversTax } = galleryListPrices(job.m.buyNow);
       const r = await this.deps.adapter.list(job.m.tradeId, startPrice, buyNowPrice);
+      if (!r.ok) this.noteStepLimit(r.error);
       if (r.ok) {
         if (card) card.listPrice = buyNowPrice;
         done('listed');
