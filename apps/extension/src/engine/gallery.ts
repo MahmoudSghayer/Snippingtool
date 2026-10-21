@@ -5,10 +5,11 @@
  *
  * EA's web app has no Gallery, so Nova cannot read a Set or its grade: the
  * trader pastes the cards a Set needs, and Nova buys each one, sends it to
- * the club and lists it again at once. EA's help says a card keeps counting
- * for its Sets after it is sold; whether it must reach the club first is not
- * known, and sending it there is the safe choice the trader made. One card
- * at a time:
+ * the club and lists it again at once. EA's help ("How do Gallery Sets
+ * work"): a card that passes through the club still counts for the Gallery
+ * after it is sold, and one card can count for several Sets; the trader
+ * then adds the cards to each Set in the game (Autocomplete, Confirm
+ * Changes), which the web app cannot do. One card at a time:
  *   1. its version, when the rating is not the player's base card's: a
  *      look-only search of the player at that rating names it;
  *   2. its market price: FUTBIN's, else Nova's own market data, else the

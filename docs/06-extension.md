@@ -773,9 +773,11 @@ governor):
    tried three times. A card the club refuses (EA refuses a card the club
    already holds) still goes back on the market, so its coins come back,
    and its row says "Not sent to your club (…): check the Set counted it".
-   EA's help says a card keeps counting for its Sets after it is sold;
-   whether it must reach the club first is not known, and the club is the
-   safe choice.
+   EA's help ("How do Gallery Sets work in EA SPORTS FC 27?") says a card
+   that passes through the club still counts toward the Gallery after it is
+   sold, and that one card can count for several Sets. The trader then adds
+   the cards to each Set in the game (the Set's Autocomplete, then Confirm
+   Changes): the web app has no Gallery, so Nova cannot.
 
 The list's **budget** (coins, under the list) caps what its buys spend:
 a card costing more than what is left is skipped, and the bot stops
