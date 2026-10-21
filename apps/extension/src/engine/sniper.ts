@@ -93,7 +93,6 @@ import { ACT_ERROR, isAdapterRefusal } from '../lib/act-auth.js';
 
 import { BidBook, WATCHLIST_SIZE, nextBid, pickAuctions, timeLeft } from './bidder.js';
 import {
-  GALLERY_OVER_MARKET,
   GALLERY_RESOLVE_TRIES,
   GALLERY_SNIPE_MS,
   clubCheckIds,
@@ -314,6 +313,12 @@ function clockTime(at: number): string {
 
 function plural(n: number, one: string, many = `${one}s`): string {
   return `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;
+}
+
+/** `n` on EA's price grid, never over it. */
+function downToGrid(n: number): number {
+  const r = roundToPriceStep(n);
+  return r > n ? stepPrice(r, -1) : r;
 }
 
 function coins(n: number): string {
@@ -729,8 +734,10 @@ interface GalleryWork {
   key: string;
   /** `resolve`: a look-only search names the card's version (or shows a
    * price); `price`: its market price is looked up; `snipe`: it buys only
-   * under the market price; `market`: at the market price, and up. */
-  phase: 'resolve' | 'price' | 'snipe' | 'market';
+   * under the market price; `market`: the cheapest listed, the search's max
+   * rising from the market price; `probe`: a look-only search with no max,
+   * once the max reached the budget with none found. */
+  phase: 'resolve' | 'price' | 'snipe' | 'market' | 'probe';
   /** When the phase began. */
   since: number;
   market: number | null;
@@ -738,8 +745,12 @@ interface GalleryWork {
   floor: number | null;
   /** Look-only searches so far. */
   tries: number;
-  /** Price steps over the market price (`market`). */
+  /** Searches at the market price and up that found none (`market`). */
   steps: number;
+  /** The last search's max, and whether it was the most the budget
+   * allows. */
+  cap: number | null;
+  atCeiling: boolean;
 }
 
 /** Gallery mode: a bought card on its way to the club and the transfer
@@ -1404,7 +1415,7 @@ export class Sniper {
       this.galleryLate = null;
       this.addLog({
         kind: 'info',
-        message: `Bot started in Gallery mode: ${plural(left, 'card')} to buy, ${coins(this.gallery.budget - this.gallery.spent)} left of your Gallery budget. Each card goes to your club, then back on the market one step under its market price`,
+        message: `Bot started in Gallery mode: ${plural(left, 'card')} to buy, ${coins(this.gallery.budget - this.gallery.spent)} left of your Gallery budget. Each card goes to your club, then back on the market one step over what it cost`,
       });
     } else this.addLog({ kind: 'info', message: 'Bot started' });
     const timing = this.deps.timingMode?.();
@@ -1911,7 +1922,6 @@ export class Sniper {
     // chose: no profit check (each card is bought to collect, and sold back
     // at a small loss), and a buy is followed by the card's way to the club.
     const galleryKey = this.runMode === 'gallery' ? this.galleryWork?.key : undefined;
-    const galleryMarket = galleryKey === undefined ? null : (this.galleryWork?.market ?? null);
     this.setState({ phase: 'buying', phaseEndsAt: null, stopReason: null, stopDetail: null });
     for (const m of matches) {
       if (signal.aborted) return 'stopped';
@@ -1933,7 +1943,7 @@ export class Sniper {
       // listing this cheap is gone in moments) and the estimate is looked
       // up afterwards, for the log.
       let estimate: Estimate | null =
-        galleryMarket == null ? null : this.estimateAt(m, galleryListPrices(galleryMarket).buyNowPrice);
+        galleryKey === undefined ? null : this.estimateAt(m, galleryListPrices(m.buyNow).buyNowPrice);
       if (t.minProfit > 0 && galleryKey === undefined) {
         estimate = this.knownEstimate(m);
         // Unknown profit is allowed: the user capped the price, and the
@@ -2155,10 +2165,6 @@ export class Sniper {
       }
       const plan = this.gallerySearch(card, w);
       if (plan === 'budget') return this.stop('gallery_budget');
-      if (typeof plan === 'string') {
-        this.gallerySkip(card, plan);
-        continue;
-      }
 
       const gate = await this.searchGate(signal);
       if (gate === 'stopped') return;
@@ -2198,7 +2204,7 @@ export class Sniper {
         const matches = found.matches.filter(wanted);
         const rest = plan.buy && end === 'done' && !bought() ? matches.filter((m) => !tried.has(m.tradeId)) : [];
         if (rest.length > 0 && (await this.buyMatches(rest, search, tried, signal)) === 'stopped') return;
-        if (!bought()) this.galleryAfterSearch(card, w, matches);
+        if (!bought() && this.galleryAfterSearch(card, w, matches) === 'budget') return this.stop('gallery_budget');
       }
       this.deps.onChange();
       // A buy goes straight on to the card's way to the club: those steps
@@ -2217,7 +2223,7 @@ export class Sniper {
     if (current) return current;
     const next = nextGalleryCard(this.gallery);
     this.galleryWork = next
-      ? { key: next.key, phase: next.resourceId ? 'price' : 'resolve', since: this.now(), market: null, floor: null, tries: 0, steps: 0 }
+      ? { key: next.key, phase: next.resourceId ? 'price' : 'resolve', since: this.now(), market: null, floor: null, tries: 0, steps: 0, cap: null, atCeiling: false }
       : null;
     return next;
   }
@@ -2238,13 +2244,10 @@ export class Sniper {
     const guide = found ? null : (card.guide ?? null);
     const market = found?.price ?? guide ?? w.floor;
     if (market == null) {
-      if (w.tries >= GALLERY_RESOLVE_TRIES) return this.gallerySkip(card, 'no market price (FUTBIN and Nova have none) and none listed');
+      if (w.tries >= GALLERY_RESOLVE_TRIES) return this.galleryLater(card, 'none listed right now');
       w.phase = 'resolve';
       return;
     }
-    const maxBuy = this.settings.thresholds.maxBuyPrice;
-    if (maxBuy > 0 && gallerySnipeCap(market) > maxBuy)
-      return this.gallerySkip(card, `its market price ${coins(market)} is over your max buy price (${coins(maxBuy)})`);
     w.market = market;
     // At EA's lowest price nothing lists under it: straight to the market price.
     const under = gallerySnipeCap(market) >= MIN_SALE_PRICE;
@@ -2258,19 +2261,18 @@ export class Sniper {
       ...this.galleryIds(card),
       price: market,
       message: `Gallery: {card} — ${source} price ${coins(market)}${
-        under ? `; looking for one under it for ${Math.round(GALLERY_SNIPE_MS / 60_000)} minutes first` : ''
+        under ? `; looking for one under it for ${plural(Math.round(GALLERY_SNIPE_MS / 60_000), 'minute')} first` : ''
       }`,
     });
     this.saveGallery();
   }
 
   /** The search the card needs now, whether it may buy, and at what most;
-   * `budget` when the list's budget is spent, or why the card is skipped. */
-  private gallerySearch(card: GalleryCard, w: GalleryWork): { target: SniperFilter; buy: boolean } | 'budget' | string {
+   * `budget` when the list's budget is spent. */
+  private gallerySearch(card: GalleryCard, w: GalleryWork): { target: SniperFilter; buy: boolean } | 'budget' {
     const left = this.gallery.budget - this.gallery.spent;
     // What is left, down to EA's price grid: a search's max is one of its prices.
-    const rounded = roundToPriceStep(Math.max(0, left));
-    const leftOnGrid = rounded > left ? stepPrice(rounded, -1) : rounded;
+    const leftOnGrid = downToGrid(Math.max(0, left));
     if (left < MIN_SALE_PRICE || leftOnGrid < MIN_SALE_PRICE) return 'budget';
     const filter: FilterCriteria = {
       resourceId: card.playerId,
@@ -2280,30 +2282,28 @@ export class Sniper {
       ...(card.rarity !== undefined ? { rarity: card.rarity } : {}),
     };
     const name = `${card.name} ${card.rating}${card.version ? ` ${card.version}` : ''}`;
-    if (w.phase === 'resolve') return { target: { id: `gallery:${card.key}:resolve`, name, filter }, buy: false };
-    const market = w.market!;
-    let cap: number;
-    if (w.phase === 'snipe') cap = gallerySnipeCap(market);
-    else {
-      const most = galleryMarketCap(market, w.steps);
-      if (most == null) return `none listed within ${Math.round(GALLERY_OVER_MARKET * 100)}% of its market price (${coins(market)})`;
-      if (most > left) return `it costs more than what is left of your Gallery budget (${coins(left)})`;
-      cap = most;
-    }
-    return { target: { id: `gallery:${card.key}:${w.phase}:${w.steps}`, name, filter: { ...filter, maxPrice: Math.min(cap, leftOnGrid) } }, buy: true };
+    if (w.phase === 'resolve' || w.phase === 'probe') return { target: { id: `gallery:${card.key}:${w.phase}`, name, filter }, buy: false };
+    // The most a buy may cost is what is left of the budget.
+    const cap = Math.min(w.phase === 'snipe' ? gallerySnipeCap(w.market!) : galleryMarketCap(w.market!, w.steps), leftOnGrid);
+    w.cap = cap;
+    w.atCeiling = cap >= leftOnGrid;
+    return { target: { id: `gallery:${card.key}:${w.phase}:${w.steps}`, name, filter: { ...filter, maxPrice: cap } }, buy: true };
   }
 
   /** What a search that bought nothing tells: the card's version and
-   * cheapest listing (`resolve`), the end of the minutes under the market
-   * price (`snipe`), one step more when nothing was listed (`market`). */
-  private galleryAfterSearch(card: GalleryCard, w: GalleryWork, matches: SniperMatch[]): void {
+   * cheapest listing (`resolve`), the end of the minute under the market
+   * price (`snipe`), a higher max when nothing was listed (`market`), and
+   * once the max is all the budget allows, whether the card is listed
+   * dearer (`probe`: the bot stops, `budget`) or not at all (it waits at
+   * the end of the list). */
+  private galleryAfterSearch(card: GalleryCard, w: GalleryWork, matches: SniperMatch[]): 'budget' | void {
     const cheapest = matches.length > 0 ? Math.min(...matches.map((m) => m.buyNow)) : null;
     if (cheapest != null) w.floor = w.floor == null ? cheapest : Math.min(w.floor, cheapest);
     if (w.phase === 'resolve') {
       const id = card.resourceId ?? pickResourceId(matches, card.playerId);
       if (id == null || matches.length === 0) {
         w.tries++;
-        if (w.tries >= GALLERY_RESOLVE_TRIES) this.gallerySkip(card, 'none listed at this rating right now');
+        if (w.tries >= GALLERY_RESOLVE_TRIES) this.galleryLater(card, 'none listed at this rating right now');
         return;
       }
       card.resourceId = id;
@@ -2313,6 +2313,22 @@ export class Sniper {
       this.saveGallery();
       return;
     }
+    if (w.phase === 'probe') {
+      if (cheapest == null) return this.galleryLater(card, 'none listed right now');
+      const left = this.gallery.budget - this.gallery.spent;
+      // One the budget covers (a search's max steps a little under its cap,
+      // to get fresh results, so it can miss one): buy it.
+      if (cheapest <= left) {
+        w.phase = 'market';
+        return;
+      }
+      const limit = `the ${coins(Math.max(0, left))} left of your Gallery budget`;
+      card.note = `Cheapest listed: ${cheapest.toLocaleString('en-US')} coins, over ${limit}`.slice(0, 200);
+      this.addLog({ kind: 'blocked', ...this.galleryIds(card), price: cheapest, message: `Gallery: the cheapest {card} is ${coins(cheapest)}, more than ${limit}` });
+      this.galleryWork = null;
+      this.saveGallery();
+      return 'budget';
+    }
     if (w.phase === 'snipe') {
       if (this.now() - w.since < GALLERY_SNIPE_MS) return;
       w.phase = 'market';
@@ -2321,13 +2337,16 @@ export class Sniper {
       this.addLog({
         kind: 'info',
         ...this.galleryIds(card),
-        message: `Gallery: none of {card} under its market price (${coins(w.market!)}) — buying the cheapest at or near it`,
+        message: `Gallery: none of {card} under its market price (${coins(w.market!)}) — buying the cheapest one listed`,
       });
       return;
     }
-    // Listings at the price that a buy missed (a race lost, a limit) leave
-    // the price where it is; only none listed moves it up.
-    if (matches.length === 0) w.steps++;
+    // Listings at the max that a buy missed (a race lost, a limit) leave it
+    // where it is; only none listed raises it, or, at the most the budget
+    // allows, checks whether the card is listed at all.
+    if (matches.length > 0) return;
+    if (w.atCeiling) w.phase = 'probe';
+    else w.steps++;
   }
 
   /**
@@ -2361,11 +2380,13 @@ export class Sniper {
     return marked;
   }
 
-  private gallerySkip(card: GalleryCard, why: string): void {
-    card.status = 'skipped';
-    card.note = why.slice(0, 200);
+  /** A card none of is listed: never skipped, it goes to the end of the
+   * list (still to buy, with the reason) and the next card comes first. */
+  private galleryLater(card: GalleryCard, why: string): void {
+    card.note = `${why}: Nova tries again after the other cards`.slice(0, 200);
+    this.gallery.cards = [...this.gallery.cards.filter((c) => c !== card), card];
     this.galleryWork = null;
-    this.addLog({ kind: 'blocked', ...this.galleryIds(card), message: `Gallery: skipped {card}: ${why}` });
+    this.addLog({ kind: 'info', ...this.galleryIds(card), message: `Gallery: ${why} for {card} — trying again after the other cards` });
     this.saveGallery();
     this.deps.onChange();
   }
@@ -2388,7 +2409,7 @@ export class Sniper {
   }
 
   /** One step of the first bought card's way: to the club, to the transfer
-   * list, listed one step under its market price. A step EA refuses is
+   * list, listed one step over what it cost. A step EA refuses is
    * tried again (COLLECT_TRIES in all); a card the club refused (one it
    * holds already, say) still goes back on the market, so its coins come
    * back, and the card says so. */
@@ -2428,28 +2449,17 @@ export class Sniper {
         this.addLog({ kind: 'blocked', ...ids, message: `{card} not moved to the transfer list: ${why}` });
       }
     } else {
-      const found = (await this.deps.marketPrice?.(job.m.resourceId, this.settings.autoSell.platform).catch(() => null)) ?? null;
-      const market = found?.price ?? card?.market ?? null;
-      if (market == null) {
-        done(null, 'Not listed: no market price to list it at. It is in your transfer list');
-        this.addLog({ kind: 'blocked', ...ids, message: 'not listed: no market price for {card} (FUTBIN and Nova have none)' });
-      } else {
-        const { startPrice, buyNowPrice } = galleryListPrices(market);
-        const r = await this.deps.adapter.list(job.m.tradeId, startPrice, buyNowPrice);
-        if (r.ok) {
-          if (card) card.listPrice = buyNowPrice;
-          done('listed');
-          this.addLog({
-            kind: 'listed',
-            ...ids,
-            price: buyNowPrice,
-            message: `Gallery: one step under the market price (${coins(market)})`,
-          });
-        } else if (++job.tries >= COLLECT_TRIES) {
-          const why = r.error ?? 'EA did not accept the listing';
-          done(null, `Not listed: ${why}. It is in your transfer list`);
-          this.addLog({ kind: 'blocked', ...ids, message: `not listed: ${why}` });
-        }
+      // One step over what it cost.
+      const { startPrice, buyNowPrice } = galleryListPrices(job.m.buyNow);
+      const r = await this.deps.adapter.list(job.m.tradeId, startPrice, buyNowPrice);
+      if (r.ok) {
+        if (card) card.listPrice = buyNowPrice;
+        done('listed');
+        this.addLog({ kind: 'listed', ...ids, price: buyNowPrice, message: `Gallery: one step over what it cost (${coins(job.m.buyNow)})` });
+      } else if (++job.tries >= COLLECT_TRIES) {
+        const why = r.error ?? 'EA did not accept the listing';
+        done(null, `Not listed: ${why}. It is in your transfer list`);
+        this.addLog({ kind: 'blocked', ...ids, message: `not listed: ${why}` });
       }
     }
     this.saveGallery();
@@ -3348,9 +3358,12 @@ export class Sniper {
     };
   }
 
-  /** The lower of the filter's max price and the page's max buy price. */
+  /** The lower of the filter's max price and the page's max buy price
+   * (Snipe and Bid mode: Gallery mode's only limit is its budget, so a card
+   * is never left out for its price). */
   private priceCap(filter: FilterCriteria): number | null {
-    const caps = [filter.maxPrice, this.settings.thresholds.maxBuyPrice || undefined].filter(
+    const maxBuy = this.runMode === 'gallery' ? undefined : this.settings.thresholds.maxBuyPrice || undefined;
+    const caps = [filter.maxPrice, maxBuy].filter(
       (n): n is number => n != null && n > 0,
     );
     return caps.length > 0 ? Math.min(...caps) : null;
@@ -3617,5 +3630,5 @@ const STOP_MESSAGES: Record<SniperStopReason, string> = {
   gallery_unavailable:
     "Gallery mode needs to send cards to your club and move them through EA's web app, and this page does not let Nova AI do that",
   gallery_budget: 'your Gallery budget is spent: raise it on the Gallery tab to go on',
-  gallery_done: 'every card on your Gallery list is done: listed, or skipped with the reason beside it',
+  gallery_done: 'every card on your Gallery list is done: listed, or in your club already',
 };

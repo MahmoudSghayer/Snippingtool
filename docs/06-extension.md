@@ -790,24 +790,33 @@ governor):
 1. **Its version.** A player's base card has the player's own id; for any
    other rating, a look-only search of the player at that rating (no max
    price, nothing bought) names the version listed (the base card if it is
-   among them, else the one listed most). None listed in two looks: skipped.
+   among them, else the one listed most). None listed in two looks: the
+   card goes to the end of the list, still to buy ("none listed at this
+   rating right now: Nova tries again after the other cards").
 2. **Its market price**: FUTBIN's for that version, else Nova's own market
-   data, else the cheapest listing those looks saw. A market price over the
-   page's max buy price skips the card.
-3. **Under the market price for 2 minutes** (`GALLERY_SNIPE_MS`): searches
+   data, else fut.gg's (a fut.gg Set's cards), else the cheapest listing
+   those looks saw.
+3. **Under the market price for 1 minute** (`GALLERY_SNIPE_MS`): searches
    with the max one EA price step under it, buying the cheapest match. Then
-   **at the market price**, one step higher after each search that found none
-   listed (a race lost leaves the price where it is), up to 10% over it
-   (`GALLERY_OVER_MARKET`): past that the card is skipped with the reason,
-   so a price spike never costs much. Only one copy is bought; no minimum
-   profit applies (each card is bought to collect and sold back at a small
-   loss). A buy EA does not answer in time holds the card until EA's late
-   answer settles it (up to a minute), so it is never bought twice.
+   **the cheapest listed**: the max starts at the market price and, after
+   each search that found none, goes 1, 2, 4, 8… EA price steps over it
+   (`galleryMarketCap`; a race lost leaves it where it is), and the cheapest
+   match is bought. **A card is never skipped for its price**: the only
+   limit is the list's budget (the page's max buy price plays no part in
+   Gallery mode). Once the max is all the budget allows and still nothing,
+   a look-only search with no max shows whether the card is listed dearer
+   (the bot stops, `gallery_budget`, and the row and log say its cheapest
+   price: "Cheapest listed: 4,000 coins, over the 1,300 coins left of your
+   Gallery budget") or not at all (it goes to the end of the list, as
+   above). Only one copy is bought; no minimum profit applies (each card is
+   bought to collect and sold back at a small loss). A buy EA does not
+   answer in time holds the card until EA's late answer settles it (up to a
+   minute), so it is never bought twice.
 4. **To the club, then back on the market**, a step every 1.5–3 s: the
    adapter's `club` act (`Item.move(item, ItemPile.CLUB)`, the web app's own
    "Send to My Club"), then `move` to the transfer list and `list` one EA
-   price step under its market price (FUTBIN's again, else the price it was
-   bought by), with a starting bid a step under that. A step EA refuses is
+   price step over what it cost (`galleryListPrices`), with a starting bid
+   a step under that. A step EA refuses is
    tried three times. A card the club refuses (EA refuses a card the club
    already holds) still goes back on the market, so its coins come back,
    and its row says "Not sent to your club (…): check the Set counted it".
@@ -818,14 +827,14 @@ governor):
    Changes): the web app has no Gallery, so Nova cannot.
 
 The list's **budget** (coins, under the list) caps what its buys spend:
-a card costing more than what is left is skipped, and the bot stops
-(`gallery_budget`) once less than EA's lowest price is left. Sales do not
+the bot stops (`gallery_budget`) at a card whose cheapest listing costs more
+than what is left, or once less than EA's lowest price is left. Sales do not
 add back to it; **Reset spent** zeroes it. The bot stops on its own when
-every card is listed or skipped (`gallery_done`), and refuses to start with
+every card is listed or in the club (`gallery_done`), and refuses to start with
 no card left to buy (`no_gallery`) or on a page that cannot send cards to the
 club (`gallery_unavailable`). The list and every card's progress (to buy,
-bought, in club, listed, skipped, in your club already, with what it paid, its market price, what
-it listed at and why it was skipped) are saved in this browser after every
+bought, in club, listed, in your club already, with what it paid, its
+market price, what it listed at and why it waits) are saved in this browser after every
 change (`bot.galleryGet` / `bot.gallerySet`, `sl.bot.gallery.v1`, like the
 mode: not synced with the account). A card bought but not yet listed when
 the bot stops is finished at the next Start on the same page load; after a

@@ -410,7 +410,7 @@ const MODES: { mode: BotMode; label: string; hint: string }[] = [
 
 /** Over the Gallery list: how to write it, and what Nova does with it. */
 const GALLERY_HELP =
-  'One card a line: the player\'s name and the card\'s rating ("Hugo Ekitiké 85"). When two versions share a rating, add the version after it ("Hugo Ekitiké 85 Signature"), named as in the Rarity list on the Search tab: only that version is bought. A line starting with # names the Set the cards under it belong to. Nova buys each card (under its market price for 2 minutes, then at the market price, up to 10% over it), sends it to your club, and lists it again one step under its market price.';
+  'One card a line: the player\'s name and the card\'s rating ("Hugo Ekitiké 85"). When two versions share a rating, add the version after it ("Hugo Ekitiké 85 Signature"), named as in the Rarity list on the Search tab: only that version is bought. A line starting with # names the Set the cards under it belong to. Nova buys each card (for 1 minute only under its market price, then the cheapest one listed: it never skips a card for its price), sends it to your club, and lists it again one step over what it cost.';
 
 /** Under the fut.gg Set picker. */
 const FUTGG_HELP =
@@ -2774,9 +2774,10 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
 
   function logHtml(e: SniperLogEntry): string {
     const when = timeOfDay(e.at);
-    if (e.kind === 'info')
-      return `<div class="log"><div class="main">${esc(e.message)}<div class="sub">${when}</div></div></div>`;
     const who = `${e.rating ?? ''} ${esc(nameOf(e.assetId ?? e.resourceId))}`.trim();
+    // A note can name its card too (Gallery mode's): its name goes where `{card}` is.
+    if (e.kind === 'info')
+      return `<div class="log"><div class="main">${esc(e.message).replace('{card}', `<b>${who}</b>`)}<div class="sub">${when}</div></div></div>`;
     // How fast the bot went for it, from the listing arriving to the buy.
     const reacted = e.reactionMs != null ? `, reacted in ${fmt(e.reactionMs)} ms` : '';
     // Bid mode's lines name the card inside the sentence ("Bid 12,250 on
