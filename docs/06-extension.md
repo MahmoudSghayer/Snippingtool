@@ -238,7 +238,7 @@ and the browser would otherwise provide:
 
 | Extension                         | Userscript                                                                                                                                                                              |
 | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `adapter.js` in the MAIN world    | The same adapter IIFE, built first and embedded as a string (`virtual:adapter-source`), injected with `GM_addElement` at `document-start` (`setup.ts`)                                  |
+| `adapter.js` in the MAIN world    | The same adapter IIFE, built first, obfuscated, and embedded as a string (`virtual:adapter-source`), injected with `GM_addElement` at `document-start` (`setup.ts`)                     |
 | Service worker + ISOLATED content | `background/index.ts` and `content/index.ts`, imported in that order by `main.ts` and run in Tampermonkey's isolated context                                                            |
 | `webextension-polyfill`           | `browser-shim.ts` (build alias): one in-page message bus with Chrome's first-answer-wins rule and structured cloning; `storage.*` on `GM_*Value`; `alarms` on timers; `tabs` = this tab |
 | `host_permissions` for the API    | `lib/http.ts`'s transport swapped for `gm-fetch.ts` (`GM_xmlhttpRequest`, `anonymous: true` so EA's cookies never go along); the API host is the header's only `@connect`               |
@@ -260,8 +260,12 @@ Differences that follow from there being no extension process:
   origin, so clearing ea.com's site data clears it, and EA's page code could
   read it. It only ever holds trimmed market listings; tokens and settings
   are in GM storage, which the page cannot reach.
-- **No minification.** People install userscripts by hand and should be able
-  to read what they are installing.
+- **Obfuscated.** A userscript is installed by hand, so unlike the extension
+  (which ships through a store or the update server) its whole source sits in
+  the user's script manager in the clear. The owner distributes it per
+  licensed user and does not want it read or copied wholesale, so the
+  published file is obfuscated (see "Obfuscation" below). The extension
+  builds (`ledger`, `ledger-auto`) are never obfuscated.
 - **The page channel is authenticated the same way.** `setup.ts` mints the
   act-channel nonce and puts it on `<html>` before injecting the adapter,
   which takes it synchronously, as `handoff.js` does in the extension
@@ -275,6 +279,41 @@ Differences that follow from there being no extension process:
   through `unsafeWindow`, so the userscript's adapter (only) accepts act
   requests by origin rather than by `event.source`; every request, result
   and catalog is still MAC-checked.
+
+#### Obfuscation
+
+Only the userscript is obfuscated, and only its code — never the extension
+builds, never the `==UserScript==` header or the `.meta.js` file.
+`scripts/obfuscate.mjs` (javascript-obfuscator) runs inside `buildUserscript`
+for the normal and `--template` builds alike. It is deliberately light:
+identifier renaming (hexadecimal names) plus string hiding (string array,
+base64, ~0.75 threshold), and **none** of the transforms that would cost the
+trading hot path or risk EA's page — no control-flow flattening, dead-code
+injection, debug protection, self-defending or global renaming. It raises the
+published file by roughly 15% (about 0.9 MB → 1.05 MB). No source map is
+produced or shipped.
+
+Two things have to survive obfuscation untouched, and the build enforces both:
+
+- **The four template placeholders** (`scripts/template-placeholders.mjs`):
+  the API fills these in with a plain string replace at download time
+  (`apps/api/src/lib/extension-download.ts`), so they must appear byte for
+  byte in the output. They are passed as `reservedStrings`, which keeps any
+  matching literal from being renamed, moved into the string array or
+  encoded.
+- **The embedded adapter.** The adapter is obfuscated on its own first (with
+  lighter options — string-array indirection without base64, so no decode
+  wrapper is added around code that runs in EA's page and relies on built-in
+  references it captures at `document_start`). The main bundle is then built
+  with a sentinel string in the adapter's place and obfuscated, and the
+  sentinel is swapped for the already-obfuscated adapter afterward
+  (`injectAdapterSource`). That is what stops the adapter's own string array
+  being base64-encoded a second time inside the main bundle's.
+
+`test/unit/userscript-obfuscation.test.ts` pins all of this: the code is
+obfuscated, the header and `.meta.js` stay plain, the placeholders survive,
+the sentinel is gone from the shipped file, obfuscated code still runs, and
+the `ledger` build is not obfuscated.
 
 ### Assist hotkeys (P0 Task 13)
 
