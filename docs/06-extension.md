@@ -837,14 +837,17 @@ governor):
    price: "Cheapest listed: 4,000 coins, over the 1,300 coins left of your
    Gallery budget") or not at all (it goes to the end of the list, as
    above). Only one copy is bought; no minimum profit applies (each card is
-   bought to collect and sold back at a small loss). A buy EA does not
+   bought to collect and sold back for about what it cost). A buy EA does not
    answer in time holds the card until EA's late answer settles it (up to a
    minute), so it is never bought twice.
 4. **To the club, then back on the market**, a step every 1.5–3 s: the
    adapter's `club` act (`Item.move(item, ItemPile.CLUB)`, the web app's own
    "Send to My Club"), then `move` to the transfer list and `list` one EA
    price step over what it cost (`galleryListPrices`), with a starting bid
-   a step under that. A step EA refuses is
+   a step under that. From about 2,000 coins EA's 5% tax is more than one
+   step adds (a 2,900 card listed at 3,000 brings back 2,850), so such a
+   card is listed at the lowest price whose sale brings back what it cost
+   (3,100; 9,800 for 9,300), and the log says so. A step EA refuses is
    tried three times. A card the club refuses (EA refuses a card the club
    already holds) still goes back on the market, so its coins come back,
    and its row says "Not sent to your club (…): check the Set counted it".

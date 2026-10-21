@@ -5,7 +5,8 @@
 // cheapest listed (the search's max rising faster after each search that
 // found none: never skipped for its price, only the budget stops it); a
 // bought card goes to the club, to the transfer list and back on the market
-// one step over what it cost.
+// one step over what it cost, or at the lowest price that covers EA's tax
+// when one step would not.
 // The list's budget caps its buys, and its progress is saved after every
 // change. A fut.gg lineup card is bought only as that exact card, priced on
 // fut.gg when FUTBIN and Nova have nothing, and not bought at all when the
@@ -166,19 +167,20 @@ function setup(opts: Opts = {}) {
 }
 
 describe('Gallery mode — buying and listing', () => {
-  it('buys a card under its market price, sends it to the club, moves it and lists it one step over what it cost', async () => {
+  it("buys a card under its market price, sends it to the club, moves it and lists it at the lowest price that covers EA's tax", async () => {
     // The minimum profit never holds a Gallery buy back: each one is bought to collect.
     const h = setup({ settings: { thresholds: { ...DEFAULT_BOT_SETTINGS.thresholds, minProfit: 5_000 } }, results: () => [listing('t1', 3_700)] });
     h.sniper.start();
     await h.done();
     expect(h.searches[0]!.filter).toEqual({ resourceId: 100, minRating: 85, maxRating: 85, maxPrice: 3_900 });
     expect(h.calls).toEqual(['buy t1', 'club t1', 'move t1', 'list t1']);
-    expect(h.lists).toEqual([['t1', 3_700, 3_800]]);
-    expect(h.gallery()).toEqual({ budget: 100_000, spent: 3_700, cards: [card({ status: 'listed', price: 3_700, market: 4_000, listPrice: 3_800 })] });
+    // One step over its 3,700 (3,800) would bring back 3,610 after EA's 5% tax: 3,900 brings back 3,705.
+    expect(h.lists).toEqual([['t1', 3_800, 3_900]]);
+    expect(h.gallery()).toEqual({ budget: 100_000, spent: 3_700, cards: [card({ status: 'listed', price: 3_700, market: 4_000, listPrice: 3_900 })] });
     expect(h.trades).toEqual([{ tradeId: 't1', resourceId: 100, buyPrice: 3_700 }]);
     expect(h.sniper.state.stopReason).toBe('gallery_done');
     expect(h.log()).toContain('Sent {card} to your club');
-    expect(h.log()).toContain('Gallery: one step over what it cost (3,700 coins)');
+    expect(h.log()).toContain("Gallery: the lowest price that covers EA's 5% tax on what it cost (3,700 coins)");
     // Its progress was saved after every step.
     expect(h.saved.at(-1)).toEqual(h.gallery());
   });
@@ -204,7 +206,7 @@ describe('Gallery mode — buying and listing', () => {
     const market = h.searches.filter((s) => (s.filter.maxPrice ?? 0) >= 4_000).map((s) => s.filter.maxPrice);
     expect(market).toEqual([4_000, 4_100, 4_200, 4_400, 4_800, 5_600]);
     expect(h.buys.map(([id, price]) => [id, price])).toEqual([['t1', 5_000]]);
-    expect(h.gallery().cards[0]).toMatchObject({ status: 'listed', price: 5_000, listPrice: 5_100 });
+    expect(h.gallery().cards[0]).toMatchObject({ status: 'listed', price: 5_000, listPrice: 5_300 });
     expect(h.sniper.state.stopReason).toBe('gallery_done');
   });
 
@@ -241,7 +243,7 @@ describe('Gallery mode — buying and listing', () => {
     expect(h.prices).toContain(50_000_100);
     // Not the one the look-only search saw; the next one, under 9,900.
     expect(h.buys.map(([id, price]) => [id, price])).toEqual([['t2', 9_500]]);
-    expect(h.gallery().cards[0]).toMatchObject({ status: 'listed', resourceId: 50_000_100, market: 10_000, listPrice: 9_600 });
+    expect(h.gallery().cards[0]).toMatchObject({ status: 'listed', resourceId: 50_000_100, market: 10_000, listPrice: 10_000 });
   });
 
   it('buys only the version asked for: searched by its rarity, then that card alone, whatever else is listed', async () => {
@@ -259,7 +261,7 @@ describe('Gallery mode — buying and listing', () => {
     expect(h.searches[1]!.filter).toMatchObject({ rarity: 52, maxPrice: 7_900 });
     expect(h.prices).toContain(60_000_100);
     expect(h.buys.map(([id, price]) => [id, price])).toEqual([['s2', 7_500]]);
-    expect(h.gallery().cards[0]).toMatchObject({ status: 'listed', resourceId: 60_000_100, market: 8_000, listPrice: 7_600 });
+    expect(h.gallery().cards[0]).toMatchObject({ status: 'listed', resourceId: 60_000_100, market: 8_000, listPrice: 7_900 });
   });
 
   it('prices a card by the cheapest listing seen when FUTBIN and Nova have none', async () => {
@@ -267,7 +269,7 @@ describe('Gallery mode — buying and listing', () => {
     h.sniper.start();
     await h.done();
     expect(h.searches[0]!.filter.maxPrice).toBeUndefined();
-    expect(h.gallery().cards[0]).toMatchObject({ status: 'listed', market: 3_000, price: 2_900, listPrice: 3_000 });
+    expect(h.gallery().cards[0]).toMatchObject({ status: 'listed', market: 3_000, price: 2_900, listPrice: 3_100 });
   });
 
   it("buys a card at EA's lowest price straight at the market price: nothing lists under it", async () => {
@@ -487,6 +489,8 @@ describe('Gallery mode — cards bought on an earlier run, and Sets done', () =>
     expect(h.calls).toEqual(['move t7', 'list t7']);
     expect(h.lists).toEqual([['t7', 1_300, 1_400]]);
     expect(h.gallery().cards[0]).toEqual(card({ status: 'listed', price: 1_300, listPrice: 1_400 }));
+    // Under about 2,000 coins one step over already covers EA's tax.
+    expect(h.log()).toContain('Gallery: one step over what it cost (1,300 coins)');
   });
 
   it('says to finish it by hand when the page reloaded since its buy, and does not try again', async () => {
