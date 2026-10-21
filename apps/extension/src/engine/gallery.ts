@@ -22,7 +22,8 @@
  *      (the page's max buy price plays no part), and a card nobody lists
  *      waits at the end of the list for another try;
  *   4. once bought: to the club, to the transfer list, and listed one step
- *      over what it cost.
+ *      over what it cost, or higher when EA's tax would make that a loss
+ *      (`galleryListPrices`).
  * The list's coin budget caps what its buys spend, and every search and
  * buy goes through the same limits as the rest of Nova AI.
  *
@@ -37,7 +38,7 @@
  * A Set whose cards are all collected is marked completed (`completed`):
  * never offered again, and its cards still to buy are left alone.
  */
-import { GALLERY_LIMITS, MIN_SALE_PRICE, MIN_START_PRICE, stepPrice } from '@sl/shared';
+import { EA_TAX_RATE, GALLERY_LIMITS, MIN_SALE_PRICE, MIN_START_PRICE, stepPrice } from '@sl/shared';
 
 import { fold, searchPlayers } from '../model/catalog.js';
 
@@ -234,10 +235,19 @@ export function galleryMarketCap(market: number, steps: number): number {
 }
 
 /** The prices a bought card is listed at: one EA price step over what it
- * cost, and a starting bid a step under that. */
-export function galleryListPrices(paid: number): { startPrice: number; buyNowPrice: number } {
-  const buyNowPrice = Math.max(MIN_SALE_PRICE, stepPrice(paid, 1));
-  return { buyNowPrice, startPrice: Math.max(MIN_START_PRICE, stepPrice(buyNowPrice, -1)) };
+ * cost, or, when EA's 5% tax on that would take more than the step adds
+ * (over about 2,000 coins: 3,000 for a 2,900 card leaves 2,850), the
+ * lowest price whose sale still brings back what it cost (3,100); and a
+ * starting bid a step under that. `coversTax`: the second case. */
+export function galleryListPrices(paid: number): { startPrice: number; buyNowPrice: number; coversTax: boolean } {
+  const oneStep = Math.max(MIN_SALE_PRICE, stepPrice(paid, 1));
+  let buyNowPrice = oneStep;
+  while (Math.floor(buyNowPrice * (1 - EA_TAX_RATE)) < paid) {
+    const next = stepPrice(buyNowPrice, 1);
+    if (next === buyNowPrice) break; // EA's highest price
+    buyNowPrice = next;
+  }
+  return { buyNowPrice, startPrice: Math.max(MIN_START_PRICE, stepPrice(buyNowPrice, -1)), coversTax: buyNowPrice > oneStep };
 }
 
 /** A card's version from a look-only search's matches: the player's base

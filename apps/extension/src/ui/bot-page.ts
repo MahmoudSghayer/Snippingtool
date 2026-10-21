@@ -415,7 +415,7 @@ const MODES: { mode: BotMode; label: string; hint: string }[] = [
 
 /** Over the Gallery list: how to write it, and what Nova does with it. */
 const GALLERY_HELP =
-  'One card a line: the player\'s name and the card\'s rating ("Hugo Ekitiké 85"). When two versions share a rating, add the version after it ("Hugo Ekitiké 85 Signature"), named as in the Rarity list on the Search tab: only that version is bought. A line starting with # names the Set the cards under it belong to. Nova buys each card (for 1 minute only under its market price, then the cheapest one listed: it never skips a card for its price), sends it to your club, and lists it again one step over what it cost.';
+  'One card a line: the player\'s name and the card\'s rating ("Hugo Ekitiké 85"). When two versions share a rating, add the version after it ("Hugo Ekitiké 85 Signature"), named as in the Rarity list on the Search tab: only that version is bought. A line starting with # names the Set the cards under it belong to. Nova buys each card (for 1 minute only under its market price, then the cheapest one listed: it never skips a card for its price), sends it to your club, and lists it again one step over what it cost (from about 2,000 coins, where EA\'s 5% tax is more than a step, at the lowest price that brings back what it cost).';
 
 /** Under the fut.gg Set picker. */
 const FUTGG_HELP =
