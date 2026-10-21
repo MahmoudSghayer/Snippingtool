@@ -488,6 +488,77 @@ describe('Governor — rolling ratio counts (ratioCounts, the Sniping Bot)', () 
   });
 });
 
+// Live (Oct 20): 104 of the user's own Alt+B buys were refused at a ratio of
+// exactly 1.0 while Nova AI ran, because assist's governor counted none of
+// the bot's searches.
+describe('Governor — another engine\'s counts (sharedRatioCounts, assist while Nova AI runs)', () => {
+  function sharing(counts: { searches: number; buys: number } | null, overrides: Partial<GovernorSettings> = {}) {
+    let clock = START;
+    const gov = new Governor(
+      { ...settings, buyToSearchRatio: 0.35, maxCoinFlowPerHour: 1_000_000, ...overrides },
+      { now: () => clock, sharedRatioCounts: () => counts },
+    );
+    return {
+      gov,
+      setNow: (n: number) => {
+        clock = n;
+      },
+    };
+  }
+
+  it('counts the bot\'s searches toward the ratio: a buy with no search of your own goes through', () => {
+    const { gov } = sharing({ searches: 120, buys: 2 });
+    // (2 + 1) / 120 = 0.025, within 0.35; the session alone would read 1 / 1.
+    expect(gov.ratioAllowsBuy()).toBe(true);
+    expect(gov.allow({ kind: 'buy', coins: 3_700 }).allowed).toBe(true);
+    expect(gov.snapshot().buyToSearchRatio).toBeCloseTo(3 / 120);
+  });
+
+  it('adds them to the session\'s own counts, the bot\'s buys included', () => {
+    const counts = { searches: 2, buys: 1 };
+    const { gov } = sharing(counts, { actionsPerHour: CEILING.actionsPerHour });
+    gov.allow({ kind: 'search' });
+    // (1 + 0 + 1) / (2 + 1) = 0.67.
+    expect(gov.allow({ kind: 'buy', coins: 100 })).toMatchObject({ allowed: false, reason: 'buy_search_ratio' });
+    counts.buys = 0;
+    // (0 + 0 + 1) / 3 = 0.33.
+    expect(gov.allow({ kind: 'buy', coins: 100 }).allowed).toBe(true);
+  });
+
+  it('never counts them toward actionsPerHour: they are the bot\'s actions', () => {
+    const { gov } = sharing({ searches: 500, buys: 0 }, { actionsPerHour: 5 });
+    expect(gov.allow({ kind: 'buy', coins: 100 }).allowed).toBe(true);
+    expect(gov.snapshot().actionsLastHour).toBe(1);
+  });
+
+  it('brings the bot\'s cold-start floor while it holds a search', () => {
+    const { gov } = sharing({ searches: 1, buys: 0 });
+    // 1 / max(1, ceil(1 / 0.35) = 3) = 0.33, within 0.35.
+    expect(gov.allow({ kind: 'buy', coins: 100 }).allowed).toBe(true);
+    // (1 + 1) / 3 = 0.67.
+    expect(gov.allow({ kind: 'buy', coins: 100 }).reason).toBe('buy_search_ratio');
+  });
+
+  it('changes nothing when the bot has no search in the hour, or no counts at all', () => {
+    for (const counts of [{ searches: 0, buys: 0 }, null]) {
+      const { gov } = sharing(counts);
+      gov.allow({ kind: 'search' });
+      // 1 / max(1, 1): no cold-start floor for assist's own searches.
+      expect(gov.allow({ kind: 'buy', coins: 100 }).reason).toBe('buy_search_ratio');
+    }
+  });
+
+  it('keeps counting them across a session reset of your own', () => {
+    const { gov, setNow } = sharing({ searches: 60, buys: 0 }, { actionsPerHour: CEILING.actionsPerHour });
+    expect(gov.allow({ kind: 'buy', coins: 100 }).allowed).toBe(true);
+    // An idle pause ends your session; the bot's hour is still there.
+    setNow(START + SESSION_IDLE_RESET_MS + 60_000);
+    expect(gov.snapshot().buyToSearchRatio).toBe(0);
+    expect(gov.allow({ kind: 'buy', coins: 100 }).allowed).toBe(true);
+    expect(gov.serialize()).toMatchObject({ buyCount: 1, searchCount: 0 });
+  });
+});
+
 describe('Governor — when a full window frees', () => {
   it('coinFlowFreesAt: now when the buy fits, else when enough of the hour\'s spend ages out, null when it never can', () => {
     const { gov, setNow } = governorAt(START, { buyToSearchRatio: 1, actionsPerHour: CEILING.actionsPerHour });

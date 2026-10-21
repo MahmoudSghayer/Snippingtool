@@ -1046,7 +1046,13 @@ falls back to the shipped default:
   counted search, or while an engine search is in flight, count as that
   same search. A real human search in that window is dropped too: known and
   accepted, since nothing in the reports tells the two apart and dropping
-  one only makes the ratio stricter.
+  one only makes the ratio stricter. While Nova AI runs, observed searches
+  are its own and are not counted here (they would spend assist's
+  `actionsPerHour`); instead assist's governor adds the bot's last hour of
+  searches and buys (`Sniper.ratioCounts`, passed as `sharedRatioCounts`)
+  to its session's for this ratio only, with the bot's cold-start floor
+  while that hour holds a search. Without them, every buy of your own while
+  the bot ran (Alt+B, the overlay) read 1 buy per search and was refused.
 - **`maxCoinFlowPerHour`** — sliding one-hour window over coins spent on
   `buy` actions specifically (added to `GovernorSettings` for this file —
   see `packages/shared/src/schemas/settings.ts`, additive/backward-

@@ -278,8 +278,10 @@ async function main(): Promise<void> {
   // is what keeps assist-mode buys allowed (engine/search.ts). A no-op until
   // the bootstrap below has created a governor, and while the Sniping Bot
   // runs: its searches are its own governor's, and counting them here too
-  // would spend assist's hourly budget on them. The unsubscribe is kept for
-  // the page's teardown (`pagehide` below).
+  // would spend assist's hourly budget on them. They still count toward
+  // assist's ratio, through the bot's own hour (`sharedRatioCounts` in
+  // `ensureGovernor`). The unsubscribe is kept for the page's teardown
+  // (`pagehide` below).
   const stopCountingSearches = countObservedSearches(adapter, () => (sniper?.isRunning() ? null : governor));
 
   // The trader's own trade pile (defect C13): background's trade lifecycle
@@ -438,7 +440,13 @@ async function main(): Promise<void> {
     if (governor || !(features.includes('assist.ranker') || AUTOMATION_ENABLED)) return;
     const savedState = await send<GovernorState | null>('engine.stateGet');
     if (governor) return; // another call got here first
-    const g = savedState ? Governor.hydrate(settingsCache.governor, savedState) : new Governor(settingsCache.governor);
+    // The Sniping Bot's last hour counts toward the buy:search ratio of your
+    // own buys (Alt+B, the overlay): its searches are on the same account,
+    // and without them every buy while it runs reads 1 buy per search.
+    const g = new Governor(settingsCache.governor, {
+      state: savedState ?? undefined,
+      sharedRatioCounts: () => sniper?.ratioCounts() ?? null,
+    });
     g.setKillSwitch(killSwitchActive, killSwitchActive ? 'server kill switch active at bootstrap' : undefined);
     applySettingsToEngine({ governor: g, automation: null }, settingsCache);
     // Surface any denial reasons the governor accumulates as risk-budget
