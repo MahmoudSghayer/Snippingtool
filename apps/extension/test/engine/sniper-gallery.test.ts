@@ -328,6 +328,25 @@ describe('Gallery mode — buying and listing', () => {
     expect(h.gallery().cards[0]).toMatchObject({ status: 'listed', listPrice: 3_900 });
   });
 
+  it('after a lost race, buys nothing more from that search: the next buy waits for the next search', async () => {
+    let lost = false;
+    const h = setup({
+      results: () => [listing('t1', 3_700), listing('t2', 3_700)],
+      buyResult: () => {
+        if (lost) return { ok: true, signed: true, latencyMs: 5 };
+        lost = true;
+        return { ok: false, signed: true, error: 'bid reported success: false (status 403)', latencyMs: 5 };
+      },
+    });
+    h.sniper.start();
+    await h.done();
+    // Not t2 a moment after t1 was lost (EA answered that one 429): t1 again,
+    // from the next search, a search delay later.
+    expect(h.buys.map(([id]) => id)).toEqual(['t1', 't1']);
+    expect(h.buys[1]![2] - h.buys[0]![2]).toBeGreaterThanOrEqual(10 * SEC);
+    expect(h.gallery().cards[0]).toMatchObject({ status: 'listed', price: 3_700 });
+  });
+
   it('a buy EA did not answer in time is never bought twice: its late answer settles it', async () => {
     let first = true;
     const h = setup({
