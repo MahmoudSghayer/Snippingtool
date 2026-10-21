@@ -111,11 +111,12 @@ Three channels, none of which overlap in purpose:
    (`price_mismatch` / `listing_unknown`) unless its price equals the
    buy-now price the adapter itself last saw for that `tradeId`. Automation
    builds add `list`, `pile`, Nova AI's Bid mode acts (`bid`, `watchlist`,
-   `move`) and Gallery mode's `club` ("The Sniping Bot page" below): a `bid`
-   is refused unless it is exactly the next valid bid on the auction as the
-   adapter last saw it, the watch list comes back only inside the signed
-   `action_result`, and `move`, `club` and `list` act only on a card the
-   adapter itself bought or won on this page load.
+   `move`) and Gallery mode's `club` and `owned` ("The Sniping Bot page"
+   below): a `bid` is refused unless it is exactly the next valid bid on the
+   auction as the adapter last saw it, the watch list and the club read come
+   back only inside the signed `action_result`, and `move`, `club` and
+   `list` act only on a card the adapter itself bought or won on this page
+   load.
 2. **`content/index.ts` ↔ `background/index.ts`**, `browser.runtime.sendMessage`,
    typed by `backgroundMessageTypeSchema`
    (`packages/shared/src/ext-messages.ts`). Content sends `record` (raw
@@ -745,6 +746,43 @@ on it (same player, rating and version), so a finished card is never
 bought twice. **Retry skipped** puts the
 skipped cards back to buy; **Clear list** empties it.
 
+**fut.gg Sets** (over the list box) fill the list without typing.
+**Browse fut.gg Sets** reads fut.gg's Gallery (`background/futgg.ts`,
+`gallery.futggSets`: the JSON fut.gg's own Gallery pages load,
+`/api/fut/gallery/fc27/hub/`; `www.fut.gg` is in the `ledger-auto` host
+permissions and the userscript's `@connect`), which carries, for every Set and grade, the
+cheapest lineup that reaches it from fut.gg's own solver: its cards (EA card
+ids), its price in all, its dearest card and its score, bonus tags included.
+The picker lists each Set at its best grade, cheapest first, with what that
+costs and the Gallery Tokens it gives; **Only Sets that reach grade S** (on
+by default) leaves out the Sets whose best grade is lower, and Sets with
+nothing to buy are never listed. Ticked Sets are added with **Add Sets**:
+for each, background reads the Set's card list (`gallery.futggLineup`,
+`/sets/{id}/pool/`) to name the lineup's cards (player, rating, rarity,
+holographic or not, score), and `addFutggLineup` puts them on the list under
+the Set. These cards are **exact** (`exact: true`): only that card id is
+bought, priced and listed, since a holographic copy shares the rating and
+the rarity and scores more, and the score is what the grade needs. A
+special card's searches carry its rarity when EA's Rarity list has it; a
+gold card's never (fut.gg gives every gold card rarity 0, even a newer one
+with its own id). fut.gg's price is kept as the market price of last resort
+(`guide`: after FUTBIN and Nova). A card two Sets share is on the list once
+and counts for both (`setIds`), as EA counts one card for several Sets.
+Then the page asks the club which of the lineup's cards it holds already
+(`owned`: the web app's own `services.Club.search` with the card ids in
+`defId`, as its Player Picks screen does; loans left out) and marks them
+**In your club** (`owned`): they count for their Sets as they are, so none
+is bought. Every Gallery run asks again before its first search (unless the
+page did in the last minute). A card the club cannot be read for is bought
+as before. Each Set on the list shows under the picker ("Malaga CF · grade S
+· 4 of 15 collected", with **Remove**, which takes off its cards unless
+another Set holds them or they are on their way) and atop the Gallery tab
+("grade S needs 900 points, fut.gg's lineup makes 908 · 4 of 15 collected",
+and, when cards were skipped, their points and that the Set may miss its
+grade). fut.gg's cards stay out of the list box, and **Load list** keeps
+them. fut.gg documents no API: anything it answers that does not read like
+its Gallery JSON is no Sets, and its answers are reused for ten minutes.
+
 One card at a time, in the list's order, under every limit Snipe mode has
 (the search delay start to start, breaks, rests, EA's backoff, the
 governor):
@@ -786,7 +824,7 @@ add back to it; **Reset spent** zeroes it. The bot stops on its own when
 every card is listed or skipped (`gallery_done`), and refuses to start with
 no card left to buy (`no_gallery`) or on a page that cannot send cards to the
 club (`gallery_unavailable`). The list and every card's progress (to buy,
-bought, in club, listed, skipped, with what it paid, its market price, what
+bought, in club, listed, skipped, in your club already, with what it paid, its market price, what
 it listed at and why it was skipped) are saved in this browser after every
 change (`bot.galleryGet` / `bot.gallerySet`, `sl.bot.gallery.v1`, like the
 mode: not synced with the account). A card bought but not yet listed when
@@ -827,14 +865,15 @@ and narrows the rarity list. Players come from the web app's `players.json`
 `main/adapter.ts` was checked against the FC 27 web app's own code
 (`js/compiled_1-4.js`, `ocompiled.js`) and public data files:
 
-| What       | The web app's own                                                                                                                                                                                    |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Search     | `services.Item.clearTransferMarketCache()` then `services.Item.searchTransferMarket(new UTSearchCriteriaDTO(), page)` -> observable; `res.data.items`                                                |
-| Buy now    | `services.Item.bid(item, auction.buyNowPrice)`                                                                                                                                                       |
-| Club       | `services.Item.move(item, ItemPile.CLUB)` (Gallery mode; the same call moves a card to the transfer list with `ItemPile.TRANSFER`). Not yet checked live                                             |
-| Criteria   | `type` (set first), `maskedDefId`, `level` (`bronze`/`silver`/`gold`/`SP`), `rarities`, `position` / `zone` (130-132), `playStyle`, `nation`, `league`, `club`, `minBuy`/`maxBuy`, `ovrMin`/`ovrMax` |
-| Items      | `definitionId`, `databaseId` (base player id, read as the listing's `assetId`), `rating`, `getAuctionData()` -> `tradeId`, `buyNowPrice`, `expires`                                                  |
-| Navigation | `.ut-tab-bar-item` buttons, Transfers has `icon-transfer`; top bar `.ut-navigation-bar-view`                                                                                                         |
+| What       | The web app's own                                                                                                                                                                                     |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Search     | `services.Item.clearTransferMarketCache()` then `services.Item.searchTransferMarket(new UTSearchCriteriaDTO(), page)` -> observable; `res.data.items`                                                 |
+| Buy now    | `services.Item.bid(item, auction.buyNowPrice)`                                                                                                                                                        |
+| Club       | `services.Item.move(item, ItemPile.CLUB)` (Gallery mode; the same call moves a card to the transfer list with `ItemPile.TRANSFER`). Not yet checked live                                              |
+| Club read  | `services.Club.search(new UTSearchCriteriaDTO())` with `defId` a list of card ids -> observable; `res.response.items`, each `definitionId`, `isLimitedUse()` true for a loan (Player Picks' own read) |
+| Criteria   | `type` (set first), `maskedDefId`, `level` (`bronze`/`silver`/`gold`/`SP`), `rarities`, `position` / `zone` (130-132), `playStyle`, `nation`, `league`, `club`, `minBuy`/`maxBuy`, `ovrMin`/`ovrMax`  |
+| Items      | `definitionId`, `databaseId` (base player id, read as the listing's `assetId`), `rating`, `getAuctionData()` -> `tradeId`, `buyNowPrice`, `expires`                                                   |
+| Navigation | `.ut-tab-bar-item` buttons, Transfers has `icon-transfer`; top bar `.ut-navigation-bar-view`                                                                                                          |
 
 The adapter waits for the web app to start (and log in) before its first
 probe, and builds the catalog then.

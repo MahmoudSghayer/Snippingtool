@@ -43,6 +43,13 @@
  *     -> observable; Transfer Targets' "Clear expired": finished auctions
  *        off the watch list.
  *
+ *   window.services.Club.search(criteria)
+ *     -> observable; the club's items whose definitionId is in
+ *        `criteria.defId` (a list), in `response.items`. Gallery mode asks
+ *        it which lineup cards the club holds, as the web app's own Player
+ *        Picks screen does (FC 27 code: `new UTSearchCriteriaDTO`, only
+ *        `defId` set). An item's `isLimitedUse()` is true for a loan.
+ *
  * The Nova AI page's transfer list tools, ASSUMED SHAPE as well:
  * `services.Item.clearSoldItems()` (Clear Sold),
  * `services.Item.relistExpiredAuctions()` (Re-list All) and
@@ -247,6 +254,31 @@ function createBidding(timeoutMs: number): BiddingShape {
       const response = await call(services, 'move', [entity, pile], timeoutMs);
       const r = assertSucceeded(response, 'move', true);
       if (!bidSucceeded(r)) throw new ShapeError('move to club did not report success: true');
+    },
+    async clubOwned(services, resourceIds) {
+      const club = (services as Obj).Club as Obj | undefined;
+      const search = club?.search;
+      if (!club || typeof search !== 'function') throw new ShapeError('window.services.Club.search is not a function');
+      const Dto = (window as unknown as Obj).UTSearchCriteriaDTO;
+      if (typeof Dto !== 'function') throw new ShapeError('window.UTSearchCriteriaDTO is not available');
+      const criteria = construct(Dto as new () => Obj, []);
+      criteria.defId = [...resourceIds];
+      const returned = apply(search as (...args: unknown[]) => unknown, club, [criteria]);
+      if (!isAsync(returned)) throw new ShapeError('services.Club.search returned neither an observable nor a promise');
+      const r = assertSucceeded(await settle(returned, timeoutMs), 'Club.search', true);
+      const items = ((r as Obj).response as Obj | undefined)?.items;
+      if (!Array.isArray(items)) throw new ShapeError('Club.search answered without an item list');
+      const asked = new Set(resourceIds);
+      const owned = new Set<number>();
+      for (const item of items as Obj[]) {
+        const id = item?.definitionId;
+        if (typeof id !== 'number' || !asked.has(id)) continue;
+        // A loan does not count for the Gallery.
+        const limited = item.isLimitedUse;
+        if (typeof limited === 'function' && apply(limited as () => unknown, item, []) === true) continue;
+        owned.add(id);
+      }
+      return [...owned];
     },
     async untarget(services, entities) {
       // Transfer Targets' "Clear expired", as community autobuyers describe

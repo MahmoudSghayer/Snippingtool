@@ -24,6 +24,7 @@ import {
   extBackgroundEngineStateSetPayloadSchema,
   extBackgroundFiltersSavePayloadSchema,
   extBackgroundFutbinPricePayloadSchema,
+  extBackgroundFutggLineupPayloadSchema,
   extBackgroundLicenseHeartbeatPayloadSchema,
   extBackgroundLifecycleBuyPayloadSchema,
   extBackgroundLifecyclePilePayloadSchema,
@@ -70,6 +71,7 @@ import {
 } from './engine-lease.js';
 import { installGlobalErrorHandlers, handleErrorsReport, ensureErrorFlushAlarm, onErrorFlushAlarm } from './errors.js';
 import { handleFutbinPrice } from './futbin.js';
+import { handleFutggLineup, handleFutggSets } from './futgg.js';
 import { handleEngineStateGet, handleEngineStateSet } from './governor.js';
 import { handleKillSwitchGet } from './kill-switch.js';
 import { ensureHeartbeatAlarm, handleLicenseBootstrap, handleLicenseHeartbeat, onHeartbeatAlarm, runBootstrap } from './license.js';
@@ -205,6 +207,8 @@ if (AUTOMATION_ENABLED) {
     'catalog.get': () => handleCatalogGet(),
     'catalog.save': (payload) => handleCatalogSave(payload as never),
     'price.futbin': (payload) => handleFutbinPrice(payload as never),
+    'gallery.futggSets': () => handleFutggSets(),
+    'gallery.futggLineup': (payload) => handleFutggLineup(payload as never),
     'recentSearches.get': () => handleRecentSearchesGet(),
     'recentSearches.set': (payload) => handleRecentSearchesSet(payload as never),
   } satisfies Record<string, Handler>);
@@ -258,6 +262,7 @@ if (AUTOMATION_ENABLED) {
     'cards.names': extBackgroundCardNamesPayloadSchema,
     'catalog.save': extBackgroundCatalogSavePayloadSchema,
     'price.futbin': extBackgroundFutbinPricePayloadSchema,
+    'gallery.futggLineup': extBackgroundFutggLineupPayloadSchema,
     'recentSearches.set': putRecentSearchesRequestSchema,
   });
 }

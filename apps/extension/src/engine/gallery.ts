@@ -22,13 +22,20 @@
  *      under the market price, the cheapest listing, so it sells first.
  * The list's coin budget caps what its buys spend, and every search and
  * buy goes through the same limits as the rest of Nova AI.
+ *
+ * A fut.gg Set (`addFutggLineup`) puts fut.gg's cheapest lineup for the
+ * Set's best grade on the list (its own Gallery solver, background/futgg.ts):
+ * each card by its exact id (`exact`), so a holographic copy or another
+ * version at the same rating, which scores differently, is never bought in
+ * its place. Cards the club already holds are marked `owned` (EA's club
+ * search, `markOwned`) and not bought.
  */
-import { GALLERY_LIMITS, MIN_SALE_PRICE, MIN_START_PRICE, stepPrice } from '@sl/shared';
+import { GALLERY_GRADES, GALLERY_LIMITS, MIN_SALE_PRICE, MIN_START_PRICE, stepPrice } from '@sl/shared';
 
 import { fold, searchPlayers } from '../model/catalog.js';
 
 import type { CatalogOption, CatalogPlayer } from '../model/catalog.js';
-import type { GalleryCard, GalleryState } from '@sl/shared';
+import type { FutggLineup, FutggSetSummary, FutggTier, GalleryCard, GallerySet, GalleryState } from '@sl/shared';
 
 /** How long Gallery mode looks for a card under the market price before it
  * pays the market price. */
@@ -46,9 +53,11 @@ export interface ParsedGalleryList {
 }
 
 /** A card's key on the list: the player, the rating and (when one was
- * asked for) the version's rarity id. */
-export function galleryKey(playerId: number, rating: number, rarity?: number): string {
-  return rarity === undefined ? `${playerId}:${rating}` : `${playerId}:${rating}:${rarity}`;
+ * asked for) the version's rarity id, or (a fut.gg lineup card) its exact
+ * card id. */
+export function galleryKey(playerId: number, rating: number, rarity?: number, exactId?: number): string {
+  const base = rarity === undefined ? `${playerId}:${rating}` : `${playerId}:${rating}:${rarity}`;
+  return exactId === undefined ? base : `${base}#${exactId}`;
 }
 
 /** The rarity a typed version names in EA's Rarity list (the one the Search
@@ -186,7 +195,7 @@ export function nextGalleryCard(state: GalleryState): GalleryCard | null {
 
 /** How many cards are at each step. */
 export function gallerySummary(state: GalleryState): Record<GalleryCard['status'], number> & { total: number } {
-  const counts = { todo: 0, bought: 0, club: 0, listed: 0, skipped: 0, total: state.cards.length };
+  const counts = { todo: 0, bought: 0, club: 0, listed: 0, skipped: 0, owned: 0, total: state.cards.length };
   for (const c of state.cards) counts[c.status]++;
   return counts;
 }
@@ -221,4 +230,186 @@ export function pickResourceId(matches: readonly { resourceId: number }[], playe
   const counts = new Map<number, number>();
   for (const m of matches) counts.set(m.resourceId, (counts.get(m.resourceId) ?? 0) + 1);
   return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0]![0];
+}
+
+// ---- fut.gg Sets -------------------------------------------------------------
+
+/** The grade Nova loads a fut.gg Set's lineup for: the best one fut.gg's
+ * solver reaches (its last tier). Null: fut.gg has no lineup for the Set. */
+export function futggBestTier(set: FutggSetSummary): FutggTier | null {
+  const tiers = set.tiers.filter((t) => t.cards > 0);
+  return tiers.length > 0 ? tiers[tiers.length - 1]! : null;
+}
+
+/** The Sets the picker offers, cheapest first: with `sOnly`, only those
+ * whose best grade is S. A Set with nothing to buy is left out. */
+export function futggSetChoices(sets: readonly FutggSetSummary[], sOnly: boolean): { set: FutggSetSummary; tier: FutggTier }[] {
+  const out: { set: FutggSetSummary; tier: FutggTier }[] = [];
+  for (const set of sets) {
+    const tier = futggBestTier(set);
+    if (!tier || (sOnly && tier.grade !== 'S')) continue;
+    out.push({ set, tier });
+  }
+  return out.sort((a, b) => GALLERY_GRADES.indexOf(b.tier.grade) - GALLERY_GRADES.indexOf(a.tier.grade) || a.tier.cost - b.tier.cost || a.set.name.localeCompare(b.set.name));
+}
+
+export interface AddedLineup {
+  state: GalleryState;
+  /** Cards put on the list, and lineup cards it holds already (another
+   * Set's: one card counts for several Sets). */
+  added: number;
+  already: number;
+  problems: string[];
+}
+
+/**
+ * fut.gg's lineup on the list, under its Set. Each card by its exact id
+ * (`exact`), a special card's rarity searched for when EA's Rarity list has
+ * it (a gold card's never: fut.gg gives them all rarity 0, whatever EA's own
+ * list calls them), and fut.gg's price kept as the market price of last
+ * resort (`guide`). A card the list holds already (another Set's, or this Set
+ * loaded before) keeps its progress and counts for this Set too.
+ */
+export function addFutggLineup(state: GalleryState, lineup: FutggLineup, rarities: readonly CatalogOption[]): AddedLineup {
+  const problems: string[] = [];
+  const set = lineup.set;
+  const tier = set.tiers.find((t) => t.grade === lineup.grade);
+  const sets = (state.sets ?? []).filter((s) => s.id !== set.id);
+  if (!tier) return { state, added: 0, already: 0, problems: [`${set.name}: fut.gg has no grade ${lineup.grade} lineup`] };
+  if (sets.length >= GALLERY_LIMITS.sets) return { state, added: 0, already: 0, problems: [`The list holds at most ${GALLERY_LIMITS.sets} Sets`] };
+  const entry: GallerySet = {
+    id: set.id,
+    name: set.name,
+    path: set.path,
+    grade: lineup.grade,
+    threshold: tier.threshold,
+    score: tier.score,
+    tokens: tier.tokens,
+    cost: tier.cost,
+  };
+  const rarityIds = new Set(rarities.map((r) => r.id));
+  const cards = state.cards.map((c) => ({ ...c }));
+  const byKey = new Map(cards.map((c) => [c.key, c]));
+  let added = 0;
+  let already = 0;
+  for (const f of lineup.cards) {
+    const key = galleryKey(f.playerId, f.rating, undefined, f.resourceId);
+    const held = byKey.get(key);
+    if (held) {
+      already++;
+      if (!(held.setIds ?? []).includes(set.id)) held.setIds = [...(held.setIds ?? []), set.id].slice(0, GALLERY_LIMITS.sets);
+      continue;
+    }
+    if (cards.length >= GALLERY_LIMITS.cards) {
+      problems.push(`${set.name}: the list holds at most ${GALLERY_LIMITS.cards} cards, so ${lineup.cards.length - added - already} of its cards were left out`);
+      break;
+    }
+    // A special rarity (fut.gg gives every gold card 0, even a newer card of
+    // the player with its own id), searched for and named; a holographic
+    // copy named too. The exact id tells the rest apart.
+    const special = f.rarity > 1;
+    const version = (special ? `${f.version}${f.holographic ? ' Holographic' : ''}` : f.holographic ? 'Holographic' : '').trim();
+    const card: GalleryCard = {
+      key,
+      name: f.name.slice(0, GALLERY_LIMITS.nameLength),
+      rating: f.rating,
+      playerId: f.playerId,
+      resourceId: f.resourceId,
+      exact: true,
+      status: 'todo',
+      set: set.name.slice(0, GALLERY_LIMITS.setLength),
+      setIds: [set.id],
+      score: f.score,
+      // fut.gg prices a card it saw no listing for at 0: no price at all.
+      ...(f.price >= MIN_SALE_PRICE ? { guide: f.price } : {}),
+      ...(special && rarityIds.has(f.rarity) ? { rarity: f.rarity } : {}),
+      ...(version ? { version: version.slice(0, GALLERY_LIMITS.versionLength) } : {}),
+    };
+    cards.push(card);
+    byKey.set(key, card);
+    added++;
+  }
+  if (lineup.missing > 0) {
+    problems.push(
+      `${set.name}: fut.gg does not describe ${lineup.missing} of its lineup ${lineup.missing === 1 ? 'card' : 'cards'}, so ${lineup.missing === 1 ? 'it was' : 'they were'} left out and the Set may miss grade ${lineup.grade}`,
+    );
+  }
+  return { state: { ...state, cards, sets: [...sets, entry] }, added, already, problems };
+}
+
+/** The list without a fut.gg Set: its cards go unless another Set on the
+ * list holds them too, or they are on their way (bought, in the club). */
+export function removeFutggSet(state: GalleryState, setId: number): GalleryState {
+  const cards: GalleryCard[] = [];
+  for (const c of state.cards) {
+    if (!c.setIds?.includes(setId)) {
+      cards.push(c);
+      continue;
+    }
+    const setIds = c.setIds.filter((id) => id !== setId);
+    if (setIds.length > 0) cards.push({ ...c, setIds });
+    else if (c.status === 'bought' || c.status === 'club') {
+      const { setIds: _gone, ...rest } = c;
+      cards.push(rest);
+    }
+  }
+  const sets = (state.sets ?? []).filter((s) => s.id !== setId);
+  const next: GalleryState = { ...state, cards };
+  if (sets.length > 0) next.sets = sets;
+  else delete next.sets;
+  return next;
+}
+
+/** The exact cards whose club the trader should be asked about: fut.gg
+ * lineup cards still to buy (or skipped), at most `max`. */
+export function clubCheckIds(state: GalleryState, max = 100): number[] {
+  const ids = new Set<number>();
+  for (const c of state.cards) {
+    if (!c.exact || c.resourceId === undefined || (c.status !== 'todo' && c.status !== 'skipped')) continue;
+    ids.add(c.resourceId);
+    if (ids.size >= max) break;
+  }
+  return [...ids];
+}
+
+/** Marks the cards the club holds as `owned` (they count for their Sets as
+ * they are). One way only: a card the club no longer holds was collected
+ * when it was there. Returns how many it marked. */
+export function markOwned(state: GalleryState, owned: readonly number[]): number {
+  const held = new Set(owned);
+  let marked = 0;
+  for (const c of state.cards) {
+    if (!c.exact || c.resourceId === undefined || !held.has(c.resourceId) || (c.status !== 'todo' && c.status !== 'skipped')) continue;
+    c.status = 'owned';
+    delete c.note;
+    marked++;
+  }
+  return marked;
+}
+
+export interface GallerySetProgress {
+  set: GallerySet;
+  /** Lineup cards on the list, and those collected (in the club, bought,
+   * listed, or owned already). */
+  cards: number;
+  done: number;
+  skipped: number;
+  /** fut.gg's scores of the cards skipped: the Set's score falls by at
+   * least that (bonus tags aside). */
+  skippedScore: number;
+}
+
+/** Where each fut.gg Set on the list stands. */
+export function gallerySetProgress(state: GalleryState): GallerySetProgress[] {
+  return (state.sets ?? []).map((set) => {
+    const mine = state.cards.filter((c) => c.setIds?.includes(set.id));
+    const skipped = mine.filter((c) => c.status === 'skipped');
+    return {
+      set,
+      cards: mine.length,
+      done: mine.filter((c) => c.status === 'owned' || c.status === 'bought' || c.status === 'club' || c.status === 'listed').length,
+      skipped: skipped.length,
+      skippedScore: skipped.reduce((sum, c) => sum + (c.score ?? 0), 0),
+    };
+  });
 }

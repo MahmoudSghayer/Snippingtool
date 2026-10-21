@@ -96,9 +96,11 @@ import {
   GALLERY_OVER_MARKET,
   GALLERY_RESOLVE_TRIES,
   GALLERY_SNIPE_MS,
+  clubCheckIds,
   galleryListPrices,
   galleryMarketCap,
   gallerySnipeCap,
+  markOwned,
   nextGalleryCard,
   pickResourceId,
 } from './gallery.js';
@@ -752,9 +754,22 @@ interface GalleryJob {
 /** Gallery mode: how long a buy EA did not answer in time holds the card,
  * so no second copy is bought before EA's late answer settles it. */
 const GALLERY_LATE_MS = 60_000;
+/** Gallery mode: how long a club read stays good enough to skip the one
+ * before a run's first search. */
+const GALLERY_CLUB_FRESH_MS = 60_000;
+
 /** Gallery mode: the pause before each step of a card's way to the club and
  * back on the market, in seconds: no script-fast burst of calls. */
 const GALLERY_STEP_GAP = { min: 1.5, max: 3 };
+
+/** Why the club could not be read for the list, in the user's words. */
+export function ownedMissReason(error: string | undefined): string {
+  if (error === 'owned_unsupported') return 'this EA web app has no club search Nova AI knows';
+  if (error === 'owned_too_soon') return 'it was checked a moment ago';
+  if (error === undefined || /timed out/.test(error)) return 'EA did not answer in time';
+  const status = /status (\d{3})/.exec(error)?.[1];
+  return status ? `EA refused it (error ${status})` : 'EA did not answer as expected';
+}
 
 /** Why a bought card did not go to the club, in the user's words. */
 export function clubMissReason(error: string | undefined): string {
@@ -782,7 +797,7 @@ export interface SniperDeps {
   /** `bid`, `watchlist` and `move` are Bid mode's: without the first two it
    * refuses to start in Bid mode (`bid_unavailable`). */
   adapter: Pick<AdapterClient, 'search' | 'buy' | 'list' | 'onAuctions' | 'onBuyable' | 'onProbe' | 'onShape'> &
-    Partial<Pick<AdapterClient, 'onEaError' | 'bid' | 'watchlist' | 'move' | 'club' | 'clearExpired'>>;
+    Partial<Pick<AdapterClient, 'onEaError' | 'bid' | 'watchlist' | 'move' | 'club' | 'owned' | 'clearExpired'>>;
   getFilters: () => SniperFilter[];
   /** The coin balance EA's own answers last stated (null: none seen). Bid
    * mode bids only what it leaves after the coins its other bids hold.
@@ -872,7 +887,9 @@ const EA_REST_MS = [15 * 60_000, 30 * 60_000];
 const EA_REST_WINDOW_MS = 2 * 60 * 60_000;
 
 function copyGallery(g: GalleryState): GalleryState {
-  return { budget: g.budget, spent: g.spent, cards: g.cards.map((c) => ({ ...c })) };
+  const copy: GalleryState = { budget: g.budget, spent: g.spent, cards: g.cards.map((c) => ({ ...c, ...(c.setIds ? { setIds: [...c.setIds] } : {}) })) };
+  if (g.sets) copy.sets = g.sets.map((x) => ({ ...x }));
+  return copy;
 }
 
 function emptyStats(): SniperStats {
@@ -976,6 +993,9 @@ export class Sniper {
   private galleryWork: GalleryWork | null = null;
   private galleryJobs: GalleryJob[] = [];
   private galleryLate: { key: string; until: number } | null = null;
+  /** When the club was last read for the list (`checkGalleryClub`): a run
+   * that starts soon after the page's own check does not ask again. */
+  private galleryClubAt = -Infinity;
 
   private readonly now: () => number;
   private readonly random: () => number;
@@ -2103,6 +2123,14 @@ export class Sniper {
    * after EA limits it, breaks, rests) and under every limit it has. */
   private async runGallery(signal: AbortSignal, p: Pacing): Promise<void> {
     let failuresInRow = 0;
+    // fut.gg lineup cards the club holds already count for their Sets: ask
+    // the club once, before the first search, and buy none of them.
+    if (clubCheckIds(this.gallery).length > 0 && this.now() - this.galleryClubAt > GALLERY_CLUB_FRESH_MS) {
+      if (this.applyKillSwitch() || this.applyEntitlement() || this.applyExclusive()) return;
+      if ((await this.waitOutEaBackoff(signal)) && signal.aborted) return;
+      await this.checkGalleryClub();
+      if (signal.aborted) return;
+    }
     while (!signal.aborted) {
       if (this.galleryJobs.length > 0) {
         await this.collectGallery(signal);
@@ -2143,9 +2171,11 @@ export class Sniper {
       this.searchSeq++;
       p.searchesSinceBreak++;
       const tried = new Set<string>();
-      // A version asked for: only that card (its own id, once a search has
-      // named it), never another version of the player at the rating.
-      const wanted = (m: SniperMatch) => card.rarity === undefined || card.resourceId === undefined || m.resourceId === card.resourceId;
+      // A fut.gg lineup card: only that exact card. A version asked for: only
+      // that card (its own id, once a search has named it), never another
+      // version of the player at the rating.
+      const wanted = (m: SniperMatch) =>
+        card.exact ? m.resourceId === card.resourceId : card.rarity === undefined || card.resourceId === undefined || m.resourceId === card.resourceId;
       const first = plan.buy ? search.matches().filter(wanted) : [];
       const end = first.length > 0 ? await this.buyMatches(first, search, tried, signal) : 'done';
       if (end === 'stopped') return;
@@ -2197,14 +2227,16 @@ export class Sniper {
     return { resourceId: card.resourceId ?? card.playerId, assetId: card.playerId, rating: card.rating };
   }
 
-  /** The card's market price: FUTBIN's, else Nova's, else the cheapest
-   * listing its searches saw (without one yet, a look-only search first). */
+  /** The card's market price: FUTBIN's, else Nova's, else fut.gg's from
+   * when its Set was loaded, else the cheapest listing its searches saw
+   * (without one yet, a look-only search first). */
   private async galleryPrice(card: GalleryCard, w: GalleryWork): Promise<void> {
     const found =
       card.resourceId == null
         ? null
         : ((await this.deps.marketPrice?.(card.resourceId, this.settings.autoSell.platform).catch(() => null)) ?? null);
-    const market = found?.price ?? w.floor;
+    const guide = found ? null : (card.guide ?? null);
+    const market = found?.price ?? guide ?? w.floor;
     if (market == null) {
       if (w.tries >= GALLERY_RESOLVE_TRIES) return this.gallerySkip(card, 'no market price (FUTBIN and Nova have none) and none listed');
       w.phase = 'resolve';
@@ -2220,7 +2252,7 @@ export class Sniper {
     w.since = this.now();
     w.steps = 0;
     card.market = market;
-    const source = found ? (found.source === 'futbin' ? 'FUTBIN' : 'Nova market') : 'cheapest listing seen';
+    const source = found ? (found.source === 'futbin' ? 'FUTBIN' : 'Nova market') : guide != null ? 'fut.gg' : 'cheapest listing seen';
     this.addLog({
       kind: 'info',
       ...this.galleryIds(card),
@@ -2296,6 +2328,37 @@ export class Sniper {
     // Listings at the price that a buy missed (a race lost, a limit) leave
     // the price where it is; only none listed moves it up.
     if (matches.length === 0) w.steps++;
+  }
+
+  /**
+   * Gallery mode: which fut.gg lineup cards still to buy the club holds
+   * already (EA's own club search), marked `owned` so none is bought. Runs
+   * before a Gallery run's first search, and when the page adds Sets while
+   * the bot is stopped. The number of cards it marked; null when the club
+   * could not be read (every card is then bought, as before).
+   */
+  async checkGalleryClub(): Promise<number | null> {
+    const ids = clubCheckIds(this.gallery);
+    const owned = this.deps.adapter.owned;
+    if (ids.length === 0) return 0;
+    if (!owned) return null;
+    const r = await owned(ids).catch(() => null);
+    if (!r?.ok || !r.owned) {
+      this.addLog({ kind: 'info', message: `Gallery: could not check your club (${ownedMissReason(r?.error)}) — buying every card on the list` });
+      this.deps.onChange();
+      return null;
+    }
+    this.galleryClubAt = this.now();
+    const marked = markOwned(this.gallery, r.owned);
+    if (marked > 0) {
+      this.addLog({
+        kind: 'info',
+        message: `Gallery: ${plural(marked, 'card')} of your list ${marked === 1 ? 'is' : 'are'} in your club already — ${marked === 1 ? 'it counts' : 'they count'} for ${marked === 1 ? 'its Set' : 'their Sets'}, so Nova will not buy ${marked === 1 ? 'it' : 'them'}`,
+      });
+      this.saveGallery();
+    }
+    this.deps.onChange();
+    return marked;
   }
 
   private gallerySkip(card: GalleryCard, why: string): void {

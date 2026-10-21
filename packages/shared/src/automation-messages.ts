@@ -22,6 +22,12 @@ export const AUTOMATION_BACKGROUND_MESSAGE_TYPES = [
    * (`GalleryState`, `storage.local`). Local only. */
   'bot.galleryGet',
   'bot.gallerySet',
+  /** fut.gg's Gallery Sets, and one Set's cheapest lineup for a grade, for
+   * Gallery mode (`FutggSetSummary[]`, `FutggLineup`). Background fetches
+   * fut.gg's public JSON and keeps it a few minutes; anything unreadable is
+   * null. */
+  'gallery.futggSets',
+  'gallery.futggLineup',
   /** The bot's active time today, for its hours-per-day limit
    * (`BotDailyUsage`, `storage.local`). Local only. */
   'bot.usageGet',

@@ -39,6 +39,9 @@ export interface ActionOutcome {
   /** Only for a successful `clearExpired()`: how many finished auctions went
    * off the watch list. */
   cleared?: number;
+  /** Only for a successful `owned()`: which of the cards asked about the
+   * club holds. */
+  owned?: number[];
   /** Only for a buy that came back `timeout_unknown`: settles with EA's
    * late answer if the adapter sends one (signed, like every result), or
    * `ok: false` after a few minutes without one. */
@@ -86,6 +89,9 @@ export interface AdapterClient {
   /** Automation builds (Gallery mode): send a card the adapter bought to
    * the club. */
   club(tradeId: string): Promise<ActionOutcome>;
+  /** Automation builds (Gallery mode): which of these cards (EA's card ids)
+   * the club holds, in `outcome.owned`. Read only. */
+  owned(resourceIds: number[]): Promise<ActionOutcome>;
   /** Automation builds (Bid mode): take the finished auctions the last watch
    * list read saw (expired, or lost) off the watch list, like Transfer
    * Targets' "Clear expired". Never a won or running one. */
@@ -160,6 +166,7 @@ type ActAction =
   | 'watchlist'
   | 'move'
   | 'club'
+  | 'owned'
   | 'clearSold'
   | 'relistAll'
   | 'unsold'
@@ -305,6 +312,7 @@ export function createAdapterClient(target: Window, nonce: string | null, option
           watched: data.watched,
           unsold: data.unsold,
           cleared: data.cleared,
+          owned: data.owned,
           signed: true,
           latencyMs: data.completedAt - data.requestedAt,
         };
@@ -410,6 +418,7 @@ export function createAdapterClient(target: Window, nonce: string | null, option
     watchlist: () => call({ action: 'watchlist' }),
     move: (tradeId) => call({ action: 'move', tradeId }),
     club: (tradeId) => call({ action: 'club', tradeId }),
+    owned: (resourceIds) => call({ action: 'owned', resourceIds }),
     clearExpired: () => call({ action: 'clearExpired' }),
     refreshPile: () => call({ action: 'pile' }),
     clearSold: () => call({ action: 'clearSold' }),

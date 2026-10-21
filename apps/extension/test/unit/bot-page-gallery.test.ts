@@ -2,9 +2,19 @@
 // the list box and its budget in the search's place, Load list reads the
 // pasted cards against EA's player list (saying which lines it could not
 // read), the budget saves on its own, Start runs the list without a search,
-// and the Gallery tab beside Search results shows where each card is.
+// and the Gallery tab beside Search results shows where each card is. The
+// fut.gg picker lists fut.gg's Sets (grade S only, by default), puts the
+// ticked Sets' lineups on the list and asks the club which cards it holds.
 
-import { DEFAULT_BOT_MODE_SETTINGS, DEFAULT_BOT_SETTINGS, type BotModeSettings, type GalleryState } from '@sl/shared';
+import {
+  DEFAULT_BOT_MODE_SETTINGS,
+  DEFAULT_BOT_SETTINGS,
+  type BotModeSettings,
+  type FutggLineup,
+  type FutggSetSummary,
+  type GalleryGrade,
+  type GalleryState,
+} from '@sl/shared';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { Sniper } from '../../src/engine/sniper.js';
@@ -12,6 +22,7 @@ import { createBotPage } from '../../src/ui/bot-page.js';
 
 import { captureShadowRoots, trustTestEvents, untrustedEvents } from './ui-test-helpers.js';
 
+import type { ActionOutcome } from '../../src/content/adapter-client.js';
 import type { Catalog } from '../../src/model/catalog.js';
 
 beforeEach(() => {
@@ -42,7 +53,7 @@ const CATALOG: Catalog = {
   capturedAt: 1,
 };
 
-function makeSniper(): Sniper {
+function makeSniper(owned?: (ids: number[]) => Promise<ActionOutcome>): Sniper {
   return new Sniper(
     {
       adapter: {
@@ -51,6 +62,7 @@ function makeSniper(): Sniper {
         list: vi.fn(),
         move: vi.fn(),
         club: vi.fn(),
+        ...(owned ? { owned } : {}),
         onAuctions: () => () => undefined,
         onBuyable: () => () => undefined,
         onProbe: () => () => undefined,
@@ -65,11 +77,21 @@ function makeSniper(): Sniper {
   );
 }
 
-async function mount(initialMode: BotModeSettings = DEFAULT_BOT_MODE_SETTINGS, initialGallery: GalleryState = { budget: 100_000, spent: 0, cards: [] }) {
+interface Futgg {
+  sets: FutggSetSummary[] | null;
+  lineup: (setId: number, grade: GalleryGrade) => FutggLineup | null;
+  owned?: (ids: number[]) => Promise<ActionOutcome>;
+}
+
+async function mount(
+  initialMode: BotModeSettings = DEFAULT_BOT_MODE_SETTINGS,
+  initialGallery: GalleryState = { budget: 100_000, spent: 0, cards: [] },
+  futgg?: Futgg,
+) {
   let mode = initialMode;
   let gallery = initialGallery;
   const saves: GalleryState[] = [];
-  const sniper = makeSniper();
+  const sniper = makeSniper(futgg?.owned);
   sniper.setGallery(gallery);
   const shadows = captureShadowRoots();
   const page = createBotPage({
@@ -82,12 +104,19 @@ async function mount(initialMode: BotModeSettings = DEFAULT_BOT_MODE_SETTINGS, i
     saveModeSettings: async (next) => {
       mode = next;
     },
-    getGallery: () => (sniper.isRunning() ? sniper.getGallery() : gallery),
+    // As content/index.ts: the bot's copy (the page saves into it).
+    getGallery: () => sniper.getGallery(),
     saveGallery: async (next) => {
       gallery = next;
       sniper.setGallery(next);
       saves.push(next);
     },
+    ...(futgg
+      ? {
+          futggSets: async () => futgg.sets,
+          futggLineup: async (setId: number, grade: GalleryGrade) => futgg.lineup(setId, grade),
+        }
+      : {}),
     setLiveSearch: () => undefined,
     resolveNames: async () => ({}),
     getCatalog: async () => CATALOG,
@@ -121,7 +150,7 @@ it('puts the Gallery list and its budget in the search’s place once Gallery is
   expect(tab.hidden).toBe(false);
   expect(tab.getAttribute('aria-selected')).toBe('true');
   expect(root.getElementById('gallery-feed')!.textContent).toContain('Paste your Gallery list on the left');
-  expect(root.getElementById('run-status')!.textContent).toBe('Paste your Gallery list and press Load list to start');
+  expect(root.getElementById('run-status')!.textContent).toBe('Add fut.gg Sets, or paste your Gallery list and press Load list, to start');
 });
 
 it('loads the pasted list against EA’s player list and says which lines it could not read', async () => {
@@ -192,4 +221,92 @@ it('retries skipped cards and clears the list', async () => {
   expect(saves.at(-1)!.cards[0]).toEqual({ key: '256630:86', name: 'Florian Wirtz', rating: 86, playerId: 256630, resourceId: 256630, status: 'todo' });
   click('#g-clear');
   expect(saves.at(-1)).toEqual({ budget: 100_000, spent: 0, cards: [] });
+});
+
+const tier = (grade: GalleryGrade, cost: number) => ({ grade, threshold: grade === 'S' ? 900 : 300, tokens: grade === 'S' ? 28 : 0, cost, peak: 3_100, score: 908, cards: 2 });
+const MALAGA: FutggSetSummary = { id: 90, name: 'Malaga CF', category: 'LALIGA EA SPORTS / Liga F Moeve', path: 'laliga/malaga-cf', requiredCards: 15, tiers: [tier('C', 13_250), tier('S', 20_850)] };
+const FROSINONE: FutggSetSummary = { ...MALAGA, id: 91, name: 'Frosinone', category: 'Serie A Enilive', path: 'serie-a/frosinone', tiers: [tier('S', 19_600)] };
+const ARSENAL: FutggSetSummary = { ...MALAGA, id: 30, name: 'Arsenal', category: 'Premier League / Barclays WSL', path: 'premier-league/arsenal', tiers: [tier('C', 63_500)] };
+const MALAGA_S: FutggLineup = {
+  set: MALAGA,
+  grade: 'S',
+  missing: 0,
+  cards: [
+    { resourceId: 243312, playerId: 243312, name: 'Dani Lorenzo', rating: 74, rarity: 0, version: 'Rare', holographic: false, score: 60, price: 3_100 },
+    { resourceId: 50_574_721, playerId: 243_073, name: 'Kevin', rating: 76, rarity: 3, version: 'Team of the week', holographic: true, score: 225, price: 1_400 },
+  ],
+};
+
+it("lists fut.gg's grade S Sets cheapest first, adds the ticked ones, and leaves out cards the club holds", async () => {
+  const owned = vi.fn(async (_ids: number[]) => ({ ok: true, owned: [243312], latencyMs: 5 }));
+  const lineup = vi.fn((setId: number, grade: GalleryGrade) => (setId === 90 && grade === 'S' ? MALAGA_S : null));
+  const { root, $, click, sniper } = await mount({ ...DEFAULT_BOT_MODE_SETTINGS, mode: 'gallery' }, undefined, { sets: [MALAGA, ARSENAL, FROSINONE], lineup, owned });
+  click('#g-futgg');
+  await vi.advanceTimersByTimeAsync(10);
+  const names = () => [...root.querySelectorAll('.g-set')].map((r) => r.querySelector('.nm')!.childNodes[0]!.textContent);
+  expect(names()).toEqual(['Frosinone', 'Malaga CF']);
+  expect(root.querySelector('.g-set')!.textContent).toContain('19,600');
+  expect(root.querySelector('.g-set')!.textContent).toContain('28 tokens');
+  // Every Set with a lineup, grade S first.
+  const sOnly = $('g-sonly')!;
+  sOnly.checked = false;
+  sOnly.dispatchEvent(new Event('change', { bubbles: true }));
+  expect(names()).toEqual(['Frosinone', 'Malaga CF', 'Arsenal']);
+  $('g-sonly')!.checked = true;
+  $('g-sonly')!.dispatchEvent(new Event('change', { bubbles: true }));
+
+  const tick = root.querySelector('input[data-futgg="90"]') as HTMLInputElement;
+  tick.checked = true;
+  tick.dispatchEvent(new Event('change', { bubbles: true }));
+  expect(root.getElementById('g-add')!.textContent).toBe('Add 1 Set');
+  click('#g-add');
+  await vi.advanceTimersByTimeAsync(10);
+  expect(lineup).toHaveBeenCalledWith(90, 'S');
+  expect(owned).toHaveBeenCalledWith([243312, 50_574_721]);
+  const g = sniper.getGallery();
+  expect(g.cards.map((c) => [c.name, c.status, c.exact])).toEqual([
+    ['Dani Lorenzo', 'owned', true],
+    ['Kevin', 'todo', true],
+  ]);
+  expect(g.sets!.map((x) => [x.name, x.grade, x.cost])).toEqual([['Malaga CF', 'S', 20_850]]);
+  expect(root.getElementById('saved')!.textContent).toBe('Added 1 Set: 2 cards · 1 in your club already');
+  // On the list now: ticked and locked in the picker, with its progress.
+  expect((root.querySelector('input[data-futgg="90"]') as HTMLInputElement).disabled).toBe(true);
+  expect(root.querySelector('.g-mineset')!.textContent).toContain('Malaga CF · grade S · 1 of 2 collected');
+  expect(root.querySelector('#gallery-feed .g-sethead')!.textContent).toBe("Malaga CF · grade S needs 900 points, fut.gg's lineup makes 908 · 1 of 2 collected");
+  expect(root.querySelectorAll('#gallery-feed .bidrow')[1]!.textContent).toContain('fut.gg price 1,400');
+  expect(root.querySelectorAll('#gallery-feed .bidrow')[0]!.querySelector('.st')!.textContent).toBe('In your club');
+
+  // The box holds the typed cards only, and Load list keeps fut.gg's.
+  const box = $('g-list') as unknown as HTMLTextAreaElement;
+  expect(box.value).toBe('');
+  box.value = 'Hugo Ekitiké 85';
+  box.dispatchEvent(new Event('input', { bubbles: true }));
+  click('#g-load');
+  expect(sniper.getGallery().cards.map((c) => c.name)).toEqual(['Dani Lorenzo', 'Kevin', 'Hugo Ekitiké']);
+
+  // Removing the Set takes its cards off the list.
+  click('[data-remove-set="90"]');
+  expect(sniper.getGallery().cards.map((c) => c.name)).toEqual(['Hugo Ekitiké']);
+  expect(sniper.getGallery().sets).toBeUndefined();
+});
+
+it('says when fut.gg cannot be reached', async () => {
+  const { root, click } = await mount({ ...DEFAULT_BOT_MODE_SETTINGS, mode: 'gallery' }, undefined, { sets: null, lineup: () => null });
+  click('#g-futgg');
+  await vi.advanceTimersByTimeAsync(10);
+  expect(root.getElementById('g-futgg-problems')!.textContent).toBe('fut.gg could not be reached: try again in a minute');
+});
+
+it('says when fut.gg sends no lineup for a Set, and adds nothing', async () => {
+  const other = await mount({ ...DEFAULT_BOT_MODE_SETTINGS, mode: 'gallery' }, undefined, { sets: [MALAGA], lineup: () => null });
+  other.click('#g-futgg');
+  await vi.advanceTimersByTimeAsync(10);
+  const tick = other.root.querySelector('input[data-futgg="90"]') as HTMLInputElement;
+  tick.checked = true;
+  tick.dispatchEvent(new Event('change', { bubbles: true }));
+  other.click('#g-add');
+  await vi.advanceTimersByTimeAsync(10);
+  expect(other.root.getElementById('g-futgg-problems')!.textContent).toBe('Malaga CF: fut.gg did not send its lineup — try again');
+  expect(other.sniper.getGallery().cards).toEqual([]);
 });
