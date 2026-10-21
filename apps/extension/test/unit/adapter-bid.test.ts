@@ -267,6 +267,60 @@ describe("Gallery mode's club call", () => {
   });
 });
 
+describe("Gallery mode's club read", () => {
+  // The web app's own search criteria class, as its Player Picks screen uses it.
+  class Criteria {
+    defId: number[] = [];
+  }
+  const clubItem = (definitionId: number, loan = false) => ({ definitionId, isLimitedUse: () => loan });
+
+  it('says which of the cards asked about the club holds (loans and other cards left out)', async () => {
+    const shape = createObservableShape(1_000);
+    (window as unknown as { UTSearchCriteriaDTO?: unknown }).UTSearchCriteriaDTO = Criteria;
+    try {
+      const search = vi.fn((_c: Criteria): unknown => observable({ success: true, response: { items: [clubItem(243312), clubItem(5, true), clubItem(77)] } }));
+      const owned = await shape.bidding!.clubOwned!({ Club: { search } } as never, [243312, 5, 6]);
+      expect(owned).toEqual([243312]);
+      expect(search.mock.calls[0]![0]).toBeInstanceOf(Criteria);
+      expect(search.mock.calls[0]![0].defId).toEqual([243312, 5, 6]);
+      // Nothing it can read is never "none owned".
+      const noList = vi.fn((): unknown => observable({ success: true, response: {} }));
+      await expect(shape.bidding!.clubOwned!({ Club: { search: noList } } as never, [1])).rejects.toThrow(/without an item list/);
+      const refused = vi.fn((): unknown => observable({ success: false, status: 500 }));
+      await expect(shape.bidding!.clubOwned!({ Club: { search: refused } } as never, [1])).rejects.toThrow(/success: false/);
+      await expect(shape.bidding!.clubOwned!({ Item: {} } as never, [1])).rejects.toThrow(/Club\.search is not a function/);
+    } finally {
+      delete (window as unknown as { UTSearchCriteriaDTO?: unknown }).UTSearchCriteriaDTO;
+    }
+  });
+
+  it('says the promise shape has no club read, and drops a malformed request', async () => {
+    install(promiseServices().services);
+    expect((await act({ action: 'owned', resourceIds: [1] })).data).toMatchObject({ ok: false, error: 'owned_unsupported' });
+    install(biddingServices().services);
+    expect(await actIgnored({ action: 'owned', resourceIds: [] })).toBe(true);
+    expect(await actIgnored({ action: 'owned', resourceIds: [0] })).toBe(true);
+    expect(await actIgnored({ action: 'owned', resourceIds: Array.from({ length: 101 }, (_, i) => i + 1) })).toBe(true);
+  });
+
+  it('answers signed, and refuses a second read within a few seconds', async () => {
+    const svc = biddingServices();
+    const search = vi.fn((): unknown => observable({ success: true, response: { items: [clubItem(243312)] } }));
+    install({ ...svc.services, Club: { search } });
+    (window as unknown as { UTSearchCriteriaDTO?: unknown }).UTSearchCriteriaDTO = Criteria;
+    try {
+      const res = await act({ action: 'owned', resourceIds: [243312, 6] });
+      expect(res.data).toMatchObject({ action: 'owned', ok: true, owned: [243312] });
+      expect(await signer.verify(canonicalActMessage('action_result', res.data), res.mac!)).toBe(true);
+      expect(adapterActionResultMessageSchema.safeParse({ channel: ADAPTER_CHANNEL, kind: 'action_result', data: res.data, mac: res.mac }).success).toBe(true);
+      expect((await act({ action: 'owned', resourceIds: [6] })).data).toMatchObject({ ok: false, error: 'owned_too_soon' });
+      expect(search).toHaveBeenCalledTimes(1);
+    } finally {
+      delete (window as unknown as { UTSearchCriteriaDTO?: unknown }).UTSearchCriteriaDTO;
+    }
+  });
+});
+
 describe("the shapes' Bid mode calls (ASSUMED SHAPE)", () => {
   it('promise shape: bids through Transfer.repository.bid and reads Item.repository.watchlist', async () => {
     const shape = createPromiseShape(1_000);

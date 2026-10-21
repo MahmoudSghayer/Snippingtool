@@ -124,6 +124,7 @@ const parseJson = JSON.parse;
 const stringifyJson = JSON.stringify;
 const isFiniteNumber = Number.isFinite;
 const isInteger = Number.isInteger;
+const isArray = Array.isArray;
 const now = Date.now;
 const URLCtor = URL;
 const mapGet = Map.prototype.get;
@@ -257,7 +258,7 @@ function post(kind: string, data: unknown): void {
 }
 
 interface ActionResult {
-  action: 'search' | 'buy' | 'readResult' | 'diagnostics' | 'list' | 'pile' | 'bid' | 'watchlist' | 'move' | 'club' | 'clearSold' | 'relistAll' | 'unsold' | 'relist' | 'clearExpired';
+  action: 'search' | 'buy' | 'readResult' | 'diagnostics' | 'list' | 'pile' | 'bid' | 'watchlist' | 'move' | 'club' | 'owned' | 'clearSold' | 'relistAll' | 'unsold' | 'relist' | 'clearExpired';
   requestId: string;
   ok: boolean;
   requestedAt: number;
@@ -271,6 +272,8 @@ interface ActionResult {
   unsold?: TradePileItem[];
   /** How many finished auctions `clearExpired` took off the watch list. */
   cleared?: number;
+  /** Which of the cards asked about the club holds (`owned`). */
+  owned?: number[];
   /** A second result for a buy that first came back `timeout_unknown`:
    * EA's answer arrived after all (lib/act-auth.ts). */
   late?: boolean;
@@ -1460,6 +1463,31 @@ async function actClub(requestId: string, tradeId: string): Promise<void> {
   }
 }
 
+/** Least time between two club reads (`owned`): Gallery mode asks once a
+ * run, and once when the trader adds Sets. */
+const OWNED_MIN_GAP_MS = 5_000;
+let lastOwnedAt = -Infinity;
+
+/** Which of these cards (EA's card ids) the club holds, through the web
+ * app's own club search (Gallery mode). Read only. */
+async function actOwned(requestId: string, resourceIds: number[]): Promise<void> {
+  const requestedAt = now();
+  const { result, selection } = runProbeAndReport();
+  const shape = selection.shape;
+  if (!result.ok || !shape) return fail('owned', requestId, requestedAt, result.reason);
+  const read = shape.bidding?.clubOwned;
+  if (!read) return fail('owned', requestId, requestedAt, 'owned_unsupported');
+  if (requestedAt - lastOwnedAt < OWNED_MIN_GAP_MS) return fail('owned', requestId, requestedAt, 'owned_too_soon');
+  lastOwnedAt = requestedAt;
+  try {
+    const owned = await apply(read, shape.bidding, [servicesRoot() as Record<string, unknown>, resourceIds]);
+    adapterLog.add(`owned ok (${shape.name}): ${owned.length} of ${resourceIds.length} in the club`);
+    postResult({ action: 'owned', requestId, ok: true, requestedAt, completedAt: now(), owned });
+  } catch (err) {
+    fail('owned', requestId, requestedAt, errorText(err), describeError(err));
+  }
+}
+
 /** Takes the finished auctions the last watch list read saw (expired, or
  * lost to another bid) off the watch list, as Transfer Targets' "Clear
  * expired" does. Never a won or running one (`finishedWatched`). */
@@ -1560,6 +1588,7 @@ type ActRequest =
   | { action: 'list'; requestId: string; tradeId: string; startPrice: number; buyNowPrice: number }
   | { action: 'move'; requestId: string; tradeId: string }
   | { action: 'club'; requestId: string; tradeId: string }
+  | { action: 'owned'; requestId: string; resourceIds: number[] }
   | { action: 'diagnostics'; requestId: string }
   | { action: 'catalog'; requestId: string }
   | { action: 'pile'; requestId: string }
@@ -1601,6 +1630,12 @@ function asActRequest(value: unknown): ActRequest | null {
     d.action === 'clearExpired'
   )
     return d as unknown as ActRequest;
+  if (d.action === 'owned') {
+    const ids = d.resourceIds;
+    if (!isArray(ids) || ids.length === 0 || ids.length > 100) return null;
+    for (let i = 0; i < ids.length; i++) if (!isInteger(ids[i]) || (ids[i] as number) <= 0) return null;
+    return d as unknown as ActRequest;
+  }
   if (d.action === 'relist') {
     if (typeof d.itemId !== 'string' || d.itemId === '' || d.itemId.length > 40) return null;
     return isListingPrice(d.startPrice, d.buyNowPrice) ? (d as unknown as ActRequest) : null;
@@ -1649,6 +1684,9 @@ async function handleActRequest(data: unknown, mac: unknown): Promise<void> {
   }
   else if (request.action === 'club') {
     if (BIDDING_ENABLED) await actClub(request.requestId, request.tradeId);
+  }
+  else if (request.action === 'owned') {
+    if (BIDDING_ENABLED) await actOwned(request.requestId, request.resourceIds);
   }
   else if (request.action === 'clearExpired') {
     if (BIDDING_ENABLED) await actClearExpired(request.requestId);

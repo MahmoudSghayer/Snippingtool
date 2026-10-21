@@ -23,6 +23,8 @@ export function buildManifest(target, env) {
   const hostPermissions = [...EA_WEB_APP_MATCHES, `${env.apiOrigin}/*`];
   // Auto-sell reads a card's price from FUTBIN (background/futbin.ts).
   if (isAuto) hostPermissions.push('https://www.futbin.com/*');
+  // Gallery mode reads fut.gg's Gallery Sets and lineups (background/futgg.ts).
+  if (isAuto) hostPermissions.push('https://www.fut.gg/*');
 
   /** @type {Record<string, unknown>} */
   const manifest = {

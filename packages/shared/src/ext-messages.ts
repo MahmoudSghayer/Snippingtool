@@ -10,7 +10,7 @@ import { activityEventSchema } from './schemas/activity.js';
 import { emailSchema, passwordSchema } from './schemas/auth.js';
 import { botDailyUsageSchema, botModeSettingsSchema, botSettingsSchema } from './schemas/bot.js';
 import { filterCriteriaSchema, filterStatsSchema, savedFilterSchema } from './schemas/filters.js';
-import { galleryStateSchema } from './schemas/gallery.js';
+import { GALLERY_GRADES, galleryStateSchema } from './schemas/gallery.js';
 import { coinPriceSchema, MAX_COIN_PRICE } from './schemas/ingest-bounds.js';
 import { riskBudgetEventSchema } from './schemas/risk.js';
 import { snipingAttemptSchema } from './schemas/sniping.js';
@@ -374,6 +374,7 @@ export const adapterActionResultMessageSchema = z.object({
       'watchlist',
       'move',
       'club',
+      'owned',
       'clearSold',
       'relistAll',
       'unsold',
@@ -403,6 +404,9 @@ export const adapterActionResultMessageSchema = z.object({
     /** Only present for a successful `action: 'clearExpired'`: how many
      * finished auctions went off the watch list. */
     cleared: z.number().int().min(0).max(100).optional(),
+    /** Only present for a successful `action: 'owned'`: which of the card
+     * ids asked about the trader's club holds (loans left out). */
+    owned: z.array(z.number().int().positive()).max(100).optional(),
     /** A second result for a `buy` whose first result was
      * `error: 'timeout_unknown'`: EA's answer arrived after the adapter
      * stopped waiting, and `ok` says whether it bought. */
@@ -518,6 +522,15 @@ export const adapterActRequestMessageSchema = z.object({
       action: z.literal('club'),
       requestId: z.string().min(1),
       tradeId: z.string().min(1),
+    }),
+    /** Automation builds (Gallery mode): which of these cards (EA's card
+     * ids) the trader's club already holds, through the web app's own club
+     * search (what its Player Picks screen asks). Read only.
+     * `main/adapter.ts`'s `asActRequest` re-checks this shape by hand. */
+    z.object({
+      action: z.literal('owned'),
+      requestId: z.string().min(1),
+      resourceIds: z.array(z.number().int().positive()).min(1).max(100),
     }),
     /** Automation builds (the Nova AI page's Transfer list card): the web
      * app's own "Clear Sold", then a reload of the transfer list. */
@@ -909,6 +922,15 @@ export const extBackgroundCatalogSavePayloadSchema = adapterCatalogSchema;
 export const extBackgroundCardNamesPayloadSchema = z
   .object({
     resourceIds: z.array(z.number().int().positive()).max(50),
+  })
+  .strict();
+
+/** `gallery.futggLineup`: a fut.gg Set (its id) and the grade to load the
+ * cheapest lineup for. */
+export const extBackgroundFutggLineupPayloadSchema = z
+  .object({
+    setId: z.number().int().positive(),
+    grade: z.enum(GALLERY_GRADES),
   })
   .strict();
 

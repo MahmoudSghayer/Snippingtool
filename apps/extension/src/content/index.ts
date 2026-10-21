@@ -78,6 +78,8 @@ import type {
   BotSettings,
   BootstrapResponse,
   FeatureKey,
+  FutggLineup,
+  FutggSetSummary,
   GalleryState,
   RiskBudgetEvent,
   SavedFilter,
@@ -792,8 +794,10 @@ async function main(): Promise<void> {
               if (moved.ok) pileRefresher.listed();
               return moved;
             },
-            // Gallery mode: a bought card sent to the club.
+            // Gallery mode: a bought card sent to the club, and which fut.gg
+            // lineup cards the club holds already.
             club: adapter.club,
+            owned: adapter.owned,
             clearExpired: adapter.clearExpired,
             onAuctions: adapter.onAuctions,
             onBuyable: adapter.onBuyable,
@@ -930,6 +934,9 @@ async function main(): Promise<void> {
         sniper?.setGallery(next);
         await send('bot.gallerySet', next);
       },
+      // fut.gg's Gallery Sets and a Set's cheapest lineup (background/futgg.ts).
+      futggSets: async () => (await send<{ sets: FutggSetSummary[] | null }>('gallery.futggSets'))?.sets ?? null,
+      futggLineup: async (setId, grade) => (await send<{ lineup: FutggLineup | null }>('gallery.futggLineup', { setId, grade }))?.lineup ?? null,
       setLiveSearch: (search) => {
         liveSearch = search;
       },

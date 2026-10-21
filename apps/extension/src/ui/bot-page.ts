@@ -62,11 +62,22 @@ import {
   type BotRiskLevel,
   type BotSettings,
   type FilterCriteria,
+  type FutggLineup,
+  type FutggSetSummary,
   type GalleryCard,
+  type GalleryGrade,
   type GalleryState,
 } from '@sl/shared';
 
-import { gallerySummary, parseGalleryList } from '../engine/gallery.js';
+import {
+  addFutggLineup,
+  futggBestTier,
+  futggSetChoices,
+  gallerySetProgress,
+  gallerySummary,
+  parseGalleryList,
+  removeFutggSet,
+} from '../engine/gallery.js';
 import { TRANSFER_LIST_SIZE, type TransferListSummary } from '../lib/transfer-list.js';
 import {
   SPECIAL_LEVEL,
@@ -115,6 +126,10 @@ export interface BotPageDeps {
    * list, not saved. */
   getGallery?: () => GalleryState;
   saveGallery?: (state: GalleryState) => Promise<void>;
+  /** fut.gg's Gallery Sets, and one Set's cheapest lineup for a grade (null:
+   * fut.gg could not be read). Omitted: no fut.gg picker. */
+  futggSets?: () => Promise<FutggSetSummary[] | null>;
+  futggLineup?: (setId: number, grade: GalleryGrade) => Promise<FutggLineup | null>;
   /** The search the bot should run from now on (null: none). */
   setLiveSearch: (search: LiveSearch | null) => void;
   resolveNames: (resourceIds: number[]) => Promise<Record<string, string | null>>;
@@ -397,12 +412,17 @@ const MODES: { mode: BotMode; label: string; hint: string }[] = [
 const GALLERY_HELP =
   'One card a line: the player\'s name and the card\'s rating ("Hugo Ekitiké 85"). When two versions share a rating, add the version after it ("Hugo Ekitiké 85 Signature"), named as in the Rarity list on the Search tab: only that version is bought. A line starting with # names the Set the cards under it belong to. Nova buys each card (under its market price for 2 minutes, then at the market price, up to 10% over it), sends it to your club, and lists it again one step under its market price.';
 
+/** Under the fut.gg Set picker. */
+const FUTGG_HELP =
+  "Sets and lineups come from fut.gg's Gallery: for each Set, the cheapest lineup that reaches its best grade, by fut.gg's own solver and prices. Tick the Sets and add them: Nova checks your club first and skips the cards you already own, then buys the rest exactly as fut.gg lists them (the same version, holographic or not), sends each one to your club and sells it again. When a Set's cards are collected, finish it in the game: Gallery, the Set, Autocomplete, then Confirm Changes. fut.gg's prices move, so the cost is an estimate.";
+
 const GALLERY_STATUS: Record<GalleryCard['status'], string> = {
   todo: 'To buy',
   bought: 'Bought',
   club: 'In club',
   listed: 'Listed',
   skipped: 'Skipped',
+  owned: 'In your club',
 };
 
 /** Under the Buy Now price in Bid mode: what the max price means there. */
@@ -545,6 +565,22 @@ const CSS = `
   .g-problems:empty { display: none; }
   .g-budget input { width: 100%; min-width: 0; height: 44px; padding: 0 12px; border-radius: 4px; border: 1px solid var(--ea-input-line); background: var(--ea-input); color: var(--ea-text); font: inherit; font-size: 16px; }
   .g-sum { margin-top: 8px; font-size: 13px; color: var(--ea-text-2); }
+  .g-sonly { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ea-text-2); cursor: pointer; }
+  .g-sets { margin-top: 10px; max-height: 280px; overflow-y: auto; border: 1px solid var(--ea-line); border-radius: 4px; }
+  .g-set { display: grid; grid-template-columns: auto 1fr auto auto auto; align-items: center; gap: 8px; padding: 7px 10px; font-size: 13px; border-bottom: 1px solid var(--ea-line); cursor: pointer; }
+  .g-set:last-child { border-bottom: 0; }
+  .g-set:hover { background: var(--ea-row-hover); }
+  .g-set.added { color: var(--ea-muted); cursor: default; }
+  .g-set .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .g-set .cat { margin-left: 6px; color: var(--ea-muted); font-size: 12px; }
+  .g-set .gr { font-weight: 700; min-width: 14px; text-align: center; }
+  .g-set .gr.gS { color: var(--ea-success); }
+  .g-set .cost { white-space: nowrap; }
+  .g-set .tok { color: var(--ea-muted); font-size: 12px; white-space: nowrap; }
+  .g-mine { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+  .g-mineset { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; }
+  .g-sethead { font-size: 13px; padding: 2px 6px 8px; color: var(--ea-text-2); }
+  .g-sethead .warn { color: var(--ea-warning); }
   .settings-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 24px 8px; scrollbar-width: thin; scrollbar-color: var(--ea-input-line) transparent; }
   .card { background: var(--ea-row); border-radius: 6px; margin-bottom: 10px; }
   .card > summary { list-style: none; display: flex; align-items: center; gap: 10px; padding: 14px 16px; cursor: pointer; font-size: 17px; line-height: 20px; font-weight: 600; color: var(--ea-text); }
@@ -865,6 +901,13 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
    * Load said about it. */
   let galleryDraft: string | null = null;
   let galleryProblems: string[] = [];
+  /** The fut.gg picker: its Sets once loaded (null: not yet), the ones
+   * ticked, whether only grade S Sets show, and what the last add said. */
+  let futggSets: FutggSetSummary[] | null = null;
+  let futggBusy: 'sets' | 'add' | null = null;
+  const futggPicked = new Set<number>();
+  let futggSOnly = true;
+  let futggProblems: string[] = [];
   let ringFrame: number | null = null;
   let refreshQueued = false;
   let catalog: Catalog | null = null;
@@ -979,7 +1022,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   function galleryText(g: GalleryState): string {
     const lines: string[] = [];
     let set: string | undefined;
-    for (const c of g.cards) {
+    // fut.gg's cards are listed under their Sets, not in the box.
+    for (const c of g.cards.filter((x) => !x.exact)) {
       if (c.set !== set) {
         set = c.set;
         lines.push(set ? `# ${set}` : '#');
@@ -991,7 +1035,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
 
   function gallerySumText(g: GalleryState): string {
     const n = gallerySummary(g);
-    return `${n.todo} to buy · ${n.listed} listed · ${n.bought + n.club} on the way · ${n.skipped} skipped · spent ${fmt(g.spent)} of ${fmt(g.budget)}`;
+    const owned = n.owned > 0 ? ` · ${n.owned} in your club` : '';
+    return `${n.todo} to buy${owned} · ${n.listed} listed · ${n.bought + n.club} on the way · ${n.skipped} skipped · spent ${fmt(g.spent)} of ${fmt(g.budget)}`;
   }
 
   /** The Search tab in Gallery mode: the list box, its buttons, the budget. */
@@ -1002,7 +1047,10 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     const running = deps.getSniper()?.isRunning() ?? false;
     const off = running ? ' disabled' : '';
     if (galleryDraft == null) galleryDraft = galleryText(g);
+    // Redrawn on every change: the Set list keeps where it was scrolled to.
+    const scrolled = el.querySelector('.g-sets')?.scrollTop ?? 0;
     el.innerHTML =
+      (deps.futggSets ? section('fut.gg Sets', futggHtml(g, off)) : '') +
       section(
         'Gallery list',
         `<textarea class="g-list" id="g-list" spellcheck="false" aria-label="Gallery list"${off}
@@ -1025,6 +1073,112 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         <div class="g-sum" id="g-sum">${esc(gallerySumText(g))}</div>
         <div class="g-actions"><button type="button" class="ghost" id="g-reset-spent"${off}>Reset spent</button></div>`,
       );
+    const sets = el.querySelector('.g-sets');
+    if (sets && scrolled > 0) sets.scrollTop = scrolled;
+  }
+
+  /** The Add button's count, as Sets are ticked (no redraw). */
+  function futggAddLabel(): string {
+    return futggBusy === 'add' ? 'Adding…' : `Add ${futggPicked.size === 1 ? '1 Set' : `${futggPicked.size} Sets`}`;
+  }
+
+  /** fut.gg's Sets, ticked and added, and the Sets on the list. */
+  function futggHtml(g: GalleryState, off: string): string {
+    const onList = new Set((g.sets ?? []).map((x) => x.id));
+    const busy = futggBusy !== null ? ' disabled' : '';
+    const head = `<div class="g-actions">
+        <button type="button" class="preset" id="g-futgg"${off}${busy}><b>${futggBusy === 'sets' ? 'Loading…' : futggSets ? 'Reload fut.gg Sets' : 'Browse fut.gg Sets'}</b></button>
+        <label class="g-sonly"><input type="checkbox" id="g-sonly"${futggSOnly ? ' checked' : ''} /> Only Sets that reach grade S</label>
+      </div>`;
+    let list = '';
+    if (futggSets) {
+      const choices = futggSetChoices(futggSets, futggSOnly);
+      list =
+        choices.length === 0
+          ? `<div class="hint">${futggSOnly ? 'fut.gg lists no Set that reaches grade S right now.' : 'fut.gg lists no Set with a lineup right now.'}</div>`
+          : `<div class="g-sets" role="group" aria-label="fut.gg Sets">${choices
+              .map(({ set, tier }) => {
+                const added = onList.has(set.id);
+                const checked = added || futggPicked.has(set.id) ? ' checked' : '';
+                return `<label class="g-set${added ? ' added' : ''}"><input type="checkbox" data-futgg="${set.id}"${checked}${added ? ' disabled' : off} />
+                  <span class="nm">${esc(set.name)}<span class="cat">${esc(set.category.split(' / ')[0] ?? '')}</span></span>
+                  <span class="gr g${tier.grade}">${tier.grade}</span>
+                  <span class="cost">${fmt(tier.cost)}${COIN}</span>
+                  <span class="tok">${added ? 'on your list' : `${tier.tokens} tokens`}</span></label>`;
+              })
+              .join('')}</div>
+            <div class="g-actions"><button type="button" class="preset" id="g-add"${off}${busy}${futggPicked.size === 0 ? ' disabled' : ''}><b>${futggAddLabel()}</b></button></div>`;
+    }
+    const progress = gallerySetProgress(g);
+    const mine =
+      progress.length === 0
+        ? ''
+        : `<div class="g-mine">${progress
+            .map(
+              (p) => `<div class="g-mineset"><span><b>${esc(p.set.name)}</b> · grade ${p.set.grade} · ${p.done} of ${p.cards} collected${
+                p.skipped > 0 ? ` · ${p.skipped} skipped` : ''
+              }</span><button type="button" class="ghost" data-remove-set="${p.set.id}"${off}>Remove</button></div>`,
+            )
+            .join('')}</div>`;
+    return `${head}${list}<div class="g-problems" id="g-futgg-problems">${futggProblems.map(esc).join('<br>')}</div>${mine}<div class="hint">${esc(FUTGG_HELP)}</div>`;
+  }
+
+  /** Loads fut.gg's Sets into the picker. */
+  async function loadFutggSets(): Promise<void> {
+    if (!deps.futggSets || futggBusy) return;
+    futggBusy = 'sets';
+    futggProblems = [];
+    renderGallery();
+    const sets = await deps.futggSets().catch(() => null);
+    futggBusy = null;
+    if (sets) futggSets = sets;
+    else futggProblems = ['fut.gg could not be reached: try again in a minute'];
+    renderGallery();
+  }
+
+  /** Puts the ticked Sets' lineups on the list, then asks the club which of
+   * their cards it holds already. */
+  async function addFutggSets(): Promise<void> {
+    const sniper = deps.getSniper();
+    if (!deps.futggLineup || !futggSets || futggBusy || sniper?.isRunning()) return;
+    futggBusy = 'add';
+    futggProblems = [];
+    renderGallery();
+    let g = currentGallery();
+    let added = 0;
+    let sets = 0;
+    let cost = 0;
+    for (const id of [...futggPicked]) {
+      const set = futggSets.find((x) => x.id === id);
+      const tier = set ? futggBestTier(set) : null;
+      if (!set || !tier) continue;
+      const lineup = await deps.futggLineup(id, tier.grade).catch(() => null);
+      if (!lineup) {
+        futggProblems.push(`${set.name}: fut.gg did not send its lineup — try again`);
+        continue;
+      }
+      const r = addFutggLineup(g, lineup, catalog?.rarities ?? []);
+      futggProblems.push(...r.problems);
+      if (r.state === g) continue;
+      g = r.state;
+      added += r.added;
+      sets++;
+      cost += tier.cost;
+      futggPicked.delete(id);
+    }
+    if (sets > 0) {
+      await deps.saveGallery?.(g);
+      // The club holds some of them already, maybe: those are not bought.
+      const marked = sniper && !sniper.isRunning() ? await sniper.checkGalleryClub() : null;
+      const left = g.budget - g.spent;
+      const club = marked ? ` · ${marked} in your club already` : '';
+      const budget = cost > left ? ` · fut.gg prices them at ${fmt(cost)}, more than the ${fmt(left)} left of your budget` : '';
+      say(`Added ${sets === 1 ? '1 Set' : `${sets} Sets`}: ${added} cards${club}${budget}`, cost > left);
+    }
+    futggBusy = null;
+    renderGallery();
+    renderRunbar();
+    renderBids();
   }
 
   /** Saves a changed list (the bot takes it at once while stopped). */
@@ -1043,10 +1197,15 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     const g = currentGallery();
     if (id === 'g-load') {
       const text = (root.getElementById('g-list') as HTMLTextAreaElement | null)?.value ?? galleryDraft ?? '';
-      const parsed = parseGalleryList(text, catalog?.players ?? [], g.cards, catalog?.rarities ?? []);
+      // fut.gg's cards stay as they are: the box holds the typed ones.
+      const exact = g.cards.filter((c) => c.exact);
+      const parsed = parseGalleryList(text, catalog?.players ?? [], g.cards.filter((c) => !c.exact), catalog?.rarities ?? []);
+      const room = GALLERY_LIMITS.cards - exact.length;
+      if (parsed.cards.length > room) parsed.problems.push(`The list holds at most ${GALLERY_LIMITS.cards} cards: ${parsed.cards.length - room} typed cards were left out`);
+      const typed = parsed.cards.slice(0, Math.max(0, room));
       galleryProblems = parsed.problems;
       galleryDraft = text;
-      commitGallery({ ...g, cards: parsed.cards }, `Loaded ${parsed.cards.length} cards`);
+      commitGallery({ ...g, cards: [...exact, ...typed] }, `Loaded ${typed.length} cards`);
     } else if (id === 'g-retry') {
       const cards = g.cards.map((c) => {
         if (c.status !== 'skipped') return c;
@@ -1057,9 +1216,15 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     } else if (id === 'g-clear') {
       galleryDraft = '';
       galleryProblems = [];
-      commitGallery({ ...g, cards: [], spent: 0 }, 'List cleared');
+      futggProblems = [];
+      const { sets: _sets, ...rest } = g;
+      commitGallery({ ...rest, cards: [], spent: 0 }, 'List cleared');
     } else if (id === 'g-reset-spent') {
       commitGallery({ ...g, spent: 0 });
+    } else if (id === 'g-futgg') {
+      void loadFutggSets();
+    } else if (id === 'g-add') {
+      void addFutggSets();
     }
   }
 
@@ -2287,7 +2452,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       const g = currentGallery();
       const n = gallerySummary(g);
       if (n.todo === 0) {
-        text = n.total === 0 ? 'Paste your Gallery list and press Load list to start' : 'Every card on your Gallery list is done';
+        text = n.total === 0 ? 'Add fut.gg Sets, or paste your Gallery list and press Load list, to start' : 'Every card on your Gallery list is done';
         bad = true;
       } else if (g.budget - g.spent < MIN_SALE_PRICE) {
         text = 'Your Gallery budget is spent: raise it to start';
@@ -2757,16 +2922,26 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   }
 
   function galleryFeedHtml(g: GalleryState, running: boolean): string {
-    if (g.cards.length === 0) return '<div class="empty">Paste your Gallery list on the left, then press Load list.</div>';
+    if (g.cards.length === 0) return '<div class="empty">Paste your Gallery list on the left, then press Load list, or add fut.gg Sets.</div>';
     // The bot works the list in order: the first card still to buy is the one it is on.
     const buying = running ? g.cards.find((c) => c.status === 'todo')?.key : undefined;
-    return `<div class="bids-head">${esc(gallerySumText(g))}</div>${g.cards.map((c) => galleryRowHtml(c, c.key === buying)).join('')}`;
+    // Each fut.gg Set: the grade its lineup is for, and how far it got.
+    const sets = gallerySetProgress(g)
+      .map((p) => {
+        const risk =
+          p.skipped > 0
+            ? ` · <span class="warn">${p.skipped} skipped (${fmt(p.skippedScore)} points): retry ${p.skipped === 1 ? 'it' : 'them'}, or the Set may miss grade ${p.set.grade}</span>`
+            : '';
+        return `<div class="g-sethead"><b>${esc(p.set.name)}</b> · grade ${p.set.grade} needs ${fmt(p.set.threshold)} points, fut.gg's lineup makes ${fmt(p.set.score)} · ${p.done} of ${p.cards} collected${risk}</div>`;
+      })
+      .join('');
+    return `<div class="bids-head">${esc(gallerySumText(g))}</div>${sets}${g.cards.map((c) => galleryRowHtml(c, c.key === buying)).join('')}`;
   }
 
   function galleryRowHtml(c: GalleryCard, buying: boolean): string {
     const state = buying ? 'buying' : c.status;
     const label = buying ? 'Buying now' : GALLERY_STATUS[c.status];
-    const detail = c.note ?? (c.market != null ? `Market price ${fmt(c.market)}` : null);
+    const detail = c.note ?? (c.market != null ? `Market price ${fmt(c.market)}` : c.guide != null ? `fut.gg price ${fmt(c.guide)}` : null);
     const sub = [c.set, detail].filter((x): x is string => !!x).map(esc).join(' · ');
     const paid = c.price != null ? `${fmt(c.price)}${COIN}` : '—';
     const listed = c.listPrice != null ? `${fmt(c.listPrice)}${COIN}` : '—';
@@ -2948,6 +3123,12 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   onTrusted($('gallery'), 'click', (e) => {
     const id = (e.target as HTMLElement).closest<HTMLButtonElement>('button[id^="g-"]')?.id;
     if (id) onGalleryClick(id);
+    const remove = Number((e.target as HTMLElement).closest<HTMLButtonElement>('button[data-remove-set]')?.dataset.removeSet);
+    if (Number.isInteger(remove) && remove > 0 && !deps.getSniper()?.isRunning()) {
+      const g = currentGallery();
+      const name = g.sets?.find((x) => x.id === remove)?.name ?? 'Set';
+      commitGallery(removeFutggSet(g, remove), `${name} removed`);
+    }
   });
   onTrusted($('gallery'), 'input', (e) => {
     const t = e.target as HTMLTextAreaElement;
@@ -2955,6 +3136,23 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   });
   onTrusted($('gallery'), 'change', (e) => {
     const t = e.target as HTMLInputElement;
+    // The fut.gg picker: a Set ticked or unticked, or the grade S filter.
+    const setId = Number(t.dataset.futgg);
+    if (Number.isInteger(setId) && setId > 0) {
+      if (t.checked) futggPicked.add(setId);
+      else futggPicked.delete(setId);
+      const add = root.getElementById('g-add') as HTMLButtonElement | null;
+      if (add) {
+        add.innerHTML = `<b>${futggAddLabel()}</b>`;
+        add.disabled = futggPicked.size === 0 || futggBusy !== null || (deps.getSniper()?.isRunning() ?? false);
+      }
+      return;
+    }
+    if (t.id === 'g-sonly') {
+      futggSOnly = t.checked;
+      renderGallery();
+      return;
+    }
     if (t.id !== 'g-budget' || deps.getSniper()?.isRunning()) return;
     const v = Number(t.value.replace(/[,\s]/g, ''));
     if (!Number.isInteger(v) || v < GALLERY_LIMITS.budget.min || v > GALLERY_LIMITS.budget.max) {

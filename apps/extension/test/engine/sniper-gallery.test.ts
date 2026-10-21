@@ -6,7 +6,9 @@
 // 10% over it (past that it is skipped); a bought card goes to the club, to
 // the transfer list and back on the market one step under its market price.
 // The list's budget caps its buys, and its progress is saved after every
-// change.
+// change. A fut.gg lineup card is bought only as that exact card, priced on
+// fut.gg when FUTBIN and Nova have nothing, and not bought at all when the
+// club holds it already.
 //
 // A fake EA answers searches and the club/move/list calls; `sleep` advances
 // a fake clock.
@@ -14,7 +16,7 @@
 import { DEFAULT_BOT_MODE_SETTINGS, DEFAULT_BOT_SETTINGS, type BotSettings, type FilterCriteria, type GalleryCard, type GalleryState, type TrimmedAuction } from '@sl/shared';
 import { describe, expect, it } from 'vitest';
 
-import { Sniper, clubMissReason, type SniperDeps } from '../../src/engine/sniper.js';
+import { Sniper, clubMissReason, ownedMissReason, type SniperDeps } from '../../src/engine/sniper.js';
 import { ACT_ERROR } from '../../src/lib/act-auth.js';
 
 import type { ActionOutcome } from '../../src/content/adapter-client.js';
@@ -53,6 +55,9 @@ interface Opts {
   buyResult?: (tradeId: string) => ActionOutcome;
   clubResult?: () => ActionOutcome;
   noClub?: boolean;
+  /** What EA's club says it holds of the cards asked about. Omitted: no
+   * club read on this page. */
+  owned?: (resourceIds: number[]) => ActionOutcome;
   /** Searches before the test stops the bot. */
   maxSearches?: number;
 }
@@ -118,6 +123,13 @@ function setup(opts: Opts = {}) {
     onProbe: () => () => undefined,
     onShape: () => () => undefined,
   };
+  if (opts.owned) {
+    const owned = opts.owned;
+    adapter.owned = async (ids) => {
+      h.calls.push(`owned ${ids.join(',')}`);
+      return owned(ids);
+    };
+  }
   if (!opts.noClub)
     adapter.club = async (tradeId) => {
       h.calls.push(`club ${tradeId}`);
@@ -343,11 +355,95 @@ describe('Gallery mode — the budget and the list', () => {
   });
 });
 
+describe('Gallery mode — fut.gg lineup cards', () => {
+  // Shea Charles 80 TOTW, as fut.gg's lineup names it: the holographic copy.
+  const HOLO = 67_000_100;
+  const NORMAL = 50_000_100;
+  const exact = (extra: Partial<GalleryCard> = {}): GalleryCard =>
+    card({ key: `100:80#${HOLO}`, name: 'Shea Charles', rating: 80, resourceId: HOLO, exact: true, rarity: 3, version: 'Team of the Week Holographic', setIds: [54], guide: 4_000, ...extra });
+
+  it('buys only that exact card, never another version at the same rating and rarity', async () => {
+    const h = setup({
+      gallery: { budget: 100_000, spent: 0, cards: [exact()] },
+      results: () => [listing('normal', 3_000, { resourceId: NORMAL, rating: 80 }), listing('holo', 3_700, { resourceId: HOLO, rating: 80 })],
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.searches[0]!.filter).toEqual({ resourceId: 100, minRating: 80, maxRating: 80, rarity: 3, maxPrice: 3_900 });
+    expect(h.buys.map(([id]) => id)).toEqual(['holo']);
+    expect(h.prices[0]).toBe(HOLO);
+    expect(h.gallery().cards[0]).toMatchObject({ status: 'listed', price: 3_700 });
+  });
+
+  it("prices the card on fut.gg's price when FUTBIN and Nova have none", async () => {
+    const h = setup({
+      gallery: { budget: 100_000, spent: 0, cards: [exact({ guide: 5_000 })] },
+      market: () => null,
+      results: () => [listing('holo', 4_800, { resourceId: HOLO, rating: 80 })],
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.searches[0]!.filter.maxPrice).toBe(4_900);
+    expect(h.buys.map(([id, price]) => [id, price])).toEqual([['holo', 4_800]]);
+    expect(h.log()).toContain('Gallery: {card} — fut.gg price 5,000 coins; looking for one under it for 2 minutes first');
+  });
+
+  it('asks the club first, and buys none of the cards it holds already', async () => {
+    const other = exact({ key: '200:79#200', name: 'Alex Iwobi', playerId: 200, resourceId: 200, rating: 79, rarity: undefined, version: undefined });
+    const h = setup({
+      gallery: { budget: 100_000, spent: 0, cards: [exact(), other] },
+      owned: () => ({ ok: true, owned: [HOLO], signed: true, latencyMs: 5 }),
+      results: (_n, f) => [listing(`t${f.resourceId}`, 700, { resourceId: f.resourceId, assetId: f.resourceId, rating: 79 })],
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.calls[0]).toBe(`owned ${HOLO},200`);
+    expect(h.searches.every((s) => s.filter.resourceId === 200)).toBe(true);
+    expect(h.gallery().cards.map((c) => c.status)).toEqual(['owned', 'listed']);
+    expect(h.log()).toContain('Gallery: 1 card of your list is in your club already — it counts for its Set, so Nova will not buy it');
+    expect(h.sniper.state.stopReason).toBe('gallery_done');
+  });
+
+  it('buys every card when the club cannot be read', async () => {
+    const h = setup({
+      gallery: { budget: 100_000, spent: 0, cards: [exact()] },
+      owned: () => ({ ok: false, error: 'owned_unsupported', signed: true, latencyMs: 5 }),
+      results: () => [listing('holo', 3_700, { resourceId: HOLO, rating: 80 })],
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.buys.map(([id]) => id)).toEqual(['holo']);
+    expect(h.log()).toContain('Gallery: could not check your club (this EA web app has no club search Nova AI knows) — buying every card on the list');
+  });
+
+  it('checks the club for the page while stopped, and a run right after does not ask again', async () => {
+    const h = setup({
+      gallery: { budget: 100_000, spent: 0, cards: [exact()] },
+      owned: () => ({ ok: true, owned: [HOLO], signed: true, latencyMs: 5 }),
+    });
+    expect(await h.sniper.checkGalleryClub()).toBe(1);
+    expect(h.saved.at(-1)!.cards[0]!.status).toBe('owned');
+    h.sniper.start();
+    expect(h.sniper.state.stopReason).toBe('no_gallery');
+    expect(h.calls).toEqual([`owned ${HOLO}`]);
+  });
+});
+
 describe('clubMissReason', () => {
   it("says why a card did not go to the club, in the user's words", () => {
     expect(clubMissReason('club_not_bought')).toBe('Nova AI did not buy it on this page load');
     expect(clubMissReason('club_unsupported')).toBe('Nova AI cannot send cards to the club on this EA web app');
     expect(clubMissReason('move reported success: false (status 471)')).toBe('EA refused it (error 471): your club may already hold this card');
     expect(clubMissReason('act request timed out')).toBe('EA did not answer in time');
+  });
+});
+
+describe('ownedMissReason', () => {
+  it("says why the club could not be read, in the user's words", () => {
+    expect(ownedMissReason('owned_unsupported')).toBe('this EA web app has no club search Nova AI knows');
+    expect(ownedMissReason('owned_too_soon')).toBe('it was checked a moment ago');
+    expect(ownedMissReason(undefined)).toBe('EA did not answer in time');
+    expect(ownedMissReason('Club.search reported success: false (status 512)')).toBe('EA refused it (error 512)');
+    expect(ownedMissReason('Club.search answered without an item list')).toBe('EA did not answer as expected');
   });
 });

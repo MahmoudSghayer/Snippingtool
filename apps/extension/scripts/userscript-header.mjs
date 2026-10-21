@@ -47,9 +47,11 @@ export function buildUserscriptHeader(env) {
     ['run-at', 'document-start'],
     ['noframes', ''],
     // The hosts the script talks to besides the page it runs on: the API,
-    // and FUTBIN for auto-sell's prices (background/futbin.ts).
+    // FUTBIN for auto-sell's prices (background/futbin.ts), and fut.gg for
+    // Gallery mode's Sets (background/futgg.ts).
     ['connect', apiHost],
     ['connect', 'www.futbin.com'],
+    ['connect', 'www.fut.gg'],
     ...GRANTS.map((g) => /** @type {[string, string]} */ (['grant', g])),
   ];
 
