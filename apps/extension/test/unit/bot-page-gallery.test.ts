@@ -118,7 +118,7 @@ async function mount(
         }
       : {}),
     setLiveSearch: () => undefined,
-    resolveNames: async () => ({}),
+    resolveNames: async (ids: number[]) => Object.fromEntries(ids.map((id) => [String(id), CATALOG.players.find((p) => p.id === id)?.name ?? null])),
     getCatalog: async () => CATALOG,
   });
   page.open();
@@ -309,4 +309,23 @@ it('says when fut.gg sends no lineup for a Set, and adds nothing', async () => {
   await vi.advanceTimersByTimeAsync(10);
   expect(other.root.getElementById('g-futgg-problems')!.textContent).toBe('Malaga CF: fut.gg did not send its lineup — try again');
   expect(other.sniper.getGallery().cards).toEqual([]);
+});
+
+it("names the card in Gallery mode's notes in the Activity feed, never {card}", async () => {
+  const { root, sniper, page } = await mount({ ...DEFAULT_BOT_MODE_SETTINGS, mode: 'gallery' });
+  (sniper as unknown as { addLog(e: object): void }).addLog({
+    kind: 'info',
+    resourceId: 257289,
+    assetId: 257289,
+    rating: 85,
+    message: 'Gallery: {card} — fut.gg price 1,400 coins; looking for one under it for 1 minute first',
+  });
+  // The bot's onChange refreshes the page; the name arrives a moment later.
+  page.refresh();
+  await vi.advanceTimersByTimeAsync(1_500);
+  page.refresh();
+  await vi.advanceTimersByTimeAsync(1_500);
+  const text = root.getElementById('log')!.textContent!;
+  expect(text).toContain('Gallery: 85 Hugo Ekitiké — fut.gg price 1,400 coins');
+  expect(text).not.toContain('{card}');
 });

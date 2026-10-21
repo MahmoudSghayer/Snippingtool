@@ -129,16 +129,16 @@ describe('Gallery prices', () => {
     expect(gallerySnipeCap(40_000)).toBe(39_750);
   });
 
-  it('then pays the market price, a step more after each search that found none, up to 10% over it', () => {
-    expect(galleryMarketCap(4_000, 0)).toBe(4_000);
-    expect(galleryMarketCap(4_000, 4)).toBe(4_400);
-    expect(galleryMarketCap(4_000, 5)).toBeNull();
+  it('then the cheapest listed: from the market price, 1, 2, 4, 8… steps over it after each search that found none, with no limit', () => {
+    expect([0, 1, 2, 3, 4, 5].map((n) => galleryMarketCap(4_000, n))).toEqual([4_000, 4_100, 4_200, 4_400, 4_800, 5_600]);
+    // Never skipped: enough searches reach EA's highest price.
+    expect(galleryMarketCap(4_000, 40)).toBe(15_000_000);
   });
 
-  it('lists one step under the market price, with a starting bid a step under that', () => {
-    expect(galleryListPrices(4_000)).toEqual({ buyNowPrice: 3_900, startPrice: 3_800 });
-    // Never under EA's lowest prices.
-    expect(galleryListPrices(200)).toEqual({ buyNowPrice: 200, startPrice: 150 });
+  it('lists one step over what the card cost, with a starting bid a step under that', () => {
+    expect(galleryListPrices(3_700)).toEqual({ buyNowPrice: 3_800, startPrice: 3_700 });
+    expect(galleryListPrices(200)).toEqual({ buyNowPrice: 250, startPrice: 200 });
+    expect(galleryListPrices(9_900)).toEqual({ buyNowPrice: 10_000, startPrice: 9_900 });
   });
 });
 

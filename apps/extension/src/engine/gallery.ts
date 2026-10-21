@@ -12,14 +12,17 @@
  * Changes), which the web app cannot do. One card at a time:
  *   1. its version, when the rating is not the player's base card's: a
  *      look-only search of the player at that rating names it;
- *   2. its market price: FUTBIN's, else Nova's own market data, else the
- *      cheapest listing that search saw;
+ *   2. its market price: FUTBIN's, else Nova's own market data, else
+ *      fut.gg's, else the cheapest listing that search saw;
  *   3. for GALLERY_SNIPE_MS it buys only under the market price (one EA
- *      price step under it), then at the market price, a step higher after
- *      each search that found nothing, up to GALLERY_OVER_MARKET over it:
- *      past that the card is skipped, so a price spike never costs much;
+ *      price step under it), then the cheapest listed: from the market
+ *      price up, the search's max rising faster after each search that
+ *      found none (`galleryMarketCap`), the cheapest match bought. A card
+ *      is never skipped for its price: only the list's budget stops it
+ *      (the page's max buy price plays no part), and a card nobody lists
+ *      waits at the end of the list for another try;
  *   4. once bought: to the club, to the transfer list, and listed one step
- *      under the market price, the cheapest listing, so it sells first.
+ *      over what it cost.
  * The list's coin budget caps what its buys spend, and every search and
  * buy goes through the same limits as the rest of Nova AI.
  *
@@ -38,10 +41,8 @@ import type { CatalogOption, CatalogPlayer } from '../model/catalog.js';
 import type { FutggLineup, FutggSetSummary, FutggTier, GalleryCard, GallerySet, GalleryState } from '@sl/shared';
 
 /** How long Gallery mode looks for a card under the market price before it
- * pays the market price. */
-export const GALLERY_SNIPE_MS = 120_000;
-/** How far over the market price it goes for a card before it skips it. */
-export const GALLERY_OVER_MARKET = 0.1;
+ * buys the cheapest listed. */
+export const GALLERY_SNIPE_MS = 60_000;
 /** Look-only searches for a card's version before it is skipped as not
  * listed. */
 export const GALLERY_RESOLVE_TRIES = 2;
@@ -206,19 +207,19 @@ export function gallerySnipeCap(market: number): number {
   return stepPrice(market, -1);
 }
 
-/** The most it pays once those minutes are over: the market price, then one
- * step more for each search since that found nothing (`steps`). Null past
- * GALLERY_OVER_MARKET over the market price: the card is skipped. */
-export function galleryMarketCap(market: number, steps: number): number | null {
-  const cap = stepPrice(market, steps);
-  return cap > market * (1 + GALLERY_OVER_MARKET) ? null : cap;
+/** The search's max once that minute is over, the cheapest match bought:
+ * the market price, then 1, 2, 4, 8… EA price steps over it after each
+ * search that found none (`steps` such searches), so a card whose market
+ * price was off is found in a few searches. No limit but the budget's. */
+export function galleryMarketCap(market: number, steps: number): number {
+  // 2^14 steps cover all of EA's price grid.
+  return stepPrice(market, steps === 0 ? 0 : 2 ** Math.min(steps - 1, 14));
 }
 
-/** The prices a bought card is listed at: one step under the market price
- * (the cheapest listing, so it sells first), and a starting bid a step
- * under that. */
-export function galleryListPrices(market: number): { startPrice: number; buyNowPrice: number } {
-  const buyNowPrice = Math.max(MIN_SALE_PRICE, stepPrice(market, -1));
+/** The prices a bought card is listed at: one EA price step over what it
+ * cost, and a starting bid a step under that. */
+export function galleryListPrices(paid: number): { startPrice: number; buyNowPrice: number } {
+  const buyNowPrice = Math.max(MIN_SALE_PRICE, stepPrice(paid, 1));
   return { buyNowPrice, startPrice: Math.max(MIN_START_PRICE, stepPrice(buyNowPrice, -1)) };
 }
 

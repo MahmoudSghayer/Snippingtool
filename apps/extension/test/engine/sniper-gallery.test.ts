@@ -1,10 +1,11 @@
 // Nova AI's Gallery mode (`engine/sniper.ts`, `runGallery`; rules in
 // `engine/gallery.ts`): the trader's list, one card at a time. A card's
 // version comes from a look-only search when the rating is not the player's
-// base card's; it is bought under its market price for two minutes, then at
-// the market price and a step more after each search that found none, up to
-// 10% over it (past that it is skipped); a bought card goes to the club, to
-// the transfer list and back on the market one step under its market price.
+// base card's; it is bought under its market price for a minute, then the
+// cheapest listed (the search's max rising faster after each search that
+// found none: never skipped for its price, only the budget stops it); a
+// bought card goes to the club, to the transfer list and back on the market
+// one step over what it cost.
 // The list's budget caps its buys, and its progress is saved after every
 // change. A fut.gg lineup card is bought only as that exact card, priced on
 // fut.gg when FUTBIN and Nova have nothing, and not bought at all when the
@@ -164,45 +165,66 @@ function setup(opts: Opts = {}) {
 }
 
 describe('Gallery mode — buying and listing', () => {
-  it('buys a card under its market price, sends it to the club, moves it and lists it one step under the market price', async () => {
+  it('buys a card under its market price, sends it to the club, moves it and lists it one step over what it cost', async () => {
     // The minimum profit never holds a Gallery buy back: each one is bought to collect.
     const h = setup({ settings: { thresholds: { ...DEFAULT_BOT_SETTINGS.thresholds, minProfit: 5_000 } }, results: () => [listing('t1', 3_700)] });
     h.sniper.start();
     await h.done();
     expect(h.searches[0]!.filter).toEqual({ resourceId: 100, minRating: 85, maxRating: 85, maxPrice: 3_900 });
     expect(h.calls).toEqual(['buy t1', 'club t1', 'move t1', 'list t1']);
-    expect(h.lists).toEqual([['t1', 3_800, 3_900]]);
-    expect(h.gallery()).toEqual({ budget: 100_000, spent: 3_700, cards: [card({ status: 'listed', price: 3_700, market: 4_000, listPrice: 3_900 })] });
+    expect(h.lists).toEqual([['t1', 3_700, 3_800]]);
+    expect(h.gallery()).toEqual({ budget: 100_000, spent: 3_700, cards: [card({ status: 'listed', price: 3_700, market: 4_000, listPrice: 3_800 })] });
     expect(h.trades).toEqual([{ tradeId: 't1', resourceId: 100, buyPrice: 3_700 }]);
     expect(h.sniper.state.stopReason).toBe('gallery_done');
     expect(h.log()).toContain('Sent {card} to your club');
-    expect(h.log()).toContain('Gallery: one step under the market price (4,000 coins)');
+    expect(h.log()).toContain('Gallery: one step over what it cost (3,700 coins)');
     // Its progress was saved after every step.
     expect(h.saved.at(-1)).toEqual(h.gallery());
   });
 
-  it('looks only under the market price for two minutes, then buys the cheapest at the market price', async () => {
+  it('looks only under the market price for one minute, then buys the cheapest at the market price', async () => {
     const h = setup({ results: () => [listing('t1', 4_000)] });
     h.sniper.start();
     await h.done();
     const [buy] = h.buys;
     expect(buy![1]).toBe(4_000);
-    expect(buy![2]).toBeGreaterThanOrEqual(START + 120 * SEC);
+    expect(buy![2]).toBeGreaterThanOrEqual(START + 60 * SEC);
+    expect(buy![2]).toBeLessThan(START + 90 * SEC);
     // Every search before that asked for less than the market price.
     for (const s of h.searches.slice(0, -1)) expect(s.filter.maxPrice).toBeLessThan(4_000);
     expect(h.searches.at(-1)!.filter.maxPrice).toBe(4_000);
-    expect(h.log()).toContain('Gallery: none of {card} under its market price (4,000 coins) — buying the cheapest at or near it');
+    expect(h.log()).toContain('Gallery: none of {card} under its market price (4,000 coins) — buying the cheapest one listed');
   });
 
-  it('steps the price up while none is listed, and skips the card past 10% over its market price', async () => {
-    const h = setup({ results: () => [listing('t1', 5_000)] });
+  it('raises the max faster after each search that found none, and buys the cheapest listed: never skipped for its price', async () => {
+    const h = setup({ results: () => [listing('t2', 5_200), listing('t1', 5_000)] });
     h.sniper.start();
     await h.done();
-    expect(h.buys).toEqual([]);
     const market = h.searches.filter((s) => (s.filter.maxPrice ?? 0) >= 4_000).map((s) => s.filter.maxPrice);
-    expect(market).toEqual([4_000, 4_100, 4_200, 4_300, 4_400]);
-    expect(h.gallery().cards[0]).toMatchObject({ status: 'skipped', note: 'none listed within 10% of its market price (4,000 coins)' });
+    expect(market).toEqual([4_000, 4_100, 4_200, 4_400, 4_800, 5_600]);
+    expect(h.buys.map(([id, price]) => [id, price])).toEqual([['t1', 5_000]]);
+    expect(h.gallery().cards[0]).toMatchObject({ status: 'listed', price: 5_000, listPrice: 5_100 });
     expect(h.sniper.state.stopReason).toBe('gallery_done');
+  });
+
+  it('puts a card none of is listed at the end of the list, and buys the next one first', async () => {
+    const other = card({ key: '200:85', playerId: 200, resourceId: 200, name: 'Florian Wirtz' });
+    const h = setup({
+      gallery: { budget: 100_000, spent: 0, cards: [card(), other] },
+      // Nothing of Hugo Ekitiké, at any price; Florian Wirtz at 3,700.
+      results: (_n, f) => (f.resourceId === 200 ? [listing('w1', 3_700, { resourceId: 200, assetId: 200 })] : []),
+      market: (id) => (id === 200 ? 4_000 : null),
+      maxSearches: 12,
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.buys.map(([id]) => id)).toEqual(['w1']);
+    expect(h.gallery().cards.map((c) => [c.name, c.status])).toEqual([
+      ['Florian Wirtz', 'listed'],
+      ['Hugo Ekitiké', 'todo'],
+    ]);
+    expect(h.gallery().cards[1]!.note).toBe('none listed at this rating right now: Nova tries again after the other cards');
+    expect(h.log()).toContain('Gallery: none listed at this rating right now for {card} — trying again after the other cards');
   });
 
   it("learns a special card's version with a look-only search, and never buys on that search", async () => {
@@ -218,7 +240,7 @@ describe('Gallery mode — buying and listing', () => {
     expect(h.prices).toContain(50_000_100);
     // Not the one the look-only search saw; the next one, under 9,900.
     expect(h.buys.map(([id, price]) => [id, price])).toEqual([['t2', 9_500]]);
-    expect(h.gallery().cards[0]).toMatchObject({ status: 'listed', resourceId: 50_000_100, market: 10_000, listPrice: 9_900 });
+    expect(h.gallery().cards[0]).toMatchObject({ status: 'listed', resourceId: 50_000_100, market: 10_000, listPrice: 9_600 });
   });
 
   it('buys only the version asked for: searched by its rarity, then that card alone, whatever else is listed', async () => {
@@ -236,7 +258,7 @@ describe('Gallery mode — buying and listing', () => {
     expect(h.searches[1]!.filter).toMatchObject({ rarity: 52, maxPrice: 7_900 });
     expect(h.prices).toContain(60_000_100);
     expect(h.buys.map(([id, price]) => [id, price])).toEqual([['s2', 7_500]]);
-    expect(h.gallery().cards[0]).toMatchObject({ status: 'listed', resourceId: 60_000_100, market: 8_000, listPrice: 7_900 });
+    expect(h.gallery().cards[0]).toMatchObject({ status: 'listed', resourceId: 60_000_100, market: 8_000, listPrice: 7_600 });
   });
 
   it('prices a card by the cheapest listing seen when FUTBIN and Nova have none', async () => {
@@ -244,7 +266,7 @@ describe('Gallery mode — buying and listing', () => {
     h.sniper.start();
     await h.done();
     expect(h.searches[0]!.filter.maxPrice).toBeUndefined();
-    expect(h.gallery().cards[0]).toMatchObject({ status: 'listed', market: 3_000, price: 2_900, listPrice: 2_900 });
+    expect(h.gallery().cards[0]).toMatchObject({ status: 'listed', market: 3_000, price: 2_900, listPrice: 3_000 });
   });
 
   it("buys a card at EA's lowest price straight at the market price: nothing lists under it", async () => {
@@ -252,7 +274,7 @@ describe('Gallery mode — buying and listing', () => {
     h.sniper.start();
     await h.done();
     expect(h.searches.map((s) => s.filter.maxPrice)).toEqual([200]);
-    expect(h.gallery().cards[0]).toMatchObject({ status: 'listed', price: 200, listPrice: 200 });
+    expect(h.gallery().cards[0]).toMatchObject({ status: 'listed', price: 200, listPrice: 250 });
   });
 
   it("keeps a budget-capped max on EA's price grid", async () => {
@@ -312,7 +334,7 @@ describe('Gallery mode — the budget and the list', () => {
     expect(h.gallery().cards[1]!.status).toBe('todo');
   });
 
-  it('skips a card that costs more than what is left of the budget', async () => {
+  it('stops when a card costs more than what is left of the budget, and says what it costs', async () => {
     const h = setup({
       gallery: { budget: 5_000, spent: 0, cards: [card(), card({ key: '200:85', playerId: 200, resourceId: 200, name: 'Florian Wirtz' })] },
       results: (_n, f) => [listing(`t${f.resourceId}`, f.resourceId === 100 ? 3_700 : 4_000, { resourceId: f.resourceId, assetId: f.resourceId })],
@@ -320,7 +342,22 @@ describe('Gallery mode — the budget and the list', () => {
     h.sniper.start();
     await h.done();
     expect(h.buys.map(([id]) => id)).toEqual(['t100']);
-    expect(h.gallery().cards[1]).toMatchObject({ status: 'skipped', note: 'it costs more than what is left of your Gallery budget (1,300 coins)' });
+    // Its last search asked for no max, to see what it costs.
+    expect(h.searches.at(-1)!.filter.maxPrice).toBeUndefined();
+    expect(h.sniper.state.stopReason).toBe('gallery_budget');
+    expect(h.gallery().cards[1]).toMatchObject({ status: 'todo', note: 'Cheapest listed: 4,000 coins, over the 1,300 coins left of your Gallery budget' });
+    expect(h.log()).toContain('Gallery: the cheapest {card} is 4,000 coins, more than the 1,300 coins left of your Gallery budget');
+  });
+
+  it('ignores the max buy price: only the Gallery budget limits a buy', async () => {
+    const h = setup({
+      settings: { thresholds: { ...DEFAULT_BOT_SETTINGS.thresholds, minProfit: 0, maxBuyPrice: 3_000 } },
+      results: () => [listing('t1', 3_700)],
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.buys.map(([id, price]) => [id, price])).toEqual([['t1', 3_700]]);
+    expect(h.gallery().cards[0]!.status).toBe('listed');
   });
 
   it('refuses to start without the club call, with no card left to buy, or with the budget spent', () => {
@@ -385,7 +422,7 @@ describe('Gallery mode — fut.gg lineup cards', () => {
     await h.done();
     expect(h.searches[0]!.filter.maxPrice).toBe(4_900);
     expect(h.buys.map(([id, price]) => [id, price])).toEqual([['holo', 4_800]]);
-    expect(h.log()).toContain('Gallery: {card} — fut.gg price 5,000 coins; looking for one under it for 2 minutes first');
+    expect(h.log()).toContain('Gallery: {card} — fut.gg price 5,000 coins; looking for one under it for 1 minute first');
   });
 
   it('asks the club first, and buys none of the cards it holds already', async () => {
