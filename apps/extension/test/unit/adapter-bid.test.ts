@@ -270,6 +270,7 @@ describe("Gallery mode's club call", () => {
 describe("Gallery mode's club read", () => {
   // The web app's own search criteria class, as its Player Picks screen uses it.
   class Criteria {
+    type = '';
     defId: number[] = [];
   }
   const clubItem = (definitionId: number, loan = false) => ({ definitionId, isLimitedUse: () => loan });
@@ -284,6 +285,10 @@ describe("Gallery mode's club read", () => {
       expect(owned).toEqual([243312]);
       expect(search.mock.calls[0]![0]).toBeInstanceOf(Criteria);
       expect(search.mock.calls[0]![0].defId).toEqual([243312, 5, 6]);
+      // `type` is set first, as the web app's Player Picks does: EA ignores a
+      // criteria with no `type` and answers with the whole club, which reads
+      // as "could not check". No window.SearchType here, so the fallback.
+      expect(search.mock.calls[0]![0].type).toBe('player');
       // A player not asked about: the search ignored the card filter, and
       // its answer cannot say "none owned".
       const unfiltered = vi.fn((): unknown => observable({ success: true, response: { items: [clubItem(77)] } }));

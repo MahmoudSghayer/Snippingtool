@@ -112,6 +112,16 @@ const CRITERIA_FIELDS: Record<string, string> = {
  * cards as `SP` (community autobuyers; unverified). */
 const LEVELS: Record<string, string> = { bronze: 'bronze', silver: 'silver', gold: 'gold', special: 'SP' };
 
+/** EA's `SearchType.PLAYER` string, or the plain `'player'` fallback. The
+ * `UTSearchCriteriaDTO` `type` setter resets other fields, so callers set it
+ * first; a criteria with no `type` is ignored by EA's market and club search
+ * alike (the club search then answers with the whole club, not the asked
+ * cards). */
+function playerSearchType(): string {
+  const t = ((window as unknown as Obj).SearchType as Obj | undefined)?.PLAYER;
+  return typeof t === 'string' && t !== '' ? t : 'player';
+}
+
 /** The search criteria for `filter`: an instance of the app's own
  * `UTSearchCriteriaDTO` when the page has one (what its search form
  * builds), else a plain object, with `type` set to a player search FIRST —
@@ -135,8 +145,7 @@ export function observableSearchCriteria(filter: FilterCriteria): Obj {
       criteria = {};
     }
   }
-  const searchType = ((window as unknown as Obj).SearchType as Obj | undefined)?.PLAYER;
-  criteria.type = typeof searchType === 'string' && searchType !== '' ? searchType : 'player';
+  criteria.type = playerSearchType();
   for (const key of objectKeys(CRITERIA_FIELDS)) {
     if (f[key] == null) continue;
     if (key === 'position' && f.zone != null) continue;
@@ -262,6 +271,12 @@ function createBidding(timeoutMs: number): BiddingShape {
       const Dto = (window as unknown as Obj).UTSearchCriteriaDTO;
       if (typeof Dto !== 'function') throw new ShapeError('window.UTSearchCriteriaDTO is not available');
       const criteria = construct(Dto as new () => Obj, []);
+      // `type` first, as the market search and the web app's Player Picks do:
+      // the DTO's `type` setter resets other fields, and EA's club search
+      // ignores a criteria with no `type` — it answers with the whole club
+      // (players not asked about), which reads as "could not check" and makes
+      // Gallery mode buy every card.
+      criteria.type = playerSearchType();
       criteria.defId = [...resourceIds];
       const returned = apply(search as (...args: unknown[]) => unknown, club, [criteria]);
       if (!isAsync(returned)) throw new ShapeError('services.Club.search returned neither an observable nor a promise');
