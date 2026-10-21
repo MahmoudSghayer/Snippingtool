@@ -1,8 +1,9 @@
 // /api/v1/extension/* — bootstrap, heartbeat, telemetry, errors, version,
-// kill-switch, the Nova AI page's recent searches and bot settings, and the
-// open trades every browser's trade lifecycle follows. The MV3 background
-// service worker's only server contact points (docs/01-architecture.md,
-// "license bootstrap + heartbeat + offline grace").
+// kill-switch, the Nova AI page's recent searches, bot settings and Gallery
+// list, and the open trades every browser's trade lifecycle follows. The
+// MV3 background service worker's only server contact points
+// (docs/01-architecture.md, "license bootstrap + heartbeat + offline
+// grace").
 
 import {
   devices,
@@ -13,6 +14,7 @@ import {
   trades,
   userActivity,
   userBotSettings,
+  userGallery,
   userRecentSearches,
   users,
 } from '@sl/db';
@@ -23,6 +25,8 @@ import {
   bootstrapResponseSchema,
   extensionErrorReportSchema,
   FEATURE_KEYS,
+  gallerySyncResponseSchema,
+  galleryStateSchema,
   heartbeatRequestSchema,
   heartbeatResponseSchema,
   isPlanCode,
@@ -31,15 +35,19 @@ import {
   openTradeSchema,
   openTradesResponseSchema,
   putBotSettingsRequestSchema,
+  putGalleryRequestSchema,
+  putGalleryResponseSchema,
   putRecentSearchesRequestSchema,
   recentSearchSchema,
   recentSearchesResponseSchema,
   telemetryFlushRequestSchema,
   type BootstrapResponse,
   type BotSettingsSyncResponse,
+  type GallerySyncResponse,
   type LicenseDto,
   type OpenTrade,
   type OpenTradesResponse,
+  type PutGalleryResponse,
   type RecentSearchesResponse,
   type SubscriptionDto,
 } from '@sl/shared';
@@ -203,6 +211,23 @@ function toBotSettingsResponse(
   if (!row) return { settings: null, updatedAt: null };
   const parsed = botSettingsSchema.safeParse(row.settings);
   return { settings: parsed.success ? parsed.data : null, updatedAt: row.updatedAt.toISOString() };
+}
+
+/** A Gallery list at every limit (300 cards with every field at its
+ * longest, 40 Sets, 500 completed Sets with their times) is about 460 KiB
+ * of JSON, 600 KiB when every name is quotes JSON escapes
+ * (__tests__/gallery.test.ts measures both); a real one is a few dozen KB. */
+const GALLERY_BODY_LIMIT = 1024 * 1024;
+
+/** The caller's stored Gallery list as the API returns it. A list a later
+ * schema no longer accepts reads as none rather than failing the response:
+ * the extension then keeps its local copy. */
+function toGalleryResponse(
+  row: { state: Record<string, unknown>; updatedAt: Date } | undefined,
+): GallerySyncResponse {
+  if (!row) return { state: null, updatedAt: null };
+  const parsed = galleryStateSchema.safeParse(row.state);
+  return { state: parsed.success ? parsed.data : null, updatedAt: row.updatedAt.toISOString() };
 }
 
 export default fp(
@@ -496,6 +521,55 @@ export default fp(
           .onConflictDoUpdate({ target: userBotSettings.userId, set: { settings } })
           .returning();
         return toBotSettingsResponse(row);
+      },
+    );
+
+    // Nova AI's Gallery mode list (its cards and their progress, the fut.gg
+    // Sets on it, the Sets marked completed and when), kept per account so
+    // every browser the trader signs in on shows which Sets are done and
+    // which are not (the extension keeps a local copy for when this is
+    // unreachable). Read when the bot page loads, replaced whole at most
+    // every 2 s while the list changes. Ungated like bot-settings: the
+    // user's own data whatever their plan.
+    app.get(
+      '/api/v1/extension/gallery',
+      {
+        onRequest: [fastify.authenticate],
+        config: { rateLimit: INGEST_RATE_LIMIT },
+        schema: { tags: ['extension'], response: { 200: gallerySyncResponseSchema } },
+      },
+      async (request): Promise<GallerySyncResponse> => {
+        const row = await fastify.db.query.userGallery.findFirst({
+          where: eq(userGallery.userId, request.authUser!.id),
+        });
+        return toGalleryResponse(row);
+      },
+    );
+
+    app.put(
+      '/api/v1/extension/gallery',
+      {
+        onRequest: [fastify.authenticate],
+        preHandler: [fastify.verifyCsrf],
+        bodyLimit: GALLERY_BODY_LIMIT,
+        config: { rateLimit: INGEST_RATE_LIMIT },
+        schema: {
+          tags: ['extension'],
+          body: putGalleryRequestSchema,
+          response: { 200: putGalleryResponseSchema },
+        },
+      },
+      async (request): Promise<PutGalleryResponse> => {
+        const userId = request.authUser!.id;
+        const { state } = request.body;
+        // One row per user (user_id is unique): the first save creates it,
+        // every later one replaces the list.
+        const [row] = await fastify.db
+          .insert(userGallery)
+          .values({ id: newId(), userId, state })
+          .onConflictDoUpdate({ target: userGallery.userId, set: { state } })
+          .returning({ updatedAt: userGallery.updatedAt });
+        return { updatedAt: row!.updatedAt.toISOString() };
       },
     );
 

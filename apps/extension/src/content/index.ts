@@ -681,7 +681,8 @@ async function main(): Promise<void> {
     // Snipe or Bid, and Bid mode's settings (this browser's own; null: the
     // service worker did not answer, which reads as the defaults: Snipe).
     let botMode: BotModeSettings = (await send<BotModeSettings>('bot.modeGet')) ?? DEFAULT_BOT_MODE_SETTINGS;
-    // Gallery mode's list and its cards' progress (this browser's own).
+    // Gallery mode's list and its cards' progress (the account's, through
+    // background; this browser's copy when the account cannot be asked).
     let botGallery: GalleryState = (await send<GalleryState | null>('bot.galleryGet')) ?? EMPTY_GALLERY;
     let unavailableReason: string | null = null;
     // The search filled in on the bot page: the only one the bot runs. Never
@@ -762,6 +763,9 @@ async function main(): Promise<void> {
         unavailableReason = 'Nova AI is not available in this build.';
         return;
       }
+      // Signed in since the page loaded (from the account view): the
+      // account's Gallery list, not the one this browser had at load.
+      if (fresh) botGallery = (await send<GalleryState | null>('bot.galleryGet')) ?? botGallery;
       // Timed off the main thread, so the bot keeps its pace while the tab
       // is minimised or in the background (lib/background-timer.ts).
       const timer = createBackgroundTimer();

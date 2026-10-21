@@ -9,7 +9,10 @@ import {
   extBackgroundBotGallerySetPayloadSchema,
   extBackgroundFutggLineupPayloadSchema,
   futggLineupSchema,
+  gallerySyncResponseSchema,
   galleryStateSchema,
+  putGalleryRequestSchema,
+  putGalleryResponseSchema,
 } from '../src/index.js';
 
 const card = {
@@ -107,6 +110,24 @@ describe('fut.gg Sets on the list', () => {
     };
     expect(galleryStateSchema.parse(state)).toEqual(state);
     expect(galleryStateSchema.safeParse({ ...state, completed: [0] }).success).toBe(false);
+    // When each was marked completed, by Set id.
+    const dated = { ...state, completedAt: { '54': 1_792_000_000_000 } };
+    expect(galleryStateSchema.parse(dated)).toEqual(dated);
+    // Any Set id `completed` takes has a time key.
+    expect(
+      galleryStateSchema.safeParse({
+        ...state,
+        completed: [Number.MAX_SAFE_INTEGER],
+        completedAt: { [String(Number.MAX_SAFE_INTEGER)]: 1 },
+      }).success,
+    ).toBe(true);
+    for (const completedAt of [{ '0': 1 }, { abc: 1 }, { '054': 1 }, { '54': 0 }, { '54': 1.5 }]) {
+      expect(galleryStateSchema.safeParse({ ...state, completedAt }).success).toBe(false);
+    }
+    const tooMany = Object.fromEntries(
+      Array.from({ length: GALLERY_LIMITS.completed + 1 }, (_, i) => [String(i + 1), 1]),
+    );
+    expect(galleryStateSchema.safeParse({ ...state, completedAt: tooMany }).success).toBe(false);
     expect(
       galleryStateSchema.safeParse({ ...state, cards: [{ ...exact, tradeId: '' }] }).success,
     ).toBe(false);
@@ -223,5 +244,30 @@ describe('fut.gg Sets on the list', () => {
         },
       }).success,
     ).toBe(true);
+  });
+});
+
+describe('Gallery sync schemas (/extension/gallery)', () => {
+  it('a PUT carries one whole list, held to its limits, and nothing else', () => {
+    expect(putGalleryRequestSchema.safeParse({ state: EMPTY_GALLERY }).success).toBe(true);
+    expect(putGalleryRequestSchema.safeParse({}).success).toBe(false);
+    expect(putGalleryRequestSchema.safeParse({ state: EMPTY_GALLERY, extra: 1 }).success).toBe(
+      false,
+    );
+    expect(
+      putGalleryRequestSchema.safeParse({ state: { ...EMPTY_GALLERY, budget: -1 } }).success,
+    ).toBe(false);
+  });
+
+  it('the answer may hold no list yet', () => {
+    expect(gallerySyncResponseSchema.parse({ state: null, updatedAt: null })).toEqual({
+      state: null,
+      updatedAt: null,
+    });
+    const saved = { state: EMPTY_GALLERY, updatedAt: '2026-10-21T07:00:00.000Z' };
+    expect(gallerySyncResponseSchema.parse(saved)).toEqual(saved);
+    expect(putGalleryResponseSchema.parse({ updatedAt: saved.updatedAt })).toEqual({
+      updatedAt: saved.updatedAt,
+    });
   });
 });

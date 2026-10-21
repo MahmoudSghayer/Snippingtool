@@ -29,6 +29,7 @@ import {
   type notifications,
   type userRecentSearches,
   type userBotSettings,
+  type userGallery,
 } from './settings.js';
 import { type plans, type subscriptions, type licenses } from './subscriptions.js';
 import {
@@ -109,6 +110,8 @@ export type UserRecentSearches = InferSelectModel<typeof userRecentSearches>;
 export type NewUserRecentSearches = InferInsertModel<typeof userRecentSearches>;
 export type UserBotSettings = InferSelectModel<typeof userBotSettings>;
 export type NewUserBotSettings = InferInsertModel<typeof userBotSettings>;
+export type UserGallery = InferSelectModel<typeof userGallery>;
+export type NewUserGallery = InferInsertModel<typeof userGallery>;
 export type Notification = InferSelectModel<typeof notifications>;
 export type NewNotification = InferInsertModel<typeof notifications>;
 
