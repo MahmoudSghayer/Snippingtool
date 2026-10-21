@@ -147,6 +147,7 @@ describe('dist/ledger contents', () => {
       'club_unsupported',
       'owned_unsupported',
       'owned_too_soon',
+      'owned_unfiltered',
       'bot.galleryGet',
       'bot.gallerySet',
       'gallery.futggSets',

@@ -274,15 +274,20 @@ describe("Gallery mode's club read", () => {
   }
   const clubItem = (definitionId: number, loan = false) => ({ definitionId, isLimitedUse: () => loan });
 
-  it('says which of the cards asked about the club holds (loans and other cards left out)', async () => {
+  it('says which of the cards asked about the club holds (loans and other versions left out)', async () => {
     const shape = createObservableShape(1_000);
     (window as unknown as { UTSearchCriteriaDTO?: unknown }).UTSearchCriteriaDTO = Criteria;
     try {
-      const search = vi.fn((_c: Criteria): unknown => observable({ success: true, response: { items: [clubItem(243312), clubItem(5, true), clubItem(77)] } }));
+      // 50_574_960 is another version of player 243312 (EA adds multiples of 2^24).
+      const search = vi.fn((_c: Criteria): unknown => observable({ success: true, response: { items: [clubItem(243312), clubItem(5, true), clubItem(50_574_960)] } }));
       const owned = await shape.bidding!.clubOwned!({ Club: { search } } as never, [243312, 5, 6]);
       expect(owned).toEqual([243312]);
       expect(search.mock.calls[0]![0]).toBeInstanceOf(Criteria);
       expect(search.mock.calls[0]![0].defId).toEqual([243312, 5, 6]);
+      // A player not asked about: the search ignored the card filter, and
+      // its answer cannot say "none owned".
+      const unfiltered = vi.fn((): unknown => observable({ success: true, response: { items: [clubItem(77)] } }));
+      await expect(shape.bidding!.clubOwned!({ Club: { search: unfiltered } } as never, [243312])).rejects.toThrow(/^owned_unfiltered/);
       // Nothing it can read is never "none owned".
       const noList = vi.fn((): unknown => observable({ success: true, response: {} }));
       await expect(shape.bidding!.clubOwned!({ Club: { search: noList } } as never, [1])).rejects.toThrow(/without an item list/);

@@ -332,6 +332,32 @@ it('lets a player the club holds stand in for a lineup card, and says so', async
   expect(root.getElementById('g-futgg-problems')!.textContent).toBe('Malaga CF: your 76 Einar Galilea stands in for 74 Dani Lorenzo (saves about 3,100)');
 });
 
+/** Adds Malaga CF's grade S lineup from the picker, the club answering `owned`. */
+async function addMalaga(owned: (ids: number[]) => Promise<unknown>) {
+  const m = await mount({ ...DEFAULT_BOT_MODE_SETTINGS, mode: 'gallery' }, undefined, { sets: [MALAGA], lineup: () => MALAGA_S, owned: vi.fn(owned) as never });
+  m.click('#g-futgg');
+  await vi.advanceTimersByTimeAsync(10);
+  const tick = m.root.querySelector('input[data-futgg="90"]') as HTMLInputElement;
+  tick.checked = true;
+  tick.dispatchEvent(new Event('change', { bubbles: true }));
+  m.click('#g-add');
+  await vi.advanceTimersByTimeAsync(10);
+  return m.root;
+}
+
+it('says when the club holds none of the Set, so a check that worked is never mistaken for none at all', async () => {
+  const root = await addMalaga(async () => ({ ok: true, owned: [], latencyMs: 5 }));
+  expect(root.getElementById('saved')!.textContent).toBe('Added 1 Set: 2 cards · none in your club');
+});
+
+it("says the club was not checked, and why, when EA's club search ignored the cards asked about", async () => {
+  const root = await addMalaga(async () => ({ ok: false, error: 'owned_unfiltered: Club.search answered with players not asked about', latencyMs: 5 }));
+  expect(root.getElementById('saved')!.textContent).toBe('Added 1 Set: 2 cards · your club was not checked');
+  expect(root.getElementById('g-futgg-problems')!.textContent).toBe(
+    "Could not check your club (EA's club search answered with other players than the ones asked about): Nova buys every card (a Start checks again)",
+  );
+});
+
 it('lets the trader mark a card Nova bought but could not list as listed by hand', async () => {
   const gallery: GalleryState = {
     budget: 100_000,

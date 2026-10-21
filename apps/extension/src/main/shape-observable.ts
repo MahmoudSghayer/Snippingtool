@@ -269,10 +269,19 @@ function createBidding(timeoutMs: number): BiddingShape {
       const items = ((r as Obj).response as Obj | undefined)?.items;
       if (!Array.isArray(items)) throw new ShapeError('Club.search answered without an item list');
       const asked = new Set(resourceIds);
+      // EA's card ids: a special version is its player's base id plus a
+      // multiple of 2^24.
+      const players = new Set<number>();
+      for (const id of resourceIds) players.add(id % 2 ** 24);
       const owned = new Set<number>();
       for (const item of items as Obj[]) {
         const id = item?.definitionId;
-        if (typeof id !== 'number' || !asked.has(id)) continue;
+        if (typeof id !== 'number') continue;
+        // A player not asked about: the search ignored the card filter (and
+        // answered with the club's first page), so it cannot say "none".
+        if (!players.has(id % 2 ** 24)) throw new ShapeError('owned_unfiltered: Club.search answered with players not asked about');
+        // Another version of a player asked about.
+        if (!asked.has(id)) continue;
         // A loan does not count for the Gallery.
         const limited = item.isLimitedUse;
         if (typeof limited === 'function' && apply(limited as () => unknown, item, []) === true) continue;

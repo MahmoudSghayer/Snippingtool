@@ -306,6 +306,28 @@ describe('Gallery mode — buying and listing', () => {
     });
   });
 
+  it('a card step EA rate-limits makes the bot back off: the next step waits it out, and the steps go at a hand-made pace', async () => {
+    const clubAt: number[] = [];
+    let limited = true;
+    const h = setup({
+      results: () => [listing('t1', 3_700)],
+      clubResult: () => {
+        clubAt.push(h.clock.t);
+        if (!limited) return { ok: true, signed: true, latencyMs: 5 };
+        limited = false;
+        return { ok: false, signed: true, error: 'move to club did not report success: false (status 429)', latencyMs: 5 };
+      },
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.calls).toEqual(['buy t1', 'club t1', 'club t1', 'move t1', 'list t1']);
+    expect(h.log()).toContain('EA says too many requests (error 429): waiting 5 s before the next search');
+    // 5 s of EA backoff, then the 3 s pause before the step again (the
+    // pause alone was 1.5 s).
+    expect(clubAt[1]! - clubAt[0]!).toBeGreaterThanOrEqual(8 * SEC);
+    expect(h.gallery().cards[0]).toMatchObject({ status: 'listed', listPrice: 3_900 });
+  });
+
   it('a buy EA did not answer in time is never bought twice: its late answer settles it', async () => {
     let first = true;
     const h = setup({
@@ -444,6 +466,24 @@ describe('Gallery mode — fut.gg lineup cards', () => {
     expect(h.sniper.state.stopReason).toBe('gallery_done');
   });
 
+  it('says so when the club holds none of the cards still to buy', async () => {
+    const h = setup({
+      gallery: { budget: 100_000, spent: 0, cards: [exact()] },
+      owned: () => ({ ok: true, owned: [], signed: true, latencyMs: 5 }),
+    });
+    expect(await h.sniper.checkGalleryClub()).toBe(0);
+    expect(h.log()).toContain('Gallery: checked your club: none of the 1 card still to buy is in it');
+  });
+
+  it("says EA's club search ignored the cards asked about, and buys every card", async () => {
+    const h = setup({
+      gallery: { budget: 100_000, spent: 0, cards: [exact()] },
+      owned: () => ({ ok: false, error: 'owned_unfiltered: Club.search answered with players not asked about', signed: true, latencyMs: 5 }),
+    });
+    expect(await h.sniper.checkGalleryClub()).toBeNull();
+    expect(h.log()).toContain("Gallery: could not check your club (EA's club search answered with other players than the ones asked about) — buying every card on the list");
+  });
+
   it('buys every card when the club cannot be read', async () => {
     const h = setup({
       gallery: { budget: 100_000, spent: 0, cards: [exact()] },
@@ -521,13 +561,13 @@ describe('Gallery mode — cards bought on an earlier run, and Sets done', () =>
     expect(h.log()).toContain('Gallery: Malaga CF is complete: every card is collected. Finish it in the game: Gallery, Malaga CF, Autocomplete, then Confirm Changes');
   });
 
-  it('reads the club for the page, and says null when it cannot', async () => {
+  it('reads the club for the page, and says why when it cannot', async () => {
     const h = setup({ owned: (ids) => ({ ok: true, owned: ids.slice(0, 1), signed: true, latencyMs: 5 }) });
-    expect(await h.sniper.readClub([7, 8])).toEqual([7]);
-    expect(await h.sniper.readClub([])).toEqual([]);
+    expect(await h.sniper.readClub([7, 8])).toEqual({ ok: true, owned: [7] });
+    expect(await h.sniper.readClub([])).toEqual({ ok: true, owned: [] });
     const off = setup({ owned: () => ({ ok: false, error: 'owned_too_soon', signed: true, latencyMs: 5 }) });
-    expect(await off.sniper.readClub([7])).toBeNull();
-    expect(await setup().sniper.readClub([7])).toBeNull();
+    expect(await off.sniper.readClub([7])).toEqual({ ok: false, why: 'it was checked a moment ago' });
+    expect(await setup().sniper.readClub([7])).toEqual({ ok: false, why: 'this EA web app has no club search Nova AI knows' });
   });
 });
 
