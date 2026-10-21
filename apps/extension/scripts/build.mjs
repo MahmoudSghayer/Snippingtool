@@ -34,6 +34,12 @@ import { build } from 'vite';
 import { ES_GROUP_INPUTS, LIB_ENTRIES, USERSCRIPT_ENTRIES } from './entries.mjs';
 import { buildManifest } from './generate-manifest.mjs';
 import { licenseKeyProblem } from './license-key.mjs';
+import {
+  ADAPTER_SOURCE_SENTINEL,
+  injectAdapterSource,
+  obfuscateAdapterSource,
+  obfuscateUserscriptCode,
+} from './obfuscate.mjs';
 import { TEMPLATE_PLACEHOLDERS } from './template-placeholders.mjs';
 import { buildUserscriptHeader } from './userscript-header.mjs';
 
@@ -237,8 +243,17 @@ function writeManifest() {
 // layout). Two builds: the MAIN-world adapter first, exactly as the
 // extension ships it, then everything else with that adapter embedded as a
 // string (`virtual:adapter-source`) and `webextension-polyfill` swapped for
-// src/userscript/browser-shim.ts. Not minified: a userscript is installed by
-// hand, and people should be able to read what they are installing.
+// src/userscript/browser-shim.ts.
+//
+// The published file is obfuscated (scripts/obfuscate.mjs). A userscript is
+// installed by hand, so its whole source sits in the user's script manager
+// in the clear; the owner distributes it per licensed user and does not want
+// it read or copied wholesale. Only the code is obfuscated — never the
+// `==UserScript==` header or the .meta.js file, which stay plain text — and
+// only with transforms that don't touch the trading hot path. The adapter is
+// obfuscated on its own and swapped in after the main bundle is obfuscated
+// (ADAPTER_SOURCE_SENTINEL), so it is never encoded twice. The extension
+// targets (`ledger`, `ledger-auto`) are not obfuscated.
 
 // `TREESHAKE` above marks every module side-effect free. The userscript's
 // entry is a list of side-effect imports (setup, background, content), so it
@@ -287,13 +302,21 @@ async function buildIifeInMemory(entry, globalName, extra = {}) {
 
 async function buildUserscript() {
   const { adapter, main: entry } = USERSCRIPT_ENTRIES;
-  const adapterSource = await buildIifeInMemory(adapter.entry, adapter.globalName);
-  const code = await buildIifeInMemory(entry.entry, entry.globalName, {
-    plugins: [adapterSourcePlugin(adapterSource)],
+  // The adapter is built (minified) and obfuscated on its own, then embedded
+  // via a sentinel so the main bundle's obfuscation never touches it (it
+  // would otherwise base64-encode this whole string a second time).
+  const adapterSource = obfuscateAdapterSource(
+    await buildIifeInMemory(adapter.entry, adapter.globalName),
+  );
+  const mainBundle = await buildIifeInMemory(entry.entry, entry.globalName, {
+    plugins: [adapterSourcePlugin(ADAPTER_SOURCE_SENTINEL)],
     alias: { 'webextension-polyfill': path.join(root, 'src/userscript/browser-shim.ts') },
     treeshake: USERSCRIPT_TREESHAKE,
     minify: false,
   });
+  // `version` stays verbatim: it is compiled into the bundle so the page can
+  // show which build runs, and the publish workflow greps it out of the file.
+  const code = injectAdapterSource(obfuscateUserscriptCode(mainBundle, [version]), adapterSource);
 
   const header = buildUserscriptHeader({
     version,
