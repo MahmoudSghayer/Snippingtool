@@ -610,10 +610,12 @@ export const SEARCH_DELAY_PRESETS = [
  * What Nova AI does with its search: `snipe` buys listings at or under the
  * max price with Buy Now (what it always did); `bid` bids on auctions in
  * their last minutes, up to the max price, and buys with Buy Now when that
- * is at or under it (apps/extension `engine/bidder.ts`). The user picks one
- * before Start; only one runs at a time.
+ * is at or under it (apps/extension `engine/bidder.ts`); `gallery` works
+ * through the trader's Gallery list instead of a search: it buys each card,
+ * sends it to the club and lists it again (`schemas/gallery.ts`). The user
+ * picks one before Start; only one runs at a time.
  */
-export const BOT_MODES = ['snipe', 'bid'] as const;
+export const BOT_MODES = ['snipe', 'bid', 'gallery'] as const;
 export type BotMode = (typeof BOT_MODES)[number];
 
 /** The hard bounds of Bid mode's own settings. */
@@ -678,7 +680,7 @@ export function clampBotModeSettings(m: BotModeSettings): BotModeSettings {
   const whole = (bound: Bound, value: unknown, fallback: number) =>
     Math.round(clampTo(bound, value, fallback));
   return {
-    mode: m?.mode === 'bid' ? 'bid' : 'snipe',
+    mode: m?.mode === 'bid' || m?.mode === 'gallery' ? m.mode : 'snipe',
     bidding: {
       windowMinutes: whole(BID_LIMITS.windowMinutes, b.windowMinutes, d.windowMinutes),
       maxActiveBids: whole(BID_LIMITS.maxActiveBids, b.maxActiveBids, d.maxActiveBids),

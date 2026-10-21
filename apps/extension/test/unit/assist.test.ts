@@ -35,6 +35,7 @@ function fakeAdapter(overrides: Partial<AdapterClient> = {}): AdapterClient {
     bid: vi.fn(async () => ({ ok: true, latencyMs: 5 })),
     watchlist: vi.fn(async () => ({ ok: true, watched: [], latencyMs: 5 })),
     move: vi.fn(async () => ({ ok: true, latencyMs: 5 })),
+    club: vi.fn(async () => ({ ok: true, latencyMs: 5 })),
     onCredits: () => () => undefined,
     diagnostics: vi.fn(async () => ({ ok: false, latencyMs: 0 })),
     onProbe: () => () => undefined,

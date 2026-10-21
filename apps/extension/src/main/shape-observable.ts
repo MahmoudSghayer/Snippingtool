@@ -172,11 +172,16 @@ function bidSucceeded(response: unknown): boolean {
   return response !== null && typeof response === 'object' && (response as Obj).success === true;
 }
 
-/** The web app's own id for the transfer list pile (`ItemPile.TRANSFER`),
- * or null when the page has no such enum. */
-function transferPile(): number | string | null {
-  const pile = ((window as unknown as Obj).ItemPile as Obj | undefined)?.TRANSFER;
+/** The web app's own id for one of its item piles (`ItemPile.TRANSFER`,
+ * `ItemPile.CLUB`), or null when the page has no such enum. */
+function itemPile(name: 'TRANSFER' | 'CLUB'): number | string | null {
+  const pile = ((window as unknown as Obj).ItemPile as Obj | undefined)?.[name];
   return typeof pile === 'number' || (typeof pile === 'string' && pile !== '') ? pile : null;
+}
+
+/** The transfer list pile (`ItemPile.TRANSFER`), or null. */
+function transferPile(): number | string | null {
+  return itemPile('TRANSFER');
 }
 
 /** Longest a watch list read waits on `refreshAuctions`. */
@@ -232,6 +237,16 @@ function createBidding(timeoutMs: number): BiddingShape {
       const response = await call(services, 'move', [entity, pile], timeoutMs);
       const r = assertSucceeded(response, 'move', true);
       if (!bidSucceeded(r)) throw new ShapeError('move did not report success: true');
+    },
+    async moveToClub(services, entity) {
+      // The same call as "Send to My Club" in the web app: Item.move to
+      // ItemPile.CLUB. EA refuses a card the club already holds.
+      if (!method(services, 'move')) throw new ShapeError('window.services.Item.move is not a function');
+      const pile = itemPile('CLUB');
+      if (pile === null) throw new ShapeError('window.ItemPile.CLUB is not available');
+      const response = await call(services, 'move', [entity, pile], timeoutMs);
+      const r = assertSucceeded(response, 'move', true);
+      if (!bidSucceeded(r)) throw new ShapeError('move to club did not report success: true');
     },
     async untarget(services, entities) {
       // Transfer Targets' "Clear expired", as community autobuyers describe

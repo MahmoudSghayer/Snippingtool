@@ -110,10 +110,12 @@ Three channels, none of which overlap in purpose:
    message and drops unsigned or unmatched results. A `buy` is refused
    (`price_mismatch` / `listing_unknown`) unless its price equals the
    buy-now price the adapter itself last saw for that `tradeId`. Automation
-   builds add `list`, `pile` and Nova AI's Bid mode acts (`bid`, `watchlist`,
-   `move`; "The Sniping Bot page" below): a `bid` is refused unless it is
-   exactly the next valid bid on the auction as the adapter last saw it, and
-   the watch list comes back only inside the signed `action_result`.
+   builds add `list`, `pile`, Nova AI's Bid mode acts (`bid`, `watchlist`,
+   `move`) and Gallery mode's `club` ("The Sniping Bot page" below): a `bid`
+   is refused unless it is exactly the next valid bid on the auction as the
+   adapter last saw it, the watch list comes back only inside the signed
+   `action_result`, and `move`, `club` and `list` act only on a card the
+   adapter itself bought or won on this page load.
 2. **`content/index.ts` ↔ `background/index.ts`**, `browser.runtime.sendMessage`,
    typed by `backgroundMessageTypeSchema`
    (`packages/shared/src/ext-messages.ts`). Content sends `record` (raw
@@ -720,6 +722,74 @@ max"). Its first line sums them up: "10 of 10 open · 7 leading · 2 outbid ·
 read saw it. After a stop the bids stay listed (EA keeps them) with "not
 checked while Nova AI is stopped".
 
+**Gallery mode** (`engine/gallery.ts`, run by `engine/sniper.ts`'s
+`runGallery`) collects the cards FC 27's Gallery Sets need. EA's web app has
+no Gallery, so Nova cannot read a Set or its grade: the trader picks
+**Gallery** above Start and pastes the cards on the Search tab, one a line
+as the player's name and the card's rating ("Hugo Ekitiké 85", the rating
+first works too), with `# Set name` (or a line ending in `:`) heading the
+cards under it. **Load list** finds each name in EA's own player list (the
+catalog): an exact name wins, else the only player whose name holds it;
+among namesakes, the one whose base card rates highest at or under the
+rating. Lines it cannot read are listed under the box ("Line 3: no player
+named …", "… matches more than one player … write the full name"), and the
+rest load. Loading the list again keeps the progress of every card already
+on it, so a finished card is never bought twice. **Retry skipped** puts the
+skipped cards back to buy; **Clear list** empties it.
+
+One card at a time, in the list's order, under every limit Snipe mode has
+(the search delay start to start, breaks, rests, EA's backoff, the
+governor):
+
+1. **Its version.** A player's base card has the player's own id; for any
+   other rating, a look-only search of the player at that rating (no max
+   price, nothing bought) names the version listed (the base card if it is
+   among them, else the one listed most). None listed in two looks: skipped.
+2. **Its market price**: FUTBIN's for that version, else Nova's own market
+   data, else the cheapest listing those looks saw. A market price over the
+   page's max buy price skips the card.
+3. **Under the market price for 2 minutes** (`GALLERY_SNIPE_MS`): searches
+   with the max one EA price step under it, buying the cheapest match. Then
+   **at the market price**, one step higher after each search that found none
+   listed (a race lost leaves the price where it is), up to 10% over it
+   (`GALLERY_OVER_MARKET`): past that the card is skipped with the reason,
+   so a price spike never costs much. Only one copy is bought; no minimum
+   profit applies (each card is bought to collect and sold back at a small
+   loss). A buy EA does not answer in time holds the card until EA's late
+   answer settles it (up to a minute), so it is never bought twice.
+4. **To the club, then back on the market**, a step every 1.5–3 s: the
+   adapter's `club` act (`Item.move(item, ItemPile.CLUB)`, the web app's own
+   "Send to My Club"), then `move` to the transfer list and `list` one EA
+   price step under its market price (FUTBIN's again, else the price it was
+   bought by), with a starting bid a step under that. A step EA refuses is
+   tried three times. A card the club refuses (EA refuses a card the club
+   already holds) still goes back on the market, so its coins come back,
+   and its row says "Not sent to your club (…): check the Set counted it".
+   EA's help says a card keeps counting for its Sets after it is sold;
+   whether it must reach the club first is not known, and the club is the
+   safe choice.
+
+The list's **budget** (coins, under the list) caps what its buys spend:
+a card costing more than what is left is skipped, and the bot stops
+(`gallery_budget`) once less than EA's lowest price is left. Sales do not
+add back to it; **Reset spent** zeroes it. The bot stops on its own when
+every card is listed or skipped (`gallery_done`), and refuses to start with
+no card left to buy (`no_gallery`) or on a page that cannot send cards to the
+club (`gallery_unavailable`). The list and every card's progress (to buy,
+bought, in club, listed, skipped, with what it paid, its market price, what
+it listed at and why it was skipped) are saved in this browser after every
+change (`bot.galleryGet` / `bot.gallerySet`, `sl.bot.gallery.v1`, like the
+mode: not synced with the account). A card bought but not yet listed when
+the bot stops is finished at the next Start on the same page load; after a
+reload the adapter can no longer move it, and its row stays at Bought / In
+club for the trader to finish. Beside Search results a **Gallery** tab (the
+one the page opens on in Gallery mode, "3/20" on it) lists every card with
+its step, the price it paid and the price it listed at, the one being bought
+marked "Buying now"; its first line sums the list up ("12 to buy · 6 listed
+· 0 on the way · 2 skipped · spent 41,200 of 100,000"). Buys and sales are
+reported like any other (`onAttempt` / `onTrade`), so the trader report
+shows them.
+
 **The page is laid out like EA's "Search the Transfer Market" screen**: a
 back arrow and title on EA's navy bar, the pitch artwork behind two floating
 panels, and on the left one EA's tab row (Search / Settings; Start waiting on
@@ -751,6 +821,7 @@ and narrows the rarity list. Players come from the web app's `players.json`
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Search     | `services.Item.clearTransferMarketCache()` then `services.Item.searchTransferMarket(new UTSearchCriteriaDTO(), page)` -> observable; `res.data.items`                                                |
 | Buy now    | `services.Item.bid(item, auction.buyNowPrice)`                                                                                                                                                       |
+| Club       | `services.Item.move(item, ItemPile.CLUB)` (Gallery mode; the same call moves a card to the transfer list with `ItemPile.TRANSFER`). Not yet checked live                                             |
 | Criteria   | `type` (set first), `maskedDefId`, `level` (`bronze`/`silver`/`gold`/`SP`), `rarities`, `position` / `zone` (130-132), `playStyle`, `nation`, `league`, `club`, `minBuy`/`maxBuy`, `ovrMin`/`ovrMax` |
 | Items      | `definitionId`, `databaseId` (base player id, read as the listing's `assetId`), `rating`, `getAuctionData()` -> `tradeId`, `buyNowPrice`, `expires`                                                  |
 | Navigation | `.ut-tab-bar-item` buttons, Transfers has `icon-transfer`; top bar `.ut-navigation-bar-view`                                                                                                         |

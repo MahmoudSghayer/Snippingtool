@@ -10,6 +10,7 @@ import { activityEventSchema } from './schemas/activity.js';
 import { emailSchema, passwordSchema } from './schemas/auth.js';
 import { botDailyUsageSchema, botModeSettingsSchema, botSettingsSchema } from './schemas/bot.js';
 import { filterCriteriaSchema, filterStatsSchema, savedFilterSchema } from './schemas/filters.js';
+import { galleryStateSchema } from './schemas/gallery.js';
 import { coinPriceSchema, MAX_COIN_PRICE } from './schemas/ingest-bounds.js';
 import { riskBudgetEventSchema } from './schemas/risk.js';
 import { snipingAttemptSchema } from './schemas/sniping.js';
@@ -372,6 +373,7 @@ export const adapterActionResultMessageSchema = z.object({
       'bid',
       'watchlist',
       'move',
+      'club',
       'clearSold',
       'relistAll',
       'unsold',
@@ -506,6 +508,14 @@ export const adapterActRequestMessageSchema = z.object({
      * transfer list; anything else is refused (`move_not_bought`). */
     z.object({
       action: z.literal('move'),
+      requestId: z.string().min(1),
+      tradeId: z.string().min(1),
+    }),
+    /** Automation builds (Gallery mode): send a card the adapter itself
+     * bought on this page load (named by its tradeId) to the club; anything
+     * else is refused (`club_not_bought`). */
+    z.object({
+      action: z.literal('club'),
       requestId: z.string().min(1),
       tradeId: z.string().min(1),
     }),
@@ -888,6 +898,7 @@ export const extBackgroundLicenseHeartbeatPayloadSchema = z
  * etc. already computed), not a creation request. */
 export const extBackgroundBotSettingsSetPayloadSchema = botSettingsSchema;
 export const extBackgroundBotModeSetPayloadSchema = botModeSettingsSchema;
+export const extBackgroundBotGallerySetPayloadSchema = galleryStateSchema;
 export const extBackgroundBotUsageSetPayloadSchema = botDailyUsageSchema;
 
 /** `catalog.save`: the Snipe Targets form's choices, as the EA web app's own

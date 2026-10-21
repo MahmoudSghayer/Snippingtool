@@ -3,7 +3,9 @@
  * (`bot.settingsGet` / `bot.settingsSet`: `storage.local`, and the signed-in
  * account's copy at `/api/v1/extension/bot-settings`, so every browser the
  * trader signs in on starts with the same ones), Snipe or Bid and Bid
- * mode's settings (`bot.modeGet` / `bot.modeSet`, this browser only), EA's
+ * mode's settings (`bot.modeGet` / `bot.modeSet`, this browser only),
+ * Gallery mode's list (`bot.galleryGet` / `bot.gallerySet`, this browser
+ * only), EA's
  * player/club/league/nation lists for the Snipe Targets form
  * (`catalog.get` / `catalog.save`, see `model/catalog.ts`), and player names
  * for the log (`cards.names`).
@@ -23,10 +25,12 @@ import {
   botDailyUsageSchema,
   extBackgroundBotBudgetSetPayloadSchema,
   botSettingsSchema,
+  galleryStateSchema,
   type BotBudgetState,
   type BotDailyUsage,
   type BotModeSettings,
   type BotSettings,
+  type GalleryState,
   type MarketCardHistoryResponse,
 } from '@sl/shared';
 
@@ -41,6 +45,8 @@ const SETTINGS_KEY = 'sl.bot.settings.v1';
 /** Snipe or Bid, and Bid mode's settings: this browser only (see
  * `botModeSettingsSchema` for why they are not synced yet). */
 const MODE_KEY = 'sl.bot.mode.v1';
+/** Gallery mode's list and progress: this browser only, like the mode. */
+const GALLERY_KEY = 'sl.bot.gallery.v1';
 /** Set (to the save's time) while a save has not reached the account yet. */
 const SETTINGS_PENDING_KEY = 'sl.bot.settings.pending.v1';
 /** A burst of edits (a slider dragged) goes up as one save. */
@@ -154,6 +160,19 @@ export async function handleBotModeGet(): Promise<BotModeSettings> {
 export async function handleBotModeSet(settings: BotModeSettings): Promise<BotModeSettings> {
   await setLocal(MODE_KEY, settings);
   return settings;
+}
+
+/** Gallery mode's list, its cards' progress and its budget, as saved in
+ * this browser (null: none saved, or a stored value that no longer
+ * parses). */
+export async function handleBotGalleryGet(): Promise<GalleryState | null> {
+  const parsed = galleryStateSchema.safeParse(await getLocal<unknown>(GALLERY_KEY, null));
+  return parsed.success ? parsed.data : null;
+}
+
+export async function handleBotGallerySet(state: GalleryState): Promise<{ ok: true }> {
+  await setLocal(GALLERY_KEY, state);
+  return { ok: true };
 }
 
 /** Today's active time for the bot's hours-per-day limit (engine/sniper.ts). */

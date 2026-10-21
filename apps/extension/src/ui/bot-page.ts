@@ -42,6 +42,8 @@ import {
   BOT_LIMITS,
   BOT_RISK_LABELS,
   DEFAULT_BOT_MODE_SETTINGS,
+  EMPTY_GALLERY,
+  GALLERY_LIMITS,
   MIN_SALE_PRICE,
   RECENT_SEARCHES_MAX,
   RISK_ACKNOWLEDGMENT,
@@ -60,8 +62,11 @@ import {
   type BotRiskLevel,
   type BotSettings,
   type FilterCriteria,
+  type GalleryCard,
+  type GalleryState,
 } from '@sl/shared';
 
+import { gallerySummary, parseGalleryList } from '../engine/gallery.js';
 import { TRANSFER_LIST_SIZE, type TransferListSummary } from '../lib/transfer-list.js';
 import {
   SPECIAL_LEVEL,
@@ -105,6 +110,11 @@ export interface BotPageDeps {
    * see `botModeSettingsSchema`). Omitted: Snipe, the defaults, not saved. */
   getModeSettings?: () => BotModeSettings;
   saveModeSettings?: (settings: BotModeSettings) => Promise<void>;
+  /** Gallery mode's list, its cards' progress and its budget (this
+   * browser's own, see @sl/shared `galleryStateSchema`). Omitted: an empty
+   * list, not saved. */
+  getGallery?: () => GalleryState;
+  saveGallery?: (state: GalleryState) => Promise<void>;
   /** The search the bot should run from now on (null: none). */
   setLiveSearch: (search: LiveSearch | null) => void;
   resolveNames: (resourceIds: number[]) => Promise<Record<string, string | null>>;
@@ -380,7 +390,20 @@ const SHORT_BURSTS_HINT =
 const MODES: { mode: BotMode; label: string; hint: string }[] = [
   { mode: 'snipe', label: 'Snipe', hint: 'Buy Now at or under your max price' },
   { mode: 'bid', label: 'Bid', hint: 'Bid in the last minutes, up to your max price' },
+  { mode: 'gallery', label: 'Gallery', hint: 'Buy your Gallery list, send each card to your club, sell it again' },
 ];
+
+/** Over the Gallery list: how to write it, and what Nova does with it. */
+const GALLERY_HELP =
+  'One card a line: the player\'s name and the card\'s rating ("Hugo Ekitiké 85"). A line starting with # names the Set the cards under it belong to. Nova buys each card (under its market price for 2 minutes, then at the market price, up to 10% over it), sends it to your club, and lists it again one step under its market price.';
+
+const GALLERY_STATUS: Record<GalleryCard['status'], string> = {
+  todo: 'To buy',
+  bought: 'Bought',
+  club: 'In club',
+  listed: 'Listed',
+  skipped: 'Skipped',
+};
 
 /** Under the Buy Now price in Bid mode: what the max price means there. */
 const BID_MAX_HINT =
@@ -512,6 +535,16 @@ const CSS = `
   .tab:hover { background: var(--ea-row-hover); }
   .tab[aria-selected='true'] { border-color: var(--ea-mint); background: var(--ea-float); }
   .settings[data-tab='search'] #knobs, .settings[data-tab='settings'] #targets, .settings[data-tab='settings'] #recent { display: none; }
+  /* Gallery mode: its list takes the search's place on the Search tab */
+  .settings:not([data-mode='gallery']) #gallery, .settings[data-tab='settings'] #gallery,
+  .settings[data-mode='gallery'] #targets, .settings[data-mode='gallery'] #recent { display: none; }
+  .g-list { display: block; width: 100%; box-sizing: border-box; min-height: 170px; resize: vertical; padding: 10px 12px; border-radius: 4px;
+    border: 1px solid var(--ea-input-line); background: var(--ea-input); color: var(--ea-text); font: inherit; font-size: 14px; line-height: 20px; }
+  .g-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .g-problems { margin-top: 8px; color: var(--ea-warning); font-size: 13px; line-height: 18px; }
+  .g-problems:empty { display: none; }
+  .g-budget input { width: 100%; min-width: 0; height: 44px; padding: 0 12px; border-radius: 4px; border: 1px solid var(--ea-input-line); background: var(--ea-input); color: var(--ea-text); font: inherit; font-size: 16px; }
+  .g-sum { margin-top: 8px; font-size: 13px; color: var(--ea-text-2); }
   .settings-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 24px 8px; scrollbar-width: thin; scrollbar-color: var(--ea-input-line) transparent; }
   .card { background: var(--ea-row); border-radius: 6px; margin-bottom: 10px; }
   .card > summary { list-style: none; display: flex; align-items: center; gap: 10px; padding: 14px 16px; cursor: pointer; font-size: 17px; line-height: 20px; font-weight: 600; color: var(--ea-text); }
@@ -774,6 +807,12 @@ const CSS = `
   .st.leading { background: color-mix(in srgb, var(--ea-success) 16%, transparent); color: var(--ea-success); }
   .st.outbid { background: color-mix(in srgb, var(--ea-danger) 16%, transparent); color: var(--ea-danger); }
   .st.pending { background: color-mix(in srgb, var(--ea-warning) 16%, transparent); color: var(--ea-warning); }
+  .bidrow.listed { border-left-color: var(--ea-success); } .bidrow.skipped { border-left-color: var(--ea-danger); }
+  .bidrow.bought, .bidrow.club, .bidrow.buying { border-left-color: var(--ea-warning); }
+  .st.listed { background: color-mix(in srgb, var(--ea-success) 16%, transparent); color: var(--ea-success); }
+  .st.skipped { background: color-mix(in srgb, var(--ea-danger) 16%, transparent); color: var(--ea-danger); }
+  .st.bought, .st.club, .st.buying { background: color-mix(in srgb, var(--ea-warning) 16%, transparent); color: var(--ea-warning); }
+  .st.todo { background: var(--ea-control); color: var(--ea-muted); }
   .bidrow .cur, .bidrow .left { display: flex; flex-direction: column; align-items: flex-end; white-space: nowrap; }
   .bidrow .left { min-width: 44px; }
   .bidrow .k { font-size: 11px; color: var(--ea-muted); }
@@ -821,6 +860,11 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   let modeSettings = deps.getModeSettings?.() ?? DEFAULT_BOT_MODE_SETTINGS;
   let modeSaveTimer: ReturnType<typeof setTimeout> | null = null;
   const bidMode = (): boolean => modeSettings.mode === 'bid';
+  const galleryMode = (): boolean => modeSettings.mode === 'gallery';
+  /** The Gallery list as typed (kept across re-renders) and what the last
+   * Load said about it. */
+  let galleryDraft: string | null = null;
+  let galleryProblems: string[] = [];
   let ringFrame: number | null = null;
   let refreshQueued = false;
   let catalog: Catalog | null = null;
@@ -863,7 +907,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
           <button type="button" class="tab" role="tab" data-tab="search" aria-selected="true">Search</button>
           <button type="button" class="tab" role="tab" data-tab="settings" aria-selected="false">Settings</button>
         </div>
-        <div class="settings-scroll"><div id="targets"></div><div id="recent"></div><div id="knobs"></div></div>
+        <div class="settings-scroll"><div id="targets"></div><div id="recent"></div><div id="gallery"></div><div id="knobs"></div></div>
         <div class="runbar">
           <div class="modes" id="modes" role="radiogroup" aria-label="What Nova AI does"></div>
           <div class="run-actions">
@@ -883,9 +927,11 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
             <div class="feed-tabs" role="tablist" aria-label="Search results and active bids">
               <button type="button" class="ftab" role="tab" data-feed="results" aria-selected="true">Search results</button>
               <button type="button" class="ftab" role="tab" data-feed="bids" aria-selected="false">Active bids<span class="count" id="bids-count"></span></button>
+              <button type="button" class="ftab" role="tab" data-feed="gallery" aria-selected="false" hidden>Gallery<span class="count" id="gallery-count"></span></button>
             </div>
             <div class="list" id="results"></div>
             <div class="list" id="bids" hidden></div>
+            <div class="list" id="gallery-feed" hidden></div>
           </section>
         </div>
       </div>
@@ -918,7 +964,103 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   function renderSettings(): void {
     renderTargets();
     renderRecent();
+    renderGallery();
     renderKnobs();
+  }
+
+  // ---- Gallery mode -------------------------------------------------------
+
+  /** The list as the running bot has it, else as saved. */
+  function currentGallery(): GalleryState {
+    return deps.getGallery?.() ?? EMPTY_GALLERY;
+  }
+
+  /** The list back as text: what the box shows until the trader edits it. */
+  function galleryText(g: GalleryState): string {
+    const lines: string[] = [];
+    let set: string | undefined;
+    for (const c of g.cards) {
+      if (c.set !== set) {
+        set = c.set;
+        lines.push(set ? `# ${set}` : '#');
+      }
+      lines.push(`${c.name} ${c.rating}`);
+    }
+    return lines.join('\n');
+  }
+
+  function gallerySumText(g: GalleryState): string {
+    const n = gallerySummary(g);
+    return `${n.todo} to buy · ${n.listed} listed · ${n.bought + n.club} on the way · ${n.skipped} skipped · spent ${fmt(g.spent)} of ${fmt(g.budget)}`;
+  }
+
+  /** The Search tab in Gallery mode: the list box, its buttons, the budget. */
+  function renderGallery(): void {
+    const el = root.getElementById('gallery');
+    if (!el) return;
+    const g = currentGallery();
+    const running = deps.getSniper()?.isRunning() ?? false;
+    const off = running ? ' disabled' : '';
+    if (galleryDraft == null) galleryDraft = galleryText(g);
+    el.innerHTML =
+      section(
+        'Gallery list',
+        `<textarea class="g-list" id="g-list" spellcheck="false" aria-label="Gallery list"${off}
+          placeholder="# Set name&#10;Hugo Ekitiké 85&#10;Florian Wirtz 86">${esc(galleryDraft)}</textarea>
+        <div class="g-actions">
+          <button type="button" class="preset" id="g-load"${off}><b>Load list</b></button>
+          <button type="button" class="ghost" id="g-retry"${off}>Retry skipped</button>
+          <button type="button" class="ghost" id="g-clear"${off}>Clear list</button>
+        </div>
+        <div class="g-problems" id="g-problems">${galleryProblems.map(esc).join('<br>')}</div>
+        <div class="hint">${esc(GALLERY_HELP)}</div>`,
+      ) +
+      section(
+        'Gallery budget',
+        `${field(
+          'Budget',
+          "The most this list's buys may spend, in coins. Sales do not add back to it.",
+          `<div class="g-budget control"><input id="g-budget" inputmode="numeric" value="${esc(fmt(g.budget))}" aria-label="Gallery budget"${off} /></div>`,
+        )}
+        <div class="g-sum" id="g-sum">${esc(gallerySumText(g))}</div>
+        <div class="g-actions"><button type="button" class="ghost" id="g-reset-spent"${off}>Reset spent</button></div>`,
+      );
+  }
+
+  /** Saves a changed list (the bot takes it at once while stopped). */
+  function commitGallery(next: GalleryState, message = 'Saved'): void {
+    void deps.saveGallery?.(next).then(() => {
+      say(message, false);
+      setTimeout(() => ($('saved').textContent = ''), 1500);
+    });
+    renderGallery();
+    renderRunbar();
+    renderBids();
+  }
+
+  function onGalleryClick(id: string): void {
+    if (deps.getSniper()?.isRunning()) return;
+    const g = currentGallery();
+    if (id === 'g-load') {
+      const text = (root.getElementById('g-list') as HTMLTextAreaElement | null)?.value ?? galleryDraft ?? '';
+      const parsed = parseGalleryList(text, catalog?.players ?? [], g.cards);
+      galleryProblems = parsed.problems;
+      galleryDraft = text;
+      commitGallery({ ...g, cards: parsed.cards }, `Loaded ${parsed.cards.length} cards`);
+    } else if (id === 'g-retry') {
+      const cards = g.cards.map((c) => {
+        if (c.status !== 'skipped') return c;
+        const { note: _note, ...rest } = c;
+        return { ...rest, status: 'todo' as const };
+      });
+      commitGallery({ ...g, cards });
+    } else if (id === 'g-clear') {
+      galleryDraft = '';
+      galleryProblems = [];
+      commitGallery({ ...g, cards: [], spent: 0 }, 'List cleared');
+    } else if (id === 'g-reset-spent') {
+      commitGallery({ ...g, spent: 0 });
+    }
   }
 
   /** EA's tab row over the left panel: the search, or the bot's settings. */
@@ -1108,6 +1250,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     if (rerender) {
       renderKnobs();
       renderTargets();
+      renderGallery();
+      renderBids();
     }
     renderRunbar();
     if (modeSaveTimer) clearTimeout(modeSaveTimer);
@@ -2104,6 +2248,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
           running ? ' disabled' : ''
         } title="${esc(running ? 'Stop Nova AI to switch' : m.hint)}"><span>${esc(m.label)}</span> <small>${esc(m.hint)}</small></button>`,
     ).join('');
+    $('settings').dataset.mode = modeSettings.mode;
     if (html === modesShown) return;
     modesShown = html;
     $('modes').innerHTML = html;
@@ -2131,10 +2276,23 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       text = `Running for ${clock(startedAt ? Date.now() - startedAt : 0)}`;
       const bids = sniper.getBidStatus();
       if (bids) text += ` · Active bids: ${bids.active}/${bids.max}`;
-      if ('error' in r) text += `. Search not updated: ${r.error}`;
+      if (sniper.getRunMode() === 'gallery') {
+        const n = gallerySummary(currentGallery());
+        text += ` · Gallery: ${n.total - n.todo} of ${n.total} done`;
+      } else if ('error' in r) text += `. Search not updated: ${r.error}`;
     } else if (ackNeeded()) {
       text = 'Confirm the risk level on the Settings tab to start';
       bad = true;
+    } else if (galleryMode()) {
+      const g = currentGallery();
+      const n = gallerySummary(g);
+      if (n.todo === 0) {
+        text = n.total === 0 ? 'Paste your Gallery list and press Load list to start' : 'Every card on your Gallery list is done';
+        bad = true;
+      } else if (g.budget - g.spent < MIN_SALE_PRICE) {
+        text = 'Your Gallery budget is spent: raise it to start';
+        bad = true;
+      } else text = `Buys ${n.todo} Gallery ${n.todo === 1 ? 'card' : 'cards'} · ${fmt(g.budget - g.spent)} coins of budget left`;
     } else if ('error' in r) {
       text = r.error;
       bad = true;
@@ -2534,18 +2692,33 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   }
 
   /** The tab beside Search results the trader picked; until they pick one,
-   * Active bids in Bid mode and Search results in Snipe mode. */
-  let feedTab: 'results' | 'bids' | null = null;
+   * Active bids in Bid mode, the Gallery list in Gallery mode and Search
+   * results in Snipe mode. */
+  let feedTab: 'results' | 'bids' | 'gallery' | null = null;
 
   /** Bid mode's open bids (`Sniper.getActiveBids`): where each stands and
-   * how long it has left, redrawn every second while the page is open. */
+   * how long it has left, redrawn every second while the page is open. In
+   * Gallery mode, its list's cards and where each one is. */
   function renderBids(): void {
     const sniper = deps.getSniper();
-    const tab = feedTab ?? (bidMode() ? 'bids' : 'results');
+    root.querySelector<HTMLElement>('.ftab[data-feed="gallery"]')!.hidden = !galleryMode();
+    const picked = feedTab === 'gallery' && !galleryMode() ? null : feedTab;
+    const tab = picked ?? (galleryMode() ? 'gallery' : bidMode() ? 'bids' : 'results');
     for (const el of root.querySelectorAll<HTMLElement>('.ftab')) el.setAttribute('aria-selected', String(el.dataset.feed === tab));
     $('results').hidden = tab !== 'results';
     $('bids').hidden = tab !== 'bids';
-    root.querySelector('.feeds')!.classList.toggle('bids-open', tab === 'bids');
+    $('gallery-feed').hidden = tab !== 'gallery';
+    root.querySelector('.feeds')!.classList.toggle('bids-open', tab === 'bids' || tab === 'gallery');
+    if (galleryMode()) {
+      const g = currentGallery();
+      const n = gallerySummary(g);
+      const count = n.total > 0 ? `${n.total - n.todo}/${n.total}` : '';
+      const countEl = $('gallery-count');
+      if (countEl.textContent !== count) countEl.textContent = count;
+      const sum = root.getElementById('g-sum');
+      if (sum && sum.textContent !== gallerySumText(g)) sum.textContent = gallerySumText(g);
+      if (tab === 'gallery') setHtml($('gallery-feed'), galleryFeedHtml(g, sniper?.isRunning() ?? false));
+    }
     const view = sniper?.getActiveBids() ?? null;
     const count = view && view.bids.length > 0 ? `${view.bids.length}/${view.max}` : '';
     const countEl = $('bids-count');
@@ -2581,6 +2754,26 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         ? 'not checked yet'
         : `checked ${Math.max(0, Math.round((now - view.checkedAt) / 1000))} s ago${view.stale ? ' · EA answered from its cache, so these may be out of date' : ''}`;
     return `<div class="bids-head">${parts.join(' · ')} · <span class="when">${checked}</span></div>${view.bids.map((b) => bidRowHtml(b, now)).join('')}`;
+  }
+
+  function galleryFeedHtml(g: GalleryState, running: boolean): string {
+    if (g.cards.length === 0) return '<div class="empty">Paste your Gallery list on the left, then press Load list.</div>';
+    // The bot works the list in order: the first card still to buy is the one it is on.
+    const buying = running ? g.cards.find((c) => c.status === 'todo')?.key : undefined;
+    return `<div class="bids-head">${esc(gallerySumText(g))}</div>${g.cards.map((c) => galleryRowHtml(c, c.key === buying)).join('')}`;
+  }
+
+  function galleryRowHtml(c: GalleryCard, buying: boolean): string {
+    const state = buying ? 'buying' : c.status;
+    const label = buying ? 'Buying now' : GALLERY_STATUS[c.status];
+    const detail = c.note ?? (c.market != null ? `Market price ${fmt(c.market)}` : null);
+    const sub = [c.set, detail].filter((x): x is string => !!x).map(esc).join(' · ');
+    const paid = c.price != null ? `${fmt(c.price)}${COIN}` : '—';
+    const listed = c.listPrice != null ? `${fmt(c.listPrice)}${COIN}` : '—';
+    return `<div class="bidrow ${state}"><div class="main"><b>${c.rating} ${esc(c.name)}</b><span class="st ${state}">${label}</span>
+      <div class="sub">${sub}</div></div>
+      <div class="cur"><span class="k">Paid</span><span class="v">${paid}</span></div>
+      <div class="cur"><span class="k">Listed at</span><span class="v">${listed}</span></div></div>`;
   }
 
   function bidRowHtml(b: ActiveBid, now: number): string {
@@ -2661,11 +2854,20 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     $('wallet').hidden = coins == null && w.points == null;
   }
 
+  /** Whether the Gallery box was last drawn with the bot running (its
+   * fields are locked while it runs). */
+  let galleryDrawnRunning = false;
+
   function refreshLive(): void {
     renderTop();
     renderWallet();
     renderDash();
     renderFeeds();
+    const running = deps.getSniper()?.isRunning() ?? false;
+    if (running !== galleryDrawnRunning) {
+      galleryDrawnRunning = running;
+      renderGallery();
+    }
   }
 
   function queueRefresh(): void {
@@ -2684,6 +2886,11 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     else if (ackNeeded()) {
       say('Confirm the risk level (or reset to recommended) to start');
       return;
+    } else if (galleryMode()) {
+      // Gallery mode works through its list: the search form plays no part.
+      sniper.setSettings(settings);
+      sniper.setModeSettings(modeSettings);
+      sniper.start();
     } else {
       const r = currentSearch();
       if ('error' in r) {
@@ -2722,7 +2929,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   onTrusted($('modes'), 'click', (e) => {
     const el = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-mode]');
     const mode = el?.dataset.mode;
-    if (!el || el.disabled || (mode !== 'snipe' && mode !== 'bid') || mode === modeSettings.mode) return;
+    if (!el || el.disabled || (mode !== 'snipe' && mode !== 'bid' && mode !== 'gallery') || mode === modeSettings.mode) return;
     if (deps.getSniper()?.isRunning()) return;
     commitMode({ ...modeSettings, mode }, true);
   });
@@ -2732,9 +2939,29 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   });
   onTrusted(root.querySelector('.feed-tabs')!, 'click', (e) => {
     const tab = (e.target as HTMLElement).closest<HTMLElement>('[data-feed]')?.dataset.feed;
-    if (tab !== 'results' && tab !== 'bids') return;
+    if (tab !== 'results' && tab !== 'bids' && tab !== 'gallery') return;
     feedTab = tab;
     renderBids();
+  });
+  // Gallery mode's list box, its buttons and its budget.
+  onTrusted($('gallery'), 'click', (e) => {
+    const id = (e.target as HTMLElement).closest<HTMLButtonElement>('button[id^="g-"]')?.id;
+    if (id) onGalleryClick(id);
+  });
+  onTrusted($('gallery'), 'input', (e) => {
+    const t = e.target as HTMLTextAreaElement;
+    if (t.id === 'g-list') galleryDraft = t.value;
+  });
+  onTrusted($('gallery'), 'change', (e) => {
+    const t = e.target as HTMLInputElement;
+    if (t.id !== 'g-budget' || deps.getSniper()?.isRunning()) return;
+    const v = Number(t.value.replace(/[,\s]/g, ''));
+    if (!Number.isInteger(v) || v < GALLERY_LIMITS.budget.min || v > GALLERY_LIMITS.budget.max) {
+      t.setAttribute('aria-invalid', 'true');
+      say(`Not saved: the budget is a whole number of coins, up to ${fmt(GALLERY_LIMITS.budget.max)}`);
+      return;
+    }
+    commitGallery({ ...currentGallery(), budget: v });
   });
   onTrusted($('close'), 'click', () => api.close());
   // Esc closes the page from anywhere on EA's page, like the nav item does.

@@ -92,6 +92,16 @@ import {
 import { ACT_ERROR, isAdapterRefusal } from '../lib/act-auth.js';
 
 import { BidBook, WATCHLIST_SIZE, nextBid, pickAuctions, timeLeft } from './bidder.js';
+import {
+  GALLERY_OVER_MARKET,
+  GALLERY_RESOLVE_TRIES,
+  GALLERY_SNIPE_MS,
+  galleryListPrices,
+  galleryMarketCap,
+  gallerySnipeCap,
+  nextGalleryCard,
+  pickResourceId,
+} from './gallery.js';
 import { Governor } from './governor.js';
 import { attemptErrorCode } from './types.js';
 
@@ -108,6 +118,8 @@ import type {
   BotPace,
   BotSettings,
   FilterCriteria,
+  GalleryCard,
+  GalleryState,
   GovernorSettings,
   RiskEventKind,
   SnipeOutcome,
@@ -425,7 +437,16 @@ export type SniperStopReason =
   /** Bid mode: the watch list could not be read, again and again. */
   | 'watchlist_failing'
   /** Bid mode: EA's watch list is full and no bid is left to follow. */
-  | 'watchlist_full';
+  | 'watchlist_full'
+  /** Gallery mode: no card left to buy on the list. */
+  | 'no_gallery'
+  /** Gallery mode: the page cannot send cards to the club or move them for
+   * Nova AI. */
+  | 'gallery_unavailable'
+  /** Gallery mode: the list's coin budget is spent. */
+  | 'gallery_budget'
+  /** Gallery mode: every card on the list is listed or skipped. */
+  | 'gallery_done';
 
 export interface SniperLogEntry {
   id: number;
@@ -701,6 +722,50 @@ const NEW_BIDS_PER_SEARCH = 1;
  * the bot leaves it where it is and says so. */
 const COLLECT_TRIES = 3;
 
+/** Gallery mode: where it is with the card it works on (`runGallery`). */
+interface GalleryWork {
+  key: string;
+  /** `resolve`: a look-only search names the card's version (or shows a
+   * price); `price`: its market price is looked up; `snipe`: it buys only
+   * under the market price; `market`: at the market price, and up. */
+  phase: 'resolve' | 'price' | 'snipe' | 'market';
+  /** When the phase began. */
+  since: number;
+  market: number | null;
+  /** The cheapest listing of the card its searches saw. */
+  floor: number | null;
+  /** Look-only searches so far. */
+  tries: number;
+  /** Price steps over the market price (`market`). */
+  steps: number;
+}
+
+/** Gallery mode: a bought card on its way to the club and the transfer
+ * market, one step per turn (`collectGallery`). */
+interface GalleryJob {
+  key: string;
+  m: SniperMatch;
+  step: 'club' | 'move' | 'list';
+  tries: number;
+}
+
+/** Gallery mode: how long a buy EA did not answer in time holds the card,
+ * so no second copy is bought before EA's late answer settles it. */
+const GALLERY_LATE_MS = 60_000;
+/** Gallery mode: the pause before each step of a card's way to the club and
+ * back on the market, in seconds: no script-fast burst of calls. */
+const GALLERY_STEP_GAP = { min: 1.5, max: 3 };
+
+/** Why a bought card did not go to the club, in the user's words. */
+export function clubMissReason(error: string | undefined): string {
+  if (error === 'club_unsupported') return 'Nova AI cannot send cards to the club on this EA web app';
+  if (error === 'club_not_bought') return 'Nova AI did not buy it on this page load';
+  const status = error ? /status (\d{3})/.exec(error)?.[1] : undefined;
+  if (status) return `EA refused it (error ${status}): your club may already hold this card`;
+  if (error && /timed out/i.test(error)) return 'EA did not answer in time';
+  return 'EA did not move it: your club may already hold this card';
+}
+
 /** How a batch of matches ended (`Sniper.buyMatches`): `dropped` when it
  * left the rest (a pause after a buy made them stale, or a budget holds
  * buying back). */
@@ -717,7 +782,7 @@ export interface SniperDeps {
   /** `bid`, `watchlist` and `move` are Bid mode's: without the first two it
    * refuses to start in Bid mode (`bid_unavailable`). */
   adapter: Pick<AdapterClient, 'search' | 'buy' | 'list' | 'onAuctions' | 'onBuyable' | 'onProbe' | 'onShape'> &
-    Partial<Pick<AdapterClient, 'onEaError' | 'bid' | 'watchlist' | 'move' | 'clearExpired'>>;
+    Partial<Pick<AdapterClient, 'onEaError' | 'bid' | 'watchlist' | 'move' | 'club' | 'clearExpired'>>;
   getFilters: () => SniperFilter[];
   /** The coin balance EA's own answers last stated (null: none seen). Bid
    * mode bids only what it leaves after the coins its other bids hold.
@@ -726,6 +791,9 @@ export interface SniperDeps {
   /** What a card sells for on the market now, or null if unknown. Used
    * where the user set no sell price of their own. */
   estimateSellPrice: (resourceId: number) => Promise<number | null>;
+  /** Gallery mode: saves the list's progress after every change (the
+   * page loads it back with `setGallery`). Omitted = not saved. */
+  saveGallery?: (state: GalleryState) => void;
   /** Today's active time, as saved by an earlier page (null = none). */
   loadUsage?: () => Promise<BotDailyUsage | null>;
   saveUsage?: (usage: BotDailyUsage) => void;
@@ -802,6 +870,10 @@ const EA_LIMITS_BEFORE_REST = 3;
 const EA_LIMIT_WINDOW_MS = 10 * 60_000;
 const EA_REST_MS = [15 * 60_000, 30 * 60_000];
 const EA_REST_WINDOW_MS = 2 * 60 * 60_000;
+
+function copyGallery(g: GalleryState): GalleryState {
+  return { budget: g.budget, spent: g.spent, cards: g.cards.map((c) => ({ ...c })) };
+}
 
 function emptyStats(): SniperStats {
   return {
@@ -896,6 +968,14 @@ export class Sniper {
   private watch = { at: -Infinity, doneAt: -Infinity, failures: 0, size: 0, fullNoted: false, finished: 0, clearedAt: -Infinity, clearOff: false, stale: false, staleNoted: false };
   /** What the last watch list read said, for `settleBids`. */
   private bidEvents: BidEvent[] = [];
+  /** Gallery mode: the trader's list (`setGallery`), the card it works on,
+   * the bought cards still to send to the club and list (kept across
+   * Stop/Start on this page load: the adapter can move them until a
+   * reload), and a buy EA has not answered yet. */
+  private gallery: GalleryState = { cards: [], budget: 0, spent: 0 };
+  private galleryWork: GalleryWork | null = null;
+  private galleryJobs: GalleryJob[] = [];
+  private galleryLate: { key: string; until: number } | null = null;
 
   private readonly now: () => number;
   private readonly random: () => number;
@@ -1127,6 +1207,19 @@ export class Sniper {
     return this.runMode;
   }
 
+  /** Gallery mode's list, as the page loaded or edited it. Ignored while
+   * the bot runs: the running list is the bot's own. */
+  setGallery(state: GalleryState): void {
+    if (this.isRunning()) return;
+    this.gallery = copyGallery(state);
+    this.galleryWork = null;
+  }
+
+  /** Gallery mode's list with each card's progress (a copy). */
+  getGallery(): GalleryState {
+    return copyGallery(this.gallery);
+  }
+
   /** While Bid mode runs: its open bids out of the user's max, and the
    * coins they hold. Null otherwise. */
   getBidStatus(): { active: number; max: number; committed: number } | null {
@@ -1177,8 +1270,10 @@ export class Sniper {
 
   start(): void {
     if (this.isRunning()) return;
-    const filters = this.deps.getFilters();
-    if (filters.length === 0) {
+    const mode = this.modeSettings.mode;
+    // Gallery mode works through its list, not the page's search.
+    const filters = mode === 'gallery' ? [] : this.deps.getFilters();
+    if (mode !== 'gallery' && filters.length === 0) {
       this.setState({
         phase: 'stopped',
         phaseEndsAt: null,
@@ -1224,7 +1319,20 @@ export class Sniper {
       });
       return;
     }
-    const mode = this.modeSettings.mode;
+    if (mode === 'gallery') {
+      const reason: SniperStopReason | null =
+        !this.deps.adapter.club || !this.deps.adapter.move
+          ? 'gallery_unavailable'
+          : !nextGalleryCard(this.gallery) && this.galleryJobs.length === 0
+            ? 'no_gallery'
+            : nextGalleryCard(this.gallery) && this.gallery.budget - this.gallery.spent < MIN_SALE_PRICE && this.galleryJobs.length === 0
+              ? 'gallery_budget'
+              : null;
+      if (reason) {
+        this.setState({ phase: 'stopped', phaseEndsAt: null, stopReason: reason, stopDetail: STOP_MESSAGES[reason] });
+        return;
+      }
+    }
     if (mode === 'bid') {
       // Bid mode follows its bids on the watch list: without the calls for
       // that it never starts (and the first read must work, `runBids`).
@@ -1270,6 +1378,14 @@ export class Sniper {
         kind: 'info',
         message: `Bot started in Bid mode: bids on auctions with ${plural(b.windowMinutes, 'minute')} or less left, up to ${plural(b.maxActiveBids, 'bid')} at a time, never above your max price`,
       });
+    } else if (mode === 'gallery') {
+      const left = this.gallery.cards.filter((c) => c.status === 'todo').length;
+      this.galleryWork = null;
+      this.galleryLate = null;
+      this.addLog({
+        kind: 'info',
+        message: `Bot started in Gallery mode: ${plural(left, 'card')} to buy, ${coins(this.gallery.budget - this.gallery.spent)} left of your Gallery budget. Each card goes to your club, then back on the market one step under its market price`,
+      });
     } else this.addLog({ kind: 'info', message: 'Bot started' });
     const timing = this.deps.timingMode?.();
     if (timing === 'worker') this.addLog({ kind: 'info', message: 'Background searching is on: the bot keeps its pace in another tab' });
@@ -1306,6 +1422,13 @@ export class Sniper {
       this.addLog({ kind: 'info', message: `${plural(notMoved, 'won card')} not moved yet: still in your watch list (Transfer Targets)` });
     if (notListed > 0)
       this.addLog({ kind: 'info', message: `${plural(notListed, 'won card')} moved but not listed yet: in your transfer list` });
+    // Gallery cards bought and not listed yet: finished at the next Start
+    // on this page load.
+    if (this.galleryJobs.length > 0)
+      this.addLog({
+        kind: 'info',
+        message: `${plural(this.galleryJobs.length, 'Gallery card')} bought but not listed yet: Start again to finish ${this.galleryJobs.length === 1 ? 'it' : 'them'} before reloading the page`,
+      });
     this.setState({ phase: 'stopped', phaseEndsAt: null, stopReason: reason, stopDetail: message });
   }
 
@@ -1324,6 +1447,7 @@ export class Sniper {
   private async run(signal: AbortSignal): Promise<void> {
     const pacing = this.newPacing();
     if (!(await this.loadRunState(signal))) return;
+    if (this.runMode === 'gallery') return this.runGallery(signal, pacing);
     return this.runMode === 'bid' ? this.runBids(signal, pacing) : this.runSnipes(signal, pacing);
   }
 
@@ -1763,6 +1887,11 @@ export class Sniper {
     signal: AbortSignal,
   ): Promise<BatchEnd> {
     const t = this.settings.thresholds;
+    // Gallery mode buys one copy of the card it works on, at the price it
+    // chose: no profit check (each card is bought to collect, and sold back
+    // at a small loss), and a buy is followed by the card's way to the club.
+    const galleryKey = this.runMode === 'gallery' ? this.galleryWork?.key : undefined;
+    const galleryMarket = galleryKey === undefined ? null : (this.galleryWork?.market ?? null);
     this.setState({ phase: 'buying', phaseEndsAt: null, stopReason: null, stopDetail: null });
     for (const m of matches) {
       if (signal.aborted) return 'stopped';
@@ -1783,8 +1912,9 @@ export class Sniper {
       // every search) has answered. Without one the buy goes first (a
       // listing this cheap is gone in moments) and the estimate is looked
       // up afterwards, for the log.
-      let estimate: Estimate | null = null;
-      if (t.minProfit > 0) {
+      let estimate: Estimate | null =
+        galleryMarket == null ? null : this.estimateAt(m, galleryListPrices(galleryMarket).buyNowPrice);
+      if (t.minProfit > 0 && galleryKey === undefined) {
         estimate = this.knownEstimate(m);
         // Unknown profit is allowed: the user capped the price, and the
         // ledger may simply not have seen this card sell yet.
@@ -1872,12 +2002,23 @@ export class Sniper {
             return;
           }
           this.recordBought(m, late.latencyMs, estimate, timings);
+          if (galleryKey !== undefined) this.galleryBought(m, galleryKey);
+          else this.autoSellInBackground(m);
           // Shown now, not at the next search (the bot may have stopped).
           this.deps.onChange();
-          this.autoSellInBackground(m);
         });
         if (signal.aborted) return 'stopped';
         this.deps.onChange();
+        if (galleryKey !== undefined) {
+          // It may have bought: no other copy goes until EA's late answer
+          // says (or GALLERY_LATE_MS passes).
+          this.galleryLate = { key: galleryKey, until: this.now() + GALLERY_LATE_MS };
+          void result.late?.then((late) => {
+            if (this.galleryLate?.key === galleryKey) this.galleryLate = null;
+            if (!late.ok) this.deps.onChange();
+          });
+          return 'dropped';
+        }
         continue;
       }
       if (signal.aborted && !result.ok) return 'stopped';
@@ -1888,8 +2029,9 @@ export class Sniper {
         // on to the next listing and search. Only the user's own pause
         // after a buy, when they set one, waits.
         this.recordBought(m, result.latencyMs, estimate, timings);
-        this.autoSellInBackground(m);
-        if (t.stopAfterPurchases > 0 && this.runTotals.purchases >= t.stopAfterPurchases) {
+        if (galleryKey !== undefined) this.galleryBought(m, galleryKey);
+        else this.autoSellInBackground(m);
+        if (galleryKey === undefined && t.stopAfterPurchases > 0 && this.runTotals.purchases >= t.stopAfterPurchases) {
           this.stop('purchase_limit');
           return 'stopped';
         }
@@ -1901,6 +2043,8 @@ export class Sniper {
           // had it. The next search looks again.
           return 'dropped';
         }
+        // One copy of a Gallery card is all the list needs.
+        if (galleryKey !== undefined) return 'dropped';
       } else {
         // A signed answer settles what this buy took. The adapter's own
         // refusals (lib/act-auth.ts) never reached EA: the governor and the
@@ -1948,6 +2092,299 @@ export class Sniper {
 
   private dropBuyTime(at: number): void {
     dropTime(this.buyTimes, at);
+  }
+
+  // ---- Gallery mode ----------------------------------------------------------
+
+  /** Gallery mode's loop (engine/gallery.ts has the rules): the trader's
+   * list, one card at a time. A bought card first goes to the club, to the
+   * transfer list and back on the market, a step a turn; then the next
+   * card. Paced like Snipe mode (the search delay start to start, slower
+   * after EA limits it, breaks, rests) and under every limit it has. */
+  private async runGallery(signal: AbortSignal, p: Pacing): Promise<void> {
+    let failuresInRow = 0;
+    while (!signal.aborted) {
+      if (this.galleryJobs.length > 0) {
+        await this.collectGallery(signal);
+        continue;
+      }
+      if (this.dailyLimitReached()) return this.stop('daily_limit');
+      if (await this.takeBreakIfDue(p, signal)) continue;
+      // A buy EA has not answered yet: no second copy before its answer.
+      if (this.galleryLate) {
+        if (this.now() < this.galleryLate.until) {
+          await this.wait('waiting', 2_000, signal);
+          continue;
+        }
+        this.galleryLate = null;
+      }
+      const card = this.galleryCard();
+      if (!card) return this.stop('gallery_done');
+      const w = this.galleryWork!;
+      if (w.phase === 'price') {
+        await this.galleryPrice(card, w);
+        continue;
+      }
+      const plan = this.gallerySearch(card, w);
+      if (plan === 'budget') return this.stop('gallery_budget');
+      if (typeof plan === 'string') {
+        this.gallerySkip(card, plan);
+        continue;
+      }
+
+      const gate = await this.searchGate(signal);
+      if (gate === 'stopped') return;
+      if (gate === 'wait') continue;
+      const startedAt = this.now();
+      const search = this.startSearch(plan.target);
+      await search.ready;
+      if (signal.aborted) return;
+      this.stats.searches++;
+      this.searchSeq++;
+      p.searchesSinceBreak++;
+      const tried = new Set<string>();
+      const first = plan.buy ? search.matches() : [];
+      const end = first.length > 0 ? await this.buyMatches(first, search, tried, signal) : 'done';
+      if (end === 'stopped') return;
+      const found = await search.done;
+      if (signal.aborted) return;
+      this.pace.searches++;
+      if (!found.ok) this.pace.failed++;
+      else {
+        this.pace.searchMs.push(found.at - startedAt);
+        if (found.listings > 0) this.pace.withResults++;
+      }
+      const bought = () => this.galleryJobs.length > 0 || this.galleryLate != null;
+      if (!found.ok) {
+        if (!this.eaExcused(found.error, startedAt)) failuresInRow++;
+        this.addLog({ kind: 'failed', message: `Search "${plan.target.name}" failed: ${found.error}` });
+        if (failuresInRow >= MAX_SEARCH_FAILURES_IN_A_ROW) return this.stop('search_failing');
+      } else {
+        failuresInRow = 0;
+        this.addSearchResult(plan.target.name, found.matches, found.listings, found.cheapest, found.at);
+        const rest = plan.buy && end === 'done' && !bought() ? found.matches.filter((m) => !tried.has(m.tradeId)) : [];
+        if (rest.length > 0 && (await this.buyMatches(rest, search, tried, signal)) === 'stopped') return;
+        if (!bought()) this.galleryAfterSearch(card, w, found.matches);
+      }
+      this.deps.onChange();
+      // A buy goes straight on to the card's way to the club: those steps
+      // have their own pauses.
+      if (bought()) continue;
+      const delayMs = this.pickSeconds(this.settings.searchDelay) * 1000 * this.eaPaceFactor();
+      await this.wait('waiting', Math.max(0, delayMs - (this.now() - startedAt)), signal);
+    }
+  }
+
+  /** The card Gallery mode works on: the current one while it is still to
+   * buy, else the next one on the list (null: none left). */
+  private galleryCard(): GalleryCard | null {
+    const w = this.galleryWork;
+    const current = w ? this.gallery.cards.find((c) => c.key === w.key && c.status === 'todo') : undefined;
+    if (current) return current;
+    const next = nextGalleryCard(this.gallery);
+    this.galleryWork = next
+      ? { key: next.key, phase: next.resourceId ? 'price' : 'resolve', since: this.now(), market: null, floor: null, tries: 0, steps: 0 }
+      : null;
+    return next;
+  }
+
+  /** The card's name and ids, for a log entry the page names it in. */
+  private galleryIds(card: GalleryCard): Pick<SniperLogEntry, 'resourceId' | 'assetId' | 'rating'> {
+    return { resourceId: card.resourceId ?? card.playerId, assetId: card.playerId, rating: card.rating };
+  }
+
+  /** The card's market price: FUTBIN's, else Nova's, else the cheapest
+   * listing its searches saw (without one yet, a look-only search first). */
+  private async galleryPrice(card: GalleryCard, w: GalleryWork): Promise<void> {
+    const found =
+      card.resourceId == null
+        ? null
+        : ((await this.deps.marketPrice?.(card.resourceId, this.settings.autoSell.platform).catch(() => null)) ?? null);
+    const market = found?.price ?? w.floor;
+    if (market == null) {
+      if (w.tries >= GALLERY_RESOLVE_TRIES) return this.gallerySkip(card, 'no market price (FUTBIN and Nova have none) and none listed');
+      w.phase = 'resolve';
+      return;
+    }
+    const maxBuy = this.settings.thresholds.maxBuyPrice;
+    if (maxBuy > 0 && gallerySnipeCap(market) > maxBuy)
+      return this.gallerySkip(card, `its market price ${coins(market)} is over your max buy price (${coins(maxBuy)})`);
+    w.market = market;
+    // At EA's lowest price nothing lists under it: straight to the market price.
+    const under = gallerySnipeCap(market) >= MIN_SALE_PRICE;
+    w.phase = under ? 'snipe' : 'market';
+    w.since = this.now();
+    w.steps = 0;
+    card.market = market;
+    const source = found ? (found.source === 'futbin' ? 'FUTBIN' : 'Nova market') : 'cheapest listing seen';
+    this.addLog({
+      kind: 'info',
+      ...this.galleryIds(card),
+      price: market,
+      message: `Gallery: {card} — ${source} price ${coins(market)}${
+        under ? `; looking for one under it for ${Math.round(GALLERY_SNIPE_MS / 60_000)} minutes first` : ''
+      }`,
+    });
+    this.saveGallery();
+  }
+
+  /** The search the card needs now, whether it may buy, and at what most;
+   * `budget` when the list's budget is spent, or why the card is skipped. */
+  private gallerySearch(card: GalleryCard, w: GalleryWork): { target: SniperFilter; buy: boolean } | 'budget' | string {
+    const left = this.gallery.budget - this.gallery.spent;
+    // What is left, down to EA's price grid: a search's max is one of its prices.
+    const rounded = roundToPriceStep(Math.max(0, left));
+    const leftOnGrid = rounded > left ? stepPrice(rounded, -1) : rounded;
+    if (left < MIN_SALE_PRICE || leftOnGrid < MIN_SALE_PRICE) return 'budget';
+    const filter: FilterCriteria = { resourceId: card.playerId, minRating: card.rating, maxRating: card.rating };
+    const name = `${card.name} ${card.rating}`;
+    if (w.phase === 'resolve') return { target: { id: `gallery:${card.key}:resolve`, name, filter }, buy: false };
+    const market = w.market!;
+    let cap: number;
+    if (w.phase === 'snipe') cap = gallerySnipeCap(market);
+    else {
+      const most = galleryMarketCap(market, w.steps);
+      if (most == null) return `none listed within ${Math.round(GALLERY_OVER_MARKET * 100)}% of its market price (${coins(market)})`;
+      if (most > left) return `it costs more than what is left of your Gallery budget (${coins(left)})`;
+      cap = most;
+    }
+    return { target: { id: `gallery:${card.key}:${w.phase}:${w.steps}`, name, filter: { ...filter, maxPrice: Math.min(cap, leftOnGrid) } }, buy: true };
+  }
+
+  /** What a search that bought nothing tells: the card's version and
+   * cheapest listing (`resolve`), the end of the minutes under the market
+   * price (`snipe`), one step more when nothing was listed (`market`). */
+  private galleryAfterSearch(card: GalleryCard, w: GalleryWork, matches: SniperMatch[]): void {
+    const cheapest = matches.length > 0 ? Math.min(...matches.map((m) => m.buyNow)) : null;
+    if (cheapest != null) w.floor = w.floor == null ? cheapest : Math.min(w.floor, cheapest);
+    if (w.phase === 'resolve') {
+      const id = card.resourceId ?? pickResourceId(matches, card.playerId);
+      if (id == null || matches.length === 0) {
+        w.tries++;
+        if (w.tries >= GALLERY_RESOLVE_TRIES) this.gallerySkip(card, 'none listed at this rating right now');
+        return;
+      }
+      card.resourceId = id;
+      w.tries++;
+      w.phase = 'price';
+      w.since = this.now();
+      this.saveGallery();
+      return;
+    }
+    if (w.phase === 'snipe') {
+      if (this.now() - w.since < GALLERY_SNIPE_MS) return;
+      w.phase = 'market';
+      w.since = this.now();
+      w.steps = 0;
+      this.addLog({
+        kind: 'info',
+        ...this.galleryIds(card),
+        message: `Gallery: none of {card} under its market price (${coins(w.market!)}) — buying the cheapest at or near it`,
+      });
+      return;
+    }
+    // Listings at the price that a buy missed (a race lost, a limit) leave
+    // the price where it is; only none listed moves it up.
+    if (matches.length === 0) w.steps++;
+  }
+
+  private gallerySkip(card: GalleryCard, why: string): void {
+    card.status = 'skipped';
+    card.note = why.slice(0, 200);
+    this.galleryWork = null;
+    this.addLog({ kind: 'blocked', ...this.galleryIds(card), message: `Gallery: skipped {card}: ${why}` });
+    this.saveGallery();
+    this.deps.onChange();
+  }
+
+  /** A Gallery card bought: counted against the list's budget, and on its
+   * way to the club. */
+  private galleryBought(m: SniperMatch, key: string): void {
+    const card = this.gallery.cards.find((c) => c.key === key);
+    if (card) {
+      card.status = 'bought';
+      card.price = m.buyNow;
+      card.resourceId ??= m.resourceId;
+      delete card.note;
+    }
+    this.gallery.spent += m.buyNow;
+    this.galleryJobs.push({ key, m, step: 'club', tries: 0 });
+    if (this.galleryWork?.key === key) this.galleryWork = null;
+    if (this.galleryLate?.key === key) this.galleryLate = null;
+    this.saveGallery();
+  }
+
+  /** One step of the first bought card's way: to the club, to the transfer
+   * list, listed one step under its market price. A step EA refuses is
+   * tried again (COLLECT_TRIES in all); a card the club refused (one it
+   * holds already, say) still goes back on the market, so its coins come
+   * back, and the card says so. */
+  private async collectGallery(signal: AbortSignal): Promise<void> {
+    await this.wait('waiting', this.pickSeconds(GALLERY_STEP_GAP) * 1000, signal);
+    if (signal.aborted || this.applyKillSwitch() || this.applyEntitlement() || this.applyExclusive()) return;
+    const job = this.galleryJobs[0]!;
+    const card = this.gallery.cards.find((c) => c.key === job.key);
+    const ids = { resourceId: job.m.resourceId, assetId: job.m.assetId, rating: job.m.rating };
+    const done = (status: GalleryCard['status'] | null, note?: string) => {
+      this.galleryJobs.shift();
+      if (card && status) card.status = status;
+      if (card && note) card.note = note.slice(0, 200);
+    };
+    if (job.step === 'club') {
+      const r = await this.deps.adapter.club!(job.m.tradeId);
+      if (r.ok) {
+        if (card) card.status = 'club';
+        job.step = 'move';
+        job.tries = 0;
+        this.addLog({ kind: 'moved', ...ids, message: 'Sent {card} to your club' });
+      } else if (++job.tries >= COLLECT_TRIES || r.error === 'club_not_bought' || r.error === 'club_unsupported') {
+        const why = clubMissReason(r.error);
+        if (card) card.note = `Not sent to your club (${why}): check the Set counted it`.slice(0, 200);
+        this.addLog({ kind: 'blocked', ...ids, message: `{card} not sent to your club: ${why} — listing it anyway` });
+        job.step = 'move';
+        job.tries = 0;
+      }
+    } else if (job.step === 'move') {
+      const r = await this.deps.adapter.move!(job.m.tradeId);
+      if (r.ok) {
+        job.step = 'list';
+        job.tries = 0;
+      } else if (++job.tries >= COLLECT_TRIES || r.error === 'move_not_bought') {
+        const why = moveMissReason(r.error);
+        done(null, `Not listed: ${why}. It is in your club or unassigned items`);
+        this.addLog({ kind: 'blocked', ...ids, message: `{card} not moved to the transfer list: ${why}` });
+      }
+    } else {
+      const found = (await this.deps.marketPrice?.(job.m.resourceId, this.settings.autoSell.platform).catch(() => null)) ?? null;
+      const market = found?.price ?? card?.market ?? null;
+      if (market == null) {
+        done(null, 'Not listed: no market price to list it at. It is in your transfer list');
+        this.addLog({ kind: 'blocked', ...ids, message: 'not listed: no market price for {card} (FUTBIN and Nova have none)' });
+      } else {
+        const { startPrice, buyNowPrice } = galleryListPrices(market);
+        const r = await this.deps.adapter.list(job.m.tradeId, startPrice, buyNowPrice);
+        if (r.ok) {
+          if (card) card.listPrice = buyNowPrice;
+          done('listed');
+          this.addLog({
+            kind: 'listed',
+            ...ids,
+            price: buyNowPrice,
+            message: `Gallery: one step under the market price (${coins(market)})`,
+          });
+        } else if (++job.tries >= COLLECT_TRIES) {
+          const why = r.error ?? 'EA did not accept the listing';
+          done(null, `Not listed: ${why}. It is in your transfer list`);
+          this.addLog({ kind: 'blocked', ...ids, message: `not listed: ${why}` });
+        }
+      }
+    }
+    this.saveGallery();
+    this.deps.onChange();
+  }
+
+  private saveGallery(): void {
+    this.deps.saveGallery?.(copyGallery(this.gallery));
   }
 
   // ---- Bid mode -------------------------------------------------------------
@@ -3103,4 +3540,9 @@ const STOP_MESSAGES: Record<SniperStopReason, string> = {
     'Nova AI could not read your EA watch list, which Bid mode needs to follow its bids — try Start again in a moment',
   watchlist_full:
     "your EA watch list is full: clear the expired items in EA's Transfer Targets, then Start again",
+  no_gallery: 'no card left to buy on your Gallery list: paste the players on the Gallery tab first',
+  gallery_unavailable:
+    "Gallery mode needs to send cards to your club and move them through EA's web app, and this page does not let Nova AI do that",
+  gallery_budget: 'your Gallery budget is spent: raise it on the Gallery tab to go on',
+  gallery_done: 'every card on your Gallery list is done: listed, or skipped with the reason beside it',
 };

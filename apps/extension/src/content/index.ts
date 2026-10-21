@@ -27,6 +27,7 @@ import {
   DEFAULT_ASSIST_HOTKEYS,
   DEFAULT_BOT_MODE_SETTINGS,
   DEFAULT_BOT_SETTINGS,
+  EMPTY_GALLERY,
   extContentKillSwitchMessageSchema,
   extContentResetSessionMessageSchema,
 } from '@sl/shared';
@@ -77,6 +78,7 @@ import type {
   BotSettings,
   BootstrapResponse,
   FeatureKey,
+  GalleryState,
   RiskBudgetEvent,
   SavedFilter,
   SnipingAttempt,
@@ -677,6 +679,8 @@ async function main(): Promise<void> {
     // Snipe or Bid, and Bid mode's settings (this browser's own; null: the
     // service worker did not answer, which reads as the defaults: Snipe).
     let botMode: BotModeSettings = (await send<BotModeSettings>('bot.modeGet')) ?? DEFAULT_BOT_MODE_SETTINGS;
+    // Gallery mode's list and its cards' progress (this browser's own).
+    let botGallery: GalleryState = (await send<GalleryState | null>('bot.galleryGet')) ?? EMPTY_GALLERY;
     let unavailableReason: string | null = null;
     // The search filled in on the bot page: the only one the bot runs. Never
     // written to the saved filters (assist and the dashboard use those).
@@ -788,6 +792,8 @@ async function main(): Promise<void> {
               if (moved.ok) pileRefresher.listed();
               return moved;
             },
+            // Gallery mode: a bought card sent to the club.
+            club: adapter.club,
             clearExpired: adapter.clearExpired,
             onAuctions: adapter.onAuctions,
             onBuyable: adapter.onBuyable,
@@ -828,10 +834,17 @@ async function main(): Promise<void> {
           onAttempt: recordAttempt,
           onTrade: recordTrade,
           onRiskEvent: (event) => recordRiskEvents([event]),
+          // Gallery mode's progress, after every change: a reload never
+          // buys a finished card again.
+          saveGallery: (state) => {
+            botGallery = state;
+            void send('bot.gallerySet', state);
+          },
         },
         botSettings,
         botMode,
       );
+      sniper.setGallery(botGallery);
     };
     await prepareSniper(false);
 
@@ -909,6 +922,13 @@ async function main(): Promise<void> {
       saveModeSettings: async (next) => {
         botMode = next;
         await send('bot.modeSet', next);
+      },
+      // Gallery mode's list: the running bot's copy while it has one.
+      getGallery: () => sniper?.getGallery() ?? botGallery,
+      saveGallery: async (next) => {
+        botGallery = next;
+        sniper?.setGallery(next);
+        await send('bot.gallerySet', next);
       },
       setLiveSearch: (search) => {
         liveSearch = search;

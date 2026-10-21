@@ -87,6 +87,9 @@ export interface BiddingShape {
   /** Move a won item (its entity) from the watch list to the transfer
    * list. Absent on a shape with no known call. */
   moveToTransferList?(services: Record<string, unknown>, entity: unknown): Promise<void>;
+  /** Send a bought item (its entity) to the club (Gallery mode). Absent on
+   * a shape with no known call. EA refuses a card the club already holds. */
+  moveToClub?(services: Record<string, unknown>, entity: unknown): Promise<void>;
   /** Take finished auctions (their entities) off the watch list, as the
    * web app's Transfer Targets "Clear expired" does. Absent on a shape with
    * no known call. */

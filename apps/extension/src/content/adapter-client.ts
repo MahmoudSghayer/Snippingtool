@@ -83,6 +83,9 @@ export interface AdapterClient {
   /** Automation builds (Bid mode): move an auction the adapter won to the
    * transfer list. */
   move(tradeId: string): Promise<ActionOutcome>;
+  /** Automation builds (Gallery mode): send a card the adapter bought to
+   * the club. */
+  club(tradeId: string): Promise<ActionOutcome>;
   /** Automation builds (Bid mode): take the finished auctions the last watch
    * list read saw (expired, or lost) off the watch list, like Transfer
    * Targets' "Clear expired". Never a won or running one. */
@@ -156,6 +159,7 @@ type ActAction =
   | 'bid'
   | 'watchlist'
   | 'move'
+  | 'club'
   | 'clearSold'
   | 'relistAll'
   | 'unsold'
@@ -405,6 +409,7 @@ export function createAdapterClient(target: Window, nonce: string | null, option
       }),
     watchlist: () => call({ action: 'watchlist' }),
     move: (tradeId) => call({ action: 'move', tradeId }),
+    club: (tradeId) => call({ action: 'club', tradeId }),
     clearExpired: () => call({ action: 'clearExpired' }),
     refreshPile: () => call({ action: 'pile' }),
     clearSold: () => call({ action: 'clearSold' }),
