@@ -228,6 +228,45 @@ describe('the watch list, and what was won', () => {
   });
 });
 
+describe("Gallery mode's club call", () => {
+  it("sends only a card it bought itself to the club (the web app's own club pile), and may then move and list it", async () => {
+    const entity = itemEntity(auctionSpec(901, { buyNowPrice: 3_700 }));
+    const svc = biddingServices([entity]);
+    install(svc.services);
+    await act({ action: 'search', filter: {} });
+    expect((await act({ action: 'buy', tradeId: '901', price: 3_700 })).data.ok).toBe(true);
+    const res = await act({ action: 'club', tradeId: '901' });
+    expect(res.data).toMatchObject({ action: 'club', ok: true });
+    expect(await signer.verify(canonicalActMessage('action_result', res.data), res.mac!)).toBe(true);
+    expect(adapterActionResultMessageSchema.safeParse({ channel: ADAPTER_CHANNEL, kind: 'action_result', data: res.data, mac: res.mac }).success).toBe(true);
+    expect(svc.move.mock.calls[0]).toEqual([entity, 7]);
+    // Still its own card: to the transfer list, then listed.
+    expect((await act({ action: 'move', tradeId: '901' })).data.ok).toBe(true);
+    expect(svc.move.mock.calls[1]).toEqual([entity, 5]);
+    expect((await act({ action: 'list', tradeId: '901', startPrice: 3_800, buyNowPrice: 3_900 })).data.ok).toBe(true);
+    // Never a card it did not buy.
+    expect((await act({ action: 'club', tradeId: '902' })).data).toMatchObject({ ok: false, error: 'club_not_bought' });
+    expect(svc.move).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports EA refusing the move (a card the club holds already)', async () => {
+    const entity = itemEntity(auctionSpec(903, { buyNowPrice: 3_700 }));
+    const svc = biddingServices([entity]);
+    install(svc.services);
+    await act({ action: 'search', filter: {} });
+    expect((await act({ action: 'buy', tradeId: '903', price: 3_700 })).data.ok).toBe(true);
+    svc.move.mockReturnValueOnce(observable({ success: false, status: 471 }));
+    const res = await act({ action: 'club', tradeId: '903' });
+    expect(res.data).toMatchObject({ action: 'club', ok: false });
+    expect(String(res.data.error)).toMatch(/success: false/);
+  });
+
+  it('says the promise shape has no club call', async () => {
+    install(promiseServices().services);
+    expect((await act({ action: 'club', tradeId: '901' })).data).toMatchObject({ ok: false, error: 'club_unsupported' });
+  });
+});
+
 describe("the shapes' Bid mode calls (ASSUMED SHAPE)", () => {
   it('promise shape: bids through Transfer.repository.bid and reads Item.repository.watchlist', async () => {
     const shape = createPromiseShape(1_000);

@@ -485,6 +485,10 @@ describe('Bid mode settings (kept out of the account-synced bot settings)', () =
       },
     });
     expect(clampBotModeSettings({ mode: 'x' } as never).mode).toBe('snipe');
+    expect(clampBotModeSettings({ ...DEFAULT_BOT_MODE_SETTINGS, mode: 'gallery' }).mode).toBe(
+      'gallery',
+    );
+    expect(botModeSettingsSchema.parse({ mode: 'gallery' }).mode).toBe('gallery');
   });
 
   it('is not part of the settings the API stores: a PUT carrying it is refused', () => {

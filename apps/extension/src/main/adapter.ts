@@ -257,7 +257,7 @@ function post(kind: string, data: unknown): void {
 }
 
 interface ActionResult {
-  action: 'search' | 'buy' | 'readResult' | 'diagnostics' | 'list' | 'pile' | 'bid' | 'watchlist' | 'move' | 'clearSold' | 'relistAll' | 'unsold' | 'relist' | 'clearExpired';
+  action: 'search' | 'buy' | 'readResult' | 'diagnostics' | 'list' | 'pile' | 'bid' | 'watchlist' | 'move' | 'club' | 'clearSold' | 'relistAll' | 'unsold' | 'relist' | 'clearExpired';
   requestId: string;
   ok: boolean;
   requestedAt: number;
@@ -1439,6 +1439,27 @@ async function actMove(requestId: string, tradeId: string): Promise<void> {
   }
 }
 
+/** Sends a card this adapter bought (by its tradeId) to the club, as the
+ * web app's "Send to My Club" does (Gallery mode). The card stays one it
+ * may move to the transfer list and list (`boughtItems`). */
+async function actClub(requestId: string, tradeId: string): Promise<void> {
+  const requestedAt = now();
+  const { result, selection } = runProbeAndReport();
+  const shape = selection.shape;
+  if (!result.ok || !shape) return fail('club', requestId, requestedAt, result.reason);
+  const club = shape.bidding?.moveToClub;
+  if (!club) return fail('club', requestId, requestedAt, 'club_unsupported');
+  const entity = apply(mapGet, boughtItems, [tradeId]);
+  if (entity === undefined) return fail('club', requestId, requestedAt, 'club_not_bought');
+  try {
+    await apply(club, shape.bidding, [servicesRoot() as Record<string, unknown>, entity]);
+    adapterLog.add(`club ok (${shape.name})`);
+    postResult({ action: 'club', requestId, ok: true, requestedAt, completedAt: now() });
+  } catch (err) {
+    fail('club', requestId, requestedAt, errorText(err), describeError(err));
+  }
+}
+
 /** Takes the finished auctions the last watch list read saw (expired, or
  * lost to another bid) off the watch list, as Transfer Targets' "Clear
  * expired" does. Never a won or running one (`finishedWatched`). */
@@ -1538,6 +1559,7 @@ type ActRequest =
   | { action: 'readResult'; requestId: string; tradeId: string }
   | { action: 'list'; requestId: string; tradeId: string; startPrice: number; buyNowPrice: number }
   | { action: 'move'; requestId: string; tradeId: string }
+  | { action: 'club'; requestId: string; tradeId: string }
   | { action: 'diagnostics'; requestId: string }
   | { action: 'catalog'; requestId: string }
   | { action: 'pile'; requestId: string }
@@ -1584,7 +1606,7 @@ function asActRequest(value: unknown): ActRequest | null {
     return isListingPrice(d.startPrice, d.buyNowPrice) ? (d as unknown as ActRequest) : null;
   }
   if (typeof d.tradeId !== 'string' || d.tradeId === '') return null;
-  if (d.action === 'readResult' || d.action === 'move') return d as unknown as ActRequest;
+  if (d.action === 'readResult' || d.action === 'move' || d.action === 'club') return d as unknown as ActRequest;
   if (d.action === 'bid') {
     if (!isBidAmount(d.price)) return null;
     for (const id of [d.resourceId, d.assetId]) if (id !== undefined && (!isInteger(id) || (id as number) <= 0)) return null;
@@ -1624,6 +1646,9 @@ async function handleActRequest(data: unknown, mac: unknown): Promise<void> {
   }
   else if (request.action === 'move') {
     if (BIDDING_ENABLED) await actMove(request.requestId, request.tradeId);
+  }
+  else if (request.action === 'club') {
+    if (BIDDING_ENABLED) await actClub(request.requestId, request.tradeId);
   }
   else if (request.action === 'clearExpired') {
     if (BIDDING_ENABLED) await actClearExpired(request.requestId);

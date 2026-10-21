@@ -16,6 +16,7 @@ import {
   extBackgroundEngineStatePayloadSchema,
   extBackgroundBotBudgetSetPayloadSchema,
   extBackgroundBotModeSetPayloadSchema,
+  extBackgroundBotGallerySetPayloadSchema,
   extBackgroundBotSettingsSetPayloadSchema,
   extBackgroundBotUsageSetPayloadSchema,
   extBackgroundCardNamesPayloadSchema,
@@ -49,6 +50,8 @@ import { handleAuthLogin, handleAuthLogout, handleAuthMfaVerify, handleAuthRegis
 import {
   handleBotBudgetGet,
   handleBotBudgetSet,
+  handleBotGalleryGet,
+  handleBotGallerySet,
   handleBotModeGet,
   handleBotModeSet,
   handleBotSettingsGet,
@@ -192,6 +195,8 @@ if (AUTOMATION_ENABLED) {
     'bot.settingsSet': (payload) => handleBotSettingsSet(payload as never),
     'bot.modeGet': () => handleBotModeGet(),
     'bot.modeSet': (payload) => handleBotModeSet(payload as never),
+    'bot.galleryGet': () => handleBotGalleryGet(),
+    'bot.gallerySet': (payload) => handleBotGallerySet(payload as never),
     'bot.usageGet': () => handleBotUsageGet(),
     'bot.usageSet': (payload) => handleBotUsageSet(payload as never),
     'bot.budgetGet': () => handleBotBudgetGet(),
@@ -247,6 +252,7 @@ if (AUTOMATION_ENABLED) {
   Object.assign(payloadSchemas, {
     'bot.settingsSet': extBackgroundBotSettingsSetPayloadSchema,
     'bot.modeSet': extBackgroundBotModeSetPayloadSchema,
+    'bot.gallerySet': extBackgroundBotGallerySetPayloadSchema,
     'bot.usageSet': extBackgroundBotUsageSetPayloadSchema,
     'bot.budgetSet': extBackgroundBotBudgetSetPayloadSchema,
     'cards.names': extBackgroundCardNamesPayloadSchema,

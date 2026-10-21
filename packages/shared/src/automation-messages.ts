@@ -18,6 +18,10 @@ export const AUTOMATION_BACKGROUND_MESSAGE_TYPES = [
    * API's bot-settings schema carries them (see `botModeSettingsSchema`). */
   'bot.modeGet',
   'bot.modeSet',
+  /** Gallery mode's list of cards, their progress and its coin budget
+   * (`GalleryState`, `storage.local`). Local only. */
+  'bot.galleryGet',
+  'bot.gallerySet',
   /** The bot's active time today, for its hours-per-day limit
    * (`BotDailyUsage`, `storage.local`). Local only. */
   'bot.usageGet',

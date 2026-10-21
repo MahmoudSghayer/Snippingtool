@@ -89,12 +89,13 @@ function mount(initialMode: BotModeSettings = DEFAULT_BOT_MODE_SETTINGS, initial
   return { root, $, click, type, checked, sniper, page, modeSaves, mode: () => mode, refresh };
 }
 
-it('offers Snipe and Bid above Start, Snipe by default, and saves the choice on its own', () => {
+it('offers Snipe, Bid and Gallery above Start, Snipe by default, and saves the choice on its own', () => {
   const { root, click, checked, modeSaves, sniper } = mount();
   const modes = [...root.querySelectorAll<HTMLElement>('.modes .mode')].map((b) => [b.firstChild!.textContent, b.querySelector('small')!.textContent]);
   expect(modes).toEqual([
     ['Snipe', 'Buy Now at or under your max price'],
     ['Bid', 'Bid in the last minutes, up to your max price'],
+    ['Gallery', 'Buy your Gallery list, send each card to your club, sell it again'],
   ]);
   expect(checked()).toBe('snipe');
   // Beside Start, like the rest of the run bar.

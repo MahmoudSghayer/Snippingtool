@@ -141,6 +141,11 @@ describe('dist/ledger contents', () => {
       'move_not_bought',
       'move_unsupported',
       'ItemPile',
+      // Gallery mode: the adapter's club call and the list's storage.
+      'club_not_bought',
+      'club_unsupported',
+      'bot.galleryGet',
+      'bot.gallerySet',
       // Auto-sell: the FUTBIN lookup and the adapter's listing call.
       'price.futbin',
       'futbin.com',
