@@ -26,7 +26,7 @@ import { GALLERY_LIMITS, MIN_SALE_PRICE, MIN_START_PRICE, stepPrice } from '@sl/
 
 import { fold, searchPlayers } from '../model/catalog.js';
 
-import type { CatalogPlayer } from '../model/catalog.js';
+import type { CatalogOption, CatalogPlayer } from '../model/catalog.js';
 import type { GalleryCard, GalleryState } from '@sl/shared';
 
 /** How long Gallery mode looks for a card under the market price before it
@@ -44,9 +44,19 @@ export interface ParsedGalleryList {
   problems: string[];
 }
 
-/** A card's key on the list: the player and the rating. */
-export function galleryKey(playerId: number, rating: number): string {
-  return `${playerId}:${rating}`;
+/** A card's key on the list: the player, the rating and (when one was
+ * asked for) the version's rarity id. */
+export function galleryKey(playerId: number, rating: number, rarity?: number): string {
+  return rarity === undefined ? `${playerId}:${rating}` : `${playerId}:${rating}:${rarity}`;
+}
+
+/** The rarity a typed version names in EA's Rarity list (the one the Search
+ * tab's Rarity list shows): its name exactly (case and accents aside), else
+ * the only one whose name holds it. */
+function findRarity(rarities: CatalogOption[], version: string): CatalogOption[] {
+  const wanted = fold(version.trim());
+  const exact = rarities.filter((r) => fold(r.label) === wanted);
+  return exact.length > 0 ? exact.slice(0, 1) : rarities.filter((r) => fold(r.label).includes(wanted));
 }
 
 /** The player a typed name means: the one whose name is exactly that, or
@@ -64,14 +74,22 @@ function findPlayer(players: CatalogPlayer[], name: string, rating: number): Cat
 
 /**
  * The pasted list as cards. One card a line, the name and the rating in
- * either order ("Hugo Ekitiké 85", "85 Hugo Ekitiké"); a line starting with
- * "#" or ending with ":" names the Set the cards under it belong to; blank
- * lines and lines starting with "//" are left out. Each name is looked up in
- * EA's player list (`players`, the web app's own). A card already on the
- * list (`keep`, same player and rating) keeps its progress, so pasting the
- * list again never buys a finished card twice.
+ * either order ("Hugo Ekitiké 85", "85 Hugo Ekitiké"), and after the rating
+ * the version when only one version will do ("Hugo Ekitiké 85 Signature":
+ * two versions of a player can share a rating); a line starting with "#" or
+ * ending with ":" names the Set the cards under it belong to; blank lines
+ * and lines starting with "//" are left out. Each name is looked up in EA's
+ * player list (`players`) and each version in its Rarity list (`rarities`),
+ * both the web app's own. A card already on the list (`keep`, same player,
+ * rating and version) keeps its progress, so pasting the list again never
+ * buys a finished card twice.
  */
-export function parseGalleryList(text: string, players: CatalogPlayer[], keep: GalleryCard[] = []): ParsedGalleryList {
+export function parseGalleryList(
+  text: string,
+  players: CatalogPlayer[],
+  keep: GalleryCard[] = [],
+  rarities: CatalogOption[] = [],
+): ParsedGalleryList {
   const kept = new Map(keep.map((c) => [c.key, c]));
   const cards: GalleryCard[] = [];
   const problems: string[] = [];
@@ -87,12 +105,32 @@ export function parseGalleryList(text: string, players: CatalogPlayer[], keep: G
       set = heading === '' ? undefined : heading.slice(0, GALLERY_LIMITS.setLength);
       continue;
     }
-    const m = /^(\d{2})\s+(.+)$/.exec(line) ?? /^(.+?)\s+(\d{2})$/.exec(line);
-    const rating = m ? Number(/^\d+$/.test(m[1]!) ? m[1] : m[2]) : NaN;
-    const name = m ? (/^\d+$/.test(m[1]!) ? m[2]! : m[1]!).trim() : '';
-    if (!m || !Number.isInteger(rating) || rating < GALLERY_LIMITS.rating.min || rating > GALLERY_LIMITS.rating.max) {
+    // The rating first, or the name first with the version after the rating.
+    const first = /^(\d{2})\s+(.+)$/.exec(line);
+    const last = first ? null : /^(.+?)\s+(\d{2})(?:\s+(.+))?$/.exec(line);
+    const rating = Number(first?.[1] ?? last?.[2] ?? NaN);
+    const name = (first?.[2] ?? last?.[1] ?? '').trim();
+    const versionText = last?.[3]?.trim();
+    if ((!first && !last) || !Number.isInteger(rating) || rating < GALLERY_LIMITS.rating.min || rating > GALLERY_LIMITS.rating.max) {
       problems.push(`${where}: "${line}" needs a player name and a rating (for example "Hugo Ekitiké 85")`);
       continue;
+    }
+    let rarity: CatalogOption | undefined;
+    if (versionText) {
+      if (rarities.length === 0) {
+        problems.push(`${where}: EA's Rarity list is not loaded yet — open the transfer market search once, then load the list again`);
+        continue;
+      }
+      const versions = findRarity(rarities, versionText);
+      if (versions.length !== 1) {
+        problems.push(
+          versions.length === 0
+            ? `${where}: no version named "${versionText}" in EA's Rarity list — use a name from the Rarity list on the Search tab`
+            : `${where}: "${versionText}" matches more than one version (${versions.slice(0, 3).map((r) => r.label).join(', ')}…) — write the full name`,
+        );
+        continue;
+      }
+      rarity = versions[0];
     }
     if (players.length === 0) {
       problems.push(`${where}: EA's player list is not loaded yet — open the transfer market search once, then load the list again`);
@@ -109,9 +147,9 @@ export function parseGalleryList(text: string, players: CatalogPlayer[], keep: G
       continue;
     }
     const player = found[0]!;
-    const key = galleryKey(player.id, rating);
+    const key = galleryKey(player.id, rating, rarity?.id);
     if (seen.has(key)) {
-      problems.push(`${where}: ${player.name} ${rating} is on the list already`);
+      problems.push(`${where}: ${player.name} ${rating}${rarity ? ` ${rarity.label}` : ''} is on the list already`);
       continue;
     }
     if (cards.length >= GALLERY_LIMITS.cards) {
@@ -129,8 +167,10 @@ export function parseGalleryList(text: string, players: CatalogPlayer[], keep: G
           playerId: player.id,
           status: 'todo',
           set,
-          // A player's base card has the player's own id.
-          ...(player.rating === rating ? { resourceId: player.id } : {}),
+          // A player's base card has the player's own id; a version asked for
+          // is named by the first search.
+          ...(player.rating === rating && !rarity ? { resourceId: player.id } : {}),
+          ...(rarity ? { rarity: rarity.id, version: rarity.label.slice(0, GALLERY_LIMITS.versionLength) } : {}),
         };
     if (card.set === undefined) delete card.set;
     cards.push(card);

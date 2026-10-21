@@ -30,7 +30,10 @@ const CATALOG: Catalog = {
     { id: 256630, name: 'Florian Wirtz', rating: 86 },
   ],
   levels: [],
-  rarities: [],
+  rarities: [
+    { id: 1, value: '1', label: 'Rare' },
+    { id: 52, value: '52', label: 'Signature' },
+  ],
   positions: [],
   playStyles: [],
   nations: [],
@@ -124,17 +127,21 @@ it('puts the Gallery list and its budget in the search’s place once Gallery is
 it('loads the pasted list against EA’s player list and says which lines it could not read', async () => {
   const { root, $, click, saves } = await mount({ ...DEFAULT_BOT_MODE_SETTINGS, mode: 'gallery' });
   const box = $('g-list') as unknown as HTMLTextAreaElement;
-  box.value = '# Ligue 1\nHugo Ekitiké 85\nNobody 80\nFlorian Wirtz 88';
+  box.value = '# Ligue 1\nHugo Ekitiké 85\nNobody 80\nFlorian Wirtz 88\nHugo Ekitiké 85 Signature';
   box.dispatchEvent(new Event('input', { bubbles: true }));
   click('#g-load');
   expect(saves.at(-1)!.cards).toEqual([
     { key: '257289:85', name: 'Hugo Ekitiké', rating: 85, playerId: 257289, resourceId: 257289, status: 'todo', set: 'Ligue 1' },
     { key: '256630:88', name: 'Florian Wirtz', rating: 88, playerId: 256630, status: 'todo', set: 'Ligue 1' },
+    { key: '257289:85:52', name: 'Hugo Ekitiké', rating: 85, playerId: 257289, status: 'todo', set: 'Ligue 1', rarity: 52, version: 'Signature' },
   ]);
   expect(root.getElementById('g-problems')!.textContent).toBe('Line 3: no player named "Nobody" in EA\'s player list');
-  expect(root.getElementById('run-status')!.textContent).toBe('Buys 2 Gallery cards · 100,000 coins of budget left');
+  expect(root.getElementById('run-status')!.textContent).toBe('Buys 3 Gallery cards · 100,000 coins of budget left');
   const rows = [...root.querySelectorAll('#gallery-feed .bidrow')].map((r) => r.querySelector('.main b')!.textContent);
-  expect(rows).toEqual(['85 Hugo Ekitiké', '88 Florian Wirtz']);
+  expect(rows).toEqual(['85 Hugo Ekitiké', '88 Florian Wirtz', '85 Hugo Ekitiké']);
+  expect(root.querySelectorAll('#gallery-feed .bidrow')[2]!.textContent).toContain('Signature');
+  // The box shows the version back, so a reload of the text keeps it.
+  expect(($('g-list') as unknown as HTMLTextAreaElement).value).toContain('Hugo Ekitiké 85 Signature');
 });
 
 it('saves the budget on its own, and refuses one that is not a whole number of coins', async () => {

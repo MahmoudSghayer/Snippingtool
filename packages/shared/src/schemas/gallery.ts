@@ -19,6 +19,7 @@ export const GALLERY_LIMITS = {
   rating: { min: 40, max: 99 },
   nameLength: 60,
   setLength: 60,
+  versionLength: 40,
   noteLength: 200,
 } as const;
 
@@ -39,7 +40,7 @@ const coins = z.number().int().min(0).max(15_000_000);
 
 export const galleryCardSchema = z
   .object({
-    /** Unique on the list: the player and rating. */
+    /** Unique on the list: the player, the rating and the version. */
     key: z.string().min(1).max(80),
     /** The player's name as EA's player list has it. */
     name: z.string().min(1).max(GALLERY_LIMITS.nameLength),
@@ -49,6 +50,11 @@ export const galleryCardSchema = z
     /** The card's own id (its version), once known: equal to `playerId` for
      * a player's base card, else learned from the first search. */
     resourceId: z.number().int().positive().optional(),
+    /** The version the trader asked for, as EA's rarity id and its name in
+     * EA's Rarity list ("Signature"): only that version is bought. Absent:
+     * any version at the rating (the cheapest). */
+    rarity: z.number().int().min(0).max(1_000).optional(),
+    version: z.string().min(1).max(GALLERY_LIMITS.versionLength).optional(),
     /** The Set heading the card was listed under, if any. */
     set: z.string().max(GALLERY_LIMITS.setLength).optional(),
     status: z.enum(GALLERY_CARD_STATUSES),

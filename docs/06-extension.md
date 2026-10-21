@@ -728,13 +728,21 @@ no Gallery, so Nova cannot read a Set or its grade: the trader picks
 **Gallery** above Start and pastes the cards on the Search tab, one a line
 as the player's name and the card's rating ("Hugo Ekitiké 85", the rating
 first works too), with `# Set name` (or a line ending in `:`) heading the
-cards under it. **Load list** finds each name in EA's own player list (the
+cards under it. Two versions of a player can share a rating (a normal 85
+and a Signature 85): the version after the rating ("Hugo Ekitiké 85
+Signature"), named as in EA's Rarity list (the Search tab's Rarity list;
+an exact name, else the only one holding it), buys only that version. Its
+searches carry EA's own Rarity filter, the first one names the version's
+own card id, and from then on only listings of that exact card are bought
+and priced. Without a version, any version at the rating is bought (the
+cheapest). **Load list** finds each name in EA's own player list (the
 catalog): an exact name wins, else the only player whose name holds it;
 among namesakes, the one whose base card rates highest at or under the
 rating. Lines it cannot read are listed under the box ("Line 3: no player
 named …", "… matches more than one player … write the full name"), and the
 rest load. Loading the list again keeps the progress of every card already
-on it, so a finished card is never bought twice. **Retry skipped** puts the
+on it (same player, rating and version), so a finished card is never
+bought twice. **Retry skipped** puts the
 skipped cards back to buy; **Clear list** empties it.
 
 One card at a time, in the list's order, under every limit Snipe mode has

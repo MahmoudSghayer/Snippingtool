@@ -209,6 +209,24 @@ describe('Gallery mode — buying and listing', () => {
     expect(h.gallery().cards[0]).toMatchObject({ status: 'listed', resourceId: 50_000_100, market: 10_000, listPrice: 9_900 });
   });
 
+  it('buys only the version asked for: searched by its rarity, then that card alone, whatever else is listed', async () => {
+    const signature = (id: string, buyNow: number) => listing(id, buyNow, { resourceId: 60_000_100 });
+    // A cheaper normal 85 of the same player sneaks into the results.
+    const normal = (id: string, buyNow: number) => listing(id, buyNow, { resourceId: 100 });
+    const h = setup({
+      gallery: { budget: 100_000, spent: 0, cards: [card({ key: '100:85:52', resourceId: undefined, rarity: 52, version: 'Signature' })] },
+      results: (n) => (n === 1 ? [signature('s1', 7_000)] : [normal('n2', 3_000), signature('s2', 7_500)]),
+      market: (id) => (id === 60_000_100 ? 8_000 : 4_000),
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.searches[0]!.filter).toEqual({ resourceId: 100, minRating: 85, maxRating: 85, rarity: 52 });
+    expect(h.searches[1]!.filter).toMatchObject({ rarity: 52, maxPrice: 7_900 });
+    expect(h.prices).toContain(60_000_100);
+    expect(h.buys.map(([id, price]) => [id, price])).toEqual([['s2', 7_500]]);
+    expect(h.gallery().cards[0]).toMatchObject({ status: 'listed', resourceId: 60_000_100, market: 8_000, listPrice: 7_900 });
+  });
+
   it('prices a card by the cheapest listing seen when FUTBIN and Nova have none', async () => {
     const h = setup({ market: () => null, results: (n) => (n === 1 ? [listing('t1', 3_000)] : [listing('t2', 2_900)]), gallery: { budget: 100_000, spent: 0, cards: [card()] } });
     h.sniper.start();
