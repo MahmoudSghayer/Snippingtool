@@ -410,6 +410,37 @@ it("names the card in Gallery mode's notes in the Activity feed, never {card}", 
   expect(text).not.toContain('{card}');
 });
 
+it('says when each Set was completed: today, yesterday, else the day', async () => {
+  vi.setSystemTime(new Date(2026, 9, 21, 15, 0));
+  const listed = (id: number, name: string) => ({ id, name, path: 'laliga/malaga-cf', grade: 'S' as const, threshold: 900, score: 908, tokens: 28, cost: 3_700 });
+  const gallery: GalleryState = {
+    budget: 100_000,
+    spent: 0,
+    sets: [listed(90, 'Malaga CF'), listed(91, 'Frosinone'), listed(92, 'Celta')],
+    cards: [{ key: '1:80#1', name: 'Done one', rating: 80, playerId: 1, resourceId: 1, exact: true, setIds: [90], status: 'listed', price: 3_700 }],
+    // Celta was completed before times were kept.
+    completed: [90, 91, 92, 30],
+    completedAt: {
+      '90': new Date(2026, 9, 21, 9, 30).getTime(),
+      '91': new Date(2026, 9, 20, 23, 50).getTime(),
+      '30': new Date(2026, 9, 5, 12, 0).getTime(),
+    },
+  };
+  const { root, click } = await mount({ ...DEFAULT_BOT_MODE_SETTINGS, mode: 'gallery' }, gallery, {
+    sets: [MALAGA, ARSENAL, FROSINONE],
+    lineup: () => null,
+  });
+  const mine = () => [...root.querySelectorAll('.g-mineset')].map((r) => r.querySelector('button[data-uncomplete]')!.textContent);
+  expect(mine()).toEqual(['Completed today ✓ · Undo', 'Completed yesterday ✓ · Undo', 'Completed ✓ · Undo']);
+  expect(root.querySelector('#gallery-feed .g-sethead.done')!.textContent).toBe('Malaga CF · grade S · completed today ✓ · 1 of 1 collected');
+  click('#g-futgg');
+  await vi.advanceTimersByTimeAsync(10);
+  const picker = () => [...root.querySelectorAll('.g-set.done .tok')].map((r) => r.textContent!.trim());
+  expect(picker()).toEqual(['Completed today Undo', 'Completed yesterday Undo']);
+  click('[data-grade="C"]');
+  expect(picker()).toEqual(['Completed today Undo', 'Completed 5 Oct Undo']);
+});
+
 it('clears the finished Gallery cards and completed Sets on Reset stats', async () => {
   const set = { id: 90, name: 'Malaga CF', path: 'laliga/malaga-cf', grade: 'S' as const, threshold: 900, score: 908, tokens: 28, cost: 3_700 };
   const gallery: GalleryState = {

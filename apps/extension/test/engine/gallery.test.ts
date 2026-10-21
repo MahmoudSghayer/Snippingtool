@@ -2,6 +2,7 @@
 // prices a card is bought and listed at, and fut.gg's Sets on the list. The
 // loop that works the list is in test/engine/sniper-gallery.test.ts.
 
+import { GALLERY_LIMITS } from '@sl/shared';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -303,10 +304,44 @@ describe('completed Sets', () => {
     g.cards[0]!.status = 'listed';
     expect(markCompletedSets(g)).toEqual([]);
     g.cards[1]!.status = 'owned';
-    expect(markCompletedSets(g).map((x) => x.name)).toEqual(['Malaga CF']);
+    expect(markCompletedSets(g, 1_000).map((x) => x.name)).toEqual(['Malaga CF']);
     expect(g.completed).toEqual([90]);
-    // Once only.
-    expect(markCompletedSets(g)).toEqual([]);
+    expect(g.completedAt).toEqual({ '90': 1_000 });
+    // Once only: its time stays the first one.
+    expect(markCompletedSets(g, 2_000)).toEqual([]);
+    expect(g.completedAt).toEqual({ '90': 1_000 });
+  });
+
+  it('keeps when each Set was completed: a Set marked by hand gets the time too, Undo takes it away', () => {
+    const g = setCompleted(state(), 90, true, 1_000);
+    expect(g.completedAt).toEqual({ '90': 1_000 });
+    // Marked again: still the first time.
+    expect(setCompleted(g, 90, true, 5_000).completedAt).toEqual({ '90': 1_000 });
+    const both = setCompleted(g, 54, true, 2_000);
+    expect(both.completed).toEqual([90, 54]);
+    expect(both.completedAt).toEqual({ '90': 1_000, '54': 2_000 });
+    const undone = setCompleted(both, 90, false);
+    expect(undone.completed).toEqual([54]);
+    expect(undone.completedAt).toEqual({ '54': 2_000 });
+    const none = setCompleted(undone, 54, false);
+    expect(none.completed).toBeUndefined();
+    expect(none.completedAt).toBeUndefined();
+  });
+
+  it('a Set completed before times were kept has none, and gets none later', () => {
+    const g: GalleryState = { ...state(), completed: [90] };
+    const next = setCompleted(g, 54, true, 2_000);
+    expect(next.completedAt).toEqual({ '54': 2_000 });
+    expect(setCompleted(next, 54, false).completedAt).toBeUndefined();
+  });
+
+  it('holds no time for a Set that falls off the completed list', () => {
+    const ids = Array.from({ length: GALLERY_LIMITS.completed }, (_, i) => i + 1_000);
+    const g: GalleryState = { ...state(), completed: ids, completedAt: { [String(ids[0])]: 1, [String(ids[1])]: 2 } };
+    const next = setCompleted(g, 90, true, 3_000);
+    expect(next.completed).toHaveLength(GALLERY_LIMITS.completed);
+    expect(next.completed).not.toContain(ids[0]);
+    expect(next.completedAt).toEqual({ [String(ids[1])]: 2, '90': 3_000 });
   });
 
   it('clears what is finished on Reset stats: done cards and completed Sets go, the rest stays, spent goes to 0', () => {
@@ -323,11 +358,12 @@ describe('completed Sets', () => {
       // A typed card, done.
       { key: '9:80', name: 'Typed', rating: 80, playerId: 9, resourceId: 9, status: 'listed' },
     );
-    const next = clearFinishedGallery(g);
+    const next = clearFinishedGallery(g, 1_000);
     // 'Shared' stays: Frosinone, in progress, counts it too.
     expect(next.cards.map((c) => c.name)).toEqual(['Shared', 'Frosinone only', 'On its way']);
     expect(next.sets!.map((x) => x.name)).toEqual(['Frosinone']);
     expect(next.completed).toEqual([90]);
+    expect(next.completedAt).toEqual({ '90': 1_000 });
     expect(next.spent).toBe(0);
     // Nothing left to clear: the list stays as it is.
     expect(clearFinishedGallery(next).cards).toEqual(next.cards);

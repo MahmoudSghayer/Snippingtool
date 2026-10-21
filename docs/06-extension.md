@@ -376,6 +376,46 @@ account that cannot be asked (signed out, offline, refused) leaves the local
 copy in use and is never overwritten from it. The bot's hourly budgets and
 daily usage stay per browser.
 
+**Gallery mode's list follows the account** too (`background/bot.ts`,
+`GET`/`PUT /extension/gallery`, `user_gallery`): its cards and their
+progress, the fut.gg Sets on it, the Sets marked completed and when, and the
+budget, so a browser the trader signs in on (another PC, a cloud machine,
+the same one after signing out and back in) shows which Sets are done and
+which are not. A save goes to extension storage (`sl.bot.gallery.v1`) at
+once; a running bot saves after every card step, so the upload is throttled
+rather than debounced: at most one every 2 s, always the latest list, so
+steady saves never hold it back, and uploads go one after another (a list
+with a newer one queued behind it is not sent), so an older list never lands
+after a newer one. The PUT answers only `updatedAt`
+(`putGalleryResponseSchema`), which is kept (`sl.bot.gallery.base.v1`) as
+the account version this browser's copy is based on. At load:
+
+- the account cannot be asked (signed out, offline, refused): the local copy
+  stays in use and the account is never overwritten from it;
+- a save that has not reached the account yet (pending mark
+  `sl.bot.gallery.pending.v1`: made offline, or the browser closed within
+  the 2 s) goes up first, while the account still holds the version this
+  browser last saw (or none); if another browser has saved since, the
+  account's list wins and this browser's completed Sets are added to it
+  (and uploaded), so none is lost;
+- the first sync of each browser (`sl.bot.gallery.synced.v1` unset), for
+  lists kept before sync existed: the account's list, with the Sets this
+  browser marked completed that it lacks added (with their times; past 500
+  completed, the ones completed longest ago go), uploaded when that added
+  any; an account with none gets this browser's list. The flag is set only
+  once that has landed (or there was nothing to add, or a pending save
+  landed, which carries this browser's completed Sets), so an account that
+  could not be reached, or an upload that failed, leaves it to do at the
+  next load;
+- otherwise the account's list wins as it is and replaces the local copy:
+  a Set undone (**Undo**) in another browser stays undone.
+
+The content script reads the list at page load and again when the bot is
+first prepared after the trader signs in from the account view, so that
+sign-in shows the account's list without a reload. The API holds the list to
+`galleryStateSchema` (a field added there needs the API deployed first: until
+then the upload is refused and the local copy, still pending, stays in use).
+
 The dash's **Sold** and **Unsold** counters and its **Transfer list** panel
 (cards on the list out of EA's 100, then how many are listed and not
 listed) are counted from the trade-pile responses EA's own page already
@@ -846,9 +886,12 @@ cannot be read means every card is bought, as before.
 
 A Set whose cards are all collected (in the club, listed, or owned) is
 marked **completed** (`completed`, the log says to finish it in the game);
-**Mark completed** does it by hand. A completed Set is not offered again (the
-picker shows it with **Undo**, and so does the list), and its cards still to
-buy are left alone ("left out (Set completed)") unless another Set needs
+**Mark completed** does it by hand. When is kept too (`completedAt`, by Set
+id), and the picker, the list and the Gallery tab say it by the trader's own
+day ("Completed today", "Completed yesterday", "Completed 20 Oct"; nothing
+for a Set marked before the time was kept). A completed Set is not offered
+again (the picker shows it with **Undo**, and so does the list), and its
+cards still to buy are left alone ("left out (Set completed)") unless another Set needs
 them. Each Set on the list shows under the picker ("Malaga CF · grade S · 4
 of 15 collected", with **Mark completed** and **Remove**, which takes off its
 cards unless another Set holds them or they are on their way) and atop the
@@ -933,10 +976,11 @@ every card is listed or in the club (`gallery_done`), and refuses to start with
 no card left to buy (`no_gallery`) or on a page that cannot send cards to the
 club (`gallery_unavailable`). The list and every card's progress (to buy,
 bought, in club, listed, in your club already, with what it paid, its
-market price, what it listed at and why it waits) are saved in this browser after every
-change (`bot.galleryGet` / `bot.gallerySet`, `sl.bot.gallery.v1`, like the
-mode: not synced with the account). A card bought but not yet listed when
-the bot stops is finished at the next Start on the same page load; after a
+market price, what it listed at and why it waits), the Sets on it and the
+Sets marked completed are saved after every change, in this browser and on
+the account (`bot.galleryGet` / `bot.gallerySet`, `sl.bot.gallery.v1`; see
+"Gallery mode's list follows the account" above). A card bought but not yet
+listed when the bot stops is finished at the next Start on the same page load; after a
 reload the adapter can no longer move it, and its row stays at Bought / In
 club for the trader to finish. Beside Search results a **Gallery** tab (the
 one the page opens on in Gallery mode, "3/20" on it) lists every card with

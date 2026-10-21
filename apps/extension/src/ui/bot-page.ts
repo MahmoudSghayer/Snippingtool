@@ -366,6 +366,25 @@ function timeOfDay(at: number): string {
   });
 }
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** When a fut.gg Set was marked completed, by the trader's own day, after a
+ * space (" today", " yesterday", else " 20 Oct", with the year when it is
+ * not this one). Empty when the list has no time for it: marked before
+ * times were kept. */
+function completedWhen(g: GalleryState, setId: number, now = Date.now()): string {
+  const at = g.completedAt?.[String(setId)];
+  if (at === undefined) return '';
+  const day = new Date(at);
+  const today = new Date(now);
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (day.toDateString() === today.toDateString()) return ' today';
+  if (day.toDateString() === yesterday.toDateString()) return ' yesterday';
+  const year = day.getFullYear() === today.getFullYear() ? '' : ` ${day.getFullYear()}`;
+  return ` ${day.getDate()} ${MONTHS[day.getMonth()]}${year}`;
+}
+
 function rangeText(r: { min: number; max: number }): string {
   return r.min === r.max ? String(r.min) : `${r.min}-${r.max}`;
 }
@@ -1129,7 +1148,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
                       if (completed.has(set.id))
                         return `<div class="g-set done"><span class="g-check">✓</span><span class="nm">${esc(set.name)}</span>
                           <span class="gr g${tier.grade}">${tier.grade}</span><span class="cost">${fmt(tier.cost)}${COIN}</span>
-                          <span class="tok">Completed <button type="button" class="g-link" data-uncomplete="${set.id}"${off}>Undo</button></span></div>`;
+                          <span class="tok">Completed${completedWhen(g, set.id)} <button type="button" class="g-link" data-uncomplete="${set.id}"${off}>Undo</button></span></div>`;
                       const added = onList.get(set.id);
                       const checked = added || futggPicked.has(set.id) ? ' checked' : '';
                       return `<label class="g-set${added ? ' added' : ''}"><input type="checkbox" data-futgg="${set.id}"${checked}${added ? ' disabled' : off} />
@@ -1151,7 +1170,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
             .map((p) => {
               const isDone = completed.has(p.set.id);
               const mark = isDone
-                ? `<button type="button" class="ghost" data-uncomplete="${p.set.id}"${off}>Completed ✓ · Undo</button>`
+                ? `<button type="button" class="ghost" data-uncomplete="${p.set.id}"${off}>Completed${completedWhen(g, p.set.id)} ✓ · Undo</button>`
                 : `<button type="button" class="ghost" data-complete="${p.set.id}"${off}>Mark completed</button>`;
               return `<div class="g-mineset${isDone ? ' done' : ''}"><span><b>${esc(p.set.name)}</b> · grade ${p.set.grade} · ${p.done} of ${p.cards} collected${
                 p.skipped > 0 ? ` · ${p.skipped} skipped` : ''
@@ -2986,7 +3005,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     const sets = gallerySetProgress(g)
       .map((p) => {
         if (completed.has(p.set.id))
-          return `<div class="g-sethead done"><b>${esc(p.set.name)}</b> · grade ${p.set.grade} · completed ✓ · ${p.done} of ${p.cards} collected</div>`;
+          return `<div class="g-sethead done"><b>${esc(p.set.name)}</b> · grade ${p.set.grade} · completed${completedWhen(g, p.set.id)} ✓ · ${p.done} of ${p.cards} collected</div>`;
         const risk =
           p.skipped > 0
             ? ` · <span class="warn">${p.skipped} skipped (${fmt(p.skippedScore)} points): retry ${p.skipped === 1 ? 'it' : 'them'}, or the Set may miss grade ${p.set.grade}</span>`

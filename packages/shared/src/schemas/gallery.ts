@@ -11,8 +11,10 @@ import { z } from 'zod';
  * cheapest lineup for its best grade (fut.gg's Gallery solver), each card
  * named by its exact id (`exact`), with the Set itself in `sets`.
  *
- * Kept in the browser's own storage (`bot.galleryGet` / `bot.gallerySet`),
- * like Bid mode's settings: nothing here goes to the server.
+ * Kept in the browser's own storage (`bot.galleryGet` / `bot.gallerySet`)
+ * and on the signed-in account (`GET`/`PUT /extension/gallery`), so every
+ * browser the trader signs in on shows the same list, the same progress and
+ * the same completed Sets.
  */
 export const GALLERY_LIMITS = {
   /** Cards on one list. */
@@ -141,6 +143,14 @@ export const galleryStateSchema = z
      * and their cards still to buy are left alone. Marked when all of a
      * Set's cards are collected, or by hand. */
     completed: z.array(z.number().int().positive()).max(GALLERY_LIMITS.completed).optional(),
+    /** When each of those Sets was marked completed (epoch ms), by Set id.
+     * Sets marked before this was kept have none. */
+    completedAt: z
+      .record(z.string().regex(/^[1-9][0-9]{0,15}$/), z.number().int().positive())
+      .refine((at) => Object.keys(at).length <= GALLERY_LIMITS.completed, {
+        message: `At most ${GALLERY_LIMITS.completed} completed Sets`,
+      })
+      .optional(),
     /** The most the list may spend on buys (0: nothing is bought). */
     budget: z.number().int().min(GALLERY_LIMITS.budget.min).max(GALLERY_LIMITS.budget.max),
     /** Coins spent on the list's buys so far. */
@@ -150,6 +160,25 @@ export const galleryStateSchema = z
 export type GalleryState = z.infer<typeof galleryStateSchema>;
 
 export const EMPTY_GALLERY: GalleryState = { cards: [], budget: 100_000, spent: 0 };
+
+/** `PUT /extension/gallery` — replaces the account's Gallery list, so every
+ * browser the trader signs in on shows the same one. */
+export const putGalleryRequestSchema = z.object({ state: galleryStateSchema }).strict();
+export type PutGalleryRequest = z.infer<typeof putGalleryRequestSchema>;
+
+/** The account's Gallery list. Both null until its first save; `state`
+ * also null when what is stored no longer parses (the extension then keeps
+ * its local copy). */
+export const gallerySyncResponseSchema = z.object({
+  state: galleryStateSchema.nullable(),
+  updatedAt: z.string().datetime().nullable(),
+});
+export type GallerySyncResponse = z.infer<typeof gallerySyncResponseSchema>;
+
+/** What `PUT /extension/gallery` answers: when the list was saved. Not the
+ * list itself, which can be hundreds of KB and goes up after every card. */
+export const putGalleryResponseSchema = z.object({ updatedAt: z.string().datetime() });
+export type PutGalleryResponse = z.infer<typeof putGalleryResponseSchema>;
 
 /**
  * fut.gg's Gallery, as the Nova AI page shows it (background

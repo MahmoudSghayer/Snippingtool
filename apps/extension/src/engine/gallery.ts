@@ -35,8 +35,9 @@
  * search, `markOwned`) and not bought, and a player the club holds that is
  * not in the lineup stands in for one that is when the Set still makes its
  * grade (`planFutggSwaps`, scored as fut.gg scores it: gallery-score.ts).
- * A Set whose cards are all collected is marked completed (`completed`):
- * never offered again, and its cards still to buy are left alone.
+ * A Set whose cards are all collected is marked completed (`completed`,
+ * and when in `completedAt`): never offered again, and its cards still to
+ * buy are left alone.
  */
 import { EA_TAX_RATE, GALLERY_LIMITS, MIN_SALE_PRICE, MIN_START_PRICE, stepPrice } from '@sl/shared';
 
@@ -444,9 +445,22 @@ export function futggClubIds(lineups: readonly FutggLineup[], max = 100): number
   return [...ids];
 }
 
+/** When each of `ids` (the Sets marked completed) was marked: `now` for
+ * those in `fresh`, else what the list says. Only theirs, so it never holds
+ * a Set the list no longer marks; undefined when none has a time. */
+function completedTimes(state: GalleryState, ids: readonly number[], fresh: ReadonlySet<number>, now: number): Record<string, number> | undefined {
+  const at: Record<string, number> = {};
+  for (const id of ids) {
+    const t = fresh.has(id) ? now : state.completedAt?.[String(id)];
+    if (t !== undefined) at[String(id)] = t;
+  }
+  return Object.keys(at).length > 0 ? at : undefined;
+}
+
 /** Marks every fut.gg Set whose cards are all collected (in the club,
- * listed, or owned already) as completed. Returns the Sets it marked. */
-export function markCompletedSets(state: GalleryState): GallerySet[] {
+ * listed, or owned already) as completed, at `now`. Returns the Sets it
+ * marked. */
+export function markCompletedSets(state: GalleryState, now = Date.now()): GallerySet[] {
   const done = new Set(state.completed ?? []);
   const marked: GallerySet[] = [];
   for (const set of state.sets ?? []) {
@@ -456,7 +470,12 @@ export function markCompletedSets(state: GalleryState): GallerySet[] {
     done.add(set.id);
     marked.push(set);
   }
-  if (marked.length > 0) state.completed = [...done].slice(-GALLERY_LIMITS.completed);
+  if (marked.length > 0) {
+    state.completed = [...done].slice(-GALLERY_LIMITS.completed);
+    const at = completedTimes(state, state.completed, new Set(marked.map((x) => x.id)), now);
+    if (at) state.completedAt = at;
+    else delete state.completedAt;
+  }
   return marked;
 }
 
@@ -469,9 +488,9 @@ export function markCompletedSets(state: GalleryState): GallerySet[] {
  * the cards of Sets in progress and the cards Nova is still finishing stay.
  * What the list spent goes back to 0.
  */
-export function clearFinishedGallery(state: GalleryState): GalleryState {
+export function clearFinishedGallery(state: GalleryState, now = Date.now()): GalleryState {
   const marked: GalleryState = { ...state, cards: state.cards.map((c) => ({ ...c })) };
-  markCompletedSets(marked);
+  markCompletedSets(marked, now);
   const done = new Set(marked.completed ?? []);
   const inProgress = new Set((marked.sets ?? []).filter((s) => !done.has(s.id)).map((s) => s.id));
   const cards = marked.cards.filter((c) => {
@@ -487,13 +506,18 @@ export function clearFinishedGallery(state: GalleryState): GalleryState {
   return next;
 }
 
-/** The list with a fut.gg Set marked completed, or not. */
-export function setCompleted(state: GalleryState, setId: number, completed: boolean): GalleryState {
+/** The list with a fut.gg Set marked completed (at `now`, unless it was
+ * already), or not. */
+export function setCompleted(state: GalleryState, setId: number, completed: boolean, now = Date.now()): GalleryState {
+  const was = state.completed?.includes(setId) ?? false;
   const ids = (state.completed ?? []).filter((id) => id !== setId);
   if (completed) ids.push(setId);
   const next: GalleryState = { ...state };
   if (ids.length > 0) next.completed = ids.slice(-GALLERY_LIMITS.completed);
   else delete next.completed;
+  const at = completedTimes(state, next.completed ?? [], new Set(completed && !was ? [setId] : []), now);
+  if (at) next.completedAt = at;
+  else delete next.completedAt;
   return next;
 }
 

@@ -910,6 +910,7 @@ function copyGallery(g: GalleryState): GalleryState {
   const copy: GalleryState = { budget: g.budget, spent: g.spent, cards: g.cards.map((c) => ({ ...c, ...(c.setIds ? { setIds: [...c.setIds] } : {}) })) };
   if (g.sets) copy.sets = g.sets.map((x) => ({ ...x }));
   if (g.completed) copy.completed = [...g.completed];
+  if (g.completedAt) copy.completedAt = { ...g.completedAt };
   return copy;
 }
 
@@ -2394,7 +2395,7 @@ export class Sniper {
   /** fut.gg Sets whose cards are all collected now: marked completed, and
    * the trader told to finish them in the game. */
   private noteCompletedSets(): void {
-    for (const set of markCompletedSets(this.gallery)) {
+    for (const set of markCompletedSets(this.gallery, this.now())) {
       this.addLog({
         kind: 'info',
         message: `Gallery: ${set.name} is complete: every card is collected. Finish it in the game: Gallery, ${set.name}, Autocomplete, then Confirm Changes`,

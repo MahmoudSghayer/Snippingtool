@@ -5349,6 +5349,152 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/extension/gallery": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            state: {
+                                cards: {
+                                    key: string;
+                                    name: string;
+                                    rating: number;
+                                    playerId: number;
+                                    resourceId?: number;
+                                    rarity?: number;
+                                    version?: string;
+                                    set?: string;
+                                    /** @enum {boolean} */
+                                    exact?: true;
+                                    setIds?: number[];
+                                    score?: number;
+                                    guide?: number;
+                                    /** @enum {string} */
+                                    status: "todo" | "bought" | "club" | "listed" | "skipped" | "owned";
+                                    price?: number;
+                                    market?: number;
+                                    listPrice?: number;
+                                    note?: string;
+                                    tradeId?: string;
+                                }[];
+                                sets?: {
+                                    id: number;
+                                    name: string;
+                                    path: string;
+                                    /** @enum {string} */
+                                    grade: "D" | "C" | "B" | "A" | "S";
+                                    threshold: number;
+                                    score: number;
+                                    tokens: number;
+                                    cost: number;
+                                }[];
+                                completed?: number[];
+                                completedAt?: {
+                                    [key: string]: number;
+                                };
+                                budget: number;
+                                spent: number;
+                            } | null;
+                            updatedAt: string | null;
+                        };
+                    };
+                };
+            };
+        };
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        state: {
+                            cards: {
+                                key: string;
+                                name: string;
+                                rating: number;
+                                playerId: number;
+                                resourceId?: number;
+                                rarity?: number;
+                                version?: string;
+                                set?: string;
+                                /** @enum {boolean} */
+                                exact?: true;
+                                setIds?: number[];
+                                score?: number;
+                                guide?: number;
+                                /** @enum {string} */
+                                status: "todo" | "bought" | "club" | "listed" | "skipped" | "owned";
+                                price?: number;
+                                market?: number;
+                                listPrice?: number;
+                                note?: string;
+                                tradeId?: string;
+                            }[];
+                            sets?: {
+                                id: number;
+                                name: string;
+                                path: string;
+                                /** @enum {string} */
+                                grade: "D" | "C" | "B" | "A" | "S";
+                                threshold: number;
+                                score: number;
+                                tokens: number;
+                                cost: number;
+                            }[];
+                            completed?: number[];
+                            completedAt?: {
+                                [key: string]: number;
+                            };
+                            budget: number;
+                            spent: number;
+                        };
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: date-time */
+                            updatedAt: string;
+                        };
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/extension/open-trades": {
         parameters: {
             query?: never;

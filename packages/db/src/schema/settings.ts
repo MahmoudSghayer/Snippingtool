@@ -1,5 +1,6 @@
 // Matches migrations/0015_settings.sql, 0016_notifications.sql,
-// 0037_user_recent_searches.sql, 0039_user_bot_settings.sql.
+// 0037_user_recent_searches.sql, 0039_user_bot_settings.sql,
+// 0041_user_gallery.sql.
 
 import { isNull, relations } from 'drizzle-orm';
 import { index, integer, jsonb, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
@@ -75,6 +76,28 @@ export const userBotSettings = pgTable('user_bot_settings', {
 
 export const userBotSettingsRelations = relations(userBotSettings, ({ one }) => ({
   user: one(users, { fields: [userBotSettings.userId], references: [users.id] }),
+}));
+
+// ---------------------------------------------------------------------------
+
+/** Nova AI's Gallery mode list, replaced whole by `PUT /extension/gallery`
+ * (state: @sl/shared `GalleryState`). 0041_user_gallery.sql. */
+export const userGallery = pgTable('user_gallery', {
+  id: idPk(),
+  userId: uuid('user_id')
+    .notNull()
+    .unique()
+    .references(() => users.id, { onDelete: 'cascade' }),
+
+  state: jsonb('state').notNull().$type<Record<string, unknown>>(),
+
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+  rowVersion: rowVersion(),
+});
+
+export const userGalleryRelations = relations(userGallery, ({ one }) => ({
+  user: one(users, { fields: [userGallery.userId], references: [users.id] }),
 }));
 
 // ---------------------------------------------------------------------------

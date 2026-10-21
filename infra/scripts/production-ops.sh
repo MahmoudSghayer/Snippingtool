@@ -461,6 +461,20 @@ SELECT resource_id, player, rating, card_version FROM names ORDER BY player;
 SELECT to_char(updated_at AT TIME ZONE :'tz', 'YYYY-MM-DD HH24:MI') AS updated_local, settings::text AS settings
   FROM user_bot_settings WHERE user_id = :'uid';
 
+\echo '## gallery_completed'
+SELECT c.id AS set_id, s ->> 'name' AS set_name, s ->> 'grade' AS grade,
+       to_char(to_timestamp((g.state -> 'completedAt' ->> c.id)::bigint / 1000.0) AT TIME ZONE :'tz',
+               'YYYY-MM-DD HH24:MI') AS completed_local
+  FROM user_gallery g
+ CROSS JOIN LATERAL jsonb_array_elements_text(
+   CASE WHEN jsonb_typeof(g.state -> 'completed') = 'array' THEN g.state -> 'completed' ELSE '[]'::jsonb END) c(id)
+  LEFT JOIN LATERAL (
+    SELECT s FROM jsonb_array_elements(
+      CASE WHEN jsonb_typeof(g.state -> 'sets') = 'array' THEN g.state -> 'sets' ELSE '[]'::jsonb END) s
+     WHERE s ->> 'id' = c.id LIMIT 1) n ON true
+ WHERE g.user_id = :'uid'
+ ORDER BY (g.state -> 'completedAt' ->> c.id)::bigint DESC NULLS LAST;
+
 \echo '## recent_searches'
 SELECT to_char(to_timestamp((it ->> 'at')::bigint / 1000.0) AT TIME ZONE :'tz', 'YYYY-MM-DD HH24:MI') AS started_local,
        it ->> 'name' AS name, it -> 'form' -> 'player' ->> 'name' AS player,
