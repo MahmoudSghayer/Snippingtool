@@ -55,6 +55,7 @@ interface Opts {
   market?: (resourceId: number) => number | null;
   buyResult?: (tradeId: string) => ActionOutcome;
   clubResult?: () => ActionOutcome;
+  moveResult?: () => ActionOutcome;
   noClub?: boolean;
   /** What EA's club says it holds of the cards asked about. Omitted: no
    * club read on this page. */
@@ -114,7 +115,7 @@ function setup(opts: Opts = {}) {
     },
     move: async (tradeId) => {
       h.calls.push(`move ${tradeId}`);
-      return { ok: true, signed: true, latencyMs: 5 };
+      return opts.moveResult?.() ?? { ok: true, signed: true, latencyMs: 5 };
     },
     onAuctions: (cb) => {
       auctions.add(cb);
@@ -472,6 +473,57 @@ describe('clubMissReason', () => {
     expect(clubMissReason('club_unsupported')).toBe('Nova AI cannot send cards to the club on this EA web app');
     expect(clubMissReason('move reported success: false (status 471)')).toBe('EA refused it (error 471): your club may already hold this card');
     expect(clubMissReason('act request timed out')).toBe('EA did not answer in time');
+  });
+});
+
+describe('Gallery mode — cards bought on an earlier run, and Sets done', () => {
+  it('finishes a card whose way to the market did not finish, from where it was', async () => {
+    const h = setup({
+      gallery: { budget: 100_000, spent: 1_300, cards: [card({ status: 'club', price: 1_300, tradeId: 't7' }), card({ key: '200:85', playerId: 200, resourceId: 200, status: 'listed' })] },
+    });
+    h.sniper.start();
+    await h.done();
+    // In the club already: to the transfer list, then listed a step over its price.
+    expect(h.calls).toEqual(['move t7', 'list t7']);
+    expect(h.lists).toEqual([['t7', 1_300, 1_400]]);
+    expect(h.gallery().cards[0]).toEqual(card({ status: 'listed', price: 1_300, listPrice: 1_400 }));
+  });
+
+  it('says to finish it by hand when the page reloaded since its buy, and does not try again', async () => {
+    const h = setup({
+      gallery: { budget: 100_000, spent: 1_300, cards: [card({ status: 'bought', price: 1_300, tradeId: 't7' })] },
+      clubResult: () => ({ ok: false, signed: true, error: 'club_not_bought', latencyMs: 5 }),
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.calls).toEqual(['club t7']);
+    expect(h.gallery().cards[0]).toEqual(
+      card({ status: 'bought', price: 1_300, note: 'Bought before the page reloaded, so Nova AI can no longer move it: send it to your club and list it by hand' }),
+    );
+    const again = setup({ gallery: h.saved.at(-1)! });
+    again.sniper.start();
+    expect(again.calls).toEqual([]);
+  });
+
+  it('marks a fut.gg Set completed once all its cards are collected, and says to finish it in the game', async () => {
+    const set = { id: 90, name: 'Malaga CF', path: 'laliga/malaga-cf', grade: 'S' as const, threshold: 900, score: 908, tokens: 28, cost: 3_700 };
+    const h = setup({
+      gallery: { budget: 100_000, spent: 0, sets: [set], cards: [card({ exact: true, setIds: [90] }), card({ key: '200:85#200', playerId: 200, resourceId: 200, exact: true, setIds: [90], status: 'owned' })] },
+      results: () => [listing('t1', 3_700)],
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.gallery().completed).toEqual([90]);
+    expect(h.log()).toContain('Gallery: Malaga CF is complete: every card is collected. Finish it in the game: Gallery, Malaga CF, Autocomplete, then Confirm Changes');
+  });
+
+  it('reads the club for the page, and says null when it cannot', async () => {
+    const h = setup({ owned: (ids) => ({ ok: true, owned: ids.slice(0, 1), signed: true, latencyMs: 5 }) });
+    expect(await h.sniper.readClub([7, 8])).toEqual([7]);
+    expect(await h.sniper.readClub([])).toEqual([]);
+    const off = setup({ owned: () => ({ ok: false, error: 'owned_too_soon', signed: true, latencyMs: 5 }) });
+    expect(await off.sniper.readClub([7])).toBeNull();
+    expect(await setup().sniper.readClub([7])).toBeNull();
   });
 });
 

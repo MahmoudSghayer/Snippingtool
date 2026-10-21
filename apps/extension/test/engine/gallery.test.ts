@@ -6,24 +6,29 @@ import { describe, expect, it } from 'vitest';
 
 import {
   addFutggLineup,
+  clearFinishedGallery,
   clubCheckIds,
-  futggBestTier,
+  futggClubIds,
   futggSetChoices,
+  galleryCardNeeded,
   galleryKey,
   galleryListPrices,
   galleryMarketCap,
   gallerySetProgress,
   gallerySnipeCap,
   gallerySummary,
+  markCompletedSets,
   markOwned,
   nextGalleryCard,
   parseGalleryList,
   pickResourceId,
+  planFutggSwaps,
   removeFutggSet,
+  setCompleted,
 } from '../../src/engine/gallery.js';
 
 import type { CatalogOption, CatalogPlayer } from '../../src/model/catalog.js';
-import type { FutggCard, FutggLineup, FutggSetSummary, GalleryCard, GalleryState } from '@sl/shared';
+import type { FutggCard, FutggLineup, FutggSetSummary, FutggTag, GalleryCard, GalleryState } from '@sl/shared';
 
 const PLAYERS: CatalogPlayer[] = [
   { id: 257289, name: 'Hugo Ekitiké', rating: 85 },
@@ -155,7 +160,7 @@ describe('the list', () => {
     const card = (key: string, status: GalleryCard['status']): GalleryCard => ({ key, name: key, rating: 85, playerId: 1, status });
     const state = { budget: 10_000, spent: 0, cards: [card('a', 'listed'), card('b', 'skipped'), card('c', 'todo'), card('d', 'todo')] };
     expect(nextGalleryCard(state)?.key).toBe('c');
-    expect(gallerySummary(state)).toEqual({ todo: 2, bought: 0, club: 0, listed: 1, skipped: 1, owned: 0, total: 4 });
+    expect(gallerySummary(state)).toEqual({ todo: 2, bought: 0, club: 0, listed: 1, skipped: 1, owned: 0, parked: 0, total: 4 });
     expect(nextGalleryCard({ ...state, cards: [card('a', 'listed')] })).toBeNull();
   });
 });
@@ -202,13 +207,127 @@ const lineup = (set: FutggSetSummary, cards: FutggCard[], missing = 0): FutggLin
 const EMPTY: GalleryState = { budget: 100_000, spent: 0, cards: [] };
 
 describe('fut.gg Set picker', () => {
-  it("takes a Set's best grade, and offers only Sets with something to buy, cheapest first", () => {
-    expect(futggBestTier(MALAGA)?.grade).toBe('S');
-    expect(futggBestTier(FOUNDATIONS)).toBeNull();
-    const names = (sOnly: boolean) => futggSetChoices([MALAGA, ARSENAL, FOUNDATIONS, FROSINONE], sOnly).map((c) => `${c.set.name} ${c.tier.grade}`);
-    expect(names(true)).toEqual(['Frosinone S', 'Malaga CF S']);
-    // Without the filter, the grade S Sets still come first.
-    expect(names(false)).toEqual(['Frosinone S', 'Malaga CF S', 'Arsenal C']);
+  it("offers, for a grade, the Sets fut.gg has a lineup for, by fut.gg's categories, cheapest first", () => {
+    const frosinone = { ...FROSINONE, category: 'Serie A Enilive' };
+    const arsenal = { ...ARSENAL, category: 'Premier League / Barclays WSL' };
+    const groups = (grade: 'S' | 'C' | 'A') =>
+      futggSetChoices([MALAGA, arsenal, FOUNDATIONS, frosinone], grade).map((g) => [g.category, g.choices.map((c) => `${c.set.name} ${c.tier.cost}`)]);
+    // Squad Foundations has nothing to buy at S.
+    expect(groups('S')).toEqual([
+      ['LALIGA EA SPORTS / Liga F Moeve', ['Malaga CF 20850']],
+      ['Serie A Enilive', ['Frosinone 19600']],
+    ]);
+    expect(groups('C')).toEqual([
+      ['LALIGA EA SPORTS / Liga F Moeve', ['Malaga CF 13250']],
+      ['Premier League / Barclays WSL', ['Arsenal 63500']],
+    ]);
+    expect(groups('A')).toEqual([['LALIGA EA SPORTS / Liga F Moeve', ['Malaga CF 13450']]]);
+  });
+});
+
+describe('planFutggSwaps', () => {
+  // One bonus tag: 10% of the gold cards' scores once two are gold.
+  const GOLDEN: FutggTag = { id: 7, name: 'Golden', tiers: [{ minItems: 2, bonus: 10 }], rule: { type: 'COUNT', attribute: 'LEVEL', values: ['gold'] } };
+  const a = fcard({ resourceId: 1, playerId: 1, name: 'Card A', rating: 80, score: 100, price: 3_000 });
+  const b = fcard({ resourceId: 2, playerId: 2, name: 'Card B', rating: 76, score: 50, price: 1_000 });
+  const c = fcard({ resourceId: 3, playerId: 3, name: 'Card C', rating: 70, score: 20, price: 500 });
+  // Owned, not in the lineup: D (gold, scores more than A), E (silver,
+  // scores more than B but loses the Golden bonus), F (scores too little).
+  const d = fcard({ resourceId: 4, playerId: 4, name: 'Card D', rating: 82, score: 120, price: 0 });
+  const e = fcard({ resourceId: 5, playerId: 5, name: 'Card E', rating: 70, score: 60, price: 0 });
+  const f = fcard({ resourceId: 6, playerId: 6, name: 'Card F', rating: 66, score: 10, price: 0 });
+  // 170 + 10% of A and B (150) = 185, as fut.gg says.
+  const set: FutggSetSummary = { ...MALAGA, tiers: [tier('S', 4_500, { threshold: 205, score: 185, cards: 3 })] };
+  const lineup: FutggLineup = { set, grade: 'S', cards: [a, b, c], missing: 0, others: [d, e, f], tags: [GOLDEN] };
+
+  it('lets an owned player stand in, dearest card first, only while the Set keeps its grade, bonus tags included', () => {
+    const plan = planFutggSwaps(lineup, new Set([4, 5, 6]));
+    expect(plan.scored).toBe(true);
+    // D for A: 190 + 10% of D and B (170) = 207. E for B would lose the
+    // Golden bonus (200, under 205), so B stays; E for C keeps it: 230 + 17.
+    // F scores under every card.
+    expect(plan.swaps.map((x) => [x.out.name, x.in.name])).toEqual([
+      ['Card A', 'Card D'],
+      ['Card C', 'Card E'],
+    ]);
+    expect(plan.cards.map((x) => x.name)).toEqual(['Card D', 'Card B', 'Card E']);
+    expect(plan.score).toBe(247);
+  });
+
+  it("swaps nothing when its score is not fut.gg's for fut.gg's lineup, or a tag's rule is unknown, or none is owned", () => {
+    const off = planFutggSwaps({ ...lineup, set: { ...set, tiers: [tier('S', 4_500, { threshold: 205, score: 190, cards: 3 })] } }, new Set([4]));
+    expect([off.scored, off.swaps.length]).toEqual([false, 0]);
+    const unknown = planFutggSwaps({ ...lineup, tags: [{ ...GOLDEN, rule: { ...GOLDEN.rule, type: 'SOMETHING_NEW' } }] }, new Set([4]));
+    expect([unknown.scored, unknown.swaps.length]).toEqual([false, 0]);
+    expect(planFutggSwaps({ ...lineup, tags: undefined }, new Set([4])).swaps).toEqual([]);
+    expect(planFutggSwaps(lineup, new Set()).cards).toEqual([a, b, c]);
+  });
+
+  it('puts the plan on the list: owned cards as in your club, the Set priced without the swapped cards', () => {
+    const r = addFutggLineup(EMPTY, lineup, [], new Set([3, 4]));
+    expect(r.state.cards.map((x) => [x.name, x.status])).toEqual([
+      ['Card D', 'owned'],
+      ['Card B', 'todo'],
+      ['Card C', 'owned'],
+    ]);
+    expect([r.owned, r.swaps.length]).toEqual([2, 1]);
+    expect(r.state.sets![0]).toMatchObject({ score: 207, cost: 1_500 });
+  });
+
+  it('asks the club about every lineup card first, then the Sets\' other cards', () => {
+    expect(futggClubIds([lineup, { ...lineup, cards: [fcard({ resourceId: 9 })], others: [d] }])).toEqual([1, 2, 3, 9, 4, 5, 6]);
+    expect(futggClubIds([lineup], 4)).toEqual([1, 2, 3, 4]);
+  });
+});
+
+describe('completed Sets', () => {
+  const state = (): GalleryState => {
+    const g = addFutggLineup(EMPTY, lineup2(MALAGA, [fcard(), fcard({ resourceId: 5, playerId: 5, name: 'Shared' })]), []).state;
+    return addFutggLineup(g, lineup2(FROSINONE, [fcard({ resourceId: 5, playerId: 5, name: 'Shared' }), fcard({ resourceId: 6, playerId: 6, name: 'Frosinone only' })]), []).state;
+  };
+
+  it('marks a Set completed once all its cards are collected', () => {
+    const g = state();
+    g.cards[0]!.status = 'listed';
+    expect(markCompletedSets(g)).toEqual([]);
+    g.cards[1]!.status = 'owned';
+    expect(markCompletedSets(g).map((x) => x.name)).toEqual(['Malaga CF']);
+    expect(g.completed).toEqual([90]);
+    // Once only.
+    expect(markCompletedSets(g)).toEqual([]);
+  });
+
+  it('clears what is finished on Reset stats: done cards and completed Sets go, the rest stays, spent goes to 0', () => {
+    const g = state();
+    // Malaga CF: both cards done (not yet marked); Frosinone: in progress.
+    g.cards[0]!.status = 'listed';
+    g.cards[1]!.status = 'owned';
+    g.spent = 4_000;
+    g.cards.push(
+      // Left over from an earlier page load: bought, its Set removed since.
+      { key: '7:72#7', name: 'Leftover', rating: 72, playerId: 7, resourceId: 7, exact: true, status: 'bought', price: 1_300 },
+      // Bought on this page load, still on its way.
+      { key: '8:70#8', name: 'On its way', rating: 70, playerId: 8, resourceId: 8, exact: true, status: 'club', price: 1_200, tradeId: 't8' },
+      // A typed card, done.
+      { key: '9:80', name: 'Typed', rating: 80, playerId: 9, resourceId: 9, status: 'listed' },
+    );
+    const next = clearFinishedGallery(g);
+    // 'Shared' stays: Frosinone, in progress, counts it too.
+    expect(next.cards.map((c) => c.name)).toEqual(['Shared', 'Frosinone only', 'On its way']);
+    expect(next.sets!.map((x) => x.name)).toEqual(['Frosinone']);
+    expect(next.completed).toEqual([90]);
+    expect(next.spent).toBe(0);
+    // Nothing left to clear: the list stays as it is.
+    expect(clearFinishedGallery(next).cards).toEqual(next.cards);
+  });
+
+  it('leaves the cards of a Set marked completed alone, unless another Set needs them', () => {
+    const g = setCompleted(state(), 90, true);
+    expect(g.cards.map((x) => galleryCardNeeded(x, g))).toEqual([false, true, true]);
+    expect(nextGalleryCard(g)?.name).toBe('Shared');
+    expect(gallerySummary(g)).toMatchObject({ todo: 2, parked: 1 });
+    expect(clubCheckIds(g)).toEqual([5, 6]);
+    expect(setCompleted(g, 90, false).completed).toBeUndefined();
   });
 });
 
@@ -316,3 +435,7 @@ describe('fut.gg Sets on the list', () => {
     expect(galleryKey(276_695, 80, undefined, 67_385_559)).toBe('276695:80#67385559');
   });
 });
+
+function lineup2(set: FutggSetSummary, cards: FutggCard[]): FutggLineup {
+  return { set, grade: 'S', cards, missing: 0 };
+}

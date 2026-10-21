@@ -64,6 +64,7 @@ import {
   type FilterCriteria,
   type FutggLineup,
   type FutggSetSummary,
+  GALLERY_GRADES,
   type GalleryCard,
   type GalleryGrade,
   type GalleryState,
@@ -71,12 +72,16 @@ import {
 
 import {
   addFutggLineup,
-  futggBestTier,
+  clearFinishedGallery,
+  futggClubIds,
   futggSetChoices,
+  galleryCardNeeded,
   gallerySetProgress,
   gallerySummary,
+  markCompletedSets,
   parseGalleryList,
   removeFutggSet,
+  setCompleted,
 } from '../engine/gallery.js';
 import { TRANSFER_LIST_SIZE, type TransferListSummary } from '../lib/transfer-list.js';
 import {
@@ -414,7 +419,7 @@ const GALLERY_HELP =
 
 /** Under the fut.gg Set picker. */
 const FUTGG_HELP =
-  "Sets and lineups come from fut.gg's Gallery: for each Set, the cheapest lineup that reaches its best grade, by fut.gg's own solver and prices. Tick the Sets and add them: Nova checks your club first and skips the cards you already own, then buys the rest exactly as fut.gg lists them (the same version, holographic or not), sends each one to your club and sells it again. When a Set's cards are collected, finish it in the game: Gallery, the Set, Autocomplete, then Confirm Changes. fut.gg's prices move, so the cost is an estimate.";
+  "Sets and lineups come from fut.gg's Gallery: for each grade, the Sets that reach it and the cheapest lineup that does, by fut.gg's own solver and prices. Pick a grade, tick the Sets and add them: Nova checks your club first, skips the cards you own, and lets a player you own stand in for a lineup card when he scores at least as much and the Set still makes the grade. It buys the rest exactly as fut.gg lists them (the same version, holographic or not), sends each one to your club and sells it again. A Set whose cards are all collected is marked completed and not offered again (Undo puts it back). Finish it in the game: Gallery, the Set, Autocomplete, then Confirm Changes. fut.gg's prices move, so the cost is an estimate.";
 
 const GALLERY_STATUS: Record<GalleryCard['status'], string> = {
   todo: 'To buy',
@@ -580,6 +585,18 @@ const CSS = `
   .g-mine { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
   .g-mineset { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; }
   .g-sethead { font-size: 13px; padding: 2px 6px 8px; color: var(--ea-text-2); }
+  .g-sethead.done { color: var(--ea-success); }
+  .g-group { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--ea-muted); padding: 10px 6px 6px; }
+  .g-grades { display: inline-flex; gap: 4px; }
+  .g-grade { min-width: 34px; height: 32px; border-radius: 6px; border: 1px solid var(--ea-line); background: var(--ea-control); color: var(--ea-text); font-weight: 700; cursor: pointer; }
+  .g-grade.on { border-color: var(--ea-mint, var(--ea-focus)); background: var(--ea-float); }
+  .g-cat { font-size: 12px; font-weight: 700; color: var(--ea-muted); padding: 8px 10px 4px; border-bottom: 1px solid var(--ea-line); background: var(--ea-surface-2); position: sticky; top: 0; }
+  .g-set.done { color: var(--ea-muted); cursor: default; }
+  .g-check { color: var(--ea-success); width: 13px; text-align: center; }
+  .g-link { border: 0; background: none; color: var(--ea-accent); padding: 0; font: inherit; font-size: 12px; cursor: pointer; text-decoration: underline; }
+  .g-link:disabled { color: var(--ea-disabled-ink); cursor: default; }
+  .g-mineset.done b { color: var(--ea-success); }
+  .g-mine-actions { display: inline-flex; gap: 6px; flex-shrink: 0; }
   .g-sethead .warn { color: var(--ea-warning); }
   .settings-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 24px 8px; scrollbar-width: thin; scrollbar-color: var(--ea-input-line) transparent; }
   .card { background: var(--ea-row); border-radius: 6px; margin-bottom: 10px; }
@@ -905,8 +922,9 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
    * ticked, whether only grade S Sets show, and what the last add said. */
   let futggSets: FutggSetSummary[] | null = null;
   let futggBusy: 'sets' | 'add' | null = null;
-  const futggPicked = new Set<number>();
-  let futggSOnly = true;
+  /** Ticked Sets, each with the grade whose lineup it is added for. */
+  const futggPicked = new Map<number, GalleryGrade>();
+  let futggGrade: GalleryGrade = 'S';
   let futggProblems: string[] = [];
   let ringFrame: number | null = null;
   let refreshQueued = false;
@@ -1036,7 +1054,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   function gallerySumText(g: GalleryState): string {
     const n = gallerySummary(g);
     const owned = n.owned > 0 ? ` · ${n.owned} in your club` : '';
-    return `${n.todo} to buy${owned} · ${n.listed} listed · ${n.bought + n.club} on the way · ${n.skipped} skipped · spent ${fmt(g.spent)} of ${fmt(g.budget)}`;
+    const parked = n.parked > 0 ? ` · ${n.parked} left out (Set completed)` : '';
+    return `${n.todo} to buy${owned} · ${n.listed} listed · ${n.bought + n.club} on the way · ${n.skipped} skipped${parked} · spent ${fmt(g.spent)} of ${fmt(g.budget)}`;
   }
 
   /** The Search tab in Gallery mode: the list box, its buttons, the budget. */
@@ -1082,30 +1101,45 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     return futggBusy === 'add' ? 'Adding…' : `Add ${futggPicked.size === 1 ? '1 Set' : `${futggPicked.size} Sets`}`;
   }
 
-  /** fut.gg's Sets, ticked and added, and the Sets on the list. */
+  /** fut.gg's Sets for the grade picked, by category, ticked and added,
+   * and the Sets on the list. */
   function futggHtml(g: GalleryState, off: string): string {
-    const onList = new Set((g.sets ?? []).map((x) => x.id));
+    const onList = new Map((g.sets ?? []).map((x) => [x.id, x]));
+    const completed = new Set(g.completed ?? []);
     const busy = futggBusy !== null ? ' disabled' : '';
+    const grades = [...GALLERY_GRADES]
+      .reverse()
+      .map((gr) => `<button type="button" class="g-grade${gr === futggGrade ? ' on' : ''}" data-grade="${gr}" aria-pressed="${gr === futggGrade}">${gr}</button>`)
+      .join('');
     const head = `<div class="g-actions">
         <button type="button" class="preset" id="g-futgg"${off}${busy}><b>${futggBusy === 'sets' ? 'Loading…' : futggSets ? 'Reload fut.gg Sets' : 'Browse fut.gg Sets'}</b></button>
-        <label class="g-sonly"><input type="checkbox" id="g-sonly"${futggSOnly ? ' checked' : ''} /> Only Sets that reach grade S</label>
+        <span class="g-grades" role="group" aria-label="Grade">${grades}</span>
       </div>`;
     let list = '';
     if (futggSets) {
-      const choices = futggSetChoices(futggSets, futggSOnly);
+      const groups = futggSetChoices(futggSets, futggGrade);
       list =
-        choices.length === 0
-          ? `<div class="hint">${futggSOnly ? 'fut.gg lists no Set that reaches grade S right now.' : 'fut.gg lists no Set with a lineup right now.'}</div>`
-          : `<div class="g-sets" role="group" aria-label="fut.gg Sets">${choices
-              .map(({ set, tier }) => {
-                const added = onList.has(set.id);
-                const checked = added || futggPicked.has(set.id) ? ' checked' : '';
-                return `<label class="g-set${added ? ' added' : ''}"><input type="checkbox" data-futgg="${set.id}"${checked}${added ? ' disabled' : off} />
-                  <span class="nm">${esc(set.name)}<span class="cat">${esc(set.category.split(' / ')[0] ?? '')}</span></span>
-                  <span class="gr g${tier.grade}">${tier.grade}</span>
-                  <span class="cost">${fmt(tier.cost)}${COIN}</span>
-                  <span class="tok">${added ? 'on your list' : `${tier.tokens} tokens`}</span></label>`;
-              })
+        groups.length === 0
+          ? `<div class="hint">fut.gg lists no Set with a grade ${futggGrade} lineup right now.</div>`
+          : `<div class="g-sets" role="group" aria-label="fut.gg Sets, grade ${futggGrade}">${groups
+              .map(
+                (group) =>
+                  `<div class="g-cat">${esc(group.category)}</div>${group.choices
+                    .map(({ set, tier }) => {
+                      if (completed.has(set.id))
+                        return `<div class="g-set done"><span class="g-check">✓</span><span class="nm">${esc(set.name)}</span>
+                          <span class="gr g${tier.grade}">${tier.grade}</span><span class="cost">${fmt(tier.cost)}${COIN}</span>
+                          <span class="tok">Completed <button type="button" class="g-link" data-uncomplete="${set.id}"${off}>Undo</button></span></div>`;
+                      const added = onList.get(set.id);
+                      const checked = added || futggPicked.has(set.id) ? ' checked' : '';
+                      return `<label class="g-set${added ? ' added' : ''}"><input type="checkbox" data-futgg="${set.id}"${checked}${added ? ' disabled' : off} />
+                        <span class="nm">${esc(set.name)}</span>
+                        <span class="gr g${tier.grade}">${tier.grade}</span>
+                        <span class="cost">${fmt(tier.cost)}${COIN}</span>
+                        <span class="tok">${added ? `on your list (${added.grade})` : `${tier.tokens} tokens`}</span></label>`;
+                    })
+                    .join('')}`,
+              )
               .join('')}</div>
             <div class="g-actions"><button type="button" class="preset" id="g-add"${off}${busy}${futggPicked.size === 0 ? ' disabled' : ''}><b>${futggAddLabel()}</b></button></div>`;
     }
@@ -1114,11 +1148,15 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       progress.length === 0
         ? ''
         : `<div class="g-mine">${progress
-            .map(
-              (p) => `<div class="g-mineset"><span><b>${esc(p.set.name)}</b> · grade ${p.set.grade} · ${p.done} of ${p.cards} collected${
+            .map((p) => {
+              const isDone = completed.has(p.set.id);
+              const mark = isDone
+                ? `<button type="button" class="ghost" data-uncomplete="${p.set.id}"${off}>Completed ✓ · Undo</button>`
+                : `<button type="button" class="ghost" data-complete="${p.set.id}"${off}>Mark completed</button>`;
+              return `<div class="g-mineset${isDone ? ' done' : ''}"><span><b>${esc(p.set.name)}</b> · grade ${p.set.grade} · ${p.done} of ${p.cards} collected${
                 p.skipped > 0 ? ` · ${p.skipped} skipped` : ''
-              }</span><button type="button" class="ghost" data-remove-set="${p.set.id}"${off}>Remove</button></div>`,
-            )
+              }</span><span class="g-mine-actions">${mark}<button type="button" class="ghost" data-remove-set="${p.set.id}"${off}>Remove</button></span></div>`;
+            })
             .join('')}</div>`;
     return `${head}${list}<div class="g-problems" id="g-futgg-problems">${futggProblems.map(esc).join('<br>')}</div>${mine}<div class="hint">${esc(FUTGG_HELP)}</div>`;
   }
@@ -1136,44 +1174,57 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     renderGallery();
   }
 
-  /** Puts the ticked Sets' lineups on the list, then asks the club which of
-   * their cards it holds already. */
+  /** Puts the ticked Sets' lineups on the list: their cards and every
+   * other card that counts for them asked of the club first, so cards the
+   * club holds are not bought and its players can stand in. */
   async function addFutggSets(): Promise<void> {
     const sniper = deps.getSniper();
     if (!deps.futggLineup || !futggSets || futggBusy || sniper?.isRunning()) return;
     futggBusy = 'add';
     futggProblems = [];
     renderGallery();
+    const lineups: FutggLineup[] = [];
+    for (const [id, grade] of [...futggPicked]) {
+      const set = futggSets.find((x) => x.id === id);
+      if (!set) continue;
+      const lineup = await deps.futggLineup(id, grade).catch(() => null);
+      if (lineup) lineups.push(lineup);
+      else futggProblems.push(`${set.name}: fut.gg did not send its grade ${grade} lineup — try again`);
+    }
     let g = currentGallery();
     let added = 0;
+    let owned = 0;
+    let swapped = 0;
     let sets = 0;
     let cost = 0;
-    for (const id of [...futggPicked]) {
-      const set = futggSets.find((x) => x.id === id);
-      const tier = set ? futggBestTier(set) : null;
-      if (!set || !tier) continue;
-      const lineup = await deps.futggLineup(id, tier.grade).catch(() => null);
-      if (!lineup) {
-        futggProblems.push(`${set.name}: fut.gg did not send its lineup — try again`);
-        continue;
+    if (lineups.length > 0) {
+      const club = sniper ? await sniper.readClub(futggClubIds(lineups)) : null;
+      const held = new Set(club ?? []);
+      if (club == null) futggProblems.push('Could not check your club: every card is bought (a Start checks again)');
+      for (const lineup of lineups) {
+        const r = addFutggLineup(g, lineup, catalog?.rarities ?? [], held);
+        futggProblems.push(...r.problems);
+        for (const x of r.swaps) futggProblems.push(`${lineup.set.name}: your ${x.in.rating} ${x.in.name} stands in for ${x.out.rating} ${x.out.name} (saves about ${fmt(x.out.price)})`);
+        if (r.state === g) continue;
+        g = r.state;
+        added += r.added;
+        owned += r.owned;
+        swapped += r.swaps.length;
+        sets++;
+        cost += r.state.sets?.find((x) => x.id === lineup.set.id)?.cost ?? 0;
+        futggPicked.delete(lineup.set.id);
       }
-      const r = addFutggLineup(g, lineup, catalog?.rarities ?? []);
-      futggProblems.push(...r.problems);
-      if (r.state === g) continue;
-      g = r.state;
-      added += r.added;
-      sets++;
-      cost += tier.cost;
-      futggPicked.delete(id);
     }
     if (sets > 0) {
+      markCompletedSets(g);
       await deps.saveGallery?.(g);
-      // The club holds some of them already, maybe: those are not bought.
-      const marked = sniper && !sniper.isRunning() ? await sniper.checkGalleryClub() : null;
       const left = g.budget - g.spent;
-      const club = marked ? ` · ${marked} in your club already` : '';
-      const budget = cost > left ? ` · fut.gg prices them at ${fmt(cost)}, more than the ${fmt(left)} left of your budget` : '';
-      say(`Added ${sets === 1 ? '1 Set' : `${sets} Sets`}: ${added} cards${club}${budget}`, cost > left);
+      const parts = [`${added} cards`];
+      if (owned > 0) parts.push(`${owned} in your club already`);
+      if (swapped > 0) parts.push(`${swapped} swapped for players you own`);
+      const over = cost > left;
+      if (over) parts.push(`fut.gg prices them at ${fmt(cost)}, more than the ${fmt(left)} left of your budget`);
+      say(`Added ${sets === 1 ? '1 Set' : `${sets} Sets`}: ${parts.join(' · ')}`, over);
     }
     futggBusy = null;
     renderGallery();
@@ -2925,30 +2976,51 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   function galleryFeedHtml(g: GalleryState, running: boolean): string {
     if (g.cards.length === 0) return '<div class="empty">Paste your Gallery list on the left, then press Load list, or add fut.gg Sets.</div>';
     // The bot works the list in order: the first card still to buy is the one it is on.
-    const buying = running ? g.cards.find((c) => c.status === 'todo')?.key : undefined;
+    const buying = running ? g.cards.find((c) => c.status === 'todo' && galleryCardNeeded(c, g))?.key : undefined;
+    const completed = new Set(g.completed ?? []);
     // Each fut.gg Set: the grade its lineup is for, and how far it got.
     const sets = gallerySetProgress(g)
       .map((p) => {
+        if (completed.has(p.set.id))
+          return `<div class="g-sethead done"><b>${esc(p.set.name)}</b> · grade ${p.set.grade} · completed ✓ · ${p.done} of ${p.cards} collected</div>`;
         const risk =
           p.skipped > 0
             ? ` · <span class="warn">${p.skipped} skipped (${fmt(p.skippedScore)} points): retry ${p.skipped === 1 ? 'it' : 'them'}, or the Set may miss grade ${p.set.grade}</span>`
             : '';
-        return `<div class="g-sethead"><b>${esc(p.set.name)}</b> · grade ${p.set.grade} needs ${fmt(p.set.threshold)} points, fut.gg's lineup makes ${fmt(p.set.score)} · ${p.done} of ${p.cards} collected${risk}</div>`;
+        return `<div class="g-sethead"><b>${esc(p.set.name)}</b> · grade ${p.set.grade} needs ${fmt(p.set.threshold)} points, the lineup makes ${fmt(p.set.score)} · ${p.done} of ${p.cards} collected${risk}</div>`;
       })
       .join('');
-    return `<div class="bids-head">${esc(gallerySumText(g))}</div>${sets}${g.cards.map((c) => galleryRowHtml(c, c.key === buying)).join('')}`;
+    // Still to buy first; cards on their way, then the done ones, after.
+    const groups: { title: string; cards: GalleryCard[] }[] = [
+      { title: 'To buy', cards: g.cards.filter((c) => c.status === 'todo' && galleryCardNeeded(c, g)) },
+      { title: 'On the way to the market', cards: g.cards.filter((c) => c.status === 'bought' || c.status === 'club') },
+      { title: 'Skipped', cards: g.cards.filter((c) => c.status === 'skipped') },
+      { title: 'Done', cards: g.cards.filter((c) => c.status === 'listed' || c.status === 'owned' || (c.status === 'todo' && !galleryCardNeeded(c, g))) },
+    ];
+    const rows = groups
+      .filter((x) => x.cards.length > 0)
+      .map((x) => `<div class="g-group">${esc(x.title)} · ${x.cards.length}</div>${x.cards.map((c) => galleryRowHtml(c, c.key === buying, running, g)).join('')}`)
+      .join('');
+    return `<div class="bids-head">${esc(gallerySumText(g))}</div>${sets}${rows}`;
   }
 
-  function galleryRowHtml(c: GalleryCard, buying: boolean): string {
-    const state = buying ? 'buying' : c.status;
-    const label = buying ? 'Buying now' : GALLERY_STATUS[c.status];
+  function galleryRowHtml(c: GalleryCard, buying: boolean, running: boolean, g: GalleryState): string {
+    const parked = c.status === 'todo' && !galleryCardNeeded(c, g);
+    const state = buying ? 'buying' : parked ? 'listed' : c.status;
+    const label = buying ? 'Buying now' : parked ? 'Set completed' : GALLERY_STATUS[c.status];
     const detail = c.note ?? (c.market != null ? `Market price ${fmt(c.market)}` : c.guide != null ? `fut.gg price ${fmt(c.guide)}` : null);
     const sub = [c.set, detail].filter((x): x is string => !!x).map(esc).join(' · ');
     const paid = c.price != null ? `${fmt(c.price)}${COIN}` : '—';
     const listed = c.listPrice != null ? `${fmt(c.listPrice)}${COIN}` : '—';
     const version = c.version ? ` <span class="sub">${esc(c.version)}</span>` : '';
+    // A card bought but not on the market (the bot stopped, or the page
+    // reloaded): the trader can say they listed it.
+    const handled =
+      !running && (c.status === 'bought' || c.status === 'club')
+        ? `<button type="button" class="g-link" data-handled="${esc(c.key)}">Listed it myself</button>`
+        : '';
     return `<div class="bidrow ${state}"><div class="main"><b>${c.rating} ${esc(c.name)}</b>${version}<span class="st ${state}">${label}</span>
-      <div class="sub">${sub}</div></div>
+      <div class="sub">${sub}${handled ? ` · ${handled}` : ''}</div></div>
       <div class="cur"><span class="k">Paid</span><span class="v">${paid}</span></div>
       <div class="cur"><span class="k">Listed at</span><span class="v">${listed}</span></div></div>`;
   }
@@ -3089,7 +3161,16 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     refreshLive();
   });
   onTrusted($('reset'), 'click', () => {
-    deps.getSniper()?.reset();
+    const sniper = deps.getSniper();
+    sniper?.reset();
+    // A fresh start for the Gallery list too: its finished cards and
+    // completed Sets go (they stay marked completed), and spent goes to 0.
+    const g = currentGallery();
+    if (sniper && !sniper.isRunning() && (g.cards.length > 0 || g.spent > 0)) {
+      const next = clearFinishedGallery(g);
+      const gone = g.cards.length - next.cards.length;
+      commitGallery(next, gone > 0 ? `Stats reset · ${gone} finished Gallery ${gone === 1 ? 'card' : 'cards'} cleared` : 'Stats reset');
+    }
     refreshLive();
   });
   // EA's Reset, beside the Start button: empties the whole search.
@@ -3120,16 +3201,44 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     feedTab = tab;
     renderBids();
   });
+  // The Gallery tab: a card bought but not listed by Nova, listed by hand.
+  onTrusted($('gallery-feed'), 'click', (e) => {
+    const key = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-handled]')?.dataset.handled;
+    if (!key || deps.getSniper()?.isRunning()) return;
+    const g = currentGallery();
+    const cards = g.cards.map((c) => {
+      if (c.key !== key || (c.status !== 'bought' && c.status !== 'club')) return c;
+      const { tradeId: _gone, ...rest } = c;
+      return { ...rest, status: 'listed' as const, note: 'Listed by hand' };
+    });
+    const next = { ...g, cards };
+    markCompletedSets(next);
+    commitGallery(next, 'Marked as listed');
+  });
   // Gallery mode's list box, its buttons and its budget.
   onTrusted($('gallery'), 'click', (e) => {
     const id = (e.target as HTMLElement).closest<HTMLButtonElement>('button[id^="g-"]')?.id;
     if (id) onGalleryClick(id);
-    const remove = Number((e.target as HTMLElement).closest<HTMLButtonElement>('button[data-remove-set]')?.dataset.removeSet);
-    if (Number.isInteger(remove) && remove > 0 && !deps.getSniper()?.isRunning()) {
-      const g = currentGallery();
-      const name = g.sets?.find((x) => x.id === remove)?.name ?? 'Set';
-      commitGallery(removeFutggSet(g, remove), `${name} removed`);
+    const target = e.target as HTMLElement;
+    // A grade picked: its Sets show (works while the bot runs: it only looks).
+    const grade = target.closest<HTMLButtonElement>('button[data-grade]')?.dataset.grade;
+    if (grade && (GALLERY_GRADES as readonly string[]).includes(grade)) {
+      futggGrade = grade as GalleryGrade;
+      renderGallery();
+      return;
     }
+    if (deps.getSniper()?.isRunning()) return;
+    const g = currentGallery();
+    const nameOfSet = (id: number) => g.sets?.find((x) => x.id === id)?.name ?? futggSets?.find((x) => x.id === id)?.name ?? 'Set';
+    const remove = Number(target.closest<HTMLButtonElement>('button[data-remove-set]')?.dataset.removeSet);
+    if (Number.isInteger(remove) && remove > 0) commitGallery(removeFutggSet(g, remove), `${nameOfSet(remove)} removed`);
+    const complete = Number(target.closest<HTMLButtonElement>('button[data-complete]')?.dataset.complete);
+    if (Number.isInteger(complete) && complete > 0) {
+      futggPicked.delete(complete);
+      commitGallery(setCompleted(g, complete, true), `${nameOfSet(complete)} marked completed`);
+    }
+    const uncomplete = Number(target.closest<HTMLButtonElement>('button[data-uncomplete]')?.dataset.uncomplete);
+    if (Number.isInteger(uncomplete) && uncomplete > 0) commitGallery(setCompleted(g, uncomplete, false), `${nameOfSet(uncomplete)} no longer marked completed`);
   });
   onTrusted($('gallery'), 'input', (e) => {
     const t = e.target as HTMLTextAreaElement;
@@ -3140,18 +3249,13 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     // The fut.gg picker: a Set ticked or unticked, or the grade S filter.
     const setId = Number(t.dataset.futgg);
     if (Number.isInteger(setId) && setId > 0) {
-      if (t.checked) futggPicked.add(setId);
+      if (t.checked) futggPicked.set(setId, futggGrade);
       else futggPicked.delete(setId);
       const add = root.getElementById('g-add') as HTMLButtonElement | null;
       if (add) {
         add.innerHTML = `<b>${futggAddLabel()}</b>`;
         add.disabled = futggPicked.size === 0 || futggBusy !== null || (deps.getSniper()?.isRunning() ?? false);
       }
-      return;
-    }
-    if (t.id === 'g-sonly') {
-      futggSOnly = t.checked;
-      renderGallery();
       return;
     }
     if (t.id !== 'g-budget' || deps.getSniper()?.isRunning()) return;

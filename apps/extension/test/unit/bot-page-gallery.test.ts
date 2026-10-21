@@ -199,9 +199,11 @@ it('starts the list without a search, and shows each card’s progress', async (
   const { root, click, sniper } = await mount({ ...DEFAULT_BOT_MODE_SETTINGS, mode: 'gallery' }, gallery);
   const start = vi.spyOn(sniper, 'start');
   const rows = [...root.querySelectorAll('#gallery-feed .bidrow')];
-  expect(rows.map((r) => r.querySelector('.st')!.textContent)).toEqual(['Listed', 'Skipped', 'To buy']);
-  expect(rows[0]!.textContent).toContain('3,700');
-  expect(rows[0]!.textContent).toContain('3,900');
+  // Still to buy first, then skipped, then done.
+  expect(rows.map((r) => r.querySelector('.st')!.textContent)).toEqual(['To buy', 'Skipped', 'Listed']);
+  expect([...root.querySelectorAll('#gallery-feed .g-group')].map((x) => x.textContent)).toEqual(['To buy · 1', 'Skipped · 1', 'Done · 1']);
+  expect(rows[2]!.textContent).toContain('3,700');
+  expect(rows[2]!.textContent).toContain('3,900');
   expect(rows[1]!.textContent).toContain('none listed at this rating right now');
   expect(root.querySelector('#gallery-feed .bids-head')!.textContent).toBe('1 to buy · 1 listed · 0 on the way · 1 skipped · spent 3,700 of 100,000');
   click('#start');
@@ -237,23 +239,26 @@ const MALAGA_S: FutggLineup = {
   ],
 };
 
-it("lists fut.gg's grade S Sets cheapest first, adds the ticked ones, and leaves out cards the club holds", async () => {
+it("lists fut.gg's Sets for each grade by category, cheapest first, adds the ticked ones, and leaves out cards the club holds", async () => {
   const owned = vi.fn(async (_ids: number[]) => ({ ok: true, owned: [243312], latencyMs: 5 }));
   const lineup = vi.fn((setId: number, grade: GalleryGrade) => (setId === 90 && grade === 'S' ? MALAGA_S : null));
   const { root, $, click, sniper } = await mount({ ...DEFAULT_BOT_MODE_SETTINGS, mode: 'gallery' }, undefined, { sets: [MALAGA, ARSENAL, FROSINONE], lineup, owned });
   click('#g-futgg');
   await vi.advanceTimersByTimeAsync(10);
-  const names = () => [...root.querySelectorAll('.g-set')].map((r) => r.querySelector('.nm')!.childNodes[0]!.textContent);
-  expect(names()).toEqual(['Frosinone', 'Malaga CF']);
-  expect(root.querySelector('.g-set')!.textContent).toContain('19,600');
-  expect(root.querySelector('.g-set')!.textContent).toContain('28 tokens');
-  // Every Set with a lineup, grade S first.
-  const sOnly = $('g-sonly')!;
-  sOnly.checked = false;
-  sOnly.dispatchEvent(new Event('change', { bubbles: true }));
-  expect(names()).toEqual(['Frosinone', 'Malaga CF', 'Arsenal']);
-  $('g-sonly')!.checked = true;
-  $('g-sonly')!.dispatchEvent(new Event('change', { bubbles: true }));
+  const names = () => [...root.querySelectorAll('.g-set')].map((r) => r.querySelector('.nm')!.textContent);
+  const categories = () => [...root.querySelectorAll('.g-cat')].map((r) => r.textContent);
+  // Grade S first, by fut.gg's categories.
+  expect(root.querySelector('.g-grade.on')!.textContent).toBe('S');
+  expect(categories()).toEqual(['LALIGA EA SPORTS / Liga F Moeve', 'Serie A Enilive']);
+  expect(names()).toEqual(['Malaga CF', 'Frosinone']);
+  expect(root.querySelectorAll('.g-set')[1]!.textContent).toContain('19,600');
+  expect(root.querySelectorAll('.g-set')[1]!.textContent).toContain('28 tokens');
+  // Grade C: the Sets with a grade C lineup, at its price.
+  click('[data-grade="C"]');
+  expect(categories()).toEqual(['LALIGA EA SPORTS / Liga F Moeve', 'Premier League / Barclays WSL']);
+  expect(names()).toEqual(['Malaga CF', 'Arsenal']);
+  expect(root.querySelector('.g-set')!.textContent).toContain('13,250');
+  click('[data-grade="S"]');
 
   const tick = root.querySelector('input[data-futgg="90"]') as HTMLInputElement;
   tick.checked = true;
@@ -273,9 +278,21 @@ it("lists fut.gg's grade S Sets cheapest first, adds the ticked ones, and leaves
   // On the list now: ticked and locked in the picker, with its progress.
   expect((root.querySelector('input[data-futgg="90"]') as HTMLInputElement).disabled).toBe(true);
   expect(root.querySelector('.g-mineset')!.textContent).toContain('Malaga CF · grade S · 1 of 2 collected');
-  expect(root.querySelector('#gallery-feed .g-sethead')!.textContent).toBe("Malaga CF · grade S needs 900 points, fut.gg's lineup makes 908 · 1 of 2 collected");
-  expect(root.querySelectorAll('#gallery-feed .bidrow')[1]!.textContent).toContain('fut.gg price 1,400');
-  expect(root.querySelectorAll('#gallery-feed .bidrow')[0]!.querySelector('.st')!.textContent).toBe('In your club');
+  expect(root.querySelector('#gallery-feed .g-sethead')!.textContent).toBe('Malaga CF · grade S needs 900 points, the lineup makes 908 · 1 of 2 collected');
+  const rows = [...root.querySelectorAll('#gallery-feed .bidrow')];
+  expect(rows[0]!.textContent).toContain('fut.gg price 1,400');
+  expect(rows[1]!.querySelector('.st')!.textContent).toBe('In your club');
+
+  // Marked completed by hand: Kevin is no longer bought, the picker shows it
+  // done, and Undo puts it back.
+  click('[data-complete="90"]');
+  expect(sniper.getGallery().completed).toEqual([90]);
+  expect(root.querySelector('#gallery-feed .bids-head')!.textContent).toContain('0 to buy');
+  expect(root.querySelector('#gallery-feed .bids-head')!.textContent).toContain('1 left out (Set completed)');
+  expect(root.querySelector('.g-set.done')!.textContent).toContain('Completed');
+  expect(root.querySelector('input[data-futgg="90"]')).toBeNull();
+  click('.g-set.done [data-uncomplete="90"]');
+  expect(sniper.getGallery().completed).toBeUndefined();
 
   // The box holds the typed cards only, and Load list keeps fut.gg's.
   const box = $('g-list') as unknown as HTMLTextAreaElement;
@@ -289,6 +306,43 @@ it("lists fut.gg's grade S Sets cheapest first, adds the ticked ones, and leaves
   click('[data-remove-set="90"]');
   expect(sniper.getGallery().cards.map((c) => c.name)).toEqual(['Hugo Ekitiké']);
   expect(sniper.getGallery().sets).toBeUndefined();
+});
+
+it('lets a player the club holds stand in for a lineup card, and says so', async () => {
+  // The lineup scores 285 as fut.gg says (no bonus tags), and grade S needs 285.
+  const set: FutggSetSummary = { ...MALAGA, tiers: [{ ...tier('S', 4_500), threshold: 285, score: 285 }] };
+  const galilea = { resourceId: 74_554, playerId: 74_554, name: 'Einar Galilea', rating: 76, rarity: 0, version: 'Rare', holographic: false, score: 100, price: 0 };
+  const lineup: FutggLineup = { ...MALAGA_S, set, others: [galilea], tags: [] };
+  const owned = vi.fn(async (_ids: number[]) => ({ ok: true, owned: [74_554], latencyMs: 5 }));
+  const { root, click, sniper } = await mount({ ...DEFAULT_BOT_MODE_SETTINGS, mode: 'gallery' }, undefined, { sets: [set], lineup: () => lineup, owned });
+  click('#g-futgg');
+  await vi.advanceTimersByTimeAsync(10);
+  const tick = root.querySelector('input[data-futgg="90"]') as HTMLInputElement;
+  tick.checked = true;
+  tick.dispatchEvent(new Event('change', { bubbles: true }));
+  click('#g-add');
+  await vi.advanceTimersByTimeAsync(10);
+  // The club is asked about the Set's other cards too.
+  expect(owned).toHaveBeenCalledWith([243312, 50_574_721, 74_554]);
+  expect(sniper.getGallery().cards.map((c) => [c.name, c.status])).toEqual([
+    ['Einar Galilea', 'owned'],
+    ['Kevin', 'todo'],
+  ]);
+  expect(root.getElementById('saved')!.textContent).toBe('Added 1 Set: 2 cards · 1 in your club already · 1 swapped for players you own');
+  expect(root.getElementById('g-futgg-problems')!.textContent).toBe('Malaga CF: your 76 Einar Galilea stands in for 74 Dani Lorenzo (saves about 3,100)');
+});
+
+it('lets the trader mark a card Nova bought but could not list as listed by hand', async () => {
+  const gallery: GalleryState = {
+    budget: 100_000,
+    spent: 1_300,
+    cards: [{ key: '1:80', name: 'Someone', rating: 80, playerId: 1, resourceId: 1, status: 'club', price: 1_300, tradeId: 't9', note: 'Bought before the page reloaded' }],
+  };
+  const { root, click, sniper } = await mount({ ...DEFAULT_BOT_MODE_SETTINGS, mode: 'gallery' }, gallery);
+  expect(root.querySelector('#gallery-feed .g-group')!.textContent).toBe('On the way to the market · 1');
+  click('#gallery-feed [data-handled="1:80"]');
+  expect(sniper.getGallery().cards[0]).toEqual({ key: '1:80', name: 'Someone', rating: 80, playerId: 1, resourceId: 1, status: 'listed', price: 1_300, note: 'Listed by hand' });
+  expect(root.querySelector('#gallery-feed .g-group')!.textContent).toBe('Done · 1');
 });
 
 it('says when fut.gg cannot be reached', async () => {
@@ -307,7 +361,7 @@ it('says when fut.gg sends no lineup for a Set, and adds nothing', async () => {
   tick.dispatchEvent(new Event('change', { bubbles: true }));
   other.click('#g-add');
   await vi.advanceTimersByTimeAsync(10);
-  expect(other.root.getElementById('g-futgg-problems')!.textContent).toBe('Malaga CF: fut.gg did not send its lineup — try again');
+  expect(other.root.getElementById('g-futgg-problems')!.textContent).toBe('Malaga CF: fut.gg did not send its grade S lineup — try again');
   expect(other.sniper.getGallery().cards).toEqual([]);
 });
 
@@ -328,4 +382,28 @@ it("names the card in Gallery mode's notes in the Activity feed, never {card}", 
   const text = root.getElementById('log')!.textContent!;
   expect(text).toContain('Gallery: 85 Hugo Ekitiké — fut.gg price 1,400 coins');
   expect(text).not.toContain('{card}');
+});
+
+it('clears the finished Gallery cards and completed Sets on Reset stats', async () => {
+  const set = { id: 90, name: 'Malaga CF', path: 'laliga/malaga-cf', grade: 'S' as const, threshold: 900, score: 908, tokens: 28, cost: 3_700 };
+  const gallery: GalleryState = {
+    budget: 100_000,
+    spent: 3_700,
+    sets: [set],
+    cards: [
+      { key: '1:80#1', name: 'Done one', rating: 80, playerId: 1, resourceId: 1, exact: true, setIds: [90], status: 'listed', price: 3_700 },
+      { key: '2:72#2', name: 'Leftover', rating: 72, playerId: 2, resourceId: 2, exact: true, status: 'bought', price: 1_300 },
+      { key: '3:80', name: 'Still to buy', rating: 80, playerId: 3, status: 'todo' },
+    ],
+  };
+  const { root, sniper } = await mount({ ...DEFAULT_BOT_MODE_SETTINGS, mode: 'gallery' }, gallery);
+  (root.getElementById('reset') as HTMLButtonElement).click();
+  // The message follows the save.
+  await vi.advanceTimersByTimeAsync(10);
+  const g = sniper.getGallery();
+  expect(g.cards.map((c) => c.name)).toEqual(['Still to buy']);
+  expect(g.sets).toBeUndefined();
+  expect(g.completed).toEqual([90]);
+  expect(g.spent).toBe(0);
+  expect(root.getElementById('saved')!.textContent).toBe('Stats reset · 2 finished Gallery cards cleared');
 });

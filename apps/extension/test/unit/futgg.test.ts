@@ -5,7 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { handleFutggLineup, handleFutggSets, parseFutggHub, parseFutggPool, resetFutggCache } from '../../src/background/futgg.js';
+import { handleFutggLineup, handleFutggSets, parseFutggHub, parseFutggPool, parseFutggTags, resetFutggCache } from '../../src/background/futgg.js';
 import { setFetchImpl } from '../../src/lib/http.js';
 
 const tier = (grade: string, threshold: number, tokens: number, cost: number, peakPrice: number, totalScore: number, items: { eaId: number; price: number }[]) => ({
@@ -61,8 +61,19 @@ const POOL = {
   data: {
     setId: 90,
     items: [
-      { eaId: 243312, playerEaId: 243312, score: 60, overall: 74, rarityEaId: 0, rarityName: 'Rare', holographic: false, commonName: 'Dani Lorenzo', cardName: 'Lorenzo' },
+      { eaId: 243312, playerEaId: 243312, score: 60, overall: 74, rarityEaId: 0, rarityName: 'Rare', holographic: false, commonName: 'Dani Lorenzo', cardName: 'Lorenzo', nationEaId: 45, clubEaId: 573, leagueEaId: 54, positions: ['CM'], weakFoot: 3, skillMoves: 2 },
       { eaId: 50_574_721, playerEaId: 243_073, score: 225, overall: 76, rarityEaId: 3, rarityName: 'Team of the week', holographic: true, commonName: '', cardName: 'Kevin' },
+      // On the Set's card list, not in the lineup.
+      { eaId: 74_554, playerEaId: 74_554, score: 100, overall: 76, rarityEaId: 0, rarityName: 'Rare', holographic: false, commonName: 'Einar Galilea', nationEaId: 45, clubEaId: 573, leagueEaId: 54, positions: ['CB'], weakFoot: 3, skillMoves: 2 },
+    ],
+  },
+};
+
+const SET_PAGE = {
+  data: {
+    tags: [
+      { id: 8, name: 'Same Club', tiers: [{ minItems: 5, bonus: 1 }, { minItems: 10, bonus: 2 }], rules: [{ target: 'ATTRIBUTE', type: 'MAX_COUNT_ALL_SAME', attribute: 'CLUB', values: ['0'] }] },
+      { id: 7, name: 'Golden', tiers: [{ minItems: 5, bonus: 1 }], rules: [{ target: 'ATTRIBUTE', type: 'COUNT', attribute: 'LEVEL', values: ['gold'] }] },
     ],
   },
 };
@@ -109,28 +120,62 @@ describe('parseFutggHub', () => {
   });
 });
 
+describe('parseFutggTags', () => {
+  it('reads each tag with its one rule, and nothing when a tag does not read', () => {
+    expect(parseFutggTags(SET_PAGE)).toHaveLength(2);
+    expect(parseFutggTags({ data: { tags: [{ id: 1, name: 'Two rules', tiers: [], rules: [{}, {}] }] } })).toBeNull();
+    expect(parseFutggTags({ data: {} })).toBeNull();
+  });
+});
+
 describe('handleFutggSets / handleFutggLineup', () => {
   it("asks this game's fut.gg Gallery once, and names the lineup's cards from the Set's card list", async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-10-21T08:00:00Z'));
     const urls: string[] = [];
-    serve(urls, { '/api/fut/gallery/fc27/hub/': HUB, '/api/fut/gallery/fc27/sets/90/pool/': POOL });
+    serve(urls, { '/api/fut/gallery/fc27/hub/': HUB, '/api/fut/gallery/fc27/sets/90/pool/': POOL, '/api/fut/gallery/fc27/sets/laliga/malaga-cf/': SET_PAGE });
     expect((await handleFutggSets()).sets!.map((s) => s.name)).toEqual(['Malaga CF', 'Granada CF']);
     const { lineup } = await handleFutggLineup({ setId: 90, grade: 'S' });
     expect(lineup).toEqual({
       set: expect.objectContaining({ id: 90, name: 'Malaga CF' }),
       grade: 'S',
       cards: [
-        { resourceId: 243312, playerId: 243312, name: 'Dani Lorenzo', rating: 74, rarity: 0, version: 'Rare', holographic: false, score: 60, price: 3_100 },
-        // No common name: its card name.
+        {
+          resourceId: 243312,
+          playerId: 243312,
+          name: 'Dani Lorenzo',
+          rating: 74,
+          rarity: 0,
+          version: 'Rare',
+          holographic: false,
+          score: 60,
+          price: 3_100,
+          nation: 45,
+          club: 573,
+          league: 54,
+          positions: ['CM'],
+          weakFoot: 3,
+          skillMoves: 2,
+        },
+        // No common name: its card name. Nothing known for its tags.
         { resourceId: 50_574_721, playerId: 243_073, name: 'Kevin', rating: 76, rarity: 3, version: 'Team of the week', holographic: true, score: 225, price: 1_400 },
       ],
       // eaId 999 is not on the Set's card list.
       missing: 1,
+      // The Set's other cards, for owned ones to stand in.
+      others: [expect.objectContaining({ resourceId: 74_554, name: 'Einar Galilea', price: 0, club: 573 })],
+      tags: [
+        { id: 8, name: 'Same Club', tiers: [{ minItems: 5, bonus: 1 }, { minItems: 10, bonus: 2 }], rule: { type: 'MAX_COUNT_ALL_SAME', attribute: 'CLUB', values: ['0'] } },
+        { id: 7, name: 'Golden', tiers: [{ minItems: 5, bonus: 1 }], rule: { type: 'COUNT', attribute: 'LEVEL', values: ['gold'] } },
+      ],
     });
-    // Reused: one hub and one pool request for all of it.
+    // Reused: one hub, one pool and one Set page request for all of it.
     await handleFutggLineup({ setId: 90, grade: 'A' });
-    expect(urls).toEqual(['https://www.fut.gg/api/fut/gallery/fc27/hub/', 'https://www.fut.gg/api/fut/gallery/fc27/sets/90/pool/']);
+    expect(urls).toEqual([
+      'https://www.fut.gg/api/fut/gallery/fc27/hub/',
+      'https://www.fut.gg/api/fut/gallery/fc27/sets/90/pool/',
+      'https://www.fut.gg/api/fut/gallery/fc27/sets/laliga/malaga-cf/',
+    ]);
   });
 
   it('is null when fut.gg fails, blocks, or has no lineup for the grade', async () => {

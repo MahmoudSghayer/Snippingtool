@@ -31,14 +31,20 @@
  * each card by its exact id (`exact`), so a holographic copy or another
  * version at the same rating, which scores differently, is never bought in
  * its place. Cards the club already holds are marked `owned` (EA's club
- * search, `markOwned`) and not bought.
+ * search, `markOwned`) and not bought, and a player the club holds that is
+ * not in the lineup stands in for one that is when the Set still makes its
+ * grade (`planFutggSwaps`, scored as fut.gg scores it: gallery-score.ts).
+ * A Set whose cards are all collected is marked completed (`completed`):
+ * never offered again, and its cards still to buy are left alone.
  */
-import { GALLERY_GRADES, GALLERY_LIMITS, MIN_SALE_PRICE, MIN_START_PRICE, stepPrice } from '@sl/shared';
+import { GALLERY_LIMITS, MIN_SALE_PRICE, MIN_START_PRICE, stepPrice } from '@sl/shared';
 
 import { fold, searchPlayers } from '../model/catalog.js';
 
+import { galleryScore } from './gallery-score.js';
+
 import type { CatalogOption, CatalogPlayer } from '../model/catalog.js';
-import type { FutggLineup, FutggSetSummary, FutggTier, GalleryCard, GallerySet, GalleryState } from '@sl/shared';
+import type { FutggCard, FutggLineup, FutggSetSummary, FutggTier, GalleryCard, GalleryGrade, GallerySet, GalleryState } from '@sl/shared';
 
 /** How long Gallery mode looks for a card under the market price before it
  * buys the cheapest listed. */
@@ -189,15 +195,26 @@ export function parseGalleryList(
   return { cards, problems };
 }
 
-/** The next card to buy, or null once every card is done. */
-export function nextGalleryCard(state: GalleryState): GalleryCard | null {
-  return state.cards.find((c) => c.status === 'todo') ?? null;
+/** Whether a card is still wanted: not when every fut.gg Set it is on is
+ * marked completed. */
+export function galleryCardNeeded(card: GalleryCard, state: GalleryState): boolean {
+  const done = state.completed;
+  return !(done && done.length > 0 && card.setIds && card.setIds.length > 0 && card.setIds.every((id) => done.includes(id)));
 }
 
-/** How many cards are at each step. */
-export function gallerySummary(state: GalleryState): Record<GalleryCard['status'], number> & { total: number } {
-  const counts = { todo: 0, bought: 0, club: 0, listed: 0, skipped: 0, owned: 0, total: state.cards.length };
-  for (const c of state.cards) counts[c.status]++;
+/** The next card to buy, or null once every card is done. */
+export function nextGalleryCard(state: GalleryState): GalleryCard | null {
+  return state.cards.find((c) => c.status === 'todo' && galleryCardNeeded(c, state)) ?? null;
+}
+
+/** How many cards are at each step (`parked`: still to buy, but only for
+ * Sets marked completed). */
+export function gallerySummary(state: GalleryState): Record<GalleryCard['status'], number> & { total: number; parked: number } {
+  const counts = { todo: 0, bought: 0, club: 0, listed: 0, skipped: 0, owned: 0, parked: 0, total: state.cards.length };
+  for (const c of state.cards) {
+    if (c.status === 'todo' && !galleryCardNeeded(c, state)) counts.parked++;
+    else counts[c.status]++;
+  }
   return counts;
 }
 
@@ -235,23 +252,80 @@ export function pickResourceId(matches: readonly { resourceId: number }[], playe
 
 // ---- fut.gg Sets -------------------------------------------------------------
 
-/** The grade Nova loads a fut.gg Set's lineup for: the best one fut.gg's
- * solver reaches (its last tier). Null: fut.gg has no lineup for the Set. */
-export function futggBestTier(set: FutggSetSummary): FutggTier | null {
-  const tiers = set.tiers.filter((t) => t.cards > 0);
-  return tiers.length > 0 ? tiers[tiers.length - 1]! : null;
+export interface FutggChoiceGroup {
+  /** fut.gg's category ("Premier League / Barclays WSL"). */
+  category: string;
+  choices: { set: FutggSetSummary; tier: FutggTier }[];
 }
 
-/** The Sets the picker offers, cheapest first: with `sOnly`, only those
- * whose best grade is S. A Set with nothing to buy is left out. */
-export function futggSetChoices(sets: readonly FutggSetSummary[], sOnly: boolean): { set: FutggSetSummary; tier: FutggTier }[] {
-  const out: { set: FutggSetSummary; tier: FutggTier }[] = [];
+/** The Sets the picker offers for a grade: those fut.gg has a lineup for at
+ * that grade (with something to buy), by fut.gg's categories in fut.gg's
+ * order, cheapest first in each. */
+export function futggSetChoices(sets: readonly FutggSetSummary[], grade: GalleryGrade): FutggChoiceGroup[] {
+  const groups = new Map<string, FutggChoiceGroup>();
   for (const set of sets) {
-    const tier = futggBestTier(set);
-    if (!tier || (sOnly && tier.grade !== 'S')) continue;
-    out.push({ set, tier });
+    const tier = set.tiers.find((t) => t.grade === grade && t.cards > 0);
+    if (!tier) continue;
+    const group = groups.get(set.category) ?? { category: set.category, choices: [] };
+    group.choices.push({ set, tier });
+    groups.set(set.category, group);
   }
-  return out.sort((a, b) => GALLERY_GRADES.indexOf(b.tier.grade) - GALLERY_GRADES.indexOf(a.tier.grade) || a.tier.cost - b.tier.cost || a.set.name.localeCompare(b.set.name));
+  for (const g of groups.values()) g.choices.sort((a, b) => a.tier.cost - b.tier.cost || a.set.name.localeCompare(b.set.name));
+  return [...groups.values()];
+}
+
+export interface FutggPlan {
+  /** The lineup to collect: fut.gg's, with owned players standing in. */
+  cards: FutggCard[];
+  swaps: { out: FutggCard; in: FutggCard }[];
+  /** Its score (fut.gg's when nothing was swapped). */
+  score: number;
+  /** Whether the Set's score could be worked out as fut.gg works it out
+   * (without that, nothing is swapped). */
+  scored: boolean;
+}
+
+/**
+ * fut.gg's lineup with the club's own players standing in for cards still
+ * to buy, dearest first. A player stands in only when he is on the Set's
+ * card list, the club holds him (`owned`), he scores at least what the card
+ * he replaces scores, and the Set still makes its grade with him — scored
+ * as fut.gg scores it, bonus tags included (gallery-score.ts). That score is
+ * trusted only when it gives fut.gg's own score for fut.gg's lineup; when it
+ * does not (or a tag's rule is unknown), nothing is swapped.
+ */
+export function planFutggSwaps(lineup: FutggLineup, owned: ReadonlySet<number>): FutggPlan {
+  const tier = lineup.set.tiers.find((t) => t.grade === lineup.grade);
+  const plain: FutggPlan = { cards: lineup.cards, swaps: [], score: tier?.score ?? 0, scored: false };
+  if (!tier || !lineup.tags || lineup.missing > 0) return plain;
+  const score = (cards: readonly FutggCard[]): number | null => {
+    try {
+      return galleryScore(cards, lineup.tags!);
+    } catch {
+      return null;
+    }
+  };
+  if (score(lineup.cards) !== tier.score) return plain;
+  const plan: FutggPlan = { ...plain, scored: true };
+  const standIns = (lineup.others ?? []).filter((c) => owned.has(c.resourceId)).sort((a, b) => b.score - a.score);
+  const toBuy = lineup.cards.filter((c) => !owned.has(c.resourceId)).sort((a, b) => b.price - a.price);
+  const used = new Set<number>();
+  let cards = [...lineup.cards];
+  for (const out of toBuy) {
+    for (const standIn of standIns) {
+      if (used.has(standIn.resourceId) || standIn.score < out.score) continue;
+      const trial = cards.map((c) => (c === out ? standIn : c));
+      const s = score(trial);
+      if (s == null || s < tier.threshold) continue;
+      cards = trial;
+      used.add(standIn.resourceId);
+      plan.swaps.push({ out, in: standIn });
+      plan.score = s;
+      break;
+    }
+  }
+  plan.cards = cards;
+  return plan;
 }
 
 export interface AddedLineup {
@@ -260,6 +334,10 @@ export interface AddedLineup {
    * Set's: one card counts for several Sets). */
   added: number;
   already: number;
+  /** Of the cards added, those the club holds (not bought), and the club's
+   * players standing in for lineup cards. */
+  owned: number;
+  swaps: FutggPlan['swaps'];
   problems: string[];
 }
 
@@ -271,29 +349,37 @@ export interface AddedLineup {
  * resort (`guide`). A card the list holds already (another Set's, or this Set
  * loaded before) keeps its progress and counts for this Set too.
  */
-export function addFutggLineup(state: GalleryState, lineup: FutggLineup, rarities: readonly CatalogOption[]): AddedLineup {
+export function addFutggLineup(
+  state: GalleryState,
+  lineup: FutggLineup,
+  rarities: readonly CatalogOption[],
+  owned: ReadonlySet<number> = new Set(),
+): AddedLineup {
   const problems: string[] = [];
   const set = lineup.set;
   const tier = set.tiers.find((t) => t.grade === lineup.grade);
   const sets = (state.sets ?? []).filter((s) => s.id !== set.id);
-  if (!tier) return { state, added: 0, already: 0, problems: [`${set.name}: fut.gg has no grade ${lineup.grade} lineup`] };
-  if (sets.length >= GALLERY_LIMITS.sets) return { state, added: 0, already: 0, problems: [`The list holds at most ${GALLERY_LIMITS.sets} Sets`] };
+  const none = { state, added: 0, already: 0, owned: 0, swaps: [] };
+  if (!tier) return { ...none, problems: [`${set.name}: fut.gg has no grade ${lineup.grade} lineup`] };
+  if (sets.length >= GALLERY_LIMITS.sets) return { ...none, problems: [`The list holds at most ${GALLERY_LIMITS.sets} Sets`] };
+  const plan = planFutggSwaps(lineup, owned);
   const entry: GallerySet = {
     id: set.id,
     name: set.name,
     path: set.path,
     grade: lineup.grade,
     threshold: tier.threshold,
-    score: tier.score,
+    score: plan.score,
     tokens: tier.tokens,
-    cost: tier.cost,
+    cost: tier.cost - plan.swaps.reduce((sum, x) => sum + x.out.price, 0),
   };
   const rarityIds = new Set(rarities.map((r) => r.id));
   const cards = state.cards.map((c) => ({ ...c }));
   const byKey = new Map(cards.map((c) => [c.key, c]));
   let added = 0;
   let already = 0;
-  for (const f of lineup.cards) {
+  let ownedCount = 0;
+  for (const f of plan.cards) {
     const key = galleryKey(f.playerId, f.rating, undefined, f.resourceId);
     const held = byKey.get(key);
     if (held) {
@@ -317,7 +403,7 @@ export function addFutggLineup(state: GalleryState, lineup: FutggLineup, raritie
       playerId: f.playerId,
       resourceId: f.resourceId,
       exact: true,
-      status: 'todo',
+      status: owned.has(f.resourceId) ? 'owned' : 'todo',
       set: set.name.slice(0, GALLERY_LIMITS.setLength),
       setIds: [set.id],
       score: f.score,
@@ -329,13 +415,76 @@ export function addFutggLineup(state: GalleryState, lineup: FutggLineup, raritie
     cards.push(card);
     byKey.set(key, card);
     added++;
+    if (card.status === 'owned') ownedCount++;
   }
   if (lineup.missing > 0) {
     problems.push(
       `${set.name}: fut.gg does not describe ${lineup.missing} of its lineup ${lineup.missing === 1 ? 'card' : 'cards'}, so ${lineup.missing === 1 ? 'it was' : 'they were'} left out and the Set may miss grade ${lineup.grade}`,
     );
   }
-  return { state: { ...state, cards, sets: [...sets, entry] }, added, already, problems };
+  return { state: { ...state, cards, sets: [...sets, entry] }, added, already, owned: ownedCount, swaps: plan.swaps, problems };
+}
+
+/** The card ids the club should be asked about for these lineups: every
+ * lineup card first, then each Set's other cards by score, at most `max`. */
+export function futggClubIds(lineups: readonly FutggLineup[], max = 100): number[] {
+  const ids = new Set<number>();
+  for (const l of lineups) for (const c of l.cards) if (ids.size < max) ids.add(c.resourceId);
+  for (const l of lineups) for (const c of l.others ?? []) if (ids.size < max) ids.add(c.resourceId);
+  return [...ids];
+}
+
+/** Marks every fut.gg Set whose cards are all collected (in the club,
+ * listed, or owned already) as completed. Returns the Sets it marked. */
+export function markCompletedSets(state: GalleryState): GallerySet[] {
+  const done = new Set(state.completed ?? []);
+  const marked: GallerySet[] = [];
+  for (const set of state.sets ?? []) {
+    if (done.has(set.id)) continue;
+    const mine = state.cards.filter((c) => c.setIds?.includes(set.id));
+    if (mine.length === 0 || !mine.every((c) => c.status === 'owned' || c.status === 'club' || c.status === 'listed')) continue;
+    done.add(set.id);
+    marked.push(set);
+  }
+  if (marked.length > 0) state.completed = [...done].slice(-GALLERY_LIMITS.completed);
+  return marked;
+}
+
+/**
+ * The list with what is finished cleared away (Reset stats): the cards that
+ * are done (listed, in the club, or left out for a completed Set) and that
+ * no Set in progress counts, the cards bought on an earlier page load that
+ * Nova can no longer finish, and the completed Sets (they stay marked
+ * completed, so the picker still does not offer them). Cards still to buy,
+ * the cards of Sets in progress and the cards Nova is still finishing stay.
+ * What the list spent goes back to 0.
+ */
+export function clearFinishedGallery(state: GalleryState): GalleryState {
+  const marked: GalleryState = { ...state, cards: state.cards.map((c) => ({ ...c })) };
+  markCompletedSets(marked);
+  const done = new Set(marked.completed ?? []);
+  const inProgress = new Set((marked.sets ?? []).filter((s) => !done.has(s.id)).map((s) => s.id));
+  const cards = marked.cards.filter((c) => {
+    if (c.setIds?.some((id) => inProgress.has(id))) return true;
+    if (c.status === 'todo' || c.status === 'skipped') return galleryCardNeeded(c, marked);
+    if (c.status === 'bought' || c.status === 'club') return c.tradeId !== undefined;
+    return false;
+  });
+  const sets = (marked.sets ?? []).filter((s) => inProgress.has(s.id));
+  const next: GalleryState = { ...marked, cards, spent: 0 };
+  if (sets.length > 0) next.sets = sets;
+  else delete next.sets;
+  return next;
+}
+
+/** The list with a fut.gg Set marked completed, or not. */
+export function setCompleted(state: GalleryState, setId: number, completed: boolean): GalleryState {
+  const ids = (state.completed ?? []).filter((id) => id !== setId);
+  if (completed) ids.push(setId);
+  const next: GalleryState = { ...state };
+  if (ids.length > 0) next.completed = ids.slice(-GALLERY_LIMITS.completed);
+  else delete next.completed;
+  return next;
 }
 
 /** The list without a fut.gg Set: its cards go unless another Set on the
@@ -366,7 +515,7 @@ export function removeFutggSet(state: GalleryState, setId: number): GalleryState
 export function clubCheckIds(state: GalleryState, max = 100): number[] {
   const ids = new Set<number>();
   for (const c of state.cards) {
-    if (!c.exact || c.resourceId === undefined || (c.status !== 'todo' && c.status !== 'skipped')) continue;
+    if (!c.exact || c.resourceId === undefined || (c.status !== 'todo' && c.status !== 'skipped') || !galleryCardNeeded(c, state)) continue;
     ids.add(c.resourceId);
     if (ids.size >= max) break;
   }

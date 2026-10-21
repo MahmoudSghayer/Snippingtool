@@ -97,6 +97,21 @@ describe('fut.gg Sets on the list', () => {
     expect(galleryStateSchema.parse(state)).toEqual(state);
   });
 
+  it("takes a card's unfinished trade and the Sets marked completed", () => {
+    const state = {
+      budget: 100_000,
+      spent: 1_300,
+      cards: [{ ...exact, status: 'club', price: 1_300, tradeId: '512345678901' }],
+      sets: [set],
+      completed: [54, 90],
+    };
+    expect(galleryStateSchema.parse(state)).toEqual(state);
+    expect(galleryStateSchema.safeParse({ ...state, completed: [0] }).success).toBe(false);
+    expect(
+      galleryStateSchema.safeParse({ ...state, cards: [{ ...exact, tradeId: '' }] }).success,
+    ).toBe(false);
+  });
+
   it('refuses a Set path that is not a fut.gg Set page, or an unknown grade', () => {
     const ok = { budget: 100_000, spent: 0, cards: [exact] };
     expect(
@@ -145,6 +160,33 @@ describe('fut.gg Sets on the list', () => {
         },
       ],
       missing: 0,
+      others: [
+        {
+          resourceId: 74554,
+          playerId: 74554,
+          name: 'Einar Galilea',
+          rating: 76,
+          rarity: 0,
+          version: 'Rare',
+          holographic: false,
+          score: 100,
+          price: 0,
+          nation: 45,
+          club: 573,
+          league: 54,
+          positions: ['CB'],
+          weakFoot: 3,
+          skillMoves: 2,
+        },
+      ],
+      tags: [
+        {
+          id: 8,
+          name: 'Same Club',
+          tiers: [{ minItems: 5, bonus: 1 }],
+          rule: { type: 'MAX_COUNT_ALL_SAME', attribute: 'CLUB', values: ['0'] },
+        },
+      ],
     };
     expect(futggLineupSchema.parse(lineup)).toEqual(lineup);
     expect(futggLineupSchema.safeParse({ ...lineup, grade: 'SS' }).success).toBe(false);
