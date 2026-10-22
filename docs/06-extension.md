@@ -987,9 +987,16 @@ one the page opens on in Gallery mode, "3/20" on it) lists every card with
 its step, the price it paid and the price it listed at, the one being bought
 marked "Buying now", grouped: To buy, On the way to the market, Skipped,
 Done; its first line sums the list up ("12 to buy · 6 listed
-· 0 on the way · 2 skipped · spent 41,200 of 100,000"). Buys and sales are
-reported like any other (`onAttempt` / `onTrade`), so the trader report
-shows them.
+· 0 on the way · 2 skipped · spent 41,200 of 100,000"). A group with more
+than `GALLERY_FEED_GROUP_MAX` cards shows that many and a "+N more" line (the
+group header keeps the true count), so a list of many Sets stays quick to
+scroll. A Set counts a card as collected (its "X of Y collected", and what
+marks the Set completed) only once the card is through the club — in the
+club, listed, or owned already; a card merely bought, not yet in the club,
+is still "on the way", so it holds the Set short of complete until it lands
+there (then the Set is marked completed at once, even if listing it fails).
+Buys and sales are reported like any other (`onAttempt` / `onTrade`), so the
+trader report shows them.
 
 **The page is laid out like EA's "Search the Transfer Market" screen**: a
 back arrow and title on EA's navy bar, the pitch artwork behind two floating

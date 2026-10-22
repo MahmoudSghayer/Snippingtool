@@ -479,6 +479,21 @@ describe('fut.gg Sets on the list', () => {
     ]);
   });
 
+  it('counts a card collected only once it is through the club: bought does not count, club/listed/owned do', () => {
+    const g = two();
+    // card0 is shared by both Sets; card1 'Bought one' is Malaga's only.
+    g.cards[0]!.status = 'club';
+    g.cards[1]!.status = 'bought';
+    expect(gallerySetProgress(g).map((p) => [p.set.name, p.done])).toEqual([
+      ['Malaga CF', 1],
+      ['Frosinone', 1],
+    ]);
+    // Listed by hand (or by Nova) and it counts; so does a Set complete now.
+    g.cards[1]!.status = 'listed';
+    expect(gallerySetProgress(g).find((p) => p.set.name === 'Malaga CF')!.done).toBe(2);
+    expect(markCompletedSets(g).map((x) => x.name)).toEqual(['Malaga CF']);
+  });
+
   it('keys an exact card by its id', () => {
     expect(galleryKey(276_695, 80, undefined, 67_385_559)).toBe('276695:80#67385559');
   });

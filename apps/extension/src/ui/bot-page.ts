@@ -449,6 +449,12 @@ const GALLERY_STATUS: Record<GalleryCard['status'], string> = {
   owned: 'In your club',
 };
 
+/** Most rows the Gallery feed draws per group (To buy / On the way /
+ * Skipped / Done): a list of many Sets can run to hundreds of cards, and
+ * drawing them all made the feed slow to scroll and to redraw. The group
+ * header still shows the true count; the rest are a "+N more" line. */
+const GALLERY_FEED_GROUP_MAX = 60;
+
 /** Under the Buy Now price in Bid mode: what the max price means there. */
 const BID_MAX_HINT =
   "In Bid mode, Max is the most Nova AI bids for this player. When a card's Buy Now price is at or under it, Nova AI buys it with Buy Now instead.";
@@ -590,7 +596,7 @@ const CSS = `
   .g-budget input { width: 100%; min-width: 0; height: 44px; padding: 0 12px; border-radius: 4px; border: 1px solid var(--ea-input-line); background: var(--ea-input); color: var(--ea-text); font: inherit; font-size: 16px; }
   .g-sum { margin-top: 8px; font-size: 13px; color: var(--ea-text-2); }
   .g-sonly { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ea-text-2); cursor: pointer; }
-  .g-sets { margin-top: 10px; max-height: 280px; overflow-y: auto; border: 1px solid var(--ea-line); border-radius: 4px; }
+  .g-sets { margin-top: 10px; max-height: 280px; overflow-y: auto; border: 1px solid var(--ea-line); border-radius: 4px; contain: layout paint; }
   .g-set { display: grid; grid-template-columns: auto 1fr auto auto auto; align-items: center; gap: 8px; padding: 7px 10px; font-size: 13px; border-bottom: 1px solid var(--ea-line); cursor: pointer; }
   .g-set:last-child { border-bottom: 0; }
   .g-set:hover { background: var(--ea-row-hover); }
@@ -606,6 +612,7 @@ const CSS = `
   .g-sethead { font-size: 13px; padding: 2px 6px 8px; color: var(--ea-text-2); }
   .g-sethead.done { color: var(--ea-success); }
   .g-group { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--ea-muted); padding: 10px 6px 6px; }
+  .g-more { font-size: 12px; color: var(--ea-muted); padding: 4px 6px 2px; }
   .g-grades { display: inline-flex; gap: 4px; }
   .g-grade { min-width: 34px; height: 32px; border-radius: 6px; border: 1px solid var(--ea-line); background: var(--ea-control); color: var(--ea-text); font-weight: 700; cursor: pointer; }
   .g-grade.on { border-color: var(--ea-mint, var(--ea-focus)); background: var(--ea-float); }
@@ -850,7 +857,9 @@ const CSS = `
   .feeds { min-height: 0; display: grid; grid-template-columns: 1.4fr 1fr; gap: 12px; }
   .feed { min-height: 0; display: flex; flex-direction: column; background: var(--ea-panel); border-radius: var(--ea-radius-lg); overflow: hidden; }
   .feed h3 { margin: 0; padding: 12px 16px; font-size: 18px; line-height: 20px; font-weight: 500; color: var(--ea-muted); border-bottom: 1px solid var(--ea-line); }
-  .feed .list { flex: 1; overflow-y: auto; padding: 8px; }
+  /* contain: a feed can hold hundreds of rows; keeping its scroll's repaint
+     to itself stops the panel's layered background being redrawn each frame. */
+  .feed .list { flex: 1; overflow-y: auto; padding: 8px; contain: layout paint; }
   .log { display: flex; align-items: center; gap: 10px; padding: 8px 12px; margin-bottom: 6px; border-radius: var(--ea-radius); background: var(--ea-surface); border-left: 3px solid var(--ea-line-strong); }
   .log.bought { border-left-color: var(--ea-success); } .log.failed { border-left-color: var(--ea-danger); } .log.blocked { border-left-color: var(--ea-warning); } .log.listed { border-left-color: var(--ea-accent); }
   .log.won { border-left-color: var(--ea-success); } .log.bid, .log.moved { border-left-color: var(--ea-accent); } .log.dropped { border-left-color: var(--ea-warning); }
@@ -3022,7 +3031,16 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     ];
     const rows = groups
       .filter((x) => x.cards.length > 0)
-      .map((x) => `<div class="g-group">${esc(x.title)} · ${x.cards.length}</div>${x.cards.map((c) => galleryRowHtml(c, c.key === buying, running, g)).join('')}`)
+      .map((x) => {
+        // A long list (hundreds of cards over many Sets) is capped so the feed
+        // stays quick to scroll and to redraw; the group header keeps the true
+        // count. The card Nova is on is the first still to buy, so it is shown.
+        const shown = x.cards.slice(0, GALLERY_FEED_GROUP_MAX);
+        const more = x.cards.length - shown.length;
+        const body = shown.map((c) => galleryRowHtml(c, c.key === buying, running, g)).join('');
+        const extra = more > 0 ? `<div class="g-more">+${fmt(more)} more</div>` : '';
+        return `<div class="g-group">${esc(x.title)} · ${fmt(x.cards.length)}</div>${body}${extra}`;
+      })
       .join('');
     return `<div class="bids-head">${esc(gallerySumText(g))}</div>${sets}${rows}`;
   }
