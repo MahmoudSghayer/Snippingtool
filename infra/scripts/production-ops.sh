@@ -380,6 +380,32 @@ SELECT coalesce(c.player, s.resource_id) AS player, count(*) AS attempts,
                       WHERE cards.resource_id = s.resource_id LIMIT 1) c ON true
  WHERE s.user_id = :'uid' AND s.occurred_at > now() - make_interval(hours => :hours)
  GROUP BY 1 ORDER BY 2 DESC LIMIT 15;
+\echo
+\echo '== Gallery mode: the account''s saved list (not a snapshot in time; the whole current list)'
+\echo '   collected = a card that is through your club (in the club, listed, or owned already); to_buy = still to find/buy; skipped = none listed yet'
+WITH g AS (SELECT state AS st FROM user_gallery WHERE user_id = :'uid'),
+     cd AS (SELECT jsonb_array_elements(coalesce((SELECT st FROM g) -> 'cards', '[]'::jsonb)) AS c),
+     st AS (SELECT jsonb_array_elements(coalesce((SELECT st FROM g) -> 'sets', '[]'::jsonb)) AS s),
+     cp AS (SELECT jsonb_array_elements_text(coalesce((SELECT st FROM g) -> 'completed', '[]'::jsonb)) AS cid)
+SELECT s ->> 'name' AS set, s ->> 'grade' AS grade,
+       (SELECT count(*) FROM cd WHERE c -> 'setIds' @> to_jsonb((s ->> 'id')::bigint) AND c ->> 'status' IN ('owned', 'club', 'listed')) AS collected,
+       (SELECT count(*) FROM cd WHERE c -> 'setIds' @> to_jsonb((s ->> 'id')::bigint)) AS total,
+       (SELECT count(*) FROM cd WHERE c -> 'setIds' @> to_jsonb((s ->> 'id')::bigint) AND c ->> 'status' = 'todo') AS to_buy,
+       (SELECT count(*) FROM cd WHERE c -> 'setIds' @> to_jsonb((s ->> 'id')::bigint) AND c ->> 'status' = 'skipped') AS skipped,
+       EXISTS (SELECT 1 FROM cp WHERE cid = s ->> 'id') AS completed
+  FROM st ORDER BY completed, set;
+\echo '== Gallery list totals'
+WITH g AS (SELECT state AS st FROM user_gallery WHERE user_id = :'uid'),
+     cd AS (SELECT jsonb_array_elements(coalesce((SELECT st FROM g) -> 'cards', '[]'::jsonb)) AS c)
+SELECT jsonb_array_length(coalesce((SELECT st FROM g) -> 'sets', '[]'::jsonb)) AS sets_on_list,
+       jsonb_array_length(coalesce((SELECT st FROM g) -> 'completed', '[]'::jsonb)) AS sets_completed,
+       count(*) FILTER (WHERE c ->> 'status' IN ('owned', 'club', 'listed')) AS cards_collected,
+       count(*) FILTER (WHERE c ->> 'status' = 'todo') AS cards_to_buy,
+       count(*) FILTER (WHERE c ->> 'status' = 'skipped') AS cards_skipped,
+       count(*) AS cards_total,
+       (SELECT st FROM g) ->> 'spent' AS spent,
+       (SELECT st FROM g) ->> 'budget' AS budget
+  FROM cd;
 SQL
     print_encrypted_report "$work"
     ;;
