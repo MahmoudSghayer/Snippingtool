@@ -57,6 +57,7 @@ interface Opts {
   buyResult?: (tradeId: string) => ActionOutcome;
   clubResult?: () => ActionOutcome;
   moveResult?: () => ActionOutcome;
+  listResult?: () => ActionOutcome;
   noClub?: boolean;
   /** What EA's club says it holds of the cards asked about. Omitted: no
    * club read on this page. */
@@ -112,7 +113,7 @@ function setup(opts: Opts = {}) {
     list: async (tradeId, start, bin) => {
       h.lists.push([tradeId, start, bin]);
       h.calls.push(`list ${tradeId}`);
-      return { ok: true, signed: true, latencyMs: 5 };
+      return opts.listResult?.() ?? { ok: true, signed: true, latencyMs: 5 };
     },
     move: async (tradeId) => {
       h.calls.push(`move ${tradeId}`);
@@ -576,6 +577,22 @@ describe('Gallery mode — cards bought on an earlier run, and Sets done', () =>
     });
     h.sniper.start();
     await h.done();
+    expect(h.gallery().completed).toEqual([90]);
+    expect(h.log()).toContain('Gallery: Malaga CF is complete: every card is collected. Finish it in the game: Gallery, Malaga CF, Autocomplete, then Confirm Changes');
+  });
+
+  it('marks a Set completed when its last card lands in the club, even if listing it fails', async () => {
+    const set = { id: 90, name: 'Malaga CF', path: 'laliga/malaga-cf', grade: 'S' as const, threshold: 900, score: 908, tokens: 28, cost: 3_700 };
+    const h = setup({
+      gallery: { budget: 100_000, spent: 0, sets: [set], cards: [card({ exact: true, setIds: [90] }), card({ key: '200:85#200', playerId: 200, resourceId: 200, exact: true, setIds: [90], status: 'owned' })] },
+      results: () => [listing('t1', 3_700)],
+      // EA takes the card into the club but refuses every listing attempt.
+      listResult: () => ({ ok: false, signed: true, error: 'EA refused the listing', latencyMs: 5 }),
+    });
+    h.sniper.start();
+    await h.done();
+    // The card never reached `listed`, but it is in the club, so the Set is done.
+    expect(h.gallery().cards[0]!.status).toBe('club');
     expect(h.gallery().completed).toEqual([90]);
     expect(h.log()).toContain('Gallery: Malaga CF is complete: every card is collected. Finish it in the game: Gallery, Malaga CF, Autocomplete, then Confirm Changes');
   });

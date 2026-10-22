@@ -2525,6 +2525,10 @@ export class Sniper {
         job.step = 'move';
         job.tries = 0;
         this.addLog({ kind: 'moved', ...ids, message: 'Sent {card} to your club' });
+        // A card counts for its Set once it is in the club: a Set whose last
+        // card just landed there is complete now, even if listing it later
+        // fails — so check before the move/list steps, not only on `listed`.
+        this.noteCompletedSets();
       } else if (++job.tries >= COLLECT_TRIES || r.error === 'club_unsupported') {
         const why = clubMissReason(r.error);
         if (card) card.note = `Not sent to your club (${why}): check the Set counted it`.slice(0, 200);

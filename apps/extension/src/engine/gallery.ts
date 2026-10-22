@@ -573,8 +573,11 @@ export function markOwned(state: GalleryState, owned: readonly number[]): number
 
 export interface GallerySetProgress {
   set: GallerySet;
-  /** Lineup cards on the list, and those collected (in the club, bought,
-   * listed, or owned already). */
+  /** Lineup cards on the list, and those collected: a card counts only once
+   * it has been through the club (in the club, listed, or owned already) —
+   * the same statuses that complete a Set. A card merely bought, not yet in
+   * the club, is still on its way, so it is not counted (nor would it
+   * complete the Set). */
   cards: number;
   done: number;
   skipped: number;
@@ -591,7 +594,7 @@ export function gallerySetProgress(state: GalleryState): GallerySetProgress[] {
     return {
       set,
       cards: mine.length,
-      done: mine.filter((c) => c.status === 'owned' || c.status === 'bought' || c.status === 'club' || c.status === 'listed').length,
+      done: mine.filter((c) => c.status === 'owned' || c.status === 'club' || c.status === 'listed').length,
       skipped: skipped.length,
       skippedScore: skipped.reduce((sum, c) => sum + (c.score ?? 0), 0),
     };
