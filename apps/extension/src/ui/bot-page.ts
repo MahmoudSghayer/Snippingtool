@@ -597,7 +597,10 @@ const CSS = `
   .g-sum { margin-top: 8px; font-size: 13px; color: var(--ea-text-2); }
   .g-sonly { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ea-text-2); cursor: pointer; }
   .g-sets { margin-top: 10px; max-height: 280px; overflow-y: auto; border: 1px solid var(--ea-line); border-radius: 4px; contain: layout paint; }
-  .g-set { display: grid; grid-template-columns: auto 1fr auto auto auto; align-items: center; gap: 8px; padding: 7px 10px; font-size: 13px; border-bottom: 1px solid var(--ea-line); cursor: pointer; }
+  /* content-visibility: the picker lists every fut.gg Set (hundreds of rows);
+     this skips the layout and paint of the ones off screen, so scrolling a
+     long list costs only what is visible. */
+  .g-set { display: grid; grid-template-columns: auto 1fr auto auto auto; align-items: center; gap: 8px; padding: 7px 10px; font-size: 13px; border-bottom: 1px solid var(--ea-line); cursor: pointer; content-visibility: auto; contain-intrinsic-size: auto 34px; }
   .g-set:last-child { border-bottom: 0; }
   .g-set:hover { background: var(--ea-row-hover); }
   .g-set.added { color: var(--ea-muted); cursor: default; }
@@ -879,7 +882,9 @@ const CSS = `
   .feed .list[hidden] { display: none; }
   .bids-head { font-size: 13px; padding: 4px 6px 8px; color: var(--ea-text-2); }
   .bids-head .when { color: var(--ea-muted); }
-  .bidrow { display: flex; align-items: center; gap: 10px; padding: 8px 12px; margin-bottom: 6px; border-radius: var(--ea-radius); background: var(--ea-surface); border-left: 3px solid var(--ea-line-strong); }
+  /* content-visibility: the Gallery feed and the bids list can run to many
+     rows; skip the off-screen ones so the feed scrolls by what is visible. */
+  .bidrow { display: flex; align-items: center; gap: 10px; padding: 8px 12px; margin-bottom: 6px; border-radius: var(--ea-radius); background: var(--ea-surface); border-left: 3px solid var(--ea-line-strong); content-visibility: auto; contain-intrinsic-size: auto 56px; }
   .bidrow.leading { border-left-color: var(--ea-success); } .bidrow.outbid { border-left-color: var(--ea-danger); } .bidrow.pending { border-left-color: var(--ea-warning); }
   .bidrow .main { flex: 1; min-width: 0; }
   .bidrow .main b { font-weight: 500; }
