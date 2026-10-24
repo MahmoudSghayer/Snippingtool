@@ -864,7 +864,10 @@ const CSS = `
   /* contain: a feed can hold hundreds of rows; keeping its scroll's repaint
      to itself stops the panel's layered background being redrawn each frame. */
   .feed .list { flex: 1; overflow-y: auto; padding: 8px; contain: layout paint; }
-  .log { display: flex; align-items: center; gap: 10px; padding: 8px 12px; margin-bottom: 6px; border-radius: var(--ea-radius); background: var(--ea-surface); border-left: 3px solid var(--ea-line-strong); }
+  /* content-visibility: the log keeps up to 200 rows; skip the off-screen
+     ones so scrolling repaints only what is visible (as the bids/gallery
+     rows already do). */
+  .log { display: flex; align-items: center; gap: 10px; padding: 8px 12px; margin-bottom: 6px; border-radius: var(--ea-radius); background: var(--ea-surface); border-left: 3px solid var(--ea-line-strong); content-visibility: auto; contain-intrinsic-size: auto 44px; }
   .log.bought { border-left-color: var(--ea-success); } .log.failed { border-left-color: var(--ea-danger); } .log.blocked { border-left-color: var(--ea-warning); } .log.listed { border-left-color: var(--ea-accent); }
   .log.won { border-left-color: var(--ea-success); } .log.bid, .log.moved { border-left-color: var(--ea-accent); } .log.dropped { border-left-color: var(--ea-warning); }
   .log .main { flex: 1; min-width: 0; }
@@ -872,7 +875,7 @@ const CSS = `
   .log .sub { color: var(--ea-muted); font-size: 12px; }
   .pill { padding: 5px 10px; border-radius: var(--ea-radius); font-weight: 500; background: color-mix(in srgb, var(--ea-success) 16%, transparent); color: var(--ea-success); white-space: nowrap; }
   .pill.neg { background: color-mix(in srgb, var(--ea-danger) 16%, transparent); color: var(--ea-danger); }
-  .res { font-size: 13px; padding: 3px 6px; color: var(--ea-text-2); }
+  .res { font-size: 13px; padding: 3px 6px; color: var(--ea-text-2); content-visibility: auto; contain-intrinsic-size: auto 24px; }
   .res .when { color: var(--ea-muted); margin-right: 8px; }
   .res.item { display: flex; justify-content: space-between; color: var(--ea-text); background: var(--ea-surface); border-radius: 6px; margin: 2px 0; }
   .feeds.bids-open { grid-template-columns: 1fr 1.3fr; }
@@ -2845,6 +2848,17 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
 
   /** One frame: the ring, and the run bar's clock once a second. */
   let runClock = '';
+  /** Whether anything on the ring is moving: the bot is running, or a phase
+   * countdown is still in the future. Only then does the panel do per-frame
+   * work — idle, it does none, so opening it, scrolling and changing settings
+   * stay smooth. */
+  function ringLive(): boolean {
+    const sniper = deps.getSniper();
+    if (sniper?.isRunning()) return true;
+    const ends = sniper?.state?.phaseEndsAt ?? null;
+    return ends != null && ends > Date.now();
+  }
+
   function animate(): void {
     renderRing();
     const sniper = deps.getSniper();
@@ -2854,7 +2868,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       runClock = c;
       renderTop();
     }
-    ringFrame = requestAnimationFrame(animate);
+    ringFrame = ringLive() && !page.hidden ? requestAnimationFrame(animate) : null;
   }
 
   /** A buy's (or a won auction's) estimated profit, as a pill. */
@@ -3193,6 +3207,12 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       galleryDrawnRunning = running;
       renderGallery();
     }
+    // The ring is static while idle, so redraw it here (once per change)
+    // rather than every frame; and (re)start the per-frame loop only when
+    // something is actually moving (the bot is running or a phase is counting
+    // down).
+    renderRing();
+    if (ringLive() && ringFrame == null && !page.hidden) ringFrame = requestAnimationFrame(animate);
   }
 
   function queueRefresh(): void {
@@ -3380,7 +3400,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         renderTransferList();
         renderBids();
       }, 1_000);
-      ringFrame = requestAnimationFrame(animate);
+      // refreshLive() above already drew the ring and, if the bot is running,
+      // started the per-frame loop — so idle panels run no animation frame.
       openListeners.forEach((cb) => cb(true));
     },
     close() {
