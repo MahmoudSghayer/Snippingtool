@@ -11,7 +11,7 @@
  * buy-now price is one step of EA's grid from the card's last one, never
  * under EA's lowest; the starting bid one step under it, as auto-sell lists.
  */
-import { MIN_SALE_PRICE, MIN_START_PRICE, stepPrice } from '@sl/shared';
+import { breakEvenListPrice, MIN_SALE_PRICE, MIN_START_PRICE, stepPrice } from '@sl/shared';
 
 import type { ActionOutcome, AdapterClient } from './adapter-client.js';
 
@@ -28,6 +28,10 @@ export interface TransferToolsDeps {
   adapter: Pick<AdapterClient, 'clearSold' | 'relistAll' | 'unsold' | 'relist'>;
   sleep: (ms: number) => Promise<void>;
   random?: () => number;
+  /** What each card (EA's `itemId`) was bought for, from the trade
+   * lifecycle, so a step-lower relist never drops a card under what it cost.
+   * Cards it has no cost for are relisted as before. */
+  costOf?: (itemIds: string[]) => Promise<Record<string, number>>;
 }
 
 export interface ToolResult {
@@ -37,9 +41,12 @@ export interface ToolResult {
 }
 
 /** A card's new prices, `step` steps along EA's grid from its last buy-now
- * price. */
-export function relistPrices(buyNowPrice: number, step: RelistStep): { startPrice: number; buyNowPrice: number } {
-  const bin = Math.max(MIN_SALE_PRICE, stepPrice(buyNowPrice, step));
+ * price, but never below `floor` — the break-even price a card bought for a
+ * known cost must not be relisted under, so stepping lower can never list it
+ * at a guaranteed loss. `floor` 0 (the default, or a card with no known
+ * cost) puts no floor under it beyond EA's own lowest price. */
+export function relistPrices(buyNowPrice: number, step: RelistStep, floor = 0): { startPrice: number; buyNowPrice: number } {
+  const bin = Math.max(MIN_SALE_PRICE, floor, stepPrice(buyNowPrice, step));
   return { startPrice: Math.max(MIN_START_PRICE, stepPrice(bin, -1)), buyNowPrice: bin };
 }
 
@@ -84,16 +91,26 @@ export async function relistUnsold(
   const cards = unsold.filter((c) => c.buyNowPrice >= MIN_SALE_PRICE);
   if (cards.length === 0) return { ok: true, message: unsold.length === 0 ? 'No unsold cards to relist' : 'No unsold card has a buy-now price to step from' };
 
+  // Stepping lower must never list a card under what it cost: fetch each
+  // card's buy price and floor its new price at break-even (after EA's tax).
+  // Stepping at the same price or higher can never lose, so no floor is read.
+  const costs: Record<string, number> = step < 0 && deps.costOf ? await deps.costOf(cards.map((c) => c.itemId)).catch(() => ({})) : {};
+
   const random = deps.random ?? Math.random;
   const [low, high] = RELIST_GAP_MS;
   let listed = 0;
   let refused = 0;
+  let floored = 0;
   let inARow = 0;
   let lastRefusal: ActionOutcome | null = null;
   let done = 0;
   for (const card of cards) {
     if (done > 0) await deps.sleep(Math.round(low + random() * (high - low)));
-    const p = relistPrices(card.buyNowPrice, step);
+    const cost = costs[card.itemId];
+    const floor = cost != null && cost > 0 ? breakEvenListPrice(cost) : 0;
+    const stepped = Math.max(MIN_SALE_PRICE, stepPrice(card.buyNowPrice, step));
+    if (floor > stepped) floored++;
+    const p = relistPrices(card.buyNowPrice, step, floor);
     const r = await deps.adapter.relist(card.itemId, p.startPrice, p.buyNowPrice);
     done++;
     if (r.ok) {
@@ -109,6 +126,7 @@ export async function relistUnsold(
   }
 
   const parts = [`Relisted ${listed} of ${plural(cards.length, 'unsold card')} ${STEP_WORDS[step]}`];
+  if (floored > 0) parts.push(`${floored} kept at break-even so you do not sell under what ${floored === 1 ? 'it' : 'they'} cost`);
   if (refused > 0 && lastRefusal) parts.push(`EA refused ${refused}: ${why(lastRefusal)}`);
   if (done < cards.length) parts.push(`stopped after ${MAX_REFUSED_IN_A_ROW} refusals in a row`);
   const left = unsold.length - cards.length;

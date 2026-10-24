@@ -223,12 +223,19 @@ describe('Gallery mode — buying and listing', () => {
     h.sniper.start();
     await h.done();
     expect(h.buys.map(([id]) => id)).toEqual(['w1']);
+    // Hugo Ekitiké is never listed: Nova buys Florian Wirtz first, moving
+    // Ekitiké to the back each pass, and after GALLERY_MISS_CAP empty passes
+    // leaves it out (`skipped`) rather than searching for it forever — which
+    // is what used to pile empty searches up into an EA rate limit.
     expect(h.gallery().cards.map((c) => [c.name, c.status])).toEqual([
       ['Florian Wirtz', 'listed'],
-      ['Hugo Ekitiké', 'todo'],
+      ['Hugo Ekitiké', 'skipped'],
     ]);
-    expect(h.gallery().cards[1]!.note).toBe('none listed at this rating right now: Nova tries again after the other cards');
+    expect(h.gallery().cards[1]!.misses).toBe(3);
+    expect(h.gallery().cards[1]!.note).toContain('Not on the market after 3 tries');
+    // It did try the others first (moved the card to the back) before giving up.
     expect(h.log()).toContain('Gallery: none listed at this rating right now for {card} — trying again after the other cards');
+    expect(h.sniper.state.stopReason).toBe('gallery_done');
   });
 
   it("learns a special card's version with a look-only search, and never buys on that search", async () => {

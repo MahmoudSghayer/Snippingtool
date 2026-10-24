@@ -44,6 +44,9 @@ export const GALLERY_LIMITS = {
  *   listed, the price too far over the market, the budget).
  * - `owned`: already in the trader's club (EA's club said so): it counts
  *   for the Set as it is, so nothing is bought.
+ * - `sbc`: not on the transfer market — an SBC/Objective (or otherwise
+ *   untradeable) card the trader earns in the game, never bought and never
+ *   searched for, so it can never spin empty searches into an EA limit.
  */
 export const GALLERY_CARD_STATUSES = [
   'todo',
@@ -52,6 +55,7 @@ export const GALLERY_CARD_STATUSES = [
   'listed',
   'skipped',
   'owned',
+  'sbc',
 ] as const;
 export type GalleryCardStatus = (typeof GALLERY_CARD_STATUSES)[number];
 
@@ -98,6 +102,10 @@ export const galleryCardSchema = z
     listPrice: coins.optional(),
     /** Why it was skipped, or what went wrong after the buy. */
     note: z.string().max(GALLERY_LIMITS.noteLength).optional(),
+    /** How many passes the card came back with no listing: once it reaches
+     * the cap it is left out (`skipped`) rather than searched for again, so a
+     * card nobody lists can never spin endless searches into an EA limit. */
+    misses: z.number().int().min(0).max(100).optional(),
     /** The trade it was bought under, while its way to the club and the
      * market is not finished: a later Start on the same page load picks it
      * up again. */

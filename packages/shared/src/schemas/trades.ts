@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { MIN_SALE_PRICE } from '../coins.js';
+import { MIN_SALE_PRICE, stepPrice } from '../coins.js';
 
 import { granularitySchema } from './analytics.js';
 import { coinPriceSchema, MAX_COIN_PRICE, tradeTimestampSchema } from './ingest-bounds.js';
@@ -37,6 +37,21 @@ export const tradeItemIdSchema = z.string().min(1).max(64);
  * own price model (`apps/extension/src/model/prices.ts`) uses the same
  * constant for its pre-purchase margin estimates. */
 export const EA_TAX_RATE = 0.05;
+
+/** The lowest Buy Now price on EA's grid whose sale, after EA's tax, still
+ * brings back at least `cost` — the break-even floor a relist must not drop
+ * under, so a card is never re-listed at a guaranteed loss. (Selling at this
+ * price nets zero; anything lower loses coins once EA takes its cut.) */
+export function breakEvenListPrice(cost: number, taxRate: number = EA_TAX_RATE): number {
+  let bin = Math.max(MIN_SALE_PRICE, stepPrice(cost, 0));
+  // Walk up EA's grid until the after-tax proceeds cover the cost.
+  while (Math.floor(bin * (1 - taxRate)) < cost) {
+    const next = stepPrice(bin, 1);
+    if (next === bin) break; // EA's highest price
+    bin = next;
+  }
+  return bin;
+}
 
 export interface TradeProfit {
   /** Tax withheld on the sale, integer coins (rounded half-up). */

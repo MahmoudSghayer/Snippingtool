@@ -717,7 +717,16 @@ async function main(): Promise<void> {
     // bot lists, and every few minutes while it runs or the page is open
     // (lib/pile-refresh.ts). The list arrives through `onTradePile` above.
     const pileRefresher = createPileRefresher({ refresh: () => adapter.refreshPile() });
-    const transferTools = { adapter, sleep: (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)) };
+    const transferTools = {
+      adapter,
+      sleep: (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+      // What each unsold card cost, from the background's trade lifecycle, so a
+      // step-lower relist never lists a card under break-even (a sure loss).
+      costOf: async (itemIds: string[]): Promise<Record<string, number>> => {
+        const res = await send<{ costs: Record<string, number> }>('lifecycle.costs', { itemIds }).catch(() => null);
+        return res?.costs ?? {};
+      },
+    };
 
     const prepareSniper = async (fresh: boolean): Promise<void> => {
       if (sniper) {
