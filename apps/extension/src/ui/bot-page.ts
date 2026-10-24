@@ -447,6 +447,7 @@ const GALLERY_STATUS: Record<GalleryCard['status'], string> = {
   listed: 'Listed',
   skipped: 'Skipped',
   owned: 'In your club',
+  sbc: 'SBC/Objective',
 };
 
 /** Most rows the Gallery feed draws per group (To buy / On the way /
@@ -1228,6 +1229,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     let added = 0;
     let owned = 0;
     let swapped = 0;
+    let sbc = 0;
     let sets = 0;
     let cost = 0;
     let clubRead = false;
@@ -1244,6 +1246,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         g = r.state;
         added += r.added;
         owned += r.owned;
+        sbc += r.sbc;
         swapped += r.swaps.length;
         sets++;
         cost += r.state.sets?.find((x) => x.id === lineup.set.id)?.cost ?? 0;
@@ -1256,6 +1259,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       const left = g.budget - g.spent;
       const parts = [`${added} cards`];
       if (owned > 0) parts.push(`${owned} in your club already`);
+      if (sbc > 0) parts.push(`${sbc} SBC/Objective (not on the market — collect ${sbc === 1 ? 'it' : 'them'} in the game)`);
       if (swapped > 0) parts.push(`${swapped} swapped for players you own`);
       if (!clubRead) parts.push('your club was not checked');
       else if (owned === 0 && swapped === 0) parts.push('none in your club');
@@ -2950,6 +2954,24 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
    * results in Snipe mode. */
   let feedTab: 'results' | 'bids' | 'gallery' | null = null;
 
+  /** The Gallery feed's last-drawn signature: its rows cost real work to
+   * build and the feed can run to hundreds of cards, but the list only
+   * changes on a buy or a status change — not on the per-second bids tick or
+   * every search frame. So the feed is rebuilt only when this cheap signature
+   * (each card's status in order, the card being bought, spend and completed
+   * Sets) changes, which is what stops the panel juddering while the bot
+   * runs. The feed draws from each card's own name, so it never waits on the
+   * async name lookup the log and results feeds use. */
+  let gallerySig = '';
+
+  /** The cheap signature the Gallery feed is memoised on. */
+  function gallerySignature(g: GalleryState, running: boolean): string {
+    const buying = running ? (g.cards.find((c) => c.status === 'todo' && galleryCardNeeded(c, g))?.key ?? '') : '';
+    let statuses = '';
+    for (const c of g.cards) statuses += c.status[0];
+    return `${running ? 1 : 0}|${g.spent}|${g.cards.length}|${buying}|${(g.completed ?? []).join(',')}|${statuses}`;
+  }
+
   /** Bid mode's open bids (`Sniper.getActiveBids`): where each stands and
    * how long it has left, redrawn every second while the page is open. In
    * Gallery mode, its list's cards and where each one is. */
@@ -2971,7 +2993,14 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       if (countEl.textContent !== count) countEl.textContent = count;
       const sum = root.getElementById('g-sum');
       if (sum && sum.textContent !== gallerySumText(g)) sum.textContent = gallerySumText(g);
-      if (tab === 'gallery') setHtml($('gallery-feed'), galleryFeedHtml(g, sniper?.isRunning() ?? false));
+      if (tab === 'gallery') {
+        const running = sniper?.isRunning() ?? false;
+        const sig = gallerySignature(g, running);
+        if (sig !== gallerySig) {
+          gallerySig = sig;
+          setHtml($('gallery-feed'), galleryFeedHtml(g, running));
+        }
+      }
     }
     const view = sniper?.getActiveBids() ?? null;
     const count = view && view.bids.length > 0 ? `${view.bids.length}/${view.max}` : '';
@@ -3031,6 +3060,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     const groups: { title: string; cards: GalleryCard[] }[] = [
       { title: 'To buy', cards: g.cards.filter((c) => c.status === 'todo' && galleryCardNeeded(c, g)) },
       { title: 'On the way to the market', cards: g.cards.filter((c) => c.status === 'bought' || c.status === 'club') },
+      { title: 'SBC/Objective — collect in the game', cards: g.cards.filter((c) => c.status === 'sbc') },
       { title: 'Skipped', cards: g.cards.filter((c) => c.status === 'skipped') },
       { title: 'Done', cards: g.cards.filter((c) => c.status === 'listed' || c.status === 'owned' || (c.status === 'todo' && !galleryCardNeeded(c, g))) },
     ];

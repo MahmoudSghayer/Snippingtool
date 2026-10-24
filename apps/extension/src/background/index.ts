@@ -81,6 +81,7 @@ import {
   handleLifecycleBuy,
   handleLifecyclePile,
   handleLifecycleSessionPnl,
+  handleLifecycleCosts,
   handleLifecycleStats,
   handleLifecycleTodayPnl,
   LIFECYCLE_SEED_ALARM,
@@ -171,6 +172,7 @@ const handlers: Record<string, Handler> = {
 
   'lifecycle.buy': (payload) => handleLifecycleBuy(payload as never),
   'lifecycle.pile': (payload) => handleLifecyclePile(payload as never),
+  'lifecycle.costs': (payload) => handleLifecycleCosts(payload as never),
   'lifecycle.sessionPnl': () => handleLifecycleSessionPnl(),
   'lifecycle.stats': () => handleLifecycleStats(),
   'lifecycle.todayPnl': () => handleLifecycleTodayPnl(),

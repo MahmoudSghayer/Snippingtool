@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  breakEvenListPrice,
   closeTradeRequestSchema,
   computeTradeProfit,
   EA_TAX_RATE,
@@ -36,6 +37,27 @@ describe('computeTradeProfit', () => {
   it('defaults to EA_TAX_RATE but accepts an explicit rate', () => {
     expect(EA_TAX_RATE).toBe(0.05);
     expect(computeTradeProfit(100, 200, 0)).toEqual({ eaTaxCoins: 0, netProfit: 100 });
+  });
+});
+
+describe('breakEvenListPrice', () => {
+  it('is the lowest grid price whose after-tax proceeds cover the cost', () => {
+    // 46,250 cost: 48,750 nets floor(48,750 * 0.95) = 46,312 >= 46,250, and
+    // the step below (48,500) nets 46,075, a loss.
+    expect(breakEvenListPrice(46_250)).toBe(48_750);
+    expect(Math.floor(48_750 * (1 - EA_TAX_RATE))).toBeGreaterThanOrEqual(46_250);
+    expect(Math.floor(48_500 * (1 - EA_TAX_RATE))).toBeLessThan(46_250);
+  });
+
+  it('selling at the break-even price is not a loss (net >= 0)', () => {
+    for (const cost of [200, 950, 2_000, 13_500, 46_250, 100_000]) {
+      const bin = breakEvenListPrice(cost);
+      expect(computeTradeProfit(cost, bin).netProfit).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it("never goes under EA's lowest sale price", () => {
+    expect(breakEvenListPrice(50)).toBeGreaterThanOrEqual(200);
   });
 });
 

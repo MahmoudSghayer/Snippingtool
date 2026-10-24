@@ -173,7 +173,7 @@ describe('the list', () => {
     const card = (key: string, status: GalleryCard['status']): GalleryCard => ({ key, name: key, rating: 85, playerId: 1, status });
     const state = { budget: 10_000, spent: 0, cards: [card('a', 'listed'), card('b', 'skipped'), card('c', 'todo'), card('d', 'todo')] };
     expect(nextGalleryCard(state)?.key).toBe('c');
-    expect(gallerySummary(state)).toEqual({ todo: 2, bought: 0, club: 0, listed: 1, skipped: 1, owned: 0, parked: 0, total: 4 });
+    expect(gallerySummary(state)).toEqual({ todo: 2, bought: 0, club: 0, listed: 1, skipped: 1, owned: 0, sbc: 0, parked: 0, total: 4 });
     expect(nextGalleryCard({ ...state, cards: [card('a', 'listed')] })).toBeNull();
   });
 });
@@ -417,6 +417,26 @@ describe('addFutggLineup', () => {
     // A card fut.gg prices at 0 (none listed) carries no fut.gg price.
     expect(addFutggLineup(EMPTY, lineup(MALAGA, [fcard({ price: 0 })]), []).state.cards[0]!.guide).toBeUndefined();
     expect(state.sets).toEqual([{ id: 90, name: 'Malaga CF', path: 'laliga/malaga-cf', grade: 'S', threshold: 900, score: 908, tokens: 28, cost: 20_850 }]);
+  });
+
+  it('marks a lineup card fut.gg has no market price for as sbc, so it is never bought or searched', () => {
+    const sbcCard = fcard({ resourceId: 900, playerId: 900, name: 'SBC Only', price: 0 });
+    const r = addFutggLineup(EMPTY, lineup(MALAGA, [fcard(), sbcCard]), []);
+    expect(r.added).toBe(2);
+    expect(r.sbc).toBe(1);
+    const onList = r.state.cards.find((c) => c.playerId === 900)!;
+    expect(onList.status).toBe('sbc');
+    expect(onList.guide).toBeUndefined();
+    expect(onList.note).toContain('SBC/Objective');
+    // Only the tradeable card is ever a buy target; the sbc card is skipped.
+    expect(nextGalleryCard(r.state)?.playerId).toBe(243312);
+    expect(gallerySummary(r.state).sbc).toBe(1);
+  });
+
+  it('keeps an owned untradeable card as owned (the club copy counts), not sbc', () => {
+    const r = addFutggLineup(EMPTY, lineup(MALAGA, [fcard({ resourceId: 900, playerId: 900, price: 0 })]), [], new Set([900]));
+    expect(r.state.cards[0]!.status).toBe('owned');
+    expect(r.sbc).toBe(0);
   });
 
   it('counts a card two Sets share once, for both, and keeps its progress when a Set is loaded again', () => {

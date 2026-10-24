@@ -93,6 +93,7 @@ import { ACT_ERROR, isAdapterRefusal } from '../lib/act-auth.js';
 
 import { BidBook, WATCHLIST_SIZE, nextBid, pickAuctions, timeLeft } from './bidder.js';
 import {
+  GALLERY_MISS_CAP,
   GALLERY_RESOLVE_TRIES,
   GALLERY_SNIPE_MS,
   clubCheckIds,
@@ -2462,9 +2463,27 @@ export class Sniper {
     this.onEaError({ status, category: 'rate_limited', endpoint: 'bid', seenAt: this.now() });
   }
 
-  /** A card none of is listed: never skipped, it goes to the end of the
-   * list (still to buy, with the reason) and the next card comes first. */
+  /** A card none of is listed: it goes to the end of the list (still to buy,
+   * with the reason) and the next card comes first — but only up to
+   * `GALLERY_MISS_CAP` passes. After that it is left out (`skipped`), so a
+   * card nobody lists (an SBC/Objective card that is not on the market, or a
+   * version that has gone extinct) is never searched for endlessly and can
+   * never spin empty searches into an EA rate limit. */
   private galleryLater(card: GalleryCard, why: string): void {
+    card.misses = (card.misses ?? 0) + 1;
+    if (card.misses >= GALLERY_MISS_CAP) {
+      card.status = 'skipped';
+      card.note = `Not on the market after ${card.misses} tries (likely an SBC/Objective card) — collect it in the game, or take it off the list`.slice(0, 200);
+      this.galleryWork = null;
+      this.addLog({
+        kind: 'blocked',
+        ...this.galleryIds(card),
+        message: `Gallery: {card} is not on the transfer market after ${card.misses} tries — leaving it out so it stops searching (if it is an SBC/Objective card, collect it in the game)`,
+      });
+      this.saveGallery();
+      this.deps.onChange();
+      return;
+    }
     card.note = `${why}: Nova tries again after the other cards`.slice(0, 200);
     this.gallery.cards = [...this.gallery.cards.filter((c) => c !== card), card];
     this.galleryWork = null;
@@ -2483,6 +2502,7 @@ export class Sniper {
       card.resourceId ??= m.resourceId;
       card.tradeId = m.tradeId;
       delete card.note;
+      delete card.misses;
     }
     this.gallery.spent += m.buyNow;
     this.galleryJobs.push({ key, m, step: 'club', tries: 0 });

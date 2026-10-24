@@ -54,6 +54,12 @@ export const GALLERY_SNIPE_MS = 60_000;
 /** Look-only searches for a card's version before it is skipped as not
  * listed. */
 export const GALLERY_RESOLVE_TRIES = 2;
+/** How many passes a card may come back with no listing before it is left
+ * out (`skipped`) rather than searched for again. A card nobody lists — an
+ * SBC/Objective card not on the market, or a version that has gone extinct —
+ * is then never searched endlessly, so empty searches can never pile up into
+ * an EA rate limit. */
+export const GALLERY_MISS_CAP = 3;
 
 export interface ParsedGalleryList {
   cards: GalleryCard[];
@@ -212,7 +218,7 @@ export function nextGalleryCard(state: GalleryState): GalleryCard | null {
 /** How many cards are at each step (`parked`: still to buy, but only for
  * Sets marked completed). */
 export function gallerySummary(state: GalleryState): Record<GalleryCard['status'], number> & { total: number; parked: number } {
-  const counts = { todo: 0, bought: 0, club: 0, listed: 0, skipped: 0, owned: 0, parked: 0, total: state.cards.length };
+  const counts = { todo: 0, bought: 0, club: 0, listed: 0, skipped: 0, owned: 0, sbc: 0, parked: 0, total: state.cards.length };
   for (const c of state.cards) {
     if (c.status === 'todo' && !galleryCardNeeded(c, state)) counts.parked++;
     else counts[c.status]++;
@@ -348,6 +354,10 @@ export interface AddedLineup {
   /** Of the cards added, those the club holds (not bought), and the club's
    * players standing in for lineup cards. */
   owned: number;
+  /** Of the cards added, those fut.gg has no market price for: an
+   * SBC/Objective (or untradeable) card, added as `sbc` and never searched
+   * for or bought — the trader earns it in the game. */
+  sbc: number;
   swaps: FutggPlan['swaps'];
   problems: string[];
 }
@@ -370,7 +380,7 @@ export function addFutggLineup(
   const set = lineup.set;
   const tier = set.tiers.find((t) => t.grade === lineup.grade);
   const sets = (state.sets ?? []).filter((s) => s.id !== set.id);
-  const none = { state, added: 0, already: 0, owned: 0, swaps: [] };
+  const none = { state, added: 0, already: 0, owned: 0, sbc: 0, swaps: [] };
   if (!tier) return { ...none, problems: [`${set.name}: fut.gg has no grade ${lineup.grade} lineup`] };
   if (sets.length >= GALLERY_LIMITS.sets) return { ...none, problems: [`The list holds at most ${GALLERY_LIMITS.sets} Sets`] };
   const plan = planFutggSwaps(lineup, owned);
@@ -390,6 +400,7 @@ export function addFutggLineup(
   let added = 0;
   let already = 0;
   let ownedCount = 0;
+  let sbcCount = 0;
   for (const f of plan.cards) {
     const key = galleryKey(f.playerId, f.rating, undefined, f.resourceId);
     const held = byKey.get(key);
@@ -407,6 +418,12 @@ export function addFutggLineup(
     // copy named too. The exact id tells the rest apart.
     const special = f.rarity > 1;
     const version = (special ? `${f.version}${f.holographic ? ' Holographic' : ''}` : f.holographic ? 'Holographic' : '').trim();
+    // fut.gg prices a lineup card it saw no listing for at 0: it is not on
+    // the transfer market (an SBC/Objective or otherwise untradeable card),
+    // so it is added as `sbc` — never bought, never searched — and the trader
+    // earns it in the game. The club's own copy still stands in (`owned`).
+    const tradeable = f.price >= MIN_SALE_PRICE;
+    const status: GalleryCard['status'] = owned.has(f.resourceId) ? 'owned' : tradeable ? 'todo' : 'sbc';
     const card: GalleryCard = {
       key,
       name: f.name.slice(0, GALLERY_LIMITS.nameLength),
@@ -414,12 +431,12 @@ export function addFutggLineup(
       playerId: f.playerId,
       resourceId: f.resourceId,
       exact: true,
-      status: owned.has(f.resourceId) ? 'owned' : 'todo',
+      status,
       set: set.name.slice(0, GALLERY_LIMITS.setLength),
       setIds: [set.id],
       score: f.score,
-      // fut.gg prices a card it saw no listing for at 0: no price at all.
-      ...(f.price >= MIN_SALE_PRICE ? { guide: f.price } : {}),
+      ...(tradeable ? { guide: f.price } : {}),
+      ...(status === 'sbc' ? { note: 'Not on the transfer market (SBC/Objective) — collect it in the game' } : {}),
       ...(special && rarityIds.has(f.rarity) ? { rarity: f.rarity } : {}),
       ...(version ? { version: version.slice(0, GALLERY_LIMITS.versionLength) } : {}),
     };
@@ -427,13 +444,14 @@ export function addFutggLineup(
     byKey.set(key, card);
     added++;
     if (card.status === 'owned') ownedCount++;
+    else if (card.status === 'sbc') sbcCount++;
   }
   if (lineup.missing > 0) {
     problems.push(
       `${set.name}: fut.gg does not describe ${lineup.missing} of its lineup ${lineup.missing === 1 ? 'card' : 'cards'}, so ${lineup.missing === 1 ? 'it was' : 'they were'} left out and the Set may miss grade ${lineup.grade}`,
     );
   }
-  return { state: { ...state, cards, sets: [...sets, entry] }, added, already, owned: ownedCount, swaps: plan.swaps, problems };
+  return { state: { ...state, cards, sets: [...sets, entry] }, added, already, owned: ownedCount, sbc: sbcCount, swaps: plan.swaps, problems };
 }
 
 /** The card ids the club should be asked about for these lineups: every
@@ -495,7 +513,7 @@ export function clearFinishedGallery(state: GalleryState, now = Date.now()): Gal
   const inProgress = new Set((marked.sets ?? []).filter((s) => !done.has(s.id)).map((s) => s.id));
   const cards = marked.cards.filter((c) => {
     if (c.setIds?.some((id) => inProgress.has(id))) return true;
-    if (c.status === 'todo' || c.status === 'skipped') return galleryCardNeeded(c, marked);
+    if (c.status === 'todo' || c.status === 'skipped' || c.status === 'sbc') return galleryCardNeeded(c, marked);
     if (c.status === 'bought' || c.status === 'club') return c.tradeId !== undefined;
     return false;
   });

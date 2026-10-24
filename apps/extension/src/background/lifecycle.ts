@@ -195,3 +195,19 @@ export async function handleLifecycleTodayPnl(): Promise<LifecycleSessionPnl> {
 export function handleLifecycleStats(): Promise<LifecycleStats> {
   return lifecycle.stats();
 }
+
+/** `lifecycle.costs`: what each of these cards (EA's `itemId`) was bought
+ * for, from the trade lifecycle — so the Nova AI page's Relist tool can keep
+ * a step-lower relist from dropping a card under what it cost (a guaranteed
+ * loss once EA takes its tax). Cards with no record (bought before the
+ * lifecycle, or in a browser that never reported the buy) are left out. */
+export async function handleLifecycleCosts(payload: { itemIds: string[] }): Promise<{ costs: Record<string, number> }> {
+  const ids = Array.isArray(payload?.itemIds) ? payload.itemIds.slice(0, 200) : [];
+  const costs: Record<string, number> = {};
+  for (const id of ids) {
+    if (typeof id !== 'string' || id === '') continue;
+    const rec = await idbLifecycleStore.get(id).catch(() => undefined);
+    if (rec && rec.buyPrice > 0) costs[id] = rec.buyPrice;
+  }
+  return { costs };
+}
