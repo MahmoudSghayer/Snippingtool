@@ -92,6 +92,18 @@ it('hands each wait to the compositor as two rotations, and a refresh neither re
   }
 });
 
+it('runs no animation frame while idle: nothing moves, so scrolling and settings stay smooth', () => {
+  const sniper = makeSniper();
+  // Idle: not running, no phase counting down (the default state).
+  const { page } = mountPage(sniper);
+  const raf = vi.spyOn(globalThis, 'requestAnimationFrame');
+  vi.advanceTimersByTime(1_000);
+  // The ring loop never schedules a frame while nothing is moving.
+  expect(raf).not.toHaveBeenCalled();
+  page.close();
+  raf.mockRestore();
+});
+
 it('counts a wait down every frame, and a dash refresh does not restart it', () => {
   const sniper = new Sniper(
     {
