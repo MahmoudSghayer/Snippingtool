@@ -46,7 +46,7 @@ import { fold, searchPlayers } from '../model/catalog.js';
 import { galleryScore } from './gallery-score.js';
 
 import type { CatalogOption, CatalogPlayer } from '../model/catalog.js';
-import type { FutggCard, FutggLineup, FutggSetSummary, FutggTier, GalleryCard, GalleryGrade, GallerySet, GalleryState } from '@sl/shared';
+import type { FutggCard, FutggLineup, FutggSetSummary, FutggTier, GalleryCard, GalleryGrade, GallerySet, GallerySpare, GalleryState } from '@sl/shared';
 
 /** How long Gallery mode looks for a card under the market price before it
  * buys the cheapest listed. */
@@ -466,6 +466,18 @@ export function addFutggLineup(
   if (!tier) return { ...none, problems: [`${set.name}: fut.gg has no grade ${lineup.grade} lineup`] };
   if (sets.length >= GALLERY_LIMITS.sets) return { ...none, problems: [`The list holds at most ${GALLERY_LIMITS.sets} Sets`] };
   const plan = planFutggSwaps(lineup, owned);
+  // The Set's substitute cards: its other cards not in the lineup and not
+  // already owned, cheapest (lowest score) first, so one can stand in for a
+  // lineup card that turns out not to be on the market (an SBC/Objective card).
+  const inLineup = new Set(plan.cards.map((c) => c.resourceId));
+  const spares = (lineup.others ?? [])
+    .filter((o) => o.score > 0 && !inLineup.has(o.resourceId) && !owned.has(o.resourceId))
+    .sort((a, b) => a.score - b.score)
+    .slice(0, GALLERY_LIMITS.spares)
+    .map((o) => ({ resourceId: o.resourceId, playerId: o.playerId, name: o.name.slice(0, GALLERY_LIMITS.nameLength), rating: o.rating, score: o.score }));
+  // Each grade the Set can reach and the score it needs, so a swap that drops
+  // the lineup's score can relabel the Set to the grade it then reaches.
+  const tiers = set.tiers.filter((t) => t.cards > 0).map((t) => ({ grade: t.grade, threshold: t.threshold }));
   const entry: GallerySet = {
     id: set.id,
     name: set.name,
@@ -475,6 +487,8 @@ export function addFutggLineup(
     score: plan.score,
     tokens: tier.tokens,
     cost: tier.cost - plan.swaps.reduce((sum, x) => sum + x.out.price, 0),
+    ...(tiers.length ? { tiers } : {}),
+    ...(spares.length ? { spares } : {}),
   };
   const rarityIds = new Set(rarities.map((r) => r.id));
   const cards = state.cards.map((c) => ({ ...c }));
@@ -664,6 +678,98 @@ export function removeFutggSet(state: GalleryState, setId: number): GalleryState
   if (sets.length > 0) next.sets = sets;
   else delete next.sets;
   return next;
+}
+
+export interface GallerySubstitution {
+  state: GalleryState;
+  /** The un-buyable card routed around (named for the log/note). */
+  blocked: string;
+  /** The substitute put on the list in its place. */
+  spare: string;
+  setName: string;
+  /** The grade the Set now reaches with the swap. */
+  grade: GalleryGrade;
+  /** True when the swap kept the Set's grade; false when it dropped. */
+  keptGrade: boolean;
+}
+
+/**
+ * Routes a Set around a card that is not on the transfer market — an
+ * SBC/Objective card fut.gg still prices, so it reads as "to buy" but never
+ * lists. The Set's cheapest buyable spare takes its place: one that keeps the
+ * Set's grade if any does (the recommended, same-tier path), else the best
+ * that is left, and the Set is relabelled to the grade it then reaches (a
+ * downgrade finished with buyable players). The blocked card loses this Set
+ * (dropped if it serves no other), so the Set's count stays right.
+ *
+ * Returns null when the card is not an `exact` Set card, or no Set it belongs
+ * to has an unused spare — the caller then leaves the card out as before.
+ */
+export function gallerySubstitute(state: GalleryState, card: GalleryCard): GallerySubstitution | null {
+  if (!card.exact || !card.setIds?.length) return null;
+  const sets = state.sets ?? [];
+  const hasKey = (sp: GallerySpare): boolean => state.cards.some((c) => c.key === galleryKey(sp.playerId, sp.rating, undefined, sp.resourceId));
+  for (const setId of card.setIds) {
+    const entry = sets.find((s) => s.id === setId);
+    const usable = (entry?.spares ?? []).filter((sp) => !hasKey(sp));
+    if (!entry || usable.length === 0) continue;
+    // The lineup's score once this card is gone and a spare stands in.
+    const base = entry.score - (card.score ?? 0);
+    // Prefer the cheapest (lowest score) spare that still clears the grade;
+    // else the highest-score spare left, to drop the grade as little as can be.
+    const keepers = usable.filter((sp) => base + sp.score >= entry.threshold).sort((a, b) => a.score - b.score);
+    const spare = keepers[0] ?? [...usable].sort((a, b) => b.score - a.score)[0]!;
+    const newScore = base + spare.score;
+    const keptGrade = newScore >= entry.threshold;
+    const grade = keptGrade
+      ? entry.grade
+      : ((entry.tiers ?? [])
+          .filter((t) => newScore >= t.threshold)
+          .map((t) => t.grade)
+          .sort((a, b) => GALLERY_GRADES.indexOf(b) - GALLERY_GRADES.indexOf(a))[0] ?? entry.grade);
+    // Drop the Set from the blocked card (remove it if it serves no other).
+    const cards: GalleryCard[] = [];
+    for (const c of state.cards) {
+      if (c.key !== card.key) {
+        cards.push(c);
+        continue;
+      }
+      const rest = (c.setIds ?? []).filter((id) => id !== setId);
+      if (rest.length > 0) cards.push({ ...c, setIds: rest });
+    }
+    cards.push({
+      key: galleryKey(spare.playerId, spare.rating, undefined, spare.resourceId),
+      name: spare.name.slice(0, GALLERY_LIMITS.nameLength),
+      rating: spare.rating,
+      playerId: spare.playerId,
+      resourceId: spare.resourceId,
+      exact: true,
+      status: 'todo',
+      set: entry.name.slice(0, GALLERY_LIMITS.setLength),
+      setIds: [setId],
+      score: spare.score,
+    });
+    const nextSets = sets.map((s) =>
+      s.id === setId
+        ? {
+            ...s,
+            grade,
+            score: newScore,
+            threshold: (s.tiers ?? []).find((t) => t.grade === grade)?.threshold ?? s.threshold,
+            spares: (s.spares ?? []).filter((x) => x.resourceId !== spare.resourceId),
+          }
+        : s,
+    );
+    return {
+      state: { ...state, cards, sets: nextSets },
+      blocked: `${card.rating} ${card.name}`,
+      spare: `${spare.rating} ${spare.name}`,
+      setName: entry.name,
+      grade,
+      keptGrade,
+    };
+  }
+  return null;
 }
 
 /** The exact cards whose club the trader should be asked about: fut.gg

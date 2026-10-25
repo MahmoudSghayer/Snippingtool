@@ -431,7 +431,15 @@ const BLOCKER_PHRASE: Record<GallerySetBlockerReason, string> = {
  * is left to collect. */
 function blockerNote(blockers: GallerySetBlocker[]): { summary: string; detail: string } | null {
   if (blockers.length === 0) return null;
-  const summary = blockers.map((b) => `${b.cards.length} ${BLOCKER_PHRASE[b.reason]}`).join(', ');
+  // Name the SBC/Objective card(s) in the summary when there are only a couple,
+  // so the trader sees exactly which player is holding the Set up.
+  const summary = blockers
+    .map((b) =>
+      b.reason === 'sbc' && b.cards.length <= 2
+        ? `needs SBC: ${b.cards.map((c) => `${c.rating} ${c.name}`).join(', ')}`
+        : `${b.cards.length} ${BLOCKER_PHRASE[b.reason]}`,
+    )
+    .join(', ');
   const detail = blockers
     .flatMap((b) =>
       b.cards.map(
@@ -1247,26 +1255,25 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
               const blockers = isDone ? [] : gallerySetBlockers(g, p.set.id);
               const note = isDone ? null : blockerNote(blockers);
               const why = note ? ` · <span class="g-why" title="${esc(note.detail)}">not done: ${esc(note.summary)}</span>` : '';
-              // Stuck on a card the trader can't actually get — an SBC the
-              // non-repeatable choice already spent (fut.gg still prices it, so
-              // it reads as "to buy"), or a scarce/dear holdout? Offer to drop
-              // the Set to a lower, cheaper grade: its lower score threshold
-              // lets the 15th card be any buyable player, reusing what is owned.
+              // Let the trader re-plan a Set at any other grade fut.gg has a
+              // lineup for — a higher tier when one is available, or a lower,
+              // cheaper one. (Nova also drops a stuck Set to a buyable tier on
+              // its own mid-run; this is the manual control.) Highest first.
               const setSummary = futggSets?.find((x) => x.id === p.set.id);
               const curIdx = GALLERY_GRADES.indexOf(p.set.grade);
-              const lower =
+              const others =
                 !isDone && setSummary
                   ? setSummary.tiers
-                      .filter((t) => t.cards > 0 && GALLERY_GRADES.indexOf(t.grade) < curIdx)
+                      .filter((t) => t.cards > 0 && GALLERY_GRADES.indexOf(t.grade) !== curIdx)
                       .sort((a, b) => GALLERY_GRADES.indexOf(b.grade) - GALLERY_GRADES.indexOf(a.grade))
                   : [];
               // The cost/buyable note goes in the button's title — plain text
               // only (COIN is an inline SVG, which would break the attribute).
-              const switchBtns = lower.length
-                ? `<div class="g-switch"><span class="g-switch-label">finish at lower tier:</span> ${lower
+              const switchBtns = others.length
+                ? `<div class="g-switch"><span class="g-switch-label">switch tier:</span> ${others
                     .map(
                       (t) =>
-                        `<button type="button" class="g-link" data-switch-grade="${p.set.id}:${t.grade}"${off}${busy} title="re-plan ${esc(p.set.name)} at grade ${t.grade} — fut.gg ${fmt(t.cost)} coins${(t.sbc ?? 0) === 0 ? ', all on the market' : `, still needs ${t.sbc} SBC`}">${t.grade}</button>`,
+                        `<button type="button" class="g-link" data-switch-grade="${p.set.id}:${t.grade}"${off}${busy} title="re-plan ${esc(p.set.name)} at grade ${t.grade} — fut.gg ${fmt(t.cost)} coins${(t.sbc ?? 0) === 0 ? ', all on the market' : `, needs ${t.sbc} SBC/Objective`}">${t.grade}</button>`,
                     )
                     .join(' ')}</div>`
                 : '';

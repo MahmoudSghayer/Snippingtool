@@ -855,12 +855,30 @@ instead** puts the Set on the list at that buyable grade (`addBuyableFutggSet`).
 Not every dead end is one fut.gg can see: a card can read as "to buy" (fut.gg
 prices it) yet be unobtainable for the trader — an SBC reward from a
 non-repeatable set where a different player was already chosen. So a Set on
-the list that is not done also shows **finish at lower tier: A B C …** — a
-button per grade below its current one that fut.gg has a lineup for. Each
-(`data-switch-grade`, `switchFutggSetGrade`) drops the Set's lineup and
-re-plans it at the chosen grade, reusing every card already owned (the club
-now and the catalogue); a lower grade's lower score threshold lets the 15th
-card be any cheap buyable player instead of the locked one. Ticked Sets, each
+the list that is not done also shows **switch tier: D C B A S** — a button per
+grade fut.gg has a lineup for (both above the current one, to finish a higher
+tier once the cards release, and below it). Each (`data-switch-grade`,
+`switchFutggSetGrade`) drops the Set's lineup and re-plans it at the chosen
+grade, reusing every card already owned (the club now and the catalogue); a
+lower grade's lower score threshold lets the 15th card be any cheap buyable
+player instead of the locked one.
+
+Nova also handles the locked card on its own, at buy time, so the trader need
+not spot it. Each Set stored on the list keeps a **spare pool**
+(`GallerySet.spares`, up to `GALLERY_LIMITS.spares`: the next-cheapest buyable
+club cards fut.gg lists for that Set but the lineup did not use) and its
+**grade thresholds** (`GallerySet.tiers`, each grade's minimum score). When a
+card never lists — `galleryLater` has moved it to the back `GALLERY_MISS_CAP`
+times with nothing found, the mark of an SBC/Objective card fut.gg prices but
+that is not on the market — `gallerySubstitute` swaps in the cheapest spare
+that still clears the current grade's threshold, keeping the grade. If no
+spare keeps the grade it drops to the highest grade the new lineup does reach,
+relabelling the Set, and the log names both cards: "X isn't on the market
+(likely an SBC/Objective card) — collecting Y for <Set> instead" (plus
+", finishing at grade A" on a downgrade). Only when no buyable spare is left
+does the card go `skipped` with a note to collect it in the game or take the
+Set off the list, and the not-done summary names the SBC card when a Set is
+only one or two short. Ticked Sets, each
 at its best grade, are added with **Add Sets**: for each,
 background reads the Set's card list (`gallery.futggLineup`,
 `/sets/{id}/pool/`) to name the lineup's cards (player, rating, rarity,

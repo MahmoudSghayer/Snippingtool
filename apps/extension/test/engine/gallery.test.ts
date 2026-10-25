@@ -15,6 +15,7 @@ import {
   futggBuyableAlternative,
   futggClubIds,
   futggSetChoices,
+  gallerySubstitute,
   galleryCardNeeded,
   gallerySetBlockers,
   galleryUpgradable,
@@ -294,6 +295,67 @@ describe('fut.gg buyable-grade fallback', () => {
   });
 });
 
+describe('gallerySubstitute', () => {
+  const TIERS = [
+    { grade: 'D' as const, threshold: 10 },
+    { grade: 'C' as const, threshold: 300 },
+    { grade: 'B' as const, threshold: 400 },
+    { grade: 'A' as const, threshold: 700 },
+    { grade: 'S' as const, threshold: 900 },
+  ];
+  // A Set on the list at grade S (lineup score 908), stuck on one un-buyable card.
+  const stuck = (cardScore: number, spares: { resourceId: number; playerId: number; name: string; rating: number; score: number }[]): GalleryState => ({
+    budget: 100_000,
+    spent: 0,
+    cards: [{ key: '500:84', name: 'SBC Guy', rating: 84, playerId: 500, resourceId: 500, exact: true, status: 'skipped', set: 'Malaga CF', setIds: [90], score: cardScore }],
+    sets: [{ id: 90, name: 'Malaga CF', path: 'laliga/malaga-cf', grade: 'S', threshold: 900, score: 908, tokens: 28, cost: 20_850, tiers: TIERS, spares }],
+  });
+
+  it('swaps an un-buyable card for the cheapest buyable spare that keeps the grade', () => {
+    const g = stuck(60, [
+      { resourceId: 900, playerId: 900, name: 'Cheap', rating: 70, score: 60 },
+      { resourceId: 901, playerId: 901, name: 'Dear', rating: 82, score: 200 },
+    ]);
+    const sub = gallerySubstitute(g, g.cards[0]!)!;
+    // 908 - 60 + 60 = 908 >= 900, so grade S is kept with the cheaper spare.
+    expect([sub.keptGrade, sub.grade]).toEqual([true, 'S']);
+    expect(sub.spare).toContain('Cheap');
+    expect(sub.blocked).toContain('SBC Guy');
+    // The un-buyable card is gone; the spare is on the list to buy.
+    expect(sub.state.cards.map((c) => [c.name, c.status])).toEqual([['Cheap', 'todo']]);
+    expect(sub.state.sets![0]!.spares!.map((s) => s.resourceId)).toEqual([901]);
+  });
+
+  it('downgrades to the grade the swap reaches when no spare keeps the current one', () => {
+    const g = stuck(250, [{ resourceId: 900, playerId: 900, name: 'Cheap', rating: 68, score: 60 }]);
+    const sub = gallerySubstitute(g, g.cards[0]!)!;
+    // 908 - 250 + 60 = 718: under S (900), clears A (700).
+    expect([sub.keptGrade, sub.grade]).toEqual([false, 'A']);
+    expect([sub.state.sets![0]!.grade, sub.state.sets![0]!.threshold, sub.state.sets![0]!.score]).toEqual(['A', 700, 718]);
+  });
+
+  it('is null with no spare, or for a card that is not an exact Set card', () => {
+    expect(gallerySubstitute(stuck(60, []), stuck(60, []).cards[0]!)).toBeNull();
+    const typed: GalleryCard = { key: 'x', name: 'Typed', rating: 80, playerId: 1, status: 'todo' };
+    expect(gallerySubstitute({ budget: 1, spent: 0, cards: [typed] }, typed)).toBeNull();
+  });
+});
+
+describe('addFutggLineup spares', () => {
+  it("stores the Set's substitute cards (cheapest score first) and its tier thresholds", () => {
+    const withOthers: FutggLineup = {
+      ...lineup(MALAGA, [fcard()]),
+      others: [fcard({ resourceId: 901, playerId: 901, name: 'Dear', score: 200 }), fcard({ resourceId: 900, playerId: 900, name: 'Cheap', score: 30 })],
+    };
+    const set = addFutggLineup(EMPTY, withOthers, []).state.sets![0]!;
+    expect(set.spares!.map((s) => [s.name, s.score])).toEqual([
+      ['Cheap', 30],
+      ['Dear', 200],
+    ]);
+    expect(set.tiers!.map((t) => t.grade)).toEqual(['D', 'C', 'B', 'A', 'S']);
+  });
+});
+
 describe('galleryUpgradable', () => {
   const completedAt = (set: FutggSetSummary, grade: 'A' | 'S') => {
     const added = addFutggLineup(EMPTY, { set, grade, cards: [fcard()], missing: 0 }, []).state;
@@ -540,7 +602,25 @@ describe('addFutggLineup', () => {
     expect(state.cards[2]!.rarity).toBeUndefined();
     // A card fut.gg prices at 0 (none listed) carries no fut.gg price.
     expect(addFutggLineup(EMPTY, lineup(MALAGA, [fcard({ price: 0 })]), []).state.cards[0]!.guide).toBeUndefined();
-    expect(state.sets).toEqual([{ id: 90, name: 'Malaga CF', path: 'laliga/malaga-cf', grade: 'S', threshold: 900, score: 908, tokens: 28, cost: 20_850 }]);
+    expect(state.sets).toEqual([
+      {
+        id: 90,
+        name: 'Malaga CF',
+        path: 'laliga/malaga-cf',
+        grade: 'S',
+        threshold: 900,
+        score: 908,
+        tokens: 28,
+        cost: 20_850,
+        tiers: [
+          { grade: 'D', threshold: 10 },
+          { grade: 'C', threshold: 300 },
+          { grade: 'B', threshold: 400 },
+          { grade: 'A', threshold: 700 },
+          { grade: 'S', threshold: 900 },
+        ],
+      },
+    ]);
   });
 
   it('marks a lineup card fut.gg has no market price for as sbc, so it is never bought or searched', () => {

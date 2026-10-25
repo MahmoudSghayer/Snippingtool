@@ -31,6 +31,9 @@ export const GALLERY_LIMITS = {
   sets: 40,
   /** fut.gg Sets marked completed. */
   completed: 500,
+  /** Substitute cards kept per Set, to swap in for a lineup card that turns
+   * out not to be on the market (an SBC/Objective card fut.gg still prices). */
+  spares: 12,
 } as const;
 
 /**
@@ -117,6 +120,23 @@ export type GalleryCard = z.infer<typeof galleryCardSchema>;
 export const GALLERY_GRADES = ['D', 'C', 'B', 'A', 'S'] as const;
 export type GalleryGrade = (typeof GALLERY_GRADES)[number];
 
+/** A substitute card kept for a Set: one of the Set's other cards, used to
+ * swap in for a lineup card that turns out not to be on the market (an
+ * SBC/Objective card fut.gg still prices). Only the fields needed to put it
+ * on the list and keep the Set's grade in check are stored. */
+export const gallerySpareSchema = z
+  .object({
+    resourceId: z.number().int().positive(),
+    playerId: z.number().int().positive(),
+    name: z.string().min(1).max(GALLERY_LIMITS.nameLength),
+    rating: z.number().int().min(GALLERY_LIMITS.rating.min).max(GALLERY_LIMITS.rating.max),
+    /** fut.gg's Gallery score for the card, to check the Set still clears a
+     * grade after the swap. */
+    score: z.number().int().min(0).max(10_000_000),
+  })
+  .strict();
+export type GallerySpare = z.infer<typeof gallerySpareSchema>;
+
 /** A fut.gg Set on the list: the grade its lineup is for, and what fut.gg
  * says that grade needs, gives and costs. */
 export const gallerySetSchema = z
@@ -138,6 +158,23 @@ export const gallerySetSchema = z
     tokens: z.number().int().min(0).max(10_000),
     /** fut.gg's price for the whole lineup when it was loaded. */
     cost: z.number().int().min(0).max(1_000_000_000),
+    /** Each grade the Set can reach and the score it needs (lowest first), so
+     * a swap that drops the lineup's score can relabel the Set to the grade it
+     * actually reaches. */
+    tiers: z
+      .array(
+        z
+          .object({
+            grade: z.enum(GALLERY_GRADES),
+            threshold: z.number().int().min(0).max(100_000_000),
+          })
+          .strict(),
+      )
+      .max(GALLERY_GRADES.length)
+      .optional(),
+    /** The Set's substitute cards (cheapest score first), to swap in for a
+     * lineup card that is not on the market. Consumed as they are used. */
+    spares: z.array(gallerySpareSchema).max(GALLERY_LIMITS.spares).optional(),
   })
   .strict();
 export type GallerySet = z.infer<typeof gallerySetSchema>;
