@@ -700,3 +700,49 @@ export function gallerySetProgress(state: GalleryState): GallerySetProgress[] {
     };
   });
 }
+
+/** Why a card a Set still needs is not collected: still to buy, nobody has
+ * listed it, an SBC/Objective off the market, or bought and on its way. */
+export type GallerySetBlockerReason = 'buy' | 'skipped' | 'sbc' | 'collecting';
+
+export interface GallerySetBlockerCard {
+  name: string;
+  rating: number;
+  version?: string;
+  /** fut.gg's price, when known: a card that sits unbought is usually the
+   * dear/scarce one, which this shows. */
+  guide?: number;
+}
+
+export interface GallerySetBlocker {
+  reason: GallerySetBlockerReason;
+  cards: GallerySetBlockerCard[];
+}
+
+const BLOCKER_ORDER: GallerySetBlockerReason[] = ['buy', 'skipped', 'sbc', 'collecting'];
+
+/**
+ * Why a Set is not completed: the cards it still needs (not yet through the
+ * club), grouped by the reason each is not collected — so each uncompleted
+ * Set can say what is holding it up. Empty for a completed Set, or one whose
+ * every card is collected (in the club, listed, or owned already).
+ */
+export function gallerySetBlockers(state: GalleryState, setId: number): GallerySetBlocker[] {
+  if ((state.completed ?? []).includes(setId)) return [];
+  const groups = new Map<GallerySetBlockerReason, GallerySetBlocker>();
+  for (const c of state.cards) {
+    if (!c.setIds?.includes(setId)) continue;
+    if (c.status === 'owned' || c.status === 'club' || c.status === 'listed') continue;
+    const reason: GallerySetBlockerReason =
+      c.status === 'sbc' ? 'sbc' : c.status === 'skipped' ? 'skipped' : c.status === 'bought' ? 'collecting' : 'buy';
+    const group = groups.get(reason) ?? { reason, cards: [] };
+    group.cards.push({
+      name: c.name,
+      rating: c.rating,
+      ...(c.version ? { version: c.version } : {}),
+      ...(c.guide !== undefined ? { guide: c.guide } : {}),
+    });
+    groups.set(reason, group);
+  }
+  return BLOCKER_ORDER.filter((r) => groups.has(r)).map((r) => groups.get(r)!);
+}
