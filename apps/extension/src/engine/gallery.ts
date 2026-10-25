@@ -323,6 +323,16 @@ export function futggBuyableAlternative(set: FutggSetSummary): { best: FutggTier
   return { best, buyable: bestBuyableFutggTier(set) };
 }
 
+/** The SBC/Objective cards of a lineup, named "<rating> <name>": the cards not
+ * on the transfer market (fut.gg prices them below a sale). Used to tell the
+ * trader which card blocks a Set's best grade, so they know what to complete in
+ * the game to upgrade to it. */
+export function futggSbcCards(lineup: FutggLineup): string[] {
+  return lineup.cards
+    .filter((c) => c.price < MIN_SALE_PRICE)
+    .map((c) => `${c.rating} ${c.name}`.slice(0, GALLERY_LIMITS.nameLength + 4));
+}
+
 /** The Sets the picker offers: each Set once, at its best grade, by fut.gg's
  * categories, cheapest first in each. The trader sees a Set at its highest
  * grade only — not once per grade — so a Set that reaches S is not also
@@ -457,6 +467,7 @@ export function addFutggLineup(
   lineup: FutggLineup,
   rarities: readonly CatalogOption[],
   owned: ReadonlySet<number> = new Set(),
+  upgrade?: GallerySet['upgrade'],
 ): AddedLineup {
   const problems: string[] = [];
   const set = lineup.set;
@@ -489,6 +500,7 @@ export function addFutggLineup(
     cost: tier.cost - plan.swaps.reduce((sum, x) => sum + x.out.price, 0),
     ...(tiers.length ? { tiers } : {}),
     ...(spares.length ? { spares } : {}),
+    ...(upgrade && GALLERY_GRADES.indexOf(upgrade.grade) > GALLERY_GRADES.indexOf(lineup.grade) ? { upgrade } : {}),
   };
   const rarityIds = new Set(rarities.map((r) => r.id));
   const cards = state.cards.map((c) => ({ ...c }));

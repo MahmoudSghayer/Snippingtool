@@ -175,6 +175,20 @@ export const gallerySetSchema = z
     /** The Set's substitute cards (cheapest score first), to swap in for a
      * lineup card that is not on the market. Consumed as they are used. */
     spares: z.array(gallerySpareSchema).max(GALLERY_LIMITS.spares).optional(),
+    /** Set when the Set was added at a lower, fully-buyable grade because its
+     * best grade needs an SBC/Objective card off the market: the best grade,
+     * the tokens it gives, and the blocking SBC card(s) named (empty when they
+     * could not be read). Kept so the row shows the trader can still upgrade to
+     * that grade by completing the SBC in the game — the switch-tier control
+     * already offers the grade once its cards are through the club. */
+    upgrade: z
+      .object({
+        grade: z.enum(GALLERY_GRADES),
+        tokens: z.number().int().min(0).max(10_000),
+        cards: z.array(z.string().min(1).max(GALLERY_LIMITS.nameLength)).max(GALLERY_LIMITS.spares),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type GallerySet = z.infer<typeof gallerySetSchema>;

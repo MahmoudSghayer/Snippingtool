@@ -14,6 +14,7 @@ import {
   futggBestChoices,
   futggBuyableAlternative,
   futggClubIds,
+  futggSbcCards,
   futggSetChoices,
   gallerySubstitute,
   galleryCardNeeded,
@@ -353,6 +354,23 @@ describe('addFutggLineup spares', () => {
       ['Dear', 200],
     ]);
     expect(set.tiers!.map((t) => t.grade)).toEqual(['D', 'C', 'B', 'A', 'S']);
+  });
+
+  it('keeps the upgrade note when added below the best grade, and drops it when not above', () => {
+    // Added at A (buyable), best grade S needs an SBC card: the note rides along.
+    const up = { grade: 'S' as const, tokens: 28, cards: ['91 Tate Johnson'] };
+    const added = addFutggLineup(EMPTY, { ...lineup(MALAGA, [fcard()]), grade: 'A' }, [], new Set(), up).state.sets![0]!;
+    expect(added.upgrade).toEqual(up);
+    // Added at S already (not below it): no upgrade note.
+    const atBest = addFutggLineup(EMPTY, { ...lineup(MALAGA, [fcard()]), grade: 'S' }, [], new Set(), up).state.sets![0]!;
+    expect(atBest.upgrade).toBeUndefined();
+  });
+});
+
+describe('futggSbcCards', () => {
+  it('names the lineup cards that are not on the transfer market (priced below a sale)', () => {
+    const l = lineup(MALAGA, [fcard(), fcard({ resourceId: 500, playerId: 500, name: 'Tate Johnson', rating: 91, price: 0 })]);
+    expect(futggSbcCards(l)).toEqual(['91 Tate Johnson']);
   });
 });
 
