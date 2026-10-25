@@ -47,7 +47,8 @@ const HUB = {
             { eaId: 50_574_721, price: 1_400 },
             { eaId: 999, price: 900 },
           ]),
-          tier('A', 700, 13, 13_450, 1_300, 700, [{ eaId: 243312, price: 3_100 }]),
+          // One card priced 0 by fut.gg: not on the market (SBC/Objective).
+          tier('A', 700, 13, 13_450, 1_300, 700, [{ eaId: 243312, price: 3_100 }, { eaId: 888, price: 0 }]),
           // Not a grade.
           tier('Z', 1, 1, 1, 1, 1, []),
         ],
@@ -103,8 +104,8 @@ describe('parseFutggHub', () => {
         path: 'laliga/malaga-cf',
         requiredCards: 15,
         tiers: [
-          { grade: 'A', threshold: 700, tokens: 13, cost: 13_450, peak: 1_300, score: 700, cards: 1 },
-          { grade: 'S', threshold: 900, tokens: 28, cost: 20_850, peak: 3_100, score: 908, cards: 3 },
+          { grade: 'A', threshold: 700, tokens: 13, cost: 13_450, peak: 1_300, score: 700, cards: 2, sbc: 1 },
+          { grade: 'S', threshold: 900, tokens: 28, cost: 20_850, peak: 3_100, score: 908, cards: 3, sbc: 0 },
         ],
       },
       { id: 77, name: 'Granada CF', category: 'LALIGA EA SPORTS / Liga F Moeve', path: 'laliga/granada-cf', requiredCards: 15, tiers: [] },

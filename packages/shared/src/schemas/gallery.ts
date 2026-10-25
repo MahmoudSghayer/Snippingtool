@@ -252,6 +252,12 @@ export const futggTierSchema = z
     /** The lineup's score, and how many cards it buys. */
     score: z.number().int().min(0).max(100_000_000),
     cards: z.number().int().min(0).max(100),
+    /** How many of the lineup's cards are not on the transfer market — an
+     * SBC/Objective (or otherwise untradeable) card fut.gg prices at 0. A
+     * grade with `sbc` > 0 cannot be finished by buying alone, so the picker
+     * offers the highest grade with `sbc` 0 as a buyable alternative. Omitted
+     * (treated as 0) by anything that predates the field. */
+    sbc: z.number().int().min(0).max(100).optional(),
   })
   .strict();
 export type FutggTier = z.infer<typeof futggTierSchema>;
