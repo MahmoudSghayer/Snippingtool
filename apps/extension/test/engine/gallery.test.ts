@@ -7,10 +7,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   addFutggLineup,
+  bestBuyableFutggTier,
   bestFutggTier,
   clearFinishedGallery,
   clubCheckIds,
   futggBestChoices,
+  futggBuyableAlternative,
   futggClubIds,
   futggSetChoices,
   galleryCardNeeded,
@@ -262,6 +264,33 @@ describe('fut.gg best-tier picker', () => {
       ['Premier League / Barclays WSL', ['Arsenal C 63500']],
       ['Serie A Enilive', ['Frosinone S 19600']],
     ]);
+  });
+});
+
+describe('fut.gg buyable-grade fallback', () => {
+  // Best grade (S) needs one SBC/Objective card; A is entirely on the market.
+  const SBC_S: FutggSetSummary = {
+    ...MALAGA,
+    id: 70,
+    name: 'SBC at S',
+    tiers: [tier('D', 13_250), tier('C', 13_250), tier('B', 13_250, { sbc: 2 }), tier('A', 13_450), tier('S', 20_850, { sbc: 1 })],
+  };
+  // Every grade needs a card off the market.
+  const ALL_SBC: FutggSetSummary = { ...MALAGA, id: 71, name: 'SBC everywhere', tiers: [tier('A', 13_450, { sbc: 1 }), tier('S', 20_850, { sbc: 2 })] };
+
+  it('bestBuyableFutggTier is the highest grade with no SBC/Objective card', () => {
+    expect(bestBuyableFutggTier(SBC_S)?.grade).toBe('A'); // S needs SBC, B needs SBC; A is clean
+    expect(bestBuyableFutggTier(MALAGA)?.grade).toBe('S'); // no SBC anywhere (field absent = 0)
+    expect(bestBuyableFutggTier(ALL_SBC)).toBeNull(); // no grade is fully buyable
+    expect(bestBuyableFutggTier(FOUNDATIONS)).toBeNull(); // nothing to buy at all
+  });
+
+  it('futggBuyableAlternative suggests a buyable grade only when the best grade needs SBC', () => {
+    expect(futggBuyableAlternative(MALAGA)).toBeNull(); // best grade already buyable: nothing to suggest
+    const sbc = futggBuyableAlternative(SBC_S);
+    expect([sbc?.best.grade, sbc?.buyable?.grade, sbc?.best.sbc]).toEqual(['S', 'A', 1]);
+    const none = futggBuyableAlternative(ALL_SBC);
+    expect([none?.best.grade, none?.buyable]).toEqual(['S', null]); // best needs SBC, but no grade is buyable
   });
 });
 

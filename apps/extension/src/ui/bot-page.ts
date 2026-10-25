@@ -71,9 +71,11 @@ import {
 
 import {
   addFutggLineup,
+  bestBuyableFutggTier,
   bestFutggTier,
   clearFinishedGallery,
   futggBestChoices,
+  futggBuyableAlternative,
   futggClubIds,
   galleryCardNeeded,
   gallerySetBlockers,
@@ -667,6 +669,7 @@ const CSS = `
   .g-mine-actions { display: inline-flex; gap: 6px; flex-shrink: 0; }
   .g-sethead .warn { color: var(--ea-warning); }
   .g-why { color: var(--ea-muted); cursor: help; text-decoration: underline dotted; text-underline-offset: 2px; }
+  .g-alt { padding: 0 10px 7px 31px; margin-top: -2px; font-size: 12px; color: var(--ea-muted); border-bottom: 1px solid var(--ea-line); }
   .settings-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 24px 8px; scrollbar-width: thin; scrollbar-color: var(--ea-input-line) transparent; }
   .card { background: var(--ea-row); border-radius: 6px; margin-bottom: 10px; }
   .card > summary { list-style: none; display: flex; align-items: center; gap: 10px; padding: 14px 16px; cursor: pointer; font-size: 17px; line-height: 20px; font-weight: 600; color: var(--ea-text); }
@@ -1212,11 +1215,23 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
                       }
                       const added = onList.get(set.id);
                       const checked = added || futggPicked.has(set.id) ? ' checked' : '';
+                      // Best grade needs SBC/Objective cards? Offer the highest
+                      // grade that is entirely on the market, so the Set can be
+                      // finished by buying alone (the user's chosen fallback).
+                      const alt = !added ? futggBuyableAlternative(set) : null;
+                      const need = alt ? (alt.best.sbc ?? 0) : 0;
+                      const altHtml = alt
+                        ? `<div class="g-alt">grade ${alt.best.grade} needs ${need} SBC/Objective ${need === 1 ? 'card' : 'cards'} — ${
+                            alt.buyable
+                              ? `<button type="button" class="g-link" data-buyable="${set.id}"${off}${busy}>add grade ${alt.buyable.grade} instead (${fmt(alt.buyable.cost)}${COIN}, all buyable)</button>`
+                              : 'no grade of it is fully buyable yet'
+                          }</div>`
+                        : '';
                       return `<label class="g-set${added ? ' added' : ''}"><input type="checkbox" data-futgg="${set.id}"${checked}${added ? ' disabled' : off} />
                         <span class="nm">${esc(set.name)}</span>
                         <span class="gr g${tier.grade}">${tier.grade}</span>
                         <span class="cost">${fmt(tier.cost)}${COIN}</span>
-                        <span class="tok">${added ? `on your list (${added.grade})` : `${tier.tokens} tokens`}</span></label>`;
+                        <span class="tok">${added ? `on your list (${added.grade})` : `${tier.tokens} tokens`}</span></label>${altHtml}`;
                     })
                     .join('')}`,
               )
@@ -1233,11 +1248,21 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
               const mark = isDone
                 ? `<button type="button" class="ghost" data-uncomplete="${p.set.id}"${off}>Completed${completedWhen(g, p.set.id)} ✓ · Undo</button>`
                 : `<button type="button" class="ghost" data-complete="${p.set.id}"${off}>Mark completed</button>`;
-              const note = isDone ? null : blockerNote(gallerySetBlockers(g, p.set.id));
+              const blockers = isDone ? [] : gallerySetBlockers(g, p.set.id);
+              const note = isDone ? null : blockerNote(blockers);
               const why = note ? ` · <span class="g-why" title="${esc(note.detail)}">not done: ${esc(note.summary)}</span>` : '';
+              // Stuck on SBC/Objective cards it can't buy? Offer a switch to the
+              // highest grade that is entirely on the market, reusing cards it
+              // already owns so only the cheaper lineup's gaps are bought.
+              const setSummary = futggSets?.find((x) => x.id === p.set.id);
+              const alt = !isDone && setSummary && blockers.some((b) => b.reason === 'sbc') ? futggBuyableAlternative(setSummary) : null;
+              const switchBtn =
+                alt?.buyable && alt.buyable.grade !== p.set.grade
+                  ? `<button type="button" class="ghost" data-switch-buyable="${p.set.id}"${off}${busy}>Switch to grade ${alt.buyable.grade} (buyable)</button>`
+                  : '';
               return `<div class="g-mineset${isDone ? ' done' : ''}"><span><b>${esc(p.set.name)}</b> · grade ${p.set.grade} · ${p.done} of ${p.cards} collected${
                 p.skipped > 0 ? ` · ${p.skipped} skipped` : ''
-              }${why}</span><span class="g-mine-actions">${mark}<button type="button" class="ghost" data-remove-set="${p.set.id}"${off}>Remove</button></span></div>`;
+              }${why}</span><span class="g-mine-actions">${mark}${switchBtn}<button type="button" class="ghost" data-remove-set="${p.set.id}"${off}>Remove</button></span></div>`;
             })
             .join('')}</div>`;
     return `${head}${list}<div class="g-problems" id="g-futgg-problems">${futggProblems.map(esc).join('<br>')}</div>${mine}<div class="hint">${esc(FUTGG_HELP)}</div>`;
@@ -1359,6 +1384,55 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         say(
           `Upgrading ${set.name} to grade ${best.grade}: ${toBuy > 0 ? `${toBuy} new ${toBuy === 1 ? 'card' : 'cards'} to buy` : 'nothing new to buy'}` +
             `${r.owned > 0 ? ` · ${r.owned} you already own` : ''}${r.sbc > 0 ? ` · ${r.sbc} SBC/Objective` : ''}`,
+          false,
+        );
+      }
+    }
+    futggBusy = null;
+    renderGallery();
+    renderRunbar();
+    renderBids();
+  }
+
+  /** Adds (or switches) a Set at its best fully-buyable grade — the highest
+   * grade with no SBC/Objective card — so a Set whose best grade needs cards
+   * off the market can still be finished by buying. Any lineup already on the
+   * list for the Set is dropped first; every card the trader owns (the club
+   * now and the catalogue) stands in, so only the buyable grade's gaps buy. */
+  async function addBuyableFutggSet(setId: number): Promise<void> {
+    const sniper = deps.getSniper();
+    if (!deps.futggLineup || !futggSets || futggBusy || sniper?.isRunning()) return;
+    const set = futggSets.find((x) => x.id === setId);
+    const buyable = set ? bestBuyableFutggTier(set) : null;
+    if (!set || !buyable) return;
+    futggBusy = 'add';
+    futggProblems = [];
+    renderGallery();
+    const lineup = await deps.futggLineup(setId, buyable.grade).catch(() => null);
+    let g = currentGallery();
+    if (!lineup) {
+      futggProblems.push(`${set.name}: fut.gg did not send its grade ${buyable.grade} lineup — try again`);
+    } else {
+      const [club, catalogue] = await Promise.all([
+        sniper ? sniper.readClub(futggClubIds([lineup])) : Promise.resolve(null),
+        deps.galleryOwned?.() ?? Promise.resolve(null),
+      ]);
+      const held = new Set<number>([...(club?.ok ? club.owned : []), ...(catalogue ?? [])]);
+      if (!club?.ok) futggProblems.push(`Could not check your club (${club?.why ?? 'Nova AI is not ready'}): a Start checks it again`);
+      // Drop any lineup already on the list for this Set (its higher grade's
+      // cards), then add the buyable grade's; owned cards come in collected.
+      const dropped = removeFutggSet(g, setId);
+      const r = addFutggLineup(dropped, lineup, catalog?.rarities ?? [], held);
+      futggProblems.push(...r.problems);
+      for (const x of r.swaps) futggProblems.push(`${set.name}: your ${x.in.rating} ${x.in.name} stands in for ${x.out.rating} ${x.out.name}`);
+      if (r.state !== dropped) {
+        g = r.state;
+        const toBuy = r.added - r.owned - r.sbc;
+        futggPicked.delete(setId);
+        await deps.saveGallery?.(g);
+        say(
+          `Set to grade ${buyable.grade} (fully buyable) for ${set.name}: ${toBuy > 0 ? `${toBuy} ${toBuy === 1 ? 'card' : 'cards'} to buy` : 'nothing to buy'}` +
+            `${r.owned > 0 ? ` · ${r.owned} you already own` : ''}`,
           false,
         );
       }
@@ -3416,6 +3490,16 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     const upgrade = Number(target.closest<HTMLButtonElement>('button[data-upgrade]')?.dataset.upgrade);
     if (Number.isInteger(upgrade) && upgrade > 0 && !deps.getSniper()?.isRunning()) {
       void upgradeFutggSet(upgrade);
+      return;
+    }
+    // Add, or switch a Set, to its best fully-buyable grade (no SBC/Objective
+    // cards): a look-and-add, so it is blocked while the bot runs.
+    const buyable = Number(
+      target.closest<HTMLButtonElement>('button[data-buyable]')?.dataset.buyable ??
+        target.closest<HTMLButtonElement>('button[data-switch-buyable]')?.dataset.switchBuyable,
+    );
+    if (Number.isInteger(buyable) && buyable > 0 && !deps.getSniper()?.isRunning()) {
+      void addBuyableFutggSet(buyable);
       return;
     }
     if (deps.getSniper()?.isRunning()) return;

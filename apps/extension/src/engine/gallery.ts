@@ -301,6 +301,28 @@ export function bestFutggTier(set: FutggSetSummary): FutggTier | null {
   return null;
 }
 
+/** A Set's best grade that can be finished by buying alone: the highest grade
+ * whose lineup is entirely on the transfer market (no SBC/Objective card, so
+ * `sbc` is 0). Null when every grade needs a card off the market. A tier from
+ * before the `sbc` field counts as fully buyable (`sbc` treated as 0). */
+export function bestBuyableFutggTier(set: FutggSetSummary): FutggTier | null {
+  for (let i = set.tiers.length - 1; i >= 0; i--) {
+    const tier = set.tiers[i]!;
+    if (tier.cards > 0 && (tier.sbc ?? 0) === 0) return tier;
+  }
+  return null;
+}
+
+/** For a Set whose best grade needs SBC/Objective cards (cards off the
+ * transfer market, so it cannot be finished by buying): its best grade and
+ * the highest grade that is entirely buyable (null when no grade is). Null
+ * when the best grade is already fully on the market — nothing to suggest. */
+export function futggBuyableAlternative(set: FutggSetSummary): { best: FutggTier; buyable: FutggTier | null } | null {
+  const best = bestFutggTier(set);
+  if (!best || (best.sbc ?? 0) === 0) return null;
+  return { best, buyable: bestBuyableFutggTier(set) };
+}
+
 /** The Sets the picker offers: each Set once, at its best grade, by fut.gg's
  * categories, cheapest first in each. The trader sees a Set at its highest
  * grade only — not once per grade — so a Set that reaches S is not also

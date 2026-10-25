@@ -239,6 +239,79 @@ const MALAGA_S: FutggLineup = {
   ],
 };
 
+// A Set whose best grade (S) needs an SBC/Objective card, with a lower grade
+// (A) that is entirely on the transfer market.
+const SBC_SET: FutggSetSummary = {
+  id: 95,
+  name: 'SBC Set',
+  category: 'Test League',
+  path: 'test/sbc-set',
+  requiredCards: 2,
+  tiers: [
+    { grade: 'C', threshold: 300, tokens: 0, cost: 10_000, peak: 3_100, score: 908, cards: 2, sbc: 0 },
+    { grade: 'A', threshold: 700, tokens: 13, cost: 13_450, peak: 3_100, score: 908, cards: 2, sbc: 0 },
+    { grade: 'S', threshold: 900, tokens: 28, cost: 20_850, peak: 3_100, score: 908, cards: 2, sbc: 1 },
+  ],
+};
+const SBC_SET_S: FutggLineup = {
+  set: SBC_SET,
+  grade: 'S',
+  missing: 0,
+  cards: [
+    { resourceId: 243312, playerId: 243312, name: 'Dani Lorenzo', rating: 74, rarity: 0, version: 'Rare', holographic: false, score: 60, price: 3_100 },
+    { resourceId: 55_000_001, playerId: 243_900, name: 'SBC Hero', rating: 88, rarity: 5, version: 'SBC', holographic: false, score: 300, price: 0 },
+  ],
+};
+const SBC_SET_A: FutggLineup = {
+  set: SBC_SET,
+  grade: 'A',
+  missing: 0,
+  cards: [
+    { resourceId: 243312, playerId: 243312, name: 'Dani Lorenzo', rating: 74, rarity: 0, version: 'Rare', holographic: false, score: 60, price: 3_100 },
+    { resourceId: 243313, playerId: 243313, name: 'Pablo Ortiz', rating: 75, rarity: 0, version: 'Rare', holographic: false, score: 61, price: 2_000 },
+  ],
+};
+
+it('suggests a fully-buyable grade when the best grade needs SBC, and switches a stuck Set to it', async () => {
+  const owned = vi.fn(async (_ids: number[]) => ({ ok: true, owned: [] as number[], latencyMs: 5 }));
+  const lineup = vi.fn((setId: number, grade: GalleryGrade) => (setId === 95 ? (grade === 'S' ? SBC_SET_S : grade === 'A' ? SBC_SET_A : null) : null));
+  const { root, click, sniper } = await mount({ ...DEFAULT_BOT_MODE_SETTINGS, mode: 'gallery' }, undefined, { sets: [SBC_SET], lineup, owned });
+  click('#g-futgg');
+  await vi.advanceTimersByTimeAsync(10);
+  // The best grade (S) needs 1 SBC card; the picker offers grade A as the
+  // highest fully-buyable grade.
+  const alt = root.querySelector('.g-alt') as HTMLElement;
+  expect(alt.textContent).toContain('grade S needs 1 SBC/Objective card');
+  const buyBtn = alt.querySelector('button[data-buyable="95"]') as HTMLButtonElement;
+  expect(buyBtn.textContent).toContain('add grade A instead (13,450');
+
+  // Add it at its best grade (S) anyway: it sticks on the SBC card.
+  const tick = root.querySelector('input[data-futgg="95"]') as HTMLInputElement;
+  tick.checked = true;
+  tick.dispatchEvent(new Event('change', { bubbles: true }));
+  click('#g-add');
+  await vi.advanceTimersByTimeAsync(10);
+  expect(sniper.getGallery().sets!.map((x) => [x.name, x.grade])).toEqual([['SBC Set', 'S']]);
+  expect(sniper.getGallery().cards.map((c) => [c.name, c.status])).toEqual([
+    ['Dani Lorenzo', 'todo'],
+    ['SBC Hero', 'sbc'],
+  ]);
+
+  // The stuck Set offers a one-click switch to the buyable grade.
+  const switchBtn = root.querySelector('.g-mineset button[data-switch-buyable="95"]') as HTMLButtonElement;
+  expect(switchBtn.textContent).toContain('Switch to grade A (buyable)');
+  switchBtn.click();
+  await vi.advanceTimersByTimeAsync(10);
+  expect(lineup).toHaveBeenCalledWith(95, 'A');
+  const g = sniper.getGallery();
+  expect(g.sets!.map((x) => [x.name, x.grade])).toEqual([['SBC Set', 'A']]);
+  // On the list at grade A now, fully buyable: no SBC card left.
+  expect(g.cards.map((c) => [c.name, c.status])).toEqual([
+    ['Dani Lorenzo', 'todo'],
+    ['Pablo Ortiz', 'todo'],
+  ]);
+});
+
 it("lists fut.gg's Sets for each grade by category, cheapest first, adds the ticked ones, and leaves out cards the club holds", async () => {
   const owned = vi.fn(async (_ids: number[]) => ({ ok: true, owned: [243312], latencyMs: 5 }));
   const lineup = vi.fn((setId: number, grade: GalleryGrade) => (setId === 90 && grade === 'S' ? MALAGA_S : null));

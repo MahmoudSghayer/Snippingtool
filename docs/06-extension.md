@@ -832,12 +832,23 @@ skipped cards back to buy; **Clear list** empties it.
 permissions and the userscript's `@connect`), which carries, for every Set
 and grade, the cheapest lineup that reaches it from fut.gg's own solver: its
 cards (EA card ids), its price in all, its dearest card and its score, bonus
-tags included. The picker has a tab per grade (**S**, A, B, C, D; S first):
-each lists the Sets fut.gg has a lineup for at that grade, under fut.gg's
-categories in fut.gg's order (Rarities, Premier League / Barclays WSL, …),
-cheapest first, with what that grade costs and the Gallery Tokens it gives.
-Sets with nothing to buy are never listed. Ticked Sets, each at the grade
-of the tab it was ticked on, are added with **Add Sets**: for each,
+tags included. The picker lists each Set once, at its **best grade** — the
+highest grade fut.gg has a lineup to buy for (`bestFutggTier`) — under
+fut.gg's categories in fut.gg's order (Rarities, Premier League / Barclays
+WSL, …), cheapest first, with what that grade costs and the Gallery Tokens
+it gives. Sets with nothing to buy are never listed.
+
+When a Set's best grade needs a card off the transfer market — an
+SBC/Objective card fut.gg prices at 0, counted per grade as `tier.sbc` — the
+picker says so and offers the highest grade that is **entirely buyable**
+(`bestBuyableFutggTier`, `futggBuyableAlternative`): "grade S needs 1
+SBC/Objective card — add grade A instead (…, all buyable)". **Add grade A
+instead** puts the Set on the list at that buyable grade (`addBuyableFutggSet`),
+and a Set already on the list that is stuck on an SBC card the same way shows
+**Switch to grade A (buyable)**, which drops its lineup and re-adds it at the
+buyable grade, reusing every card already owned. A Set with no fully-buyable
+grade says so instead. Ticked Sets, each at its best grade, are added with
+**Add Sets**: for each,
 background reads the Set's card list (`gallery.futggLineup`,
 `/sets/{id}/pool/`) to name the lineup's cards (player, rating, rarity,
 holographic or not, score, and what the Set's bonus tags look at: nation,

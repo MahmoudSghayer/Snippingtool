@@ -34,6 +34,7 @@
  */
 import {
   GALLERY_GRADES,
+  MIN_SALE_PRICE,
   futggLineupSchema,
   futggSetSummarySchema,
   futggTagSchema,
@@ -109,7 +110,11 @@ export function parseFutggHub(json: unknown): Hub | null {
         const peak = int(tier.peakPrice);
         const score = int(tier.totalScore);
         if (threshold == null || tokens == null || cost == null || peak == null || score == null) continue;
-        tiers.push({ grade: tier.grade, threshold, tokens, cost, peak, score, cards: items.length });
+        // A card fut.gg prices under EA's floor is not on the transfer market
+        // (an SBC/Objective or otherwise untradeable card): count them so the
+        // picker can tell a buyable grade from one that needs cards off-market.
+        const sbc = items.filter((i) => i.price < MIN_SALE_PRICE).length;
+        tiers.push({ grade: tier.grade, threshold, tokens, cost, peak, score, cards: items.length, sbc });
         cards.set(tier.grade, items);
       }
       tiers.sort((a, b) => GALLERY_GRADES.indexOf(a.grade) - GALLERY_GRADES.indexOf(b.grade));
