@@ -400,9 +400,12 @@ describe('extension module: Gallery owned catalogue', () => {
     expect(add.json()).toEqual({ added: 2, total: 2 });
 
     const read = await app.inject({ method: 'GET', url: OWNED_URL, headers: bearer(accessToken) });
-    expect(read.json().resourceIds.slice().sort((a: number, b: number) => a - b)).toEqual([
-      67_000_100, 67_000_200,
-    ]);
+    expect(
+      read
+        .json()
+        .resourceIds.slice()
+        .sort((a: number, b: number) => a - b),
+    ).toEqual([67_000_100, 67_000_200]);
   });
 
   it('is idempotent: re-sending a catalogued id adds nothing and keeps the total', async () => {

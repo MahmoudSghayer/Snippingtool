@@ -3,7 +3,17 @@
 // 0041_user_gallery.sql.
 
 import { isNull, relations } from 'drizzle-orm';
-import { bigint, index, integer, jsonb, pgTable, primaryKey, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import {
+  bigint,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  primaryKey,
+  text,
+  uniqueIndex,
+  uuid,
+} from 'drizzle-orm/pg-core';
 
 import {
   createdAt,
