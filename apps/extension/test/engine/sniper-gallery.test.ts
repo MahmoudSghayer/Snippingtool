@@ -1,7 +1,7 @@
 // Nova AI's Gallery mode (`engine/sniper.ts`, `runGallery`; rules in
 // `engine/gallery.ts`): the trader's list, one card at a time. A card's
 // version comes from a look-only search when the rating is not the player's
-// base card's; it is bought under its market price for a minute, then the
+// base card's; it is bought under its market price for 30 seconds, then the
 // cheapest listed (the search's max rising faster after each search that
 // found none: never skipped for its price, only the budget stops it); a
 // bought card goes to the club, to the transfer list and back on the market
@@ -192,14 +192,14 @@ describe('Gallery mode — buying and listing', () => {
     expect(h.saved.at(-1)).toEqual(h.gallery());
   });
 
-  it('looks only under the market price for one minute, then buys the cheapest at the market price', async () => {
+  it('looks only under the market price for 30 seconds, then buys the cheapest at the market price', async () => {
     const h = setup({ results: () => [listing('t1', 4_000)] });
     h.sniper.start();
     await h.done();
     const [buy] = h.buys;
     expect(buy![1]).toBe(4_000);
-    expect(buy![2]).toBeGreaterThanOrEqual(START + 60 * SEC);
-    expect(buy![2]).toBeLessThan(START + 90 * SEC);
+    expect(buy![2]).toBeGreaterThanOrEqual(START + 30 * SEC);
+    expect(buy![2]).toBeLessThan(START + 60 * SEC);
     // Every search before that asked for less than the market price.
     for (const s of h.searches.slice(0, -1)) expect(s.filter.maxPrice).toBeLessThan(4_000);
     expect(h.searches.at(-1)!.filter.maxPrice).toBe(4_000);
@@ -480,7 +480,7 @@ describe('Gallery mode — fut.gg lineup cards', () => {
     await h.done();
     expect(h.searches[0]!.filter.maxPrice).toBe(4_900);
     expect(h.buys.map(([id, price]) => [id, price])).toEqual([['holo', 4_800]]);
-    expect(h.log()).toContain('Gallery: {card} — fut.gg price 5,000 coins; looking for one under it for 1 minute first');
+    expect(h.log()).toContain('Gallery: {card} — fut.gg price 5,000 coins; looking for one under it for 30 seconds first');
   });
 
   it('asks the club first, and buys none of the cards it holds already', async () => {

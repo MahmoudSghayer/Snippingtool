@@ -50,7 +50,7 @@ import type { FutggCard, FutggLineup, FutggSetSummary, FutggTier, GalleryCard, G
 
 /** How long Gallery mode looks for a card under the market price before it
  * buys the cheapest listed. */
-export const GALLERY_SNIPE_MS = 60_000;
+export const GALLERY_SNIPE_MS = 30_000;
 /** Look-only searches for a card's version before it is skipped as not
  * listed. */
 export const GALLERY_RESOLVE_TRIES = 2;
@@ -226,13 +226,13 @@ export function gallerySummary(state: GalleryState): Record<GalleryCard['status'
   return counts;
 }
 
-/** The most it pays for a card in its first minutes: one EA price step
+/** The most it pays for a card in the snipe window: one EA price step
  * under the market price. */
 export function gallerySnipeCap(market: number): number {
   return stepPrice(market, -1);
 }
 
-/** The search's max once that minute is over, the cheapest match bought:
+/** The search's max once that window is over, the cheapest match bought:
  * the market price, then 1, 2, 4, 8… EA price steps over it after each
  * search that found none (`steps` such searches), so a card whose market
  * price was off is found in a few searches. No limit but the budget's. */

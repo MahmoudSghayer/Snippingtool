@@ -401,7 +401,7 @@ it("names the card in Gallery mode's notes in the Activity feed, never {card}", 
     resourceId: 257289,
     assetId: 257289,
     rating: 85,
-    message: 'Gallery: {card} — fut.gg price 1,400 coins; looking for one under it for 1 minute first',
+    message: 'Gallery: {card} — fut.gg price 1,400 coins; looking for one under it for 30 seconds first',
   });
   // The bot's onChange refreshes the page; the name arrives a moment later.
   page.refresh();

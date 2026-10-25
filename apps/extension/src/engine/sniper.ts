@@ -2298,7 +2298,13 @@ export class Sniper {
       ...this.galleryIds(card),
       price: market,
       message: `Gallery: {card} — ${source} price ${coins(market)}${
-        under ? `; looking for one under it for ${plural(Math.round(GALLERY_SNIPE_MS / 60_000), 'minute')} first` : ''
+        under
+          ? `; looking for one under it for ${
+              GALLERY_SNIPE_MS % 60_000 === 0
+                ? plural(GALLERY_SNIPE_MS / 60_000, 'minute')
+                : plural(Math.round(GALLERY_SNIPE_MS / 1_000), 'second')
+            } first`
+          : ''
       }`,
     });
     this.saveGallery();

@@ -915,7 +915,7 @@ governor):
 2. **Its market price**: FUTBIN's for that version, else Nova's own market
    data, else fut.gg's (a fut.gg Set's cards), else the cheapest listing
    those looks saw.
-3. **Under the market price for 1 minute** (`GALLERY_SNIPE_MS`): searches
+3. **Under the market price for 30 seconds** (`GALLERY_SNIPE_MS`): searches
    with the max one EA price step under it, buying the cheapest match. Then
    **the cheapest listed**: the max starts at the market price and, after
    each search that found none, goes 1, 2, 4, 8… EA price steps over it
