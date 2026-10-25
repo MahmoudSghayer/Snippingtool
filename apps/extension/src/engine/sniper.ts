@@ -100,6 +100,7 @@ import {
   galleryListPrices,
   galleryMarketCap,
   gallerySnipeCap,
+  gallerySubstitute,
   markCompletedSets,
   markOwned,
   nextGalleryCard,
@@ -2542,13 +2543,31 @@ export class Sniper {
   private galleryLater(card: GalleryCard, why: string): void {
     card.misses = (card.misses ?? 0) + 1;
     if (card.misses >= GALLERY_MISS_CAP) {
+      // An SBC/Objective card fut.gg prices but that never lists. Try to finish
+      // the Set another way: swap in the cheapest buyable club card, keeping
+      // the grade if one can, else dropping to the grade that lineup reaches.
+      const sub = gallerySubstitute(this.gallery, card);
+      if (sub) {
+        this.gallery = sub.state;
+        this.galleryWork = null;
+        this.addLog({
+          kind: 'info',
+          ...this.galleryIds(card),
+          message:
+            `Gallery: ${sub.blocked} isn't on the market (likely an SBC/Objective card) — collecting ${sub.spare} for ${sub.setName} instead` +
+            (sub.keptGrade ? '' : `, finishing at grade ${sub.grade}`),
+        });
+        this.saveGallery();
+        this.deps.onChange();
+        return;
+      }
       card.status = 'skipped';
-      card.note = `Not on the market after ${card.misses} tries (likely an SBC/Objective card) — collect it in the game, or take it off the list`.slice(0, 200);
+      card.note = `Not on the market after ${card.misses} tries (likely an SBC/Objective card) — no buyable substitute is left, so collect it in the game, or take the Set off the list`.slice(0, 200);
       this.galleryWork = null;
       this.addLog({
         kind: 'blocked',
         ...this.galleryIds(card),
-        message: `Gallery: {card} is not on the transfer market after ${card.misses} tries — leaving it out so it stops searching (if it is an SBC/Objective card, collect it in the game)`,
+        message: `Gallery: {card} is not on the transfer market after ${card.misses} tries, and no buyable substitute is left — leaving it out (if it is an SBC/Objective card, collect it in the game, or remove the Set)`,
       });
       this.saveGallery();
       this.deps.onChange();

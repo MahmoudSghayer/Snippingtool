@@ -300,7 +300,7 @@ it('suggests a fully-buyable grade when the best grade needs SBC, and switches a
   // The stuck Set offers one-click switches to each lower tier it can finish
   // at by buying (A and C here), highest first.
   const sw = root.querySelector('.g-mineset .g-switch') as HTMLElement;
-  expect(sw.textContent).toContain('finish at lower tier:');
+  expect(sw.textContent).toContain('switch tier:');
   expect([...sw.querySelectorAll('button[data-switch-grade]')].map((b) => b.getAttribute('data-switch-grade'))).toEqual(['95:A', '95:C']);
   const switchBtn = sw.querySelector('button[data-switch-grade="95:A"]') as HTMLButtonElement;
   // Each button's visible label is just the grade letter; the cost/buyable note
@@ -575,7 +575,7 @@ it('on an uncompleted Set, notes why it is not done with a hover popup of the mi
   };
   const { root } = await mount({ ...DEFAULT_BOT_MODE_SETTINGS, mode: 'gallery' }, gallery);
   const why = root.querySelector('#gallery-feed .g-sethead .g-why') as HTMLElement;
-  expect(why.textContent).toBe('not done: 1 still to buy, 1 SBC/Objective — collect it in the game');
+  expect(why.textContent).toBe('not done: 1 still to buy, needs SBC: 82 SBC Guy');
   // The hover popup names each missing card and why, with fut.gg's price on the dear one.
   expect(why.title).toContain('Manu Duah 84 Future Stars — still to buy (~17,260)');
   expect(why.title).toContain('SBC Guy 82 — SBC/Objective — collect it in the game');

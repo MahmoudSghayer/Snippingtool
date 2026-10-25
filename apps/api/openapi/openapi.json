@@ -14357,6 +14357,77 @@
                                     "type": "integer",
                                     "minimum": 0,
                                     "maximum": 1000000000
+                                  },
+                                  "tiers": {
+                                    "maxItems": 5,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "grade": {
+                                          "type": "string",
+                                          "enum": [
+                                            "D",
+                                            "C",
+                                            "B",
+                                            "A",
+                                            "S"
+                                          ]
+                                        },
+                                        "threshold": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 100000000
+                                        }
+                                      },
+                                      "required": [
+                                        "grade",
+                                        "threshold"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "spares": {
+                                    "maxItems": 12,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "resourceId": {
+                                          "type": "integer",
+                                          "exclusiveMinimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "playerId": {
+                                          "type": "integer",
+                                          "exclusiveMinimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "name": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 60
+                                        },
+                                        "rating": {
+                                          "type": "integer",
+                                          "minimum": 40,
+                                          "maximum": 99
+                                        },
+                                        "score": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 10000000
+                                        }
+                                      },
+                                      "required": [
+                                        "resourceId",
+                                        "playerId",
+                                        "name",
+                                        "rating",
+                                        "score"
+                                      ],
+                                      "additionalProperties": false
+                                    }
                                   }
                                 },
                                 "required": [
@@ -14643,6 +14714,77 @@
                               "type": "integer",
                               "minimum": 0,
                               "maximum": 1000000000
+                            },
+                            "tiers": {
+                              "maxItems": 5,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "grade": {
+                                    "type": "string",
+                                    "enum": [
+                                      "D",
+                                      "C",
+                                      "B",
+                                      "A",
+                                      "S"
+                                    ]
+                                  },
+                                  "threshold": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 100000000
+                                  }
+                                },
+                                "required": [
+                                  "grade",
+                                  "threshold"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "spares": {
+                              "maxItems": 12,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "resourceId": {
+                                    "type": "integer",
+                                    "exclusiveMinimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "playerId": {
+                                    "type": "integer",
+                                    "exclusiveMinimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "name": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 60
+                                  },
+                                  "rating": {
+                                    "type": "integer",
+                                    "minimum": 40,
+                                    "maximum": 99
+                                  },
+                                  "score": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 10000000
+                                  }
+                                },
+                                "required": [
+                                  "resourceId",
+                                  "playerId",
+                                  "name",
+                                  "rating",
+                                  "score"
+                                ],
+                                "additionalProperties": false
+                              }
                             }
                           },
                           "required": [
