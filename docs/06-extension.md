@@ -836,19 +836,32 @@ tags included. The picker lists each Set once, at its **best grade** — the
 highest grade fut.gg has a lineup to buy for (`bestFutggTier`) — under
 fut.gg's categories in fut.gg's order (Rarities, Premier League / Barclays
 WSL, …), cheapest first, with what that grade costs and the Gallery Tokens
-it gives. Sets with nothing to buy are never listed.
+it gives. Sets with nothing to buy are never listed. The list is
+**virtualized** (`buildPickerRows` → `mountFutggList` → `renderFutggWindow`):
+fut.gg has hundreds of Sets, so every row is built once as a flat list with
+its y-offset and height (the `PICKER_*_H` constants, which must match the
+`.g-cat` / `.g-set` / `.g-alt` CSS heights) while the DOM only ever holds the
+rows inside the scroll window — so the picker stays smooth to scroll. Where
+there is no layout to measure (a test, or the panel hidden) it renders every
+row.
 
 When a Set's best grade needs a card off the transfer market — an
 SBC/Objective card fut.gg prices at 0, counted per grade as `tier.sbc` — the
 picker says so and offers the highest grade that is **entirely buyable**
 (`bestBuyableFutggTier`, `futggBuyableAlternative`): "grade S needs 1
 SBC/Objective card — add grade A instead (…, all buyable)". **Add grade A
-instead** puts the Set on the list at that buyable grade (`addBuyableFutggSet`),
-and a Set already on the list that is stuck on an SBC card the same way shows
-**Switch to grade A (buyable)**, which drops its lineup and re-adds it at the
-buyable grade, reusing every card already owned. A Set with no fully-buyable
-grade says so instead. Ticked Sets, each at its best grade, are added with
-**Add Sets**: for each,
+instead** puts the Set on the list at that buyable grade (`addBuyableFutggSet`).
+
+Not every dead end is one fut.gg can see: a card can read as "to buy" (fut.gg
+prices it) yet be unobtainable for the trader — an SBC reward from a
+non-repeatable set where a different player was already chosen. So a Set on
+the list that is not done also shows **finish at lower tier: A B C …** — a
+button per grade below its current one that fut.gg has a lineup for. Each
+(`data-switch-grade`, `switchFutggSetGrade`) drops the Set's lineup and
+re-plans it at the chosen grade, reusing every card already owned (the club
+now and the catalogue); a lower grade's lower score threshold lets the 15th
+card be any cheap buyable player instead of the locked one. Ticked Sets, each
+at its best grade, are added with **Add Sets**: for each,
 background reads the Set's card list (`gallery.futggLineup`,
 `/sets/{id}/pool/`) to name the lineup's cards (player, rating, rarity,
 holographic or not, score, and what the Set's bonus tags look at: nation,

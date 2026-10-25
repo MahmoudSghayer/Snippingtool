@@ -57,6 +57,7 @@ import {
   stepPrice,
   withRecommendedLimits,
   withShortBurstLimits,
+  GALLERY_GRADES,
   type BotMode,
   type BotModeSettings,
   type BotRiskLevel,
@@ -402,6 +403,22 @@ function completedGradeOf(g: GalleryState, setId: number): GalleryGrade | null {
   return g.completedGrade?.[String(setId)] ?? null;
 }
 
+/** One row of the virtualized fut.gg picker: its top offset and height (px,
+ * matching the CSS) and its HTML. A category header or a Set row. */
+interface PickerRow {
+  top: number;
+  h: number;
+  html: string;
+}
+/** Row heights, in px — these MUST match the CSS (.g-cat, .g-set, .g-alt) so
+ * the virtualizer places each row exactly where it renders. */
+const PICKER_CAT_H = 28;
+const PICKER_ROW_H = 34;
+const PICKER_ALT_H = 22;
+/** Extra px rendered above and below the scroll window, so a fast scroll does
+ * not show blank space before the next frame fills it. */
+const PICKER_OVERSCAN = 260;
+
 const BLOCKER_PHRASE: Record<GallerySetBlockerReason, string> = {
   buy: 'still to buy',
   skipped: 'not listed on the market',
@@ -637,11 +654,14 @@ const CSS = `
   .g-budget input { width: 100%; min-width: 0; height: 44px; padding: 0 12px; border-radius: 4px; border: 1px solid var(--ea-input-line); background: var(--ea-input); color: var(--ea-text); font: inherit; font-size: 16px; }
   .g-sum { margin-top: 8px; font-size: 13px; color: var(--ea-text-2); }
   .g-sonly { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ea-text-2); cursor: pointer; }
+  /* The picker is virtualized (buildPickerRows / renderFutggWindow): the Set
+     list can be hundreds of rows, so .g-sets scrolls a spacer sized to the
+     whole list while the DOM only holds the rows in view, each .g-item placed
+     at its row's offset. Row heights here MUST match PICKER_*_H in the code. */
   .g-sets { margin-top: 10px; max-height: 280px; overflow-y: auto; border: 1px solid var(--ea-line); border-radius: 4px; contain: layout paint; }
-  /* content-visibility: the picker lists every fut.gg Set (hundreds of rows);
-     this skips the layout and paint of the ones off screen, so scrolling a
-     long list costs only what is visible. */
-  .g-set { display: grid; grid-template-columns: auto 1fr auto auto auto; align-items: center; gap: 8px; padding: 7px 10px; font-size: 13px; border-bottom: 1px solid var(--ea-line); cursor: pointer; content-visibility: auto; contain-intrinsic-size: auto 34px; }
+  .g-spacer { position: relative; width: 100%; }
+  .g-item { position: absolute; left: 0; right: 0; }
+  .g-set { display: grid; grid-template-columns: auto 1fr auto auto auto; align-items: center; gap: 8px; padding: 7px 10px; height: 34px; box-sizing: border-box; font-size: 13px; border-bottom: 1px solid var(--ea-line); cursor: pointer; }
   .g-set:last-child { border-bottom: 0; }
   .g-set:hover { background: var(--ea-row-hover); }
   .g-set.added { color: var(--ea-muted); cursor: default; }
@@ -660,7 +680,7 @@ const CSS = `
   .g-grades { display: inline-flex; gap: 4px; }
   .g-grade { min-width: 34px; height: 32px; border-radius: 6px; border: 1px solid var(--ea-line); background: var(--ea-control); color: var(--ea-text); font-weight: 700; cursor: pointer; }
   .g-grade.on { border-color: var(--ea-mint, var(--ea-focus)); background: var(--ea-float); }
-  .g-cat { font-size: 12px; font-weight: 700; color: var(--ea-muted); padding: 8px 10px 4px; border-bottom: 1px solid var(--ea-line); background: var(--ea-surface-2); position: sticky; top: 0; }
+  .g-cat { height: 28px; box-sizing: border-box; display: flex; align-items: center; font-size: 12px; font-weight: 700; color: var(--ea-muted); padding: 0 10px; border-bottom: 1px solid var(--ea-line); background: var(--ea-surface-2); }
   .g-set.done { color: var(--ea-muted); cursor: default; }
   .g-check { color: var(--ea-success); width: 13px; text-align: center; }
   .g-link { border: 0; background: none; color: var(--ea-accent); padding: 0; font: inherit; font-size: 12px; cursor: pointer; text-decoration: underline; }
@@ -669,7 +689,9 @@ const CSS = `
   .g-mine-actions { display: inline-flex; gap: 6px; flex-shrink: 0; }
   .g-sethead .warn { color: var(--ea-warning); }
   .g-why { color: var(--ea-muted); cursor: help; text-decoration: underline dotted; text-underline-offset: 2px; }
-  .g-alt { padding: 0 10px 7px 31px; margin-top: -2px; font-size: 12px; color: var(--ea-muted); border-bottom: 1px solid var(--ea-line); }
+  .g-alt { height: 22px; box-sizing: border-box; display: flex; align-items: center; padding: 0 10px 0 31px; font-size: 12px; color: var(--ea-muted); border-bottom: 1px solid var(--ea-line); }
+  .g-switch { color: var(--ea-muted); font-size: 12px; display: inline-flex; align-items: center; gap: 4px; }
+  .g-switch .g-link { font-weight: 700; }
   .settings-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 24px 8px; scrollbar-width: thin; scrollbar-color: var(--ea-input-line) transparent; }
   .card { background: var(--ea-row); border-radius: 6px; margin-bottom: 10px; }
   .card > summary { list-style: none; display: flex; align-items: center; gap: 10px; padding: 14px 16px; cursor: pointer; font-size: 17px; line-height: 20px; font-weight: 600; color: var(--ea-text); }
@@ -1005,6 +1027,12 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
    * best). */
   const futggPicked = new Map<number, GalleryGrade>();
   let futggProblems: string[] = [];
+  /** The fut.gg picker is virtualized: its rows are built once as a flat list
+   * (each with its y-offset, height and HTML), and only the rows inside the
+   * scroll window are put in the DOM, so a list of hundreds scrolls smoothly.
+   * `futggScroll` keeps the scroll position across the list's redraws. */
+  let futggItemsCache: { items: PickerRow[]; total: number } | null = null;
+  let futggScroll = 0;
   let ringFrame: number | null = null;
   let refreshQueued = false;
   let catalog: Catalog | null = null;
@@ -1145,8 +1173,10 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     const running = deps.getSniper()?.isRunning() ?? false;
     const off = running ? ' disabled' : '';
     if (galleryDraft == null) galleryDraft = galleryText(g);
-    // Redrawn on every change: the Set list keeps where it was scrolled to.
-    const scrolled = el.querySelector('.g-sets')?.scrollTop ?? 0;
+    // Redrawn on every change: the Set list keeps where it was scrolled to
+    // (mountFutggList restores it, since the virtualized list needs its spacer
+    // sized before the scroll position can be set).
+    futggScroll = (el.querySelector('.g-sets') as HTMLElement | null)?.scrollTop ?? futggScroll;
     el.innerHTML =
       (deps.futggSets ? section('fut.gg Sets', futggHtml(g, off)) : '') +
       section(
@@ -1171,8 +1201,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         <div class="g-sum" id="g-sum">${esc(gallerySumText(g))}</div>
         <div class="g-actions"><button type="button" class="ghost" id="g-reset-spent"${off}>Reset spent</button></div>`,
       );
-    const sets = el.querySelector('.g-sets');
-    if (sets && scrolled > 0) sets.scrollTop = scrolled;
+    mountFutggList();
   }
 
   /** The Add button's count, as Sets are ticked (no redraw). */
@@ -1183,60 +1212,24 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   /** fut.gg's Sets for the grade picked, by category, ticked and added,
    * and the Sets on the list. */
   function futggHtml(g: GalleryState, off: string): string {
-    const onList = new Map((g.sets ?? []).map((x) => [x.id, x]));
     const completed = new Set(g.completed ?? []);
     const busy = futggBusy !== null ? ' disabled' : '';
-    const upgrades = futggSets
-      ? new Map(galleryUpgradable(g, futggSets).map((u) => [u.setId, u]))
-      : new Map<number, GalleryUpgrade>();
     const head = `<div class="g-actions">
         <button type="button" class="preset" id="g-futgg"${off}${busy}><b>${futggBusy === 'sets' ? 'Loading…' : futggSets ? 'Reload fut.gg Sets' : 'Browse fut.gg Sets'}</b></button>
       </div>`;
     let list = '';
     if (futggSets) {
-      const groups = futggBestChoices(futggSets);
+      // The picker is virtualized: build every row once (futggItemsCache), but
+      // the DOM only ever holds the rows in view (mountFutggList fills a spacer
+      // sized to the whole list). This keeps a list of hundreds smooth to scroll.
+      futggItemsCache = buildPickerRows(g, off, busy);
       list =
-        groups.length === 0
+        futggItemsCache.items.length === 0
           ? `<div class="hint">fut.gg lists no Set with a lineup to buy right now.</div>`
-          : `<div class="g-sets" role="group" aria-label="fut.gg Sets, each at its best grade">${groups
-              .map(
-                (group) =>
-                  `<div class="g-cat">${esc(group.category)}</div>${group.choices
-                    .map(({ set, tier }) => {
-                      if (completed.has(set.id)) {
-                        const doneGrade = completedGradeOf(g, set.id) ?? tier.grade;
-                        const up = upgrades.get(set.id);
-                        const upBtn = up
-                          ? ` · grade ${up.to} now available <button type="button" class="g-link" data-upgrade="${set.id}"${off}${busy}>Upgrade to ${up.to} (${fmt(up.tier.cost)}${COIN})</button>`
-                          : '';
-                        return `<div class="g-set done"><span class="g-check">✓</span><span class="nm">${esc(set.name)}</span>
-                          <span class="gr g${doneGrade}">${doneGrade}</span>
-                          <span class="tok">Completed${completedWhen(g, set.id)}${upBtn} <button type="button" class="g-link" data-uncomplete="${set.id}"${off}>Undo</button></span></div>`;
-                      }
-                      const added = onList.get(set.id);
-                      const checked = added || futggPicked.has(set.id) ? ' checked' : '';
-                      // Best grade needs SBC/Objective cards? Offer the highest
-                      // grade that is entirely on the market, so the Set can be
-                      // finished by buying alone (the user's chosen fallback).
-                      const alt = !added ? futggBuyableAlternative(set) : null;
-                      const need = alt ? (alt.best.sbc ?? 0) : 0;
-                      const altHtml = alt
-                        ? `<div class="g-alt">grade ${alt.best.grade} needs ${need} SBC/Objective ${need === 1 ? 'card' : 'cards'} — ${
-                            alt.buyable
-                              ? `<button type="button" class="g-link" data-buyable="${set.id}"${off}${busy}>add grade ${alt.buyable.grade} instead (${fmt(alt.buyable.cost)}${COIN}, all buyable)</button>`
-                              : 'no grade of it is fully buyable yet'
-                          }</div>`
-                        : '';
-                      return `<label class="g-set${added ? ' added' : ''}"><input type="checkbox" data-futgg="${set.id}"${checked}${added ? ' disabled' : off} />
-                        <span class="nm">${esc(set.name)}</span>
-                        <span class="gr g${tier.grade}">${tier.grade}</span>
-                        <span class="cost">${fmt(tier.cost)}${COIN}</span>
-                        <span class="tok">${added ? `on your list (${added.grade})` : `${tier.tokens} tokens`}</span></label>${altHtml}`;
-                    })
-                    .join('')}`,
-              )
-              .join('')}</div>
+          : `<div class="g-sets" role="group" aria-label="fut.gg Sets, each at its best grade"><div class="g-spacer" style="height:${futggItemsCache.total}px"></div></div>
             <div class="g-actions"><button type="button" class="preset" id="g-add"${off}${busy}${futggPicked.size === 0 ? ' disabled' : ''}><b>${futggAddLabel()}</b></button></div>`;
+    } else {
+      futggItemsCache = null;
     }
     const progress = gallerySetProgress(g);
     const mine =
@@ -1251,21 +1244,127 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
               const blockers = isDone ? [] : gallerySetBlockers(g, p.set.id);
               const note = isDone ? null : blockerNote(blockers);
               const why = note ? ` · <span class="g-why" title="${esc(note.detail)}">not done: ${esc(note.summary)}</span>` : '';
-              // Stuck on SBC/Objective cards it can't buy? Offer a switch to the
-              // highest grade that is entirely on the market, reusing cards it
-              // already owns so only the cheaper lineup's gaps are bought.
+              // Stuck on a card the trader can't actually get — an SBC the
+              // non-repeatable choice already spent (fut.gg still prices it, so
+              // it reads as "to buy"), or a scarce/dear holdout? Offer to drop
+              // the Set to a lower, cheaper grade: its lower score threshold
+              // lets the 15th card be any buyable player, reusing what is owned.
               const setSummary = futggSets?.find((x) => x.id === p.set.id);
-              const alt = !isDone && setSummary && blockers.some((b) => b.reason === 'sbc') ? futggBuyableAlternative(setSummary) : null;
-              const switchBtn =
-                alt?.buyable && alt.buyable.grade !== p.set.grade
-                  ? `<button type="button" class="ghost" data-switch-buyable="${p.set.id}"${off}${busy}>Switch to grade ${alt.buyable.grade} (buyable)</button>`
-                  : '';
+              const curIdx = GALLERY_GRADES.indexOf(p.set.grade);
+              const lower =
+                !isDone && setSummary
+                  ? setSummary.tiers
+                      .filter((t) => t.cards > 0 && GALLERY_GRADES.indexOf(t.grade) < curIdx)
+                      .sort((a, b) => GALLERY_GRADES.indexOf(b.grade) - GALLERY_GRADES.indexOf(a.grade))
+                  : [];
+              const switchBtns = lower.length
+                ? `<span class="g-switch">finish at lower tier: ${lower
+                    .map(
+                      (t) =>
+                        `<button type="button" class="g-link" data-switch-grade="${p.set.id}:${t.grade}"${off}${busy} title="re-plan ${esc(p.set.name)} at grade ${t.grade} — fut.gg ${fmt(t.cost)}${COIN}${(t.sbc ?? 0) === 0 ? ', all on the market' : `, still needs ${t.sbc} SBC`}">${t.grade}</button>`,
+                    )
+                    .join(' ')}</span>`
+                : '';
               return `<div class="g-mineset${isDone ? ' done' : ''}"><span><b>${esc(p.set.name)}</b> · grade ${p.set.grade} · ${p.done} of ${p.cards} collected${
                 p.skipped > 0 ? ` · ${p.skipped} skipped` : ''
-              }${why}</span><span class="g-mine-actions">${mark}${switchBtn}<button type="button" class="ghost" data-remove-set="${p.set.id}"${off}>Remove</button></span></div>`;
+              }${why}</span><span class="g-mine-actions">${mark}${switchBtns}<button type="button" class="ghost" data-remove-set="${p.set.id}"${off}>Remove</button></span></div>`;
             })
             .join('')}</div>`;
     return `${head}${list}<div class="g-problems" id="g-futgg-problems">${futggProblems.map(esc).join('<br>')}</div>${mine}<div class="hint">${esc(FUTGG_HELP)}</div>`;
+  }
+
+  /** Every fut.gg picker row as a flat list with its y-offset and height, so
+   * the virtualizer can place and window them. One category header per group,
+   * then its Sets (each once, at its best grade): completed, on-list, or to add
+   * (with the buyable-grade note when its best grade needs SBC/Objective cards). */
+  function buildPickerRows(g: GalleryState, off: string, busy: string): { items: PickerRow[]; total: number } {
+    const onList = new Map((g.sets ?? []).map((x) => [x.id, x]));
+    const completed = new Set(g.completed ?? []);
+    const upgrades = futggSets ? new Map(galleryUpgradable(g, futggSets).map((u) => [u.setId, u])) : new Map<number, GalleryUpgrade>();
+    const items: PickerRow[] = [];
+    let top = 0;
+    const push = (h: number, html: string): void => {
+      items.push({ top, h, html });
+      top += h;
+    };
+    for (const group of futggBestChoices(futggSets ?? [])) {
+      push(PICKER_CAT_H, `<div class="g-cat">${esc(group.category)}</div>`);
+      for (const { set, tier } of group.choices) {
+        if (completed.has(set.id)) {
+          const doneGrade = completedGradeOf(g, set.id) ?? tier.grade;
+          const up = upgrades.get(set.id);
+          const upBtn = up
+            ? ` · grade ${up.to} now available <button type="button" class="g-link" data-upgrade="${set.id}"${off}${busy}>Upgrade to ${up.to} (${fmt(up.tier.cost)}${COIN})</button>`
+            : '';
+          push(
+            PICKER_ROW_H,
+            `<div class="g-set done"><span class="g-check">✓</span><span class="nm">${esc(set.name)}</span><span class="gr g${doneGrade}">${doneGrade}</span><span class="tok">Completed${completedWhen(g, set.id)}${upBtn} <button type="button" class="g-link" data-uncomplete="${set.id}"${off}>Undo</button></span></div>`,
+          );
+          continue;
+        }
+        const added = onList.get(set.id);
+        const checked = added || futggPicked.has(set.id) ? ' checked' : '';
+        // Best grade needs SBC/Objective cards? Offer the highest grade entirely
+        // on the market, so the Set can be finished by buying alone.
+        const alt = !added ? futggBuyableAlternative(set) : null;
+        const need = alt ? (alt.best.sbc ?? 0) : 0;
+        const altHtml = alt
+          ? `<div class="g-alt">grade ${alt.best.grade} needs ${need} SBC/Objective ${need === 1 ? 'card' : 'cards'} — ${
+              alt.buyable
+                ? `<button type="button" class="g-link" data-buyable="${set.id}"${off}${busy}>add grade ${alt.buyable.grade} instead (${fmt(alt.buyable.cost)}${COIN}, all buyable)</button>`
+                : 'no grade of it is fully buyable yet'
+            }</div>`
+          : '';
+        const row = `<label class="g-set${added ? ' added' : ''}"><input type="checkbox" data-futgg="${set.id}"${checked}${added ? ' disabled' : off} /><span class="nm">${esc(
+          set.name,
+        )}</span><span class="gr g${tier.grade}">${tier.grade}</span><span class="cost">${fmt(tier.cost)}${COIN}</span><span class="tok">${
+          added ? `on your list (${added.grade})` : `${tier.tokens} tokens`
+        }</span></label>`;
+        push(PICKER_ROW_H + (alt ? PICKER_ALT_H : 0), row + altHtml);
+      }
+    }
+    return { items, total: top };
+  }
+
+  /** Puts just the rows inside (and a little past) the scroll window into the
+   * spacer, each placed at its offset. Reads no layout when the list has none
+   * (jsdom, or the panel hidden): then it renders every row. */
+  function renderFutggWindow(): void {
+    const vp = root.getElementById('gallery')?.querySelector('.g-sets') as HTMLElement | null;
+    const spacer = vp?.querySelector('.g-spacer') as HTMLElement | null;
+    if (!vp || !spacer || !futggItemsCache) return;
+    const vpH = vp.clientHeight || Infinity;
+    const min = vp.scrollTop - PICKER_OVERSCAN;
+    const max = vp.scrollTop + vpH + PICKER_OVERSCAN;
+    let html = '';
+    for (const it of futggItemsCache.items) {
+      if (it.top + it.h <= min || it.top >= max) continue;
+      html += `<div class="g-item" style="top:${it.top}px">${it.html}</div>`;
+    }
+    spacer.innerHTML = html;
+    // A tick since the list was built (which does not redraw it) lives only in
+    // futggPicked, so set each enabled checkbox from it after injecting.
+    spacer.querySelectorAll<HTMLInputElement>('input[data-futgg]').forEach((cb) => {
+      if (!cb.disabled) cb.checked = futggPicked.has(Number(cb.dataset.futgg));
+    });
+  }
+
+  /** Wires up the virtualized picker after the gallery is (re)drawn: restores
+   * the scroll position, fills the window, and re-fills it as the user scrolls
+   * (throttled to one fill per frame). */
+  function mountFutggList(): void {
+    const vp = root.getElementById('gallery')?.querySelector('.g-sets') as HTMLElement | null;
+    if (!vp || !futggItemsCache) return;
+    if (futggScroll > 0) vp.scrollTop = futggScroll;
+    renderFutggWindow();
+    let raf = 0;
+    vp.addEventListener('scroll', () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        renderFutggWindow();
+      });
+    });
   }
 
   /** Loads fut.gg's Sets into the picker. */
@@ -1394,24 +1493,28 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     renderBids();
   }
 
-  /** Adds (or switches) a Set at its best fully-buyable grade — the highest
-   * grade with no SBC/Objective card — so a Set whose best grade needs cards
-   * off the market can still be finished by buying. Any lineup already on the
-   * list for the Set is dropped first; every card the trader owns (the club
-   * now and the catalogue) stands in, so only the buyable grade's gaps buy. */
-  async function addBuyableFutggSet(setId: number): Promise<void> {
+  /** Puts a Set on the list at a chosen grade, re-planned from scratch: any
+   * lineup already on the list for the Set is dropped first, then the grade's
+   * lineup is added with every card the trader owns (the club now and the
+   * catalogue) standing in, so only that grade's gaps are bought. Used both to
+   * add a Set at its best fully-buyable grade and to drop a stuck Set to a
+   * lower, cheaper grade it can finish by buying — e.g. a Set held up by an
+   * SBC/Objective card fut.gg still prices (so it reads as "to buy") that the
+   * trader cannot actually get, where a lower grade's 15th card is any cheap
+   * buyable player. */
+  async function switchFutggSetGrade(setId: number, grade: GalleryGrade): Promise<void> {
     const sniper = deps.getSniper();
     if (!deps.futggLineup || !futggSets || futggBusy || sniper?.isRunning()) return;
     const set = futggSets.find((x) => x.id === setId);
-    const buyable = set ? bestBuyableFutggTier(set) : null;
-    if (!set || !buyable) return;
+    const tier = set?.tiers.find((t) => t.grade === grade && t.cards > 0);
+    if (!set || !tier) return;
     futggBusy = 'add';
     futggProblems = [];
     renderGallery();
-    const lineup = await deps.futggLineup(setId, buyable.grade).catch(() => null);
+    const lineup = await deps.futggLineup(setId, grade).catch(() => null);
     let g = currentGallery();
     if (!lineup) {
-      futggProblems.push(`${set.name}: fut.gg did not send its grade ${buyable.grade} lineup — try again`);
+      futggProblems.push(`${set.name}: fut.gg did not send its grade ${grade} lineup — try again`);
     } else {
       const [club, catalogue] = await Promise.all([
         sniper ? sniper.readClub(futggClubIds([lineup])) : Promise.resolve(null),
@@ -1419,8 +1522,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       ]);
       const held = new Set<number>([...(club?.ok ? club.owned : []), ...(catalogue ?? [])]);
       if (!club?.ok) futggProblems.push(`Could not check your club (${club?.why ?? 'Nova AI is not ready'}): a Start checks it again`);
-      // Drop any lineup already on the list for this Set (its higher grade's
-      // cards), then add the buyable grade's; owned cards come in collected.
+      // Drop any lineup already on the list for this Set, then add the chosen
+      // grade's; owned cards come in already collected.
       const dropped = removeFutggSet(g, setId);
       const r = addFutggLineup(dropped, lineup, catalog?.rarities ?? [], held);
       futggProblems.push(...r.problems);
@@ -1431,8 +1534,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         futggPicked.delete(setId);
         await deps.saveGallery?.(g);
         say(
-          `Set to grade ${buyable.grade} (fully buyable) for ${set.name}: ${toBuy > 0 ? `${toBuy} ${toBuy === 1 ? 'card' : 'cards'} to buy` : 'nothing to buy'}` +
-            `${r.owned > 0 ? ` · ${r.owned} you already own` : ''}`,
+          `${set.name} set to grade ${grade}${(tier.sbc ?? 0) === 0 ? ' (all buyable)' : ''}: ${toBuy > 0 ? `${toBuy} ${toBuy === 1 ? 'card' : 'cards'} to buy` : 'nothing to buy'}` +
+            `${r.owned > 0 ? ` · ${r.owned} you already own` : ''}${r.sbc > 0 ? ` · ${r.sbc} SBC/Objective` : ''}`,
           false,
         );
       }
@@ -1441,6 +1544,14 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     renderGallery();
     renderRunbar();
     renderBids();
+  }
+
+  /** Adds (or switches) a Set at its best fully-buyable grade — the highest
+   * grade with no SBC/Objective card. */
+  async function addBuyableFutggSet(setId: number): Promise<void> {
+    const set = futggSets?.find((x) => x.id === setId);
+    const buyable = set ? bestBuyableFutggTier(set) : null;
+    if (buyable) await switchFutggSetGrade(setId, buyable.grade);
   }
 
   /** Saves a changed list (the bot takes it at once while stopped). */
@@ -3492,15 +3603,23 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       void upgradeFutggSet(upgrade);
       return;
     }
-    // Add, or switch a Set, to its best fully-buyable grade (no SBC/Objective
-    // cards): a look-and-add, so it is blocked while the bot runs.
-    const buyable = Number(
-      target.closest<HTMLButtonElement>('button[data-buyable]')?.dataset.buyable ??
-        target.closest<HTMLButtonElement>('button[data-switch-buyable]')?.dataset.switchBuyable,
-    );
+    // Add a Set at its best fully-buyable grade (no SBC/Objective cards):
+    // a look-and-add, so it is blocked while the bot runs.
+    const buyable = Number(target.closest<HTMLButtonElement>('button[data-buyable]')?.dataset.buyable);
     if (Number.isInteger(buyable) && buyable > 0 && !deps.getSniper()?.isRunning()) {
       void addBuyableFutggSet(buyable);
       return;
+    }
+    // Drop a stuck Set to a chosen lower grade ("<setId>:<grade>"): re-plans
+    // the lineup at that grade, reusing owned cards. Blocked while the bot runs.
+    const switchGrade = target.closest<HTMLButtonElement>('button[data-switch-grade]')?.dataset.switchGrade;
+    if (switchGrade && !deps.getSniper()?.isRunning()) {
+      const [idPart, gradePart] = switchGrade.split(':');
+      const id = Number(idPart);
+      if (Number.isInteger(id) && id > 0 && (GALLERY_GRADES as readonly string[]).includes(gradePart ?? '')) {
+        void switchFutggSetGrade(id, gradePart as GalleryGrade);
+        return;
+      }
     }
     if (deps.getSniper()?.isRunning()) return;
     const g = currentGallery();
