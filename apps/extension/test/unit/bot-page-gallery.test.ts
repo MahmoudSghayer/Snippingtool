@@ -279,7 +279,9 @@ it("lists fut.gg's Sets for each grade by category, cheapest first, adds the tic
   // On the list now: ticked and locked in the picker, with its progress.
   expect((root.querySelector('input[data-futgg="90"]') as HTMLInputElement).disabled).toBe(true);
   expect(root.querySelector('.g-mineset')!.textContent).toContain('Malaga CF · grade S · 1 of 2 collected');
-  expect(root.querySelector('#gallery-feed .g-sethead')!.textContent).toBe('Malaga CF · grade S needs 900 points, the lineup makes 908 · 1 of 2 collected');
+  expect(root.querySelector('#gallery-feed .g-sethead')!.textContent).toBe(
+    'Malaga CF · grade S needs 900 points, the lineup makes 908 · 1 of 2 collected · not done: 1 still to buy',
+  );
   const rows = [...root.querySelectorAll('#gallery-feed .bidrow')];
   expect(rows[0]!.textContent).toContain('fut.gg price 1,400');
   expect(rows[1]!.querySelector('.st')!.textContent).toBe('In your club');
@@ -440,6 +442,25 @@ it('says when each Set was completed: today, yesterday, else the day', async () 
   // (Malaga today, Arsenal 5 Oct, Frosinone yesterday) — no grade to switch.
   const picker = () => [...root.querySelectorAll('.g-set.done .tok')].map((r) => r.textContent!.trim().replace(/\s+/g, ' '));
   expect(picker()).toEqual(['Completed today Undo', 'Completed 5 Oct Undo', 'Completed yesterday Undo']);
+});
+
+it('on an uncompleted Set, notes why it is not done with a hover popup of the missing cards', async () => {
+  const gallery: GalleryState = {
+    budget: 100_000,
+    spent: 0,
+    sets: [{ id: 90, name: 'Malaga CF', path: 'laliga/malaga-cf', grade: 'S', threshold: 900, score: 908, tokens: 28, cost: 20_850 }],
+    cards: [
+      { key: '1:84#1', name: 'Manu Duah', rating: 84, playerId: 1, resourceId: 1, exact: true, setIds: [90], status: 'todo', guide: 17_260, version: 'Future Stars' },
+      { key: '2:70#2', name: 'Clubbed Guy', rating: 70, playerId: 2, resourceId: 2, exact: true, setIds: [90], status: 'listed' },
+      { key: '3:82#3', name: 'SBC Guy', rating: 82, playerId: 3, resourceId: 3, exact: true, setIds: [90], status: 'sbc' },
+    ],
+  };
+  const { root } = await mount({ ...DEFAULT_BOT_MODE_SETTINGS, mode: 'gallery' }, gallery);
+  const why = root.querySelector('#gallery-feed .g-sethead .g-why') as HTMLElement;
+  expect(why.textContent).toBe('not done: 1 still to buy, 1 SBC/Objective — collect it in the game');
+  // The hover popup names each missing card and why, with fut.gg's price on the dear one.
+  expect(why.title).toContain('Manu Duah 84 Future Stars — still to buy (~17,260)');
+  expect(why.title).toContain('SBC Guy 82 — SBC/Objective — collect it in the game');
 });
 
 it('clears the finished Gallery cards and completed Sets on Reset stats', async () => {

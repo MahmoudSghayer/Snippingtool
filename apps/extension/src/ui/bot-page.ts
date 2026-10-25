@@ -76,6 +76,7 @@ import {
   futggBestChoices,
   futggClubIds,
   galleryCardNeeded,
+  gallerySetBlockers,
   gallerySetProgress,
   gallerySummary,
   galleryUpgradable,
@@ -83,6 +84,8 @@ import {
   parseGalleryList,
   removeFutggSet,
   setCompleted,
+  type GallerySetBlocker,
+  type GallerySetBlockerReason,
   type GalleryUpgrade,
 } from '../engine/gallery.js';
 import { TRANSFER_LIST_SIZE, type TransferListSummary } from '../lib/transfer-list.js';
@@ -397,6 +400,29 @@ function completedGradeOf(g: GalleryState, setId: number): GalleryGrade | null {
   return g.completedGrade?.[String(setId)] ?? null;
 }
 
+const BLOCKER_PHRASE: Record<GallerySetBlockerReason, string> = {
+  buy: 'still to buy',
+  skipped: 'not listed on the market',
+  sbc: 'SBC/Objective — collect it in the game',
+  collecting: 'bought — on its way to your club',
+};
+
+/** Why an uncompleted Set is not done: a short summary for the row, and the
+ * full per-card reason for the hover popup (its `title`). Null when nothing
+ * is left to collect. */
+function blockerNote(blockers: GallerySetBlocker[]): { summary: string; detail: string } | null {
+  if (blockers.length === 0) return null;
+  const summary = blockers.map((b) => `${b.cards.length} ${BLOCKER_PHRASE[b.reason]}`).join(', ');
+  const detail = blockers
+    .flatMap((b) =>
+      b.cards.map(
+        (c) => `${c.name} ${c.rating}${c.version ? ` ${c.version}` : ''} — ${BLOCKER_PHRASE[b.reason]}${c.guide !== undefined ? ` (~${fmt(c.guide)})` : ''}`,
+      ),
+    )
+    .join('\n');
+  return { summary, detail };
+}
+
 function rangeText(r: { min: number; max: number }): string {
   return r.min === r.max ? String(r.min) : `${r.min}-${r.max}`;
 }
@@ -640,6 +666,7 @@ const CSS = `
   .g-mineset.done b { color: var(--ea-success); }
   .g-mine-actions { display: inline-flex; gap: 6px; flex-shrink: 0; }
   .g-sethead .warn { color: var(--ea-warning); }
+  .g-why { color: var(--ea-muted); cursor: help; text-decoration: underline dotted; text-underline-offset: 2px; }
   .settings-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 24px 8px; scrollbar-width: thin; scrollbar-color: var(--ea-input-line) transparent; }
   .card { background: var(--ea-row); border-radius: 6px; margin-bottom: 10px; }
   .card > summary { list-style: none; display: flex; align-items: center; gap: 10px; padding: 14px 16px; cursor: pointer; font-size: 17px; line-height: 20px; font-weight: 600; color: var(--ea-text); }
@@ -1206,9 +1233,11 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
               const mark = isDone
                 ? `<button type="button" class="ghost" data-uncomplete="${p.set.id}"${off}>Completed${completedWhen(g, p.set.id)} ✓ · Undo</button>`
                 : `<button type="button" class="ghost" data-complete="${p.set.id}"${off}>Mark completed</button>`;
+              const note = isDone ? null : blockerNote(gallerySetBlockers(g, p.set.id));
+              const why = note ? ` · <span class="g-why" title="${esc(note.detail)}">not done: ${esc(note.summary)}</span>` : '';
               return `<div class="g-mineset${isDone ? ' done' : ''}"><span><b>${esc(p.set.name)}</b> · grade ${p.set.grade} · ${p.done} of ${p.cards} collected${
                 p.skipped > 0 ? ` · ${p.skipped} skipped` : ''
-              }</span><span class="g-mine-actions">${mark}<button type="button" class="ghost" data-remove-set="${p.set.id}"${off}>Remove</button></span></div>`;
+              }${why}</span><span class="g-mine-actions">${mark}<button type="button" class="ghost" data-remove-set="${p.set.id}"${off}>Remove</button></span></div>`;
             })
             .join('')}</div>`;
     return `${head}${list}<div class="g-problems" id="g-futgg-problems">${futggProblems.map(esc).join('<br>')}</div>${mine}<div class="hint">${esc(FUTGG_HELP)}</div>`;
@@ -3131,7 +3160,9 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
           p.skipped > 0
             ? ` · <span class="warn">${p.skipped} skipped (${fmt(p.skippedScore)} points): retry ${p.skipped === 1 ? 'it' : 'them'}, or the Set may miss grade ${p.set.grade}</span>`
             : '';
-        return `<div class="g-sethead"><b>${esc(p.set.name)}</b> · grade ${p.set.grade} needs ${fmt(p.set.threshold)} points, the lineup makes ${fmt(p.set.score)} · ${p.done} of ${p.cards} collected${risk}</div>`;
+        const note = blockerNote(gallerySetBlockers(g, p.set.id));
+        const why = note ? ` · <span class="g-why" title="${esc(note.detail)}">not done: ${esc(note.summary)}</span>` : '';
+        return `<div class="g-sethead"><b>${esc(p.set.name)}</b> · grade ${p.set.grade} needs ${fmt(p.set.threshold)} points, the lineup makes ${fmt(p.set.score)} · ${p.done} of ${p.cards} collected${risk}${why}</div>`;
       })
       .join('');
     // Still to buy first; cards on their way, then the done ones, after.

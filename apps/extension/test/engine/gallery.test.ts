@@ -14,6 +14,7 @@ import {
   futggClubIds,
   futggSetChoices,
   galleryCardNeeded,
+  gallerySetBlockers,
   galleryUpgradable,
   galleryKey,
   galleryListPrices,
@@ -280,6 +281,42 @@ describe('galleryUpgradable', () => {
     expect(galleryUpgradable(completedAt(MALAGA, 'S'), [MALAGA])).toEqual([]);
     expect(galleryUpgradable({ ...EMPTY, completed: [90] }, [MALAGA])).toEqual([]);
     expect(galleryUpgradable(completedAt(MALAGA, 'A'), [FROSINONE])).toEqual([]);
+  });
+});
+
+describe('gallerySetBlockers', () => {
+  const state = (): GalleryState =>
+    addFutggLineup(
+      EMPTY,
+      lineup2(MALAGA, [
+        fcard({ resourceId: 1, playerId: 1, name: 'Buy Me', price: 17_260 }),
+        fcard({ resourceId: 2, playerId: 2, name: 'Clubbed' }),
+        fcard({ resourceId: 3, playerId: 3, name: 'Gone SBC', price: 0 }),
+        fcard({ resourceId: 4, playerId: 4, name: 'Not Listed' }),
+      ]),
+      [],
+    ).state;
+
+  it('groups a Set\'s still-missing cards by why each is not collected, collected ones aside', () => {
+    const g = state();
+    g.cards.find((c) => c.name === 'Clubbed')!.status = 'listed'; // collected — not a blocker
+    g.cards.find((c) => c.name === 'Not Listed')!.status = 'skipped';
+    const blockers = gallerySetBlockers(g, 90);
+    expect(blockers.map((b) => [b.reason, b.cards.map((c) => c.name)])).toEqual([
+      ['buy', ['Buy Me']],
+      ['skipped', ['Not Listed']],
+      ['sbc', ['Gone SBC']],
+    ]);
+    // The dear card carries fut.gg's price so the row can show why it lags.
+    expect(blockers[0]!.cards[0]).toMatchObject({ name: 'Buy Me', rating: 74, guide: 17_260 });
+    expect(blockers[2]!.cards[0]!.guide).toBeUndefined(); // an SBC card has no market price
+  });
+
+  it('is empty for a completed Set or one with every card collected', () => {
+    expect(gallerySetBlockers(setCompleted(state(), 90, true), 90)).toEqual([]);
+    const g = state();
+    for (const c of g.cards) c.status = 'owned';
+    expect(gallerySetBlockers(g, 90)).toEqual([]);
   });
 });
 
