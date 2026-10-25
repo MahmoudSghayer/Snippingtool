@@ -297,9 +297,12 @@ it('suggests a fully-buyable grade when the best grade needs SBC, and switches a
     ['SBC Hero', 'sbc'],
   ]);
 
-  // The stuck Set offers a one-click switch to the buyable grade.
-  const switchBtn = root.querySelector('.g-mineset button[data-switch-buyable="95"]') as HTMLButtonElement;
-  expect(switchBtn.textContent).toContain('Switch to grade A (buyable)');
+  // The stuck Set offers one-click switches to each lower tier it can finish
+  // at by buying (A and C here), highest first.
+  const sw = root.querySelector('.g-mineset .g-switch') as HTMLElement;
+  expect(sw.textContent).toContain('finish at lower tier:');
+  expect([...sw.querySelectorAll('button[data-switch-grade]')].map((b) => b.getAttribute('data-switch-grade'))).toEqual(['95:A', '95:C']);
+  const switchBtn = sw.querySelector('button[data-switch-grade="95:A"]') as HTMLButtonElement;
   switchBtn.click();
   await vi.advanceTimersByTimeAsync(10);
   expect(lineup).toHaveBeenCalledWith(95, 'A');
@@ -310,6 +313,43 @@ it('suggests a fully-buyable grade when the best grade needs SBC, and switches a
     ['Dani Lorenzo', 'todo'],
     ['Pablo Ortiz', 'todo'],
   ]);
+});
+
+it('virtualizes the fut.gg picker: only the rows in view are in the DOM, swapping as you scroll', async () => {
+  const many: FutggSetSummary[] = Array.from({ length: 40 }, (_, i) => ({
+    id: 500 + i,
+    name: `Set ${i}`,
+    category: 'Big League',
+    path: `big/set-${i}`,
+    requiredCards: 15,
+    tiers: [tier('S', 10_000 + i)],
+  }));
+  const { root, click } = await mount({ ...DEFAULT_BOT_MODE_SETTINGS, mode: 'gallery' }, undefined, { sets: many, lineup: () => null });
+  click('#g-futgg');
+  await vi.advanceTimersByTimeAsync(10);
+  const vp = root.querySelector('.g-sets') as HTMLElement;
+  // 1 category header (28px) + 40 rows (34px) = 1388px of scrollable content.
+  expect((root.querySelector('.g-spacer') as HTMLElement).style.height).toBe('1388px');
+  // No layout yet (clientHeight 0 in jsdom): the safe fallback renders them all.
+  expect(root.querySelectorAll('.g-set').length).toBe(40);
+
+  // Give it a 280px window at the top: only the rows near the top are in the DOM.
+  Object.defineProperty(vp, 'clientHeight', { value: 280, configurable: true });
+  vp.scrollTop = 0;
+  vp.dispatchEvent(new Event('scroll'));
+  await vi.advanceTimersByTimeAsync(20);
+  const inView = root.querySelectorAll('.g-set').length;
+  expect(inView).toBeGreaterThan(0);
+  expect(inView).toBeLessThan(40);
+  expect(root.querySelector('input[data-futgg="500"]')).not.toBeNull(); // first Set, in view
+  expect(root.querySelector('input[data-futgg="539"]')).toBeNull(); // last Set, far below
+
+  // Scroll to the bottom: the last rows come in, the first drop out.
+  vp.scrollTop = 1388;
+  vp.dispatchEvent(new Event('scroll'));
+  await vi.advanceTimersByTimeAsync(20);
+  expect(root.querySelector('input[data-futgg="539"]')).not.toBeNull();
+  expect(root.querySelector('input[data-futgg="500"]')).toBeNull();
 });
 
 it("lists fut.gg's Sets for each grade by category, cheapest first, adds the ticked ones, and leaves out cards the club holds", async () => {
