@@ -159,6 +159,16 @@ export const galleryStateSchema = z
         message: `At most ${GALLERY_LIMITS.completed} completed Sets`,
       })
       .optional(),
+    /** The grade each completed Set was completed at (by Set id), so the
+     * trader sees whether a Set finished at A can now be upgraded to a higher
+     * grade since fut.gg released new cards. Sets marked before this was kept
+     * have none. */
+    completedGrade: z
+      .record(z.string().regex(/^[1-9][0-9]{0,15}$/), z.enum(GALLERY_GRADES))
+      .refine((at) => Object.keys(at).length <= GALLERY_LIMITS.completed, {
+        message: `At most ${GALLERY_LIMITS.completed} completed Sets`,
+      })
+      .optional(),
     /** The most the list may spend on buys (0: nothing is bought). */
     budget: z.number().int().min(GALLERY_LIMITS.budget.min).max(GALLERY_LIMITS.budget.max),
     /** Coins spent on the list's buys so far. */
