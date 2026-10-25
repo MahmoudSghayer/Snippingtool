@@ -62,6 +62,9 @@ interface Opts {
   /** What EA's club says it holds of the cards asked about. Omitted: no
    * club read on this page. */
   owned?: (resourceIds: number[]) => ActionOutcome;
+  /** The account's collected-card catalogue (user_gallery_owned). Omitted: no
+   * catalogue on this page. */
+  ownedCatalogue?: number[];
   /** Searches before the test stops the bot. */
   maxSearches?: number;
 }
@@ -91,6 +94,7 @@ function setup(opts: Opts = {}) {
     prices: [] as number[],
     trades: [] as TradeInput[],
     saved: [] as GalleryState[],
+    savedOwned: [] as number[],
     log: () => h.sniper.getLog().map((e) => e.message),
     gallery: () => h.sniper.getGallery(),
     done: async () => {
@@ -149,6 +153,8 @@ function setup(opts: Opts = {}) {
       return price == null ? null : { price, source: 'futbin' };
     },
     saveGallery: (state) => void h.saved.push(state),
+    ...(opts.ownedCatalogue ? { loadGalleryOwned: async () => opts.ownedCatalogue! } : {}),
+    saveGalleryOwned: (ids) => void h.savedOwned.push(...ids),
     killSwitch: () => ({ active: false }),
     onTrade: (t) => void h.trades.push(t),
     onChange: () => {
@@ -533,6 +539,33 @@ describe('Gallery mode — fut.gg lineup cards', () => {
     h.sniper.start();
     expect(h.sniper.state.stopReason).toBe('no_gallery');
     expect(h.calls).toEqual([`owned ${HOLO}`]);
+  });
+
+  it('never buys a card in the account catalogue: it was collected before (and since sold) and counts still', async () => {
+    // HOLO is in the account's catalogue — put through the club before, then
+    // listed again and sold, so it is not in the club now. It must still count
+    // for its Set, so Nova never buys it a second time.
+    const h = setup({
+      gallery: { budget: 100_000, spent: 0, cards: [exact()] },
+      ownedCatalogue: [HOLO],
+      results: () => [listing('holo', 3_700, { resourceId: HOLO, rating: 80 })],
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.buys).toEqual([]);
+    expect(h.gallery().cards[0]!.status).toBe('owned');
+    expect(h.sniper.state.stopReason).toBe('gallery_done');
+  });
+
+  it('records a clubbed card in the account catalogue, so a later run never buys it again', async () => {
+    const h = setup({
+      gallery: { budget: 100_000, spent: 0, cards: [exact()] },
+      results: () => [listing('holo', 3_700, { resourceId: HOLO, rating: 80 })],
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.calls).toContain('club holo');
+    expect(h.savedOwned).toContain(HOLO);
   });
 });
 

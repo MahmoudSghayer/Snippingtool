@@ -15,16 +15,20 @@ import {
   userActivity,
   userBotSettings,
   userGallery,
+  userGalleryOwned,
   userRecentSearches,
   users,
 } from '@sl/db';
 import {
+  addGalleryOwnedRequestSchema,
+  addGalleryOwnedResponseSchema,
   botSettingsSchema,
   botSettingsSyncResponseSchema,
   bootstrapRequestSchema,
   bootstrapResponseSchema,
   extensionErrorReportSchema,
   FEATURE_KEYS,
+  galleryOwnedResponseSchema,
   gallerySyncResponseSchema,
   galleryStateSchema,
   heartbeatRequestSchema,
@@ -45,13 +49,15 @@ import {
   type BotSettingsSyncResponse,
   type GallerySyncResponse,
   type LicenseDto,
+  type AddGalleryOwnedResponse,
+  type GalleryOwnedResponse,
   type OpenTrade,
   type OpenTradesResponse,
   type PutGalleryResponse,
   type RecentSearchesResponse,
   type SubscriptionDto,
 } from '@sl/shared';
-import { and, desc, eq, gte, isNotNull, isNull } from 'drizzle-orm';
+import { and, desc, eq, gte, isNotNull, isNull, sql } from 'drizzle-orm';
 import fp from 'fastify-plugin';
 import { z } from 'zod';
 
@@ -570,6 +576,59 @@ export default fp(
           .onConflictDoUpdate({ target: userGallery.userId, set: { state } })
           .returning({ updatedAt: userGallery.updatedAt });
         return { updatedAt: row!.updatedAt.toISOString() };
+      },
+    );
+
+    // The account's collected-card catalogue: every card id put through the
+    // club in Gallery mode (user_gallery_owned, 0042). A card counts for FC's
+    // Gallery once it has passed through the club, so Nova lists it again and
+    // sells it; this is what remembers it stays collected, after it is sold
+    // and on any browser. Read on bot start and merged into the planner's
+    // `owned` so a catalogued card is never bought twice. Ungated like
+    // gallery/bot-settings: the user's own data whatever their plan.
+    app.get(
+      '/api/v1/extension/gallery/owned',
+      {
+        onRequest: [fastify.authenticate],
+        config: { rateLimit: INGEST_RATE_LIMIT },
+        schema: { tags: ['extension'], response: { 200: galleryOwnedResponseSchema } },
+      },
+      async (request): Promise<GalleryOwnedResponse> => {
+        const rows = await fastify.db
+          .select({ resourceId: userGalleryOwned.resourceId })
+          .from(userGalleryOwned)
+          .where(eq(userGalleryOwned.userId, request.authUser!.id));
+        return { resourceIds: rows.map((r) => r.resourceId) };
+      },
+    );
+
+    // Adds the card ids the bot has just clubbed. Idempotent: ids already
+    // catalogued are ignored (the composite PK), so a re-send is cheap.
+    app.post(
+      '/api/v1/extension/gallery/owned',
+      {
+        onRequest: [fastify.authenticate],
+        preHandler: [fastify.verifyCsrf],
+        config: { rateLimit: INGEST_RATE_LIMIT },
+        schema: {
+          tags: ['extension'],
+          body: addGalleryOwnedRequestSchema,
+          response: { 200: addGalleryOwnedResponseSchema },
+        },
+      },
+      async (request): Promise<AddGalleryOwnedResponse> => {
+        const userId = request.authUser!.id;
+        const ids = [...new Set(request.body.resourceIds)];
+        const inserted = await fastify.db
+          .insert(userGalleryOwned)
+          .values(ids.map((resourceId) => ({ userId, resourceId })))
+          .onConflictDoNothing()
+          .returning({ resourceId: userGalleryOwned.resourceId });
+        const [row] = await fastify.db
+          .select({ total: sql<number>`count(*)::int` })
+          .from(userGalleryOwned)
+          .where(eq(userGalleryOwned.userId, userId));
+        return { added: inserted.length, total: row?.total ?? 0 };
       },
     );
 

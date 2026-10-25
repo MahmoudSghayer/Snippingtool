@@ -14263,7 +14263,8 @@
                                       "club",
                                       "listed",
                                       "skipped",
-                                      "owned"
+                                      "owned",
+                                      "sbc"
                                     ]
                                   },
                                   "price": {
@@ -14284,6 +14285,11 @@
                                   "note": {
                                     "type": "string",
                                     "maxLength": 200
+                                  },
+                                  "misses": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 100
                                   },
                                   "tradeId": {
                                     "type": "string",
@@ -14526,7 +14532,8 @@
                                 "club",
                                 "listed",
                                 "skipped",
-                                "owned"
+                                "owned",
+                                "sbc"
                               ]
                             },
                             "price": {
@@ -14547,6 +14554,11 @@
                             "note": {
                               "type": "string",
                               "maxLength": 200
+                            },
+                            "misses": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 100
                             },
                             "tradeId": {
                               "type": "string",
@@ -14693,6 +14705,100 @@
                   },
                   "required": [
                     "updatedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/extension/gallery/owned": {
+      "get": {
+        "tags": [
+          "extension"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "resourceIds": {
+                      "maxItems": 100000,
+                      "type": "array",
+                      "items": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    }
+                  },
+                  "required": [
+                    "resourceIds"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "extension"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "resourceIds": {
+                    "minItems": 1,
+                    "maxItems": 300,
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  }
+                },
+                "required": [
+                  "resourceIds"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "added": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "added",
+                    "total"
                   ],
                   "additionalProperties": false
                 }

@@ -14,6 +14,7 @@ import { newId } from '../../../lib/ids.js';
 import type { FastifyInstance } from 'fastify';
 
 const URL = '/api/v1/extension/gallery';
+const OWNED_URL = '/api/v1/extension/gallery/owned';
 const TEST_PW = 'correcthorsebattery12';
 
 function device(fingerprint: string) {
@@ -350,5 +351,171 @@ describe('extension module: Gallery list', () => {
     expect(res.statusCode).toBe(200);
     expect(res.json().state).toBeNull();
     expect(typeof res.json().updatedAt).toBe('string');
+  });
+});
+
+describe('extension module: Gallery owned catalogue', () => {
+  let app: FastifyInstance;
+
+  beforeAll(async () => {
+    process.env.NODE_ENV = 'test';
+    app = await buildApp({ logger: false });
+    await app.ready();
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  beforeEach(async () => {
+    await resetDatabase(app.db);
+    app.mailer.sentEmails.length = 0;
+  });
+
+  it('requires a signed-in user for both GET and POST', async () => {
+    const get = await app.inject({ method: 'GET', url: OWNED_URL });
+    expect(get.statusCode).toBe(401);
+    const post = await app.inject({
+      method: 'POST',
+      url: OWNED_URL,
+      payload: { resourceIds: [67_000_100] },
+    });
+    expect(post.statusCode).toBe(401);
+  });
+
+  it('starts empty, adds the ids sent, and returns them on the next read', async () => {
+    const { accessToken } = await signIn(app, 'owned-roundtrip@example.com', '198.51.100.80');
+
+    const empty = await app.inject({ method: 'GET', url: OWNED_URL, headers: bearer(accessToken) });
+    expect(empty.statusCode).toBe(200);
+    expect(empty.json()).toEqual({ resourceIds: [] });
+
+    const add = await app.inject({
+      method: 'POST',
+      url: OWNED_URL,
+      headers: bearer(accessToken),
+      payload: { resourceIds: [67_000_100, 67_000_200] },
+    });
+    expect(add.statusCode, add.body).toBe(200);
+    expect(add.json()).toEqual({ added: 2, total: 2 });
+
+    const read = await app.inject({ method: 'GET', url: OWNED_URL, headers: bearer(accessToken) });
+    expect(
+      read
+        .json()
+        .resourceIds.slice()
+        .sort((a: number, b: number) => a - b),
+    ).toEqual([67_000_100, 67_000_200]);
+  });
+
+  it('is idempotent: re-sending a catalogued id adds nothing and keeps the total', async () => {
+    const { accessToken } = await signIn(app, 'owned-idempotent@example.com', '198.51.100.81');
+
+    const first = await app.inject({
+      method: 'POST',
+      url: OWNED_URL,
+      headers: bearer(accessToken),
+      payload: { resourceIds: [67_000_100, 67_000_200] },
+    });
+    expect(first.json()).toEqual({ added: 2, total: 2 });
+
+    const again = await app.inject({
+      method: 'POST',
+      url: OWNED_URL,
+      headers: bearer(accessToken),
+      payload: { resourceIds: [67_000_200, 67_000_300] },
+    });
+    expect(again.statusCode, again.body).toBe(200);
+    expect(again.json()).toEqual({ added: 1, total: 3 });
+  });
+
+  it('dedupes ids repeated within one request before counting what was added', async () => {
+    const { accessToken } = await signIn(app, 'owned-dedupe@example.com', '198.51.100.82');
+
+    const add = await app.inject({
+      method: 'POST',
+      url: OWNED_URL,
+      headers: bearer(accessToken),
+      payload: { resourceIds: [67_000_100, 67_000_100, 67_000_100] },
+    });
+    expect(add.statusCode, add.body).toBe(200);
+    expect(add.json()).toEqual({ added: 1, total: 1 });
+  });
+
+  it('is per user: one account neither sees nor overwrites another account catalogue', async () => {
+    const a = await signIn(app, 'owned-a@example.com', '198.51.100.83');
+    const b = await signIn(app, 'owned-b@example.com', '198.51.100.84');
+
+    await app.inject({
+      method: 'POST',
+      url: OWNED_URL,
+      headers: bearer(a.accessToken),
+      payload: { resourceIds: [67_000_100] },
+    });
+
+    const bRead = await app.inject({
+      method: 'GET',
+      url: OWNED_URL,
+      headers: bearer(b.accessToken),
+    });
+    expect(bRead.json()).toEqual({ resourceIds: [] });
+
+    const bAdd = await app.inject({
+      method: 'POST',
+      url: OWNED_URL,
+      headers: bearer(b.accessToken),
+      payload: { resourceIds: [67_000_900] },
+    });
+    expect(bAdd.json()).toEqual({ added: 1, total: 1 });
+
+    const aRead = await app.inject({
+      method: 'GET',
+      url: OWNED_URL,
+      headers: bearer(a.accessToken),
+    });
+    expect(aRead.json()).toEqual({ resourceIds: [67_000_100] });
+  });
+
+  it('a cookie session needs the CSRF token to add; a bearer token does not', async () => {
+    const { cookies } = await signIn(app, 'owned-csrf@example.com', '198.51.100.85');
+    const sessionCookies = { sl_at: cookies.sl_at!, sl_csrf: cookies.sl_csrf! };
+
+    const noToken = await app.inject({
+      method: 'POST',
+      url: OWNED_URL,
+      cookies: sessionCookies,
+      payload: { resourceIds: [67_000_100] },
+    });
+    expect(noToken.statusCode).toBe(403);
+
+    const withToken = await app.inject({
+      method: 'POST',
+      url: OWNED_URL,
+      cookies: sessionCookies,
+      headers: { 'x-csrf-token': cookies.sl_csrf! },
+      payload: { resourceIds: [67_000_100] },
+    });
+    expect(withToken.statusCode, withToken.body).toBe(200);
+    expect(withToken.json()).toEqual({ added: 1, total: 1 });
+  });
+
+  it('refuses an empty id list or unknown fields', async () => {
+    const { accessToken } = await signIn(app, 'owned-invalid@example.com', '198.51.100.86');
+    for (const payload of [
+      { resourceIds: [] },
+      { resourceIds: [0] },
+      { resourceIds: [-1] },
+      { resourceIds: [67_000_100], extra: 1 },
+      {},
+    ]) {
+      const res = await app.inject({
+        method: 'POST',
+        url: OWNED_URL,
+        headers: bearer(accessToken),
+        payload,
+      });
+      expect(res.statusCode, res.body).toBe(400);
+      expect(res.json().code).toBe('VALIDATION_FAILED');
+    }
   });
 });

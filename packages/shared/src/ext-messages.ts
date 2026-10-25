@@ -10,7 +10,7 @@ import { activityEventSchema } from './schemas/activity.js';
 import { emailSchema, passwordSchema } from './schemas/auth.js';
 import { botDailyUsageSchema, botModeSettingsSchema, botSettingsSchema } from './schemas/bot.js';
 import { filterCriteriaSchema, filterStatsSchema, savedFilterSchema } from './schemas/filters.js';
-import { GALLERY_GRADES, galleryStateSchema } from './schemas/gallery.js';
+import { GALLERY_GRADES, GALLERY_OWNED_BATCH_MAX, galleryStateSchema } from './schemas/gallery.js';
 import { coinPriceSchema, MAX_COIN_PRICE } from './schemas/ingest-bounds.js';
 import { riskBudgetEventSchema } from './schemas/risk.js';
 import { snipingAttemptSchema } from './schemas/sniping.js';
@@ -912,6 +912,12 @@ export const extBackgroundLicenseHeartbeatPayloadSchema = z
 export const extBackgroundBotSettingsSetPayloadSchema = botSettingsSchema;
 export const extBackgroundBotModeSetPayloadSchema = botModeSettingsSchema;
 export const extBackgroundBotGallerySetPayloadSchema = galleryStateSchema;
+/** `bot.galleryOwnedAdd` — card ids the bot has just clubbed, to add to the
+ * account's collected-card catalogue (user_gallery_owned). */
+export const extBackgroundBotGalleryOwnedAddPayloadSchema = z
+  .array(z.number().int().positive())
+  .min(1)
+  .max(GALLERY_OWNED_BATCH_MAX);
 export const extBackgroundBotUsageSetPayloadSchema = botDailyUsageSchema;
 
 /** `catalog.save`: the Snipe Targets form's choices, as the EA web app's own

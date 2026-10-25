@@ -830,6 +830,14 @@ export interface SniperDeps {
   /** Gallery mode: saves the list's progress after every change (the
    * page loads it back with `setGallery`). Omitted = not saved. */
   saveGallery?: (state: GalleryState) => void;
+  /** Gallery mode's collected-card catalogue (user_gallery_owned). A card
+   * counts for FC's Gallery once it has passed through the club, so Nova lists
+   * it again and sells it: `loadGalleryOwned` returns every card id the account
+   * has ever clubbed (here or on another browser), merged into the club check
+   * so a card already collected is never bought again; `saveGalleryOwned`
+   * records ids the bot has just clubbed. Omitted = the catalogue is not used. */
+  loadGalleryOwned?: () => Promise<readonly number[] | null>;
+  saveGalleryOwned?: (resourceIds: readonly number[]) => void;
   /** Today's active time, as saved by an earlier page (null = none). */
   loadUsage?: () => Promise<BotDailyUsage | null>;
   saveUsage?: (usage: BotDailyUsage) => void;
@@ -1019,6 +1027,11 @@ export class Sniper {
   /** When the club was last read for the list (`checkGalleryClub`): a run
    * that starts soon after the page's own check does not ask again. */
   private galleryClubAt = -Infinity;
+  /** The account's collected-card catalogue (user_gallery_owned): every card
+   * id ever put through the club, loaded once and merged into the club check
+   * so a card collected before (and since sold) is never bought again. */
+  private accountOwned = new Set<number>();
+  private accountOwnedLoaded = false;
 
   private readonly now: () => number;
   private readonly random: () => number;
@@ -2426,18 +2439,32 @@ export class Sniper {
    * could not be read (every card is then bought, as before).
    */
   async checkGalleryClub(): Promise<number | null> {
+    await this.loadAccountOwned();
     const ids = clubCheckIds(this.gallery);
     const owned = this.deps.adapter.owned;
     if (ids.length === 0) return 0;
-    if (!owned) return null;
+    if (!owned) {
+      this.applyAccountOwned();
+      return null;
+    }
     const r = await owned(ids).catch(() => null);
     if (!r?.ok || !r.owned) {
-      this.addLog({ kind: 'info', message: `Gallery: could not check your club (${ownedMissReason(r?.error)}) — buying every card on the list` });
+      // The club could not be read, but a card already in the account's
+      // catalogue (collected before, maybe since sold) still counts: mark
+      // those so they are not bought again, and buy the rest.
+      const fromCatalogue = this.applyAccountOwned();
+      this.addLog({
+        kind: 'info',
+        message: `Gallery: could not check your club (${ownedMissReason(r?.error)}) — buying every card on the list${fromCatalogue > 0 ? `, bar ${plural(fromCatalogue, 'card')} you collected before` : ''}`,
+      });
       this.deps.onChange();
       return null;
     }
     this.galleryClubAt = this.now();
-    const marked = markOwned(this.gallery, r.owned);
+    // A card the club holds now is collected and worth remembering too, so it
+    // is skipped later even after Nova lists it again and it is sold.
+    this.noteClubbed(r.owned);
+    const marked = markOwned(this.gallery, [...r.owned, ...this.accountOwned]);
     if (marked > 0) this.noteCompletedSets();
     if (marked > 0) {
       this.addLog({
@@ -2451,6 +2478,43 @@ export class Sniper {
     }
     this.deps.onChange();
     return marked;
+  }
+
+  /** Loads the account's collected-card catalogue once per engine, so cards
+   * clubbed before (here or on another browser) are known even though they
+   * have since been sold and are no longer in the club. */
+  private async loadAccountOwned(): Promise<void> {
+    if (this.accountOwnedLoaded || !this.deps.loadGalleryOwned) return;
+    this.accountOwnedLoaded = true;
+    const ids = await this.deps.loadGalleryOwned().catch(() => null);
+    if (ids) for (const id of ids) this.accountOwned.add(id);
+  }
+
+  /** Marks the list's cards that are in the account's catalogue as `owned`,
+   * saving and re-counting completed Sets if any were. Returns how many. */
+  private applyAccountOwned(): number {
+    if (this.accountOwned.size === 0) return 0;
+    const marked = markOwned(this.gallery, [...this.accountOwned]);
+    if (marked > 0) {
+      this.noteCompletedSets();
+      this.saveGallery();
+    }
+    return marked;
+  }
+
+  /** Records card ids the bot has just clubbed into the account's catalogue,
+   * so each counts for its Set forever — after Nova lists it again and it is
+   * sold, and on any other browser — and is never bought a second time. Only
+   * ids new to the catalogue are sent. */
+  private noteClubbed(resourceIds: number | readonly number[]): void {
+    const fresh: number[] = [];
+    for (const id of typeof resourceIds === 'number' ? [resourceIds] : resourceIds) {
+      if (!this.accountOwned.has(id)) {
+        this.accountOwned.add(id);
+        fresh.push(id);
+      }
+    }
+    if (fresh.length > 0) this.deps.saveGalleryOwned?.(fresh);
   }
 
   /** A card step (to the club, to the transfer list, listed) EA refused
@@ -2549,6 +2613,9 @@ export class Sniper {
         // card just landed there is complete now, even if listing it later
         // fails — so check before the move/list steps, not only on `listed`.
         this.noteCompletedSets();
+        // Catalogue it on the account: it stays collected after Nova lists it
+        // again and it is sold, and on any browser, so it is never re-bought.
+        this.noteClubbed(job.m.resourceId);
       } else if (++job.tries >= COLLECT_TRIES || r.error === 'club_unsupported') {
         const why = clubMissReason(r.error);
         if (card) card.note = `Not sent to your club (${why}): check the Set counted it`.slice(0, 200);

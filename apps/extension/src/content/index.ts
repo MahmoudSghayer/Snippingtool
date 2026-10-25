@@ -857,6 +857,13 @@ async function main(): Promise<void> {
             botGallery = state;
             void send('bot.gallerySet', state);
           },
+          // The account's collected-card catalogue: every card put through the
+          // club counts for FC's Gallery forever, so it is never bought again
+          // — after Nova lists it and it is sold, and on any browser.
+          loadGalleryOwned: () => send<number[] | null>('bot.galleryOwnedGet'),
+          saveGalleryOwned: (resourceIds) => {
+            void send('bot.galleryOwnedAdd', [...resourceIds]);
+          },
         },
         botSettings,
         botMode,
