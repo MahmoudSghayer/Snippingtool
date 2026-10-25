@@ -188,6 +188,41 @@ export type GallerySyncResponse = z.infer<typeof gallerySyncResponseSchema>;
 export const putGalleryResponseSchema = z.object({ updatedAt: z.string().datetime() });
 export type PutGalleryResponse = z.infer<typeof putGalleryResponseSchema>;
 
+// ---------------------------------------------------------------------------
+// The account's collected-card catalogue (user_gallery_owned, 0042).
+//
+// A card counts for FC's Gallery once it has passed through your club, so
+// Nova sends each bought card through the club and then lists it again and
+// sells it — the card does not stay. That means "collected" cannot be read
+// back from the club: the card is gone. This catalogue is the durable record
+// of every card id the account has clubbed, so a card stays collected after
+// it is sold and on any browser the trader signs in on. It is merged into the
+// `owned` set when a Set is planned (gallery.ts), so a card here is never
+// bought a second time.
+
+/** The most card ids one `POST /extension/gallery/owned` may add at once. */
+export const GALLERY_OWNED_BATCH_MAX = 300;
+
+/** `GET /extension/gallery/owned` — every card id the account has clubbed. */
+export const galleryOwnedResponseSchema = z
+  .object({ resourceIds: z.array(z.number().int().positive()).max(100_000) })
+  .strict();
+export type GalleryOwnedResponse = z.infer<typeof galleryOwnedResponseSchema>;
+
+/** `POST /extension/gallery/owned` — adds the card ids the bot has just
+ * clubbed. Idempotent: ids already catalogued are ignored. */
+export const addGalleryOwnedRequestSchema = z
+  .object({ resourceIds: z.array(z.number().int().positive()).min(1).max(GALLERY_OWNED_BATCH_MAX) })
+  .strict();
+export type AddGalleryOwnedRequest = z.infer<typeof addGalleryOwnedRequestSchema>;
+
+/** What `POST /extension/gallery/owned` answers: how many ids were new and the
+ * catalogue's size now. */
+export const addGalleryOwnedResponseSchema = z
+  .object({ added: z.number().int().min(0), total: z.number().int().min(0) })
+  .strict();
+export type AddGalleryOwnedResponse = z.infer<typeof addGalleryOwnedResponseSchema>;
+
 /**
  * fut.gg's Gallery, as the Nova AI page shows it (background
  * `gallery.futggSets`): each Set with what each grade needs, gives and

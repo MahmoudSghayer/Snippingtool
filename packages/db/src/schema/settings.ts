@@ -3,7 +3,7 @@
 // 0041_user_gallery.sql.
 
 import { isNull, relations } from 'drizzle-orm';
-import { index, integer, jsonb, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { bigint, index, integer, jsonb, pgTable, primaryKey, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 import {
   createdAt,
@@ -98,6 +98,30 @@ export const userGallery = pgTable('user_gallery', {
 
 export const userGalleryRelations = relations(userGallery, ({ one }) => ({
   user: one(users, { fields: [userGallery.userId], references: [users.id] }),
+}));
+
+/** Every card id the account has put through its club in Gallery mode. A card
+ * counts for FC's Gallery once it has passed through the club, so Nova lists
+ * it again and sells it; this is the durable record that it stays collected,
+ * after it leaves the club and on any browser the trader signs in on. Merged
+ * into `owned` when a Set is planned, so a catalogued card is never bought
+ * again. GET/POST `/api/v1/extension/gallery/owned`. 0042_user_gallery_owned.sql. */
+export const userGalleryOwned = pgTable(
+  'user_gallery_owned',
+  {
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** EA's card id (resourceId). bigint: a holographic/special card's id can
+     * run past a 32-bit integer. */
+    resourceId: bigint('resource_id', { mode: 'number' }).notNull(),
+    firstSeenAt: timestamptz('first_seen_at').notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.resourceId] })],
+);
+
+export const userGalleryOwnedRelations = relations(userGalleryOwned, ({ one }) => ({
+  user: one(users, { fields: [userGalleryOwned.userId], references: [users.id] }),
 }));
 
 // ---------------------------------------------------------------------------

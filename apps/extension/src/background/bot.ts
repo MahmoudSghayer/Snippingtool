@@ -27,6 +27,8 @@ import {
   extBackgroundBotBudgetSetPayloadSchema,
   botSettingsSchema,
   GALLERY_LIMITS,
+  GALLERY_OWNED_BATCH_MAX,
+  galleryOwnedResponseSchema,
   gallerySyncResponseSchema,
   galleryStateSchema,
   putGalleryResponseSchema,
@@ -342,6 +344,44 @@ export async function handleBotGalleryGet(): Promise<GalleryState | null> {
   if (local) void syncedOnce(queueGalleryUpload(local, null));
   else if (!synced) await syncedOnce(null);
   return local;
+}
+
+/** The account's collected-card catalogue (user_gallery_owned): every card id
+ * put through the club in Gallery mode. A card counts for FC's Gallery once it
+ * has passed through the club, so it stays collected after Nova lists it again
+ * and it is sold, and on any browser. null when it could not be asked (signed
+ * out, offline, refused) — the club check then stands alone. */
+export async function handleBotGalleryOwnedGet(): Promise<number[] | null> {
+  if (!(await isAuthenticated())) return null;
+  try {
+    const body = await apiJson<unknown>('/api/v1/extension/gallery/owned', {}, { retries: 1 });
+    const parsed = galleryOwnedResponseSchema.safeParse(body);
+    return parsed.success ? parsed.data.resourceIds : null;
+  } catch (err) {
+    if (!(err instanceof NetworkError)) logger.warn(`Gallery catalogue not read from the account: ${String(err)}`, 'bot');
+    return null;
+  }
+}
+
+/** Adds card ids the bot has just clubbed to the account's catalogue, in
+ * batches the endpoint accepts. Idempotent server-side, so a lost answer is
+ * harmless (the card is re-sent next time it is clubbed). */
+export async function handleBotGalleryOwnedAdd(resourceIds: number[]): Promise<{ ok: boolean }> {
+  if (resourceIds.length === 0 || !(await isAuthenticated())) return { ok: false };
+  try {
+    for (let i = 0; i < resourceIds.length; i += GALLERY_OWNED_BATCH_MAX) {
+      const batch = resourceIds.slice(i, i + GALLERY_OWNED_BATCH_MAX);
+      await apiJson<unknown>(
+        '/api/v1/extension/gallery/owned',
+        { method: 'POST', body: JSON.stringify({ resourceIds: batch }) },
+        { retries: 1 },
+      );
+    }
+    return { ok: true };
+  } catch (err) {
+    if (!(err instanceof NetworkError)) logger.warn(`Gallery catalogue not saved to the account: ${String(err)}`, 'bot');
+    return { ok: false };
+  }
 }
 
 let galleryTimer: ReturnType<typeof setTimeout> | null = null;
