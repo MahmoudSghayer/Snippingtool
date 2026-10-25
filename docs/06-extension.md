@@ -847,10 +847,22 @@ row.
 
 When a Set's best grade needs a card off the transfer market — an
 SBC/Objective card fut.gg prices at 0, counted per grade as `tier.sbc` — the
-picker says so and offers the highest grade that is **entirely buyable**
-(`bestBuyableFutggTier`, `futggBuyableAlternative`): "grade S needs 1
-SBC/Objective card — add grade A instead (…, all buyable)". **Add grade A
-instead** puts the Set on the list at that buyable grade (`addBuyableFutggSet`).
+picker says so and **defaults to the highest grade that is entirely buyable**
+(`bestBuyableFutggTier`, `futggBuyableAlternative`): ticking the Set adds it at
+that grade automatically (the row shows that grade, its cost and tokens), so it
+can be finished by buying alone. The alt line reads "grade S needs 1
+SBC/Objective card — adds at grade A (all buyable); upgrade to S later by
+completing the SBC", with an explicit **add grade A now** button
+(`addBuyableFutggSet`) too.
+
+So the trader does not lose the better grade, the add records an **upgrade
+note** on the Set (`GallerySet.upgrade` = the best grade, its tokens, and the
+blocking SBC card(s) named): on add, Nova reads the best grade's lineup and
+`futggSbcCards` names the cards it prices at 0. The on-list row then shows a
+standing "⬆ upgradeable to grade S (28 tokens) — complete <rating> <name> in
+the game (SBC/Objective), then switch tier → S" note, and the switch-tier
+control (below) keeps the S button ready for once that card is through the club.
+The note is dropped once the Set is re-planned at or above that grade.
 
 Not every dead end is one fut.gg can see: a card can read as "to buy" (fut.gg
 prices it) yet be unobtainable for the trader — an SBC reward from a

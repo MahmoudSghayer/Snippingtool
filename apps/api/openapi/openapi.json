@@ -14428,6 +14428,41 @@
                                       ],
                                       "additionalProperties": false
                                     }
+                                  },
+                                  "upgrade": {
+                                    "type": "object",
+                                    "properties": {
+                                      "grade": {
+                                        "type": "string",
+                                        "enum": [
+                                          "D",
+                                          "C",
+                                          "B",
+                                          "A",
+                                          "S"
+                                        ]
+                                      },
+                                      "tokens": {
+                                        "type": "integer",
+                                        "minimum": 0,
+                                        "maximum": 10000
+                                      },
+                                      "cards": {
+                                        "maxItems": 12,
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 60
+                                        }
+                                      }
+                                    },
+                                    "required": [
+                                      "grade",
+                                      "tokens",
+                                      "cards"
+                                    ],
+                                    "additionalProperties": false
                                   }
                                 },
                                 "required": [
@@ -14785,6 +14820,41 @@
                                 ],
                                 "additionalProperties": false
                               }
+                            },
+                            "upgrade": {
+                              "type": "object",
+                              "properties": {
+                                "grade": {
+                                  "type": "string",
+                                  "enum": [
+                                    "D",
+                                    "C",
+                                    "B",
+                                    "A",
+                                    "S"
+                                  ]
+                                },
+                                "tokens": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 10000
+                                },
+                                "cards": {
+                                  "maxItems": 12,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 60
+                                  }
+                                }
+                              },
+                              "required": [
+                                "grade",
+                                "tokens",
+                                "cards"
+                              ],
+                              "additionalProperties": false
                             }
                           },
                           "required": [

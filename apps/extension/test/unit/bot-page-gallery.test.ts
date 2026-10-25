@@ -271,10 +271,21 @@ const SBC_SET_A: FutggLineup = {
     { resourceId: 243313, playerId: 243313, name: 'Pablo Ortiz', rating: 75, rarity: 0, version: 'Rare', holographic: false, score: 61, price: 2_000 },
   ],
 };
+const SBC_SET_C: FutggLineup = {
+  set: SBC_SET,
+  grade: 'C',
+  missing: 0,
+  cards: [
+    { resourceId: 243312, playerId: 243312, name: 'Dani Lorenzo', rating: 74, rarity: 0, version: 'Rare', holographic: false, score: 60, price: 3_100 },
+    { resourceId: 243314, playerId: 243314, name: 'Luis Vega', rating: 72, rarity: 0, version: 'Rare', holographic: false, score: 55, price: 1_200 },
+  ],
+};
 
 it('suggests a fully-buyable grade when the best grade needs SBC, and switches a stuck Set to it', async () => {
   const owned = vi.fn(async (_ids: number[]) => ({ ok: true, owned: [] as number[], latencyMs: 5 }));
-  const lineup = vi.fn((setId: number, grade: GalleryGrade) => (setId === 95 ? (grade === 'S' ? SBC_SET_S : grade === 'A' ? SBC_SET_A : null) : null));
+  const lineup = vi.fn((setId: number, grade: GalleryGrade) =>
+    setId === 95 ? (grade === 'S' ? SBC_SET_S : grade === 'A' ? SBC_SET_A : grade === 'C' ? SBC_SET_C : null) : null,
+  );
   const { root, click, sniper } = await mount({ ...DEFAULT_BOT_MODE_SETTINGS, mode: 'gallery' }, undefined, { sets: [SBC_SET], lineup, owned });
   click('#g-futgg');
   await vi.advanceTimersByTimeAsync(10);
@@ -282,41 +293,53 @@ it('suggests a fully-buyable grade when the best grade needs SBC, and switches a
   // highest fully-buyable grade.
   const alt = root.querySelector('.g-alt') as HTMLElement;
   expect(alt.textContent).toContain('grade S needs 1 SBC/Objective card');
+  // It now states the Set is added at the buyable grade and can be upgraded later.
+  expect(alt.textContent).toContain('adds at grade A');
+  expect(alt.textContent).toContain('upgrade to S later');
   const buyBtn = alt.querySelector('button[data-buyable="95"]') as HTMLButtonElement;
-  expect(buyBtn.textContent).toContain('add grade A instead (13,450');
+  expect(buyBtn.textContent).toContain('add grade A now (13,450');
 
-  // Add it at its best grade (S) anyway: it sticks on the SBC card.
+  // Tick + Add: Nova auto-adds at grade A (the highest fully-buyable grade), not
+  // the SBC-locked best grade, and records S as the upgrade path, naming the SBC
+  // card so the trader knows what to complete in the game.
   const tick = root.querySelector('input[data-futgg="95"]') as HTMLInputElement;
   tick.checked = true;
   tick.dispatchEvent(new Event('change', { bubbles: true }));
   click('#g-add');
   await vi.advanceTimersByTimeAsync(10);
-  expect(sniper.getGallery().sets!.map((x) => [x.name, x.grade])).toEqual([['SBC Set', 'S']]);
+  const added = sniper.getGallery().sets![0]!;
+  expect([added.name, added.grade]).toEqual(['SBC Set', 'A']);
+  expect(added.upgrade).toEqual({ grade: 'S', tokens: 28, cards: ['88 SBC Hero'] });
+  // At grade A the lineup is fully buyable — no SBC card on the list.
   expect(sniper.getGallery().cards.map((c) => [c.name, c.status])).toEqual([
     ['Dani Lorenzo', 'todo'],
-    ['SBC Hero', 'sbc'],
+    ['Pablo Ortiz', 'todo'],
   ]);
+  // The on-list row carries the persistent upgrade note naming the SBC card.
+  const upNote = root.querySelector('.g-mineset .g-upgrade') as HTMLElement;
+  expect(upNote.textContent).toContain('upgradeable to grade S');
+  expect(upNote.textContent).toContain('88 SBC Hero');
 
-  // The stuck Set offers one-click switches to each lower tier it can finish
-  // at by buying (A and C here), highest first.
+  // The Set offers one-click switches to every other tier fut.gg has a lineup
+  // for — the higher S (the upgrade path) and the lower C — highest first.
   const sw = root.querySelector('.g-mineset .g-switch') as HTMLElement;
   expect(sw.textContent).toContain('switch tier:');
-  expect([...sw.querySelectorAll('button[data-switch-grade]')].map((b) => b.getAttribute('data-switch-grade'))).toEqual(['95:A', '95:C']);
-  const switchBtn = sw.querySelector('button[data-switch-grade="95:A"]') as HTMLButtonElement;
+  expect([...sw.querySelectorAll('button[data-switch-grade]')].map((b) => b.getAttribute('data-switch-grade'))).toEqual(['95:S', '95:C']);
+  const switchC = sw.querySelector('button[data-switch-grade="95:C"]') as HTMLButtonElement;
   // Each button's visible label is just the grade letter; the cost/buyable note
   // lives in a plain-text title (no COIN SVG leaking out of the attribute).
-  expect(switchBtn.textContent).toBe('A');
-  expect(switchBtn.title).toContain('all on the market');
-  expect(switchBtn.title).not.toContain('<svg');
-  switchBtn.click();
+  expect(switchC.textContent).toBe('C');
+  expect(switchC.title).toContain('all on the market');
+  expect(switchC.title).not.toContain('<svg');
+  switchC.click();
   await vi.advanceTimersByTimeAsync(10);
-  expect(lineup).toHaveBeenCalledWith(95, 'A');
+  expect(lineup).toHaveBeenCalledWith(95, 'C');
   const g = sniper.getGallery();
-  expect(g.sets!.map((x) => [x.name, x.grade])).toEqual([['SBC Set', 'A']]);
-  // On the list at grade A now, fully buyable: no SBC card left.
+  expect(g.sets!.map((x) => [x.name, x.grade])).toEqual([['SBC Set', 'C']]);
+  // On the list at grade C now, fully buyable: no SBC card left.
   expect(g.cards.map((c) => [c.name, c.status])).toEqual([
     ['Dani Lorenzo', 'todo'],
-    ['Pablo Ortiz', 'todo'],
+    ['Luis Vega', 'todo'],
   ]);
 });
 

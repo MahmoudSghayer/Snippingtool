@@ -67,6 +67,7 @@ import {
   type FutggSetSummary,
   type GalleryCard,
   type GalleryGrade,
+  type GallerySet,
   type GalleryState,
 } from '@sl/shared';
 
@@ -78,6 +79,7 @@ import {
   futggBestChoices,
   futggBuyableAlternative,
   futggClubIds,
+  futggSbcCards,
   galleryCardNeeded,
   gallerySetBlockers,
   gallerySetProgress,
@@ -414,7 +416,7 @@ interface PickerRow {
  * the virtualizer places each row exactly where it renders. */
 const PICKER_CAT_H = 28;
 const PICKER_ROW_H = 34;
-const PICKER_ALT_H = 22;
+const PICKER_ALT_H = 40;
 /** Extra px rendered above and below the scroll window, so a fast scroll does
  * not show blank space before the next frame fills it. */
 const PICKER_OVERSCAN = 260;
@@ -699,7 +701,8 @@ const CSS = `
   .g-mine-actions { display: inline-flex; gap: 6px; flex-shrink: 0; }
   .g-sethead .warn { color: var(--ea-warning); }
   .g-why { color: var(--ea-muted); cursor: help; text-decoration: underline dotted; text-underline-offset: 2px; }
-  .g-alt { height: 22px; box-sizing: border-box; display: flex; align-items: center; padding: 0 10px 0 31px; font-size: 12px; color: var(--ea-muted); border-bottom: 1px solid var(--ea-line); }
+  .g-alt { height: 40px; box-sizing: border-box; display: flex; flex-wrap: wrap; align-content: center; align-items: center; gap: 0 6px; padding: 4px 10px 4px 31px; font-size: 12px; line-height: 15px; color: var(--ea-muted); border-bottom: 1px solid var(--ea-line); overflow: hidden; }
+  .g-upgrade { color: var(--ea-accent, var(--ea-muted)); font-size: 12px; padding-left: 2px; }
   .g-switch { color: var(--ea-muted); font-size: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding-left: 2px; }
   .g-switch-label { white-space: nowrap; }
   .g-switch .g-link { font-weight: 700; min-width: 16px; text-align: center; }
@@ -1277,9 +1280,21 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
                     )
                     .join(' ')}</div>`
                 : '';
+              // Added at a buyable grade because the best grade needs an
+              // SBC/Objective card: a standing note of the higher grade and the
+              // card(s) to complete in the game to reach it (the switch-tier
+              // control above offers that grade once they are through the club).
+              const up = !isDone && p.set.upgrade && GALLERY_GRADES.indexOf(p.set.grade) < GALLERY_GRADES.indexOf(p.set.upgrade.grade) ? p.set.upgrade : null;
+              const upHtml = up
+                ? `<div class="g-upgrade">⬆ upgradeable to grade ${up.grade} (${up.tokens} tokens) — ${
+                    up.cards.length
+                      ? `complete ${up.cards.map(esc).join(', ')} in the game (SBC/Objective)`
+                      : 'complete its SBC/Objective card in the game'
+                  }, then switch tier → ${up.grade}</div>`
+                : '';
               return `<div class="g-mineset${isDone ? ' done' : ''}"><div class="g-mineset-top"><span class="g-mineset-info"><b>${esc(p.set.name)}</b> · grade ${p.set.grade} · ${p.done} of ${p.cards} collected${
                 p.skipped > 0 ? ` · ${p.skipped} skipped` : ''
-              }${why}</span><span class="g-mine-actions">${mark}<button type="button" class="ghost" data-remove-set="${p.set.id}"${off}>Remove</button></span></div>${switchBtns}</div>`;
+              }${why}</span><span class="g-mine-actions">${mark}<button type="button" class="ghost" data-remove-set="${p.set.id}"${off}>Remove</button></span></div>${upHtml}${switchBtns}</div>`;
             })
             .join('')}</div>`;
     return `${head}${list}<div class="g-problems" id="g-futgg-problems">${futggProblems.map(esc).join('<br>')}</div>${mine}<div class="hint">${esc(FUTGG_HELP)}</div>`;
@@ -1316,21 +1331,22 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         }
         const added = onList.get(set.id);
         const checked = added || futggPicked.has(set.id) ? ' checked' : '';
-        // Best grade needs SBC/Objective cards? Offer the highest grade entirely
-        // on the market, so the Set can be finished by buying alone.
+        // Best grade needs SBC/Objective cards? Add the highest grade entirely
+        // on the market automatically, so the Set can be finished by buying
+        // alone, and note the best grade is reachable later by doing the SBC.
         const alt = !added ? futggBuyableAlternative(set) : null;
         const need = alt ? (alt.best.sbc ?? 0) : 0;
+        // The grade the Set is added at: the buyable one when the best needs SBC.
+        const addTier = alt?.buyable ?? tier;
         const altHtml = alt
-          ? `<div class="g-alt">grade ${alt.best.grade} needs ${need} SBC/Objective ${need === 1 ? 'card' : 'cards'} — ${
-              alt.buyable
-                ? `<button type="button" class="g-link" data-buyable="${set.id}"${off}${busy}>add grade ${alt.buyable.grade} instead (${fmt(alt.buyable.cost)}${COIN}, all buyable)</button>`
-                : 'no grade of it is fully buyable yet'
-            }</div>`
+          ? alt.buyable
+            ? `<div class="g-alt">grade ${alt.best.grade} needs ${need} SBC/Objective ${need === 1 ? 'card' : 'cards'} — adds at grade ${alt.buyable.grade} (all buyable); upgrade to ${alt.best.grade} later by completing the SBC. <button type="button" class="g-link" data-buyable="${set.id}"${off}${busy}>add grade ${alt.buyable.grade} now (${fmt(alt.buyable.cost)}${COIN})</button></div>`
+            : `<div class="g-alt">grade ${alt.best.grade} needs ${need} SBC/Objective ${need === 1 ? 'card' : 'cards'} — no grade of it is fully buyable yet</div>`
           : '';
         const row = `<label class="g-set${added ? ' added' : ''}"><input type="checkbox" data-futgg="${set.id}"${checked}${added ? ' disabled' : off} /><span class="nm">${esc(
           set.name,
-        )}</span><span class="gr g${tier.grade}">${tier.grade}</span><span class="cost">${fmt(tier.cost)}${COIN}</span><span class="tok">${
-          added ? `on your list (${added.grade})` : `${tier.tokens} tokens`
+        )}</span><span class="gr g${addTier.grade}">${addTier.grade}</span><span class="cost">${fmt(addTier.cost)}${COIN}</span><span class="tok">${
+          added ? `on your list (${added.grade})` : `${addTier.tokens} tokens`
         }</span></label>`;
         push(PICKER_ROW_H + (alt ? PICKER_ALT_H : 0), row + altHtml);
       }
@@ -1401,13 +1417,25 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     futggBusy = 'add';
     futggProblems = [];
     renderGallery();
-    const lineups: FutggLineup[] = [];
+    const lineups: { lineup: FutggLineup; upgrade?: GallerySet['upgrade'] }[] = [];
     for (const [id, grade] of [...futggPicked]) {
       const set = futggSets.find((x) => x.id === id);
       if (!set) continue;
       const lineup = await deps.futggLineup(id, grade).catch(() => null);
-      if (lineup) lineups.push(lineup);
-      else futggProblems.push(`${set.name}: fut.gg did not send its grade ${grade} lineup — try again`);
+      if (!lineup) {
+        futggProblems.push(`${set.name}: fut.gg did not send its grade ${grade} lineup — try again`);
+        continue;
+      }
+      // Added below its best grade because that grade needs an SBC/Objective
+      // card? Read the best grade's lineup to name the blocking card(s), and
+      // keep it as the Set's upgrade target.
+      const best = bestFutggTier(set);
+      let upgrade: GallerySet['upgrade'] | undefined;
+      if (best && best.grade !== grade && (best.sbc ?? 0) > 0) {
+        const bestLineup = await deps.futggLineup(id, best.grade).catch(() => null);
+        upgrade = { grade: best.grade, tokens: best.tokens, cards: bestLineup ? futggSbcCards(bestLineup) : [] };
+      }
+      lineups.push({ lineup, upgrade });
     }
     let g = currentGallery();
     let added = 0;
@@ -1418,12 +1446,12 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     let cost = 0;
     let clubRead = false;
     if (lineups.length > 0) {
-      const club = sniper ? await sniper.readClub(futggClubIds(lineups)) : null;
+      const club = sniper ? await sniper.readClub(futggClubIds(lineups.map((l) => l.lineup))) : null;
       const held = new Set(club?.ok ? club.owned : []);
       clubRead = club?.ok === true;
       if (!club?.ok) futggProblems.push(`Could not check your club (${club?.why ?? 'Nova AI is not ready'}): Nova buys every card (a Start checks again)`);
-      for (const lineup of lineups) {
-        const r = addFutggLineup(g, lineup, catalog?.rarities ?? [], held);
+      for (const { lineup, upgrade } of lineups) {
+        const r = addFutggLineup(g, lineup, catalog?.rarities ?? [], held, upgrade);
         futggProblems.push(...r.problems);
         for (const x of r.swaps) futggProblems.push(`${lineup.set.name}: your ${x.in.rating} ${x.in.name} stands in for ${x.out.rating} ${x.out.name} (saves about ${fmt(x.out.price)})`);
         if (r.state === g) continue;
@@ -3657,7 +3685,12 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     if (Number.isInteger(setId) && setId > 0) {
       const picked = futggSets?.find((x) => x.id === setId);
       const best = picked ? bestFutggTier(picked) : null;
-      if (t.checked && best) futggPicked.set(setId, best.grade);
+      // Add at the highest grade that can be finished by buying alone: when the
+      // best grade needs an SBC/Objective card, drop to the best buyable grade
+      // (and keep the best grade as the upgrade target, set at add time). If no
+      // grade is fully buyable, keep the best grade (its SBC card is flagged).
+      const grade = picked && best ? ((best.sbc ?? 0) > 0 ? (bestBuyableFutggTier(picked)?.grade ?? best.grade) : best.grade) : null;
+      if (t.checked && grade) futggPicked.set(setId, grade);
       else futggPicked.delete(setId);
       const add = root.getElementById('g-add') as HTMLButtonElement | null;
       if (add) {
