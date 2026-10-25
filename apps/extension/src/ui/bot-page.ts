@@ -64,7 +64,6 @@ import {
   type FilterCriteria,
   type FutggLineup,
   type FutggSetSummary,
-  GALLERY_GRADES,
   type GalleryCard,
   type GalleryGrade,
   type GalleryState,
@@ -72,16 +71,19 @@ import {
 
 import {
   addFutggLineup,
+  bestFutggTier,
   clearFinishedGallery,
+  futggBestChoices,
   futggClubIds,
-  futggSetChoices,
   galleryCardNeeded,
   gallerySetProgress,
   gallerySummary,
+  galleryUpgradable,
   markCompletedSets,
   parseGalleryList,
   removeFutggSet,
   setCompleted,
+  type GalleryUpgrade,
 } from '../engine/gallery.js';
 import { TRANSFER_LIST_SIZE, type TransferListSummary } from '../lib/transfer-list.js';
 import {
@@ -135,6 +137,10 @@ export interface BotPageDeps {
    * fut.gg could not be read). Omitted: no fut.gg picker. */
   futggSets?: () => Promise<FutggSetSummary[] | null>;
   futggLineup?: (setId: number, grade: GalleryGrade) => Promise<FutggLineup | null>;
+  /** The account's collected-card catalogue (every card id ever clubbed), so
+   * upgrading a Set reuses cards collected before and now sold. Null: the
+   * catalogue could not be read. Omitted: not used. */
+  galleryOwned?: () => Promise<readonly number[] | null>;
   /** The search the bot should run from now on (null: none). */
   setLiveSearch: (search: LiveSearch | null) => void;
   resolveNames: (resourceIds: number[]) => Promise<Record<string, string | null>>;
@@ -383,6 +389,12 @@ function completedWhen(g: GalleryState, setId: number, now = Date.now()): string
   if (day.toDateString() === yesterday.toDateString()) return ' yesterday';
   const year = day.getFullYear() === today.getFullYear() ? '' : ` ${day.getFullYear()}`;
   return ` ${day.getDate()} ${MONTHS[day.getMonth()]}${year}`;
+}
+
+/** The grade a completed fut.gg Set was completed at, or null when the list
+ * kept none (a Set completed before completedGrade was kept). */
+function completedGradeOf(g: GalleryState, setId: number): GalleryGrade | null {
+  return g.completedGrade?.[String(setId)] ?? null;
 }
 
 function rangeText(r: { min: number; max: number }): string {
@@ -959,9 +971,9 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
    * ticked, whether only grade S Sets show, and what the last add said. */
   let futggSets: FutggSetSummary[] | null = null;
   let futggBusy: 'sets' | 'add' | null = null;
-  /** Ticked Sets, each with the grade whose lineup it is added for. */
+  /** Ticked Sets, each with the grade whose lineup it is added for (its
+   * best). */
   const futggPicked = new Map<number, GalleryGrade>();
-  let futggGrade: GalleryGrade = 'S';
   let futggProblems: string[] = [];
   let ringFrame: number | null = null;
   let refreshQueued = false;
@@ -1144,29 +1156,33 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     const onList = new Map((g.sets ?? []).map((x) => [x.id, x]));
     const completed = new Set(g.completed ?? []);
     const busy = futggBusy !== null ? ' disabled' : '';
-    const grades = [...GALLERY_GRADES]
-      .reverse()
-      .map((gr) => `<button type="button" class="g-grade${gr === futggGrade ? ' on' : ''}" data-grade="${gr}" aria-pressed="${gr === futggGrade}">${gr}</button>`)
-      .join('');
+    const upgrades = futggSets
+      ? new Map(galleryUpgradable(g, futggSets).map((u) => [u.setId, u]))
+      : new Map<number, GalleryUpgrade>();
     const head = `<div class="g-actions">
         <button type="button" class="preset" id="g-futgg"${off}${busy}><b>${futggBusy === 'sets' ? 'Loading…' : futggSets ? 'Reload fut.gg Sets' : 'Browse fut.gg Sets'}</b></button>
-        <span class="g-grades" role="group" aria-label="Grade">${grades}</span>
       </div>`;
     let list = '';
     if (futggSets) {
-      const groups = futggSetChoices(futggSets, futggGrade);
+      const groups = futggBestChoices(futggSets);
       list =
         groups.length === 0
-          ? `<div class="hint">fut.gg lists no Set with a grade ${futggGrade} lineup right now.</div>`
-          : `<div class="g-sets" role="group" aria-label="fut.gg Sets, grade ${futggGrade}">${groups
+          ? `<div class="hint">fut.gg lists no Set with a lineup to buy right now.</div>`
+          : `<div class="g-sets" role="group" aria-label="fut.gg Sets, each at its best grade">${groups
               .map(
                 (group) =>
                   `<div class="g-cat">${esc(group.category)}</div>${group.choices
                     .map(({ set, tier }) => {
-                      if (completed.has(set.id))
+                      if (completed.has(set.id)) {
+                        const doneGrade = completedGradeOf(g, set.id) ?? tier.grade;
+                        const up = upgrades.get(set.id);
+                        const upBtn = up
+                          ? ` · grade ${up.to} now available <button type="button" class="g-link" data-upgrade="${set.id}"${off}${busy}>Upgrade to ${up.to} (${fmt(up.tier.cost)}${COIN})</button>`
+                          : '';
                         return `<div class="g-set done"><span class="g-check">✓</span><span class="nm">${esc(set.name)}</span>
-                          <span class="gr g${tier.grade}">${tier.grade}</span><span class="cost">${fmt(tier.cost)}${COIN}</span>
-                          <span class="tok">Completed${completedWhen(g, set.id)} <button type="button" class="g-link" data-uncomplete="${set.id}"${off}>Undo</button></span></div>`;
+                          <span class="gr g${doneGrade}">${doneGrade}</span>
+                          <span class="tok">Completed${completedWhen(g, set.id)}${upBtn} <button type="button" class="g-link" data-uncomplete="${set.id}"${off}>Undo</button></span></div>`;
+                      }
                       const added = onList.get(set.id);
                       const checked = added || futggPicked.has(set.id) ? ' checked' : '';
                       return `<label class="g-set${added ? ' added' : ''}"><input type="checkbox" data-futgg="${set.id}"${checked}${added ? ' disabled' : off} />
@@ -1269,6 +1285,54 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       const over = cost > left;
       if (over) parts.push(`fut.gg prices them at ${fmt(cost)}, more than the ${fmt(left)} left of your budget`);
       say(`Added ${sets === 1 ? '1 Set' : `${sets} Sets`}: ${parts.join(' · ')}`, over);
+    }
+    futggBusy = null;
+    renderGallery();
+    renderRunbar();
+    renderBids();
+  }
+
+  /** Upgrades a completed Set to the higher grade fut.gg now lists: re-opens
+   * it and puts the higher grade's lineup on the list, with every card the
+   * trader already owns (the club now, and the catalogue of all it has ever
+   * clubbed) marked owned, so only the cards the higher grade adds are bought. */
+  async function upgradeFutggSet(setId: number): Promise<void> {
+    const sniper = deps.getSniper();
+    if (!deps.futggLineup || !futggSets || futggBusy || sniper?.isRunning()) return;
+    const set = futggSets.find((x) => x.id === setId);
+    const best = set ? bestFutggTier(set) : null;
+    if (!set || !best) return;
+    futggBusy = 'add';
+    futggProblems = [];
+    renderGallery();
+    const lineup = await deps.futggLineup(setId, best.grade).catch(() => null);
+    let g = currentGallery();
+    if (!lineup) {
+      futggProblems.push(`${set.name}: fut.gg did not send its grade ${best.grade} lineup — try again`);
+    } else {
+      const [club, catalogue] = await Promise.all([
+        sniper ? sniper.readClub(futggClubIds([lineup])) : Promise.resolve(null),
+        deps.galleryOwned?.() ?? Promise.resolve(null),
+      ]);
+      const held = new Set<number>([...(club?.ok ? club.owned : []), ...(catalogue ?? [])]);
+      if (!club?.ok) futggProblems.push(`Could not check your club (${club?.why ?? 'Nova AI is not ready'}): a Start checks it again`);
+      // Re-open the Set so its cards are worked again, then add the higher
+      // grade's lineup over what is there; owned cards come in already collected.
+      const reopened = setCompleted(g, setId, false);
+      const r = addFutggLineup(reopened, lineup, catalog?.rarities ?? [], held);
+      futggProblems.push(...r.problems);
+      for (const x of r.swaps) futggProblems.push(`${set.name}: your ${x.in.rating} ${x.in.name} stands in for ${x.out.rating} ${x.out.name}`);
+      if (r.state !== reopened) {
+        g = r.state;
+        const toBuy = r.added - r.owned - r.sbc;
+        futggPicked.delete(setId);
+        await deps.saveGallery?.(g);
+        say(
+          `Upgrading ${set.name} to grade ${best.grade}: ${toBuy > 0 ? `${toBuy} new ${toBuy === 1 ? 'card' : 'cards'} to buy` : 'nothing new to buy'}` +
+            `${r.owned > 0 ? ` · ${r.owned} you already own` : ''}${r.sbc > 0 ? ` · ${r.sbc} SBC/Objective` : ''}`,
+          false,
+        );
+      }
     }
     futggBusy = null;
     renderGallery();
@@ -3316,11 +3380,11 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     const id = (e.target as HTMLElement).closest<HTMLButtonElement>('button[id^="g-"]')?.id;
     if (id) onGalleryClick(id);
     const target = e.target as HTMLElement;
-    // A grade picked: its Sets show (works while the bot runs: it only looks).
-    const grade = target.closest<HTMLButtonElement>('button[data-grade]')?.dataset.grade;
-    if (grade && (GALLERY_GRADES as readonly string[]).includes(grade)) {
-      futggGrade = grade as GalleryGrade;
-      renderGallery();
+    // Upgrade a completed Set to the higher grade fut.gg now lists (reusing the
+    // cards already owned): a look-and-add, so it is blocked while the bot runs.
+    const upgrade = Number(target.closest<HTMLButtonElement>('button[data-upgrade]')?.dataset.upgrade);
+    if (Number.isInteger(upgrade) && upgrade > 0 && !deps.getSniper()?.isRunning()) {
+      void upgradeFutggSet(upgrade);
       return;
     }
     if (deps.getSniper()?.isRunning()) return;
@@ -3342,10 +3406,12 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   });
   onTrusted($('gallery'), 'change', (e) => {
     const t = e.target as HTMLInputElement;
-    // The fut.gg picker: a Set ticked or unticked, or the grade S filter.
+    // The fut.gg picker: a Set ticked or unticked (added at its best grade).
     const setId = Number(t.dataset.futgg);
     if (Number.isInteger(setId) && setId > 0) {
-      if (t.checked) futggPicked.set(setId, futggGrade);
+      const picked = futggSets?.find((x) => x.id === setId);
+      const best = picked ? bestFutggTier(picked) : null;
+      if (t.checked && best) futggPicked.set(setId, best.grade);
       else futggPicked.delete(setId);
       const add = root.getElementById('g-add') as HTMLButtonElement | null;
       if (add) {

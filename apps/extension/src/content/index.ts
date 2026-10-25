@@ -957,6 +957,9 @@ async function main(): Promise<void> {
       // fut.gg's Gallery Sets and a Set's cheapest lineup (background/futgg.ts).
       futggSets: async () => (await send<{ sets: FutggSetSummary[] | null }>('gallery.futggSets'))?.sets ?? null,
       futggLineup: async (setId, grade) => (await send<{ lineup: FutggLineup | null }>('gallery.futggLineup', { setId, grade }))?.lineup ?? null,
+      // The account's collected-card catalogue, so a Set upgrade reuses cards
+      // collected before (and since sold) and buys only the higher grade's delta.
+      galleryOwned: () => send<number[] | null>('bot.galleryOwnedGet'),
       setLiveSearch: (search) => {
         liveSearch = search;
       },

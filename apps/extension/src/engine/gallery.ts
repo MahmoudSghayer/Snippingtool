@@ -39,7 +39,7 @@
  * and when in `completedAt`): never offered again, and its cards still to
  * buy are left alone.
  */
-import { EA_TAX_RATE, GALLERY_LIMITS, MIN_SALE_PRICE, MIN_START_PRICE, stepPrice } from '@sl/shared';
+import { EA_TAX_RATE, GALLERY_GRADES, GALLERY_LIMITS, MIN_SALE_PRICE, MIN_START_PRICE, stepPrice } from '@sl/shared';
 
 import { fold, searchPlayers } from '../model/catalog.js';
 
@@ -291,6 +291,66 @@ export function futggSetChoices(sets: readonly FutggSetSummary[], grade: Gallery
   return [...groups.values()];
 }
 
+/** A Set's best grade: the highest grade fut.gg has a buyable lineup for
+ * (tiers run D→best, so the last with cards). Null when fut.gg has none. */
+export function bestFutggTier(set: FutggSetSummary): FutggTier | null {
+  for (let i = set.tiers.length - 1; i >= 0; i--) {
+    const tier = set.tiers[i]!;
+    if (tier.cards > 0) return tier;
+  }
+  return null;
+}
+
+/** The Sets the picker offers: each Set once, at its best grade, by fut.gg's
+ * categories, cheapest first in each. The trader sees a Set at its highest
+ * grade only — not once per grade — so a Set that reaches S is not also
+ * listed under A, B, C and D. */
+export function futggBestChoices(sets: readonly FutggSetSummary[]): FutggChoiceGroup[] {
+  const groups = new Map<string, FutggChoiceGroup>();
+  for (const set of sets) {
+    const tier = bestFutggTier(set);
+    if (!tier) continue;
+    const group = groups.get(set.category) ?? { category: set.category, choices: [] };
+    group.choices.push({ set, tier });
+    groups.set(set.category, group);
+  }
+  for (const g of groups.values()) g.choices.sort((a, b) => a.tier.cost - b.tier.cost || a.set.name.localeCompare(b.set.name));
+  return [...groups.values()];
+}
+
+export interface GalleryUpgrade {
+  setId: number;
+  name: string;
+  /** The grade the Set was completed at. */
+  from: GalleryGrade;
+  /** The higher grade fut.gg now has a lineup for. */
+  to: GalleryGrade;
+  /** fut.gg's best tier now (what `to` costs and needs). */
+  tier: FutggTier;
+}
+
+/**
+ * Completed Sets fut.gg now grades higher than they were completed at: new
+ * cards have raised the Set's best grade since, so the trader can upgrade it,
+ * reusing every card already owned and buying only what the higher grade
+ * adds. Needs the grade each was completed at (`completedGrade`); a Set
+ * completed before that was kept, or that fut.gg no longer lists, is left out.
+ */
+export function galleryUpgradable(state: GalleryState, sets: readonly FutggSetSummary[]): GalleryUpgrade[] {
+  const completed = new Set(state.completed ?? []);
+  const byId = new Map(sets.map((s) => [s.id, s]));
+  const upgrades: GalleryUpgrade[] = [];
+  for (const id of completed) {
+    const from = state.completedGrade?.[String(id)];
+    const set = byId.get(id);
+    if (from === undefined || !set) continue;
+    const best = bestFutggTier(set);
+    if (!best || GALLERY_GRADES.indexOf(best.grade) <= GALLERY_GRADES.indexOf(from)) continue;
+    upgrades.push({ setId: id, name: set.name, from, to: best.grade, tier: best });
+  }
+  return upgrades;
+}
+
 export interface FutggPlan {
   /** The lineup to collect: fut.gg's, with owned players standing in. */
   cards: FutggCard[];
@@ -475,6 +535,19 @@ function completedTimes(state: GalleryState, ids: readonly number[], fresh: Read
   return Object.keys(at).length > 0 ? at : undefined;
 }
 
+/** The grade each of `ids` (the Sets marked completed) was completed at:
+ * `fresh`'s grade for those just marked, else what the list already kept.
+ * Only theirs, so it never holds a Set the list no longer marks; undefined
+ * when none has a grade. */
+function completedGrades(state: GalleryState, ids: readonly number[], fresh: ReadonlyMap<number, GalleryGrade>): Record<string, GalleryGrade> | undefined {
+  const grades: Record<string, GalleryGrade> = {};
+  for (const id of ids) {
+    const grade = fresh.get(id) ?? state.completedGrade?.[String(id)];
+    if (grade !== undefined) grades[String(id)] = grade;
+  }
+  return Object.keys(grades).length > 0 ? grades : undefined;
+}
+
 /** Marks every fut.gg Set whose cards are all collected (in the club,
  * listed, or owned already) as completed, at `now`. Returns the Sets it
  * marked. */
@@ -493,6 +566,9 @@ export function markCompletedSets(state: GalleryState, now = Date.now()): Galler
     const at = completedTimes(state, state.completed, new Set(marked.map((x) => x.id)), now);
     if (at) state.completedAt = at;
     else delete state.completedAt;
+    const grades = completedGrades(state, state.completed, new Map(marked.map((x) => [x.id, x.grade])));
+    if (grades) state.completedGrade = grades;
+    else delete state.completedGrade;
   }
   return marked;
 }
@@ -536,6 +612,12 @@ export function setCompleted(state: GalleryState, setId: number, completed: bool
   const at = completedTimes(state, next.completed ?? [], new Set(completed && !was ? [setId] : []), now);
   if (at) next.completedAt = at;
   else delete next.completedAt;
+  // The grade it was completed at: the Set entry's grade when it is on the
+  // list, so an upgrade later knows the grade to beat.
+  const freshGrade = completed && !was ? (state.sets ?? []).find((s) => s.id === setId)?.grade : undefined;
+  const grades = completedGrades(state, next.completed ?? [], new Map(freshGrade ? [[setId, freshGrade]] : []));
+  if (grades) next.completedGrade = grades;
+  else delete next.completedGrade;
   return next;
 }
 

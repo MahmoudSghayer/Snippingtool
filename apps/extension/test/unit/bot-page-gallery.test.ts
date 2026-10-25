@@ -247,18 +247,19 @@ it("lists fut.gg's Sets for each grade by category, cheapest first, adds the tic
   await vi.advanceTimersByTimeAsync(10);
   const names = () => [...root.querySelectorAll('.g-set')].map((r) => r.querySelector('.nm')!.textContent);
   const categories = () => [...root.querySelectorAll('.g-cat')].map((r) => r.textContent);
-  // Grade S first, by fut.gg's categories.
-  expect(root.querySelector('.g-grade.on')!.textContent).toBe('S');
-  expect(categories()).toEqual(['LALIGA EA SPORTS / Liga F Moeve', 'Serie A Enilive']);
-  expect(names()).toEqual(['Malaga CF', 'Frosinone']);
-  expect(root.querySelectorAll('.g-set')[1]!.textContent).toContain('19,600');
-  expect(root.querySelectorAll('.g-set')[1]!.textContent).toContain('28 tokens');
-  // Grade C: the Sets with a grade C lineup, at its price.
-  click('[data-grade="C"]');
-  expect(categories()).toEqual(['LALIGA EA SPORTS / Liga F Moeve', 'Premier League / Barclays WSL']);
-  expect(names()).toEqual(['Malaga CF', 'Arsenal']);
-  expect(root.querySelector('.g-set')!.textContent).toContain('13,250');
-  click('[data-grade="S"]');
+  const row = (name: string) => [...root.querySelectorAll('.g-set')].find((r) => r.querySelector('.nm')!.textContent === name)!;
+  // Each Set once, at its best grade (no grade picker), by fut.gg's categories.
+  expect(root.querySelector('.g-grade')).toBeNull();
+  expect(categories()).toEqual(['LALIGA EA SPORTS / Liga F Moeve', 'Premier League / Barclays WSL', 'Serie A Enilive']);
+  expect(names()).toEqual(['Malaga CF', 'Arsenal', 'Frosinone']);
+  // Malaga and Frosinone show at S; Arsenal (no S lineup) at its best, C.
+  expect(row('Malaga CF').querySelector('.gr')!.textContent).toBe('S');
+  expect(row('Malaga CF').textContent).toContain('20,850');
+  expect(row('Arsenal').querySelector('.gr')!.textContent).toBe('C');
+  expect(row('Arsenal').textContent).toContain('63,500');
+  expect(row('Frosinone').querySelector('.gr')!.textContent).toBe('S');
+  expect(row('Frosinone').textContent).toContain('19,600');
+  expect(row('Frosinone').textContent).toContain('28 tokens');
 
   const tick = root.querySelector('input[data-futgg="90"]') as HTMLInputElement;
   tick.checked = true;
@@ -435,10 +436,10 @@ it('says when each Set was completed: today, yesterday, else the day', async () 
   expect(root.querySelector('#gallery-feed .g-sethead.done')!.textContent).toBe('Malaga CF · grade S · completed today ✓ · 1 of 1 collected');
   click('#g-futgg');
   await vi.advanceTimersByTimeAsync(10);
-  const picker = () => [...root.querySelectorAll('.g-set.done .tok')].map((r) => r.textContent!.trim());
-  expect(picker()).toEqual(['Completed today Undo', 'Completed yesterday Undo']);
-  click('[data-grade="C"]');
-  expect(picker()).toEqual(['Completed today Undo', 'Completed 5 Oct Undo']);
+  // Each Set shows once at its best grade, so all completed ones appear together
+  // (Malaga today, Arsenal 5 Oct, Frosinone yesterday) — no grade to switch.
+  const picker = () => [...root.querySelectorAll('.g-set.done .tok')].map((r) => r.textContent!.trim().replace(/\s+/g, ' '));
+  expect(picker()).toEqual(['Completed today Undo', 'Completed 5 Oct Undo', 'Completed yesterday Undo']);
 });
 
 it('clears the finished Gallery cards and completed Sets on Reset stats', async () => {

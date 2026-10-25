@@ -7,11 +7,14 @@ import { describe, expect, it } from 'vitest';
 
 import {
   addFutggLineup,
+  bestFutggTier,
   clearFinishedGallery,
   clubCheckIds,
+  futggBestChoices,
   futggClubIds,
   futggSetChoices,
   galleryCardNeeded,
+  galleryUpgradable,
   galleryKey,
   galleryListPrices,
   galleryMarketCap,
@@ -238,6 +241,48 @@ describe('fut.gg Set picker', () => {
   });
 });
 
+describe('fut.gg best-tier picker', () => {
+  it('a Set\'s best grade is the highest it has a lineup to buy for', () => {
+    expect(bestFutggTier(MALAGA)?.grade).toBe('S');
+    expect(bestFutggTier(ARSENAL)?.grade).toBe('C'); // no S/B/A; D and C, best C
+    expect(bestFutggTier(FROSINONE)?.grade).toBe('S');
+    expect(bestFutggTier(FOUNDATIONS)).toBeNull(); // its only tier has nothing to buy
+  });
+
+  it('offers each Set once, at its best grade — not once per grade', () => {
+    const frosinone = { ...FROSINONE, category: 'Serie A Enilive' };
+    const arsenal = { ...ARSENAL, category: 'Premier League / Barclays WSL' };
+    const groups = futggBestChoices([MALAGA, arsenal, FOUNDATIONS, frosinone]).map((g) => [
+      g.category,
+      g.choices.map((c) => `${c.set.name} ${c.tier.grade} ${c.tier.cost}`),
+    ]);
+    expect(groups).toEqual([
+      ['LALIGA EA SPORTS / Liga F Moeve', ['Malaga CF S 20850']],
+      ['Premier League / Barclays WSL', ['Arsenal C 63500']],
+      ['Serie A Enilive', ['Frosinone S 19600']],
+    ]);
+  });
+});
+
+describe('galleryUpgradable', () => {
+  const completedAt = (set: FutggSetSummary, grade: 'A' | 'S') => {
+    const added = addFutggLineup(EMPTY, { set, grade, cards: [fcard()], missing: 0 }, []).state;
+    return setCompleted(added, set.id, true, 1_000);
+  };
+
+  it('flags a completed Set fut.gg now grades higher than it was completed at', () => {
+    const g = completedAt(MALAGA, 'A'); // completed at A; fut.gg's best is now S
+    expect(g.completedGrade).toEqual({ '90': 'A' });
+    expect(galleryUpgradable(g, [MALAGA, FROSINONE]).map((u) => [u.setId, u.from, u.to, u.tier.cost])).toEqual([[90, 'A', 'S', 20_850]]);
+  });
+
+  it('does not flag a Set already at its best grade, one with no kept grade, or one fut.gg no longer lists', () => {
+    expect(galleryUpgradable(completedAt(MALAGA, 'S'), [MALAGA])).toEqual([]);
+    expect(galleryUpgradable({ ...EMPTY, completed: [90] }, [MALAGA])).toEqual([]);
+    expect(galleryUpgradable(completedAt(MALAGA, 'A'), [FROSINONE])).toEqual([]);
+  });
+});
+
 describe('planFutggSwaps', () => {
   // One bonus tag: 10% of the gold cards' scores once two are gold.
   const GOLDEN: FutggTag = { id: 7, name: 'Golden', tiers: [{ minItems: 2, bonus: 10 }], rule: { type: 'COUNT', attribute: 'LEVEL', values: ['gold'] } };
@@ -310,6 +355,19 @@ describe('completed Sets', () => {
     // Once only: its time stays the first one.
     expect(markCompletedSets(g, 2_000)).toEqual([]);
     expect(g.completedAt).toEqual({ '90': 1_000 });
+  });
+
+  it('records the grade each Set was completed at, by hand and automatically; Undo takes it away', () => {
+    // state() adds Malaga (90) and Frosinone (91) at grade S.
+    const byHand = setCompleted(state(), 90, true, 1_000);
+    expect(byHand.completedGrade).toEqual({ '90': 'S' });
+    expect(setCompleted(byHand, 90, false).completedGrade).toBeUndefined();
+
+    const g = state();
+    g.cards[0]!.status = 'listed';
+    g.cards[1]!.status = 'owned';
+    markCompletedSets(g, 1_000);
+    expect(g.completedGrade).toEqual({ '90': 'S' });
   });
 
   it('keeps when each Set was completed: a Set marked by hand gets the time too, Undo takes it away', () => {
