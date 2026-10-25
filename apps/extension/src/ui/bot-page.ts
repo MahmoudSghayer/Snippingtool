@@ -671,8 +671,10 @@ const CSS = `
   .g-set .gr.gS { color: var(--ea-success); }
   .g-set .cost { white-space: nowrap; }
   .g-set .tok { color: var(--ea-muted); font-size: 12px; white-space: nowrap; }
-  .g-mine { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
-  .g-mineset { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; }
+  .g-mine { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+  .g-mineset { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+  .g-mineset-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .g-mineset-info { min-width: 0; }
   .g-sethead { font-size: 13px; padding: 2px 6px 8px; color: var(--ea-text-2); }
   .g-sethead.done { color: var(--ea-success); }
   .g-group { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--ea-muted); padding: 10px 6px 6px; }
@@ -690,8 +692,9 @@ const CSS = `
   .g-sethead .warn { color: var(--ea-warning); }
   .g-why { color: var(--ea-muted); cursor: help; text-decoration: underline dotted; text-underline-offset: 2px; }
   .g-alt { height: 22px; box-sizing: border-box; display: flex; align-items: center; padding: 0 10px 0 31px; font-size: 12px; color: var(--ea-muted); border-bottom: 1px solid var(--ea-line); }
-  .g-switch { color: var(--ea-muted); font-size: 12px; display: inline-flex; align-items: center; gap: 4px; }
-  .g-switch .g-link { font-weight: 700; }
+  .g-switch { color: var(--ea-muted); font-size: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding-left: 2px; }
+  .g-switch-label { white-space: nowrap; }
+  .g-switch .g-link { font-weight: 700; min-width: 16px; text-align: center; }
   .settings-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 24px 8px; scrollbar-width: thin; scrollbar-color: var(--ea-input-line) transparent; }
   .card { background: var(--ea-row); border-radius: 6px; margin-bottom: 10px; }
   .card > summary { list-style: none; display: flex; align-items: center; gap: 10px; padding: 14px 16px; cursor: pointer; font-size: 17px; line-height: 20px; font-weight: 600; color: var(--ea-text); }
@@ -1257,17 +1260,19 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
                       .filter((t) => t.cards > 0 && GALLERY_GRADES.indexOf(t.grade) < curIdx)
                       .sort((a, b) => GALLERY_GRADES.indexOf(b.grade) - GALLERY_GRADES.indexOf(a.grade))
                   : [];
+              // The cost/buyable note goes in the button's title — plain text
+              // only (COIN is an inline SVG, which would break the attribute).
               const switchBtns = lower.length
-                ? `<span class="g-switch">finish at lower tier: ${lower
+                ? `<div class="g-switch"><span class="g-switch-label">finish at lower tier:</span> ${lower
                     .map(
                       (t) =>
-                        `<button type="button" class="g-link" data-switch-grade="${p.set.id}:${t.grade}"${off}${busy} title="re-plan ${esc(p.set.name)} at grade ${t.grade} — fut.gg ${fmt(t.cost)}${COIN}${(t.sbc ?? 0) === 0 ? ', all on the market' : `, still needs ${t.sbc} SBC`}">${t.grade}</button>`,
+                        `<button type="button" class="g-link" data-switch-grade="${p.set.id}:${t.grade}"${off}${busy} title="re-plan ${esc(p.set.name)} at grade ${t.grade} — fut.gg ${fmt(t.cost)} coins${(t.sbc ?? 0) === 0 ? ', all on the market' : `, still needs ${t.sbc} SBC`}">${t.grade}</button>`,
                     )
-                    .join(' ')}</span>`
+                    .join(' ')}</div>`
                 : '';
-              return `<div class="g-mineset${isDone ? ' done' : ''}"><span><b>${esc(p.set.name)}</b> · grade ${p.set.grade} · ${p.done} of ${p.cards} collected${
+              return `<div class="g-mineset${isDone ? ' done' : ''}"><div class="g-mineset-top"><span class="g-mineset-info"><b>${esc(p.set.name)}</b> · grade ${p.set.grade} · ${p.done} of ${p.cards} collected${
                 p.skipped > 0 ? ` · ${p.skipped} skipped` : ''
-              }${why}</span><span class="g-mine-actions">${mark}${switchBtns}<button type="button" class="ghost" data-remove-set="${p.set.id}"${off}>Remove</button></span></div>`;
+              }${why}</span><span class="g-mine-actions">${mark}<button type="button" class="ghost" data-remove-set="${p.set.id}"${off}>Remove</button></span></div>${switchBtns}</div>`;
             })
             .join('')}</div>`;
     return `${head}${list}<div class="g-problems" id="g-futgg-problems">${futggProblems.map(esc).join('<br>')}</div>${mine}<div class="hint">${esc(FUTGG_HELP)}</div>`;

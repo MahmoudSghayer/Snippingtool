@@ -303,6 +303,11 @@ it('suggests a fully-buyable grade when the best grade needs SBC, and switches a
   expect(sw.textContent).toContain('finish at lower tier:');
   expect([...sw.querySelectorAll('button[data-switch-grade]')].map((b) => b.getAttribute('data-switch-grade'))).toEqual(['95:A', '95:C']);
   const switchBtn = sw.querySelector('button[data-switch-grade="95:A"]') as HTMLButtonElement;
+  // Each button's visible label is just the grade letter; the cost/buyable note
+  // lives in a plain-text title (no COIN SVG leaking out of the attribute).
+  expect(switchBtn.textContent).toBe('A');
+  expect(switchBtn.title).toContain('all on the market');
+  expect(switchBtn.title).not.toContain('<svg');
   switchBtn.click();
   await vi.advanceTimersByTimeAsync(10);
   expect(lineup).toHaveBeenCalledWith(95, 'A');
