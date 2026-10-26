@@ -27,14 +27,14 @@
     "@axe-core/playwright": "^4.14.0",
     "@playwright/test": "^1.64.1",
     "@sl/config": "workspace:*",
-    "@types/chrome": "^0.3.5",
+    "@types/chrome": "^0.3.6",
     "@types/webextension-polyfill": "^0.12.1",
     "@vitest/coverage-v8": "^5.0.5",
-    "fake-indexeddb": "^6.0.0",
+    "fake-indexeddb": "^6.2.6",
     "javascript-obfuscator": "^4.2.2",
     "jsdom": "^30.1.3",
     "typescript": "^6.0.3",
-    "vite": "^8.3.4",
+    "vite": "^8.3.5",
     "vitest": "^5.0.5"
   }
 }
