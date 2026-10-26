@@ -436,20 +436,42 @@ export async function handleBotBudgetSet(budget: BotBudgetState): Promise<{ ok: 
   return { ok: true };
 }
 
-/** The saved catalog, re-validated on the way out against the same strict
- * schema `catalog.save` and content applied on the way in (an older build's
- * catalog, or an edited `storage.local`, reads as none). */
+/** The parsed catalog, kept in memory so a validation that walks up to
+ * 100k players runs once, not on every `catalog.get` (the Nova panel used to
+ * poll it every 3s). `undefined` means "not loaded yet"; `null` means
+ * "loaded, nothing valid there". The service worker holds one copy for all
+ * tabs; in the userscript each tab holds its own and keeps it current by
+ * saving its own freshly-built catalog (the shim's storage.onChanged is
+ * same-tab by design), so no cross-tab invalidation is needed. */
+let catalogCache: Catalog | null | undefined;
+
+/** The saved catalog. Validated once against the same strict schema
+ * `catalog.save` uses (an older build's catalog, or an edited
+ * `storage.local`, reads as none), then served from memory with no further
+ * re-validation. */
 export async function handleCatalogGet(): Promise<Catalog | null> {
-  const parsed = adapterCatalogSchema.safeParse(await getLocal<unknown>(CATALOG_KEY, null));
-  return parsed.success ? (parsed.data as Catalog) : null;
+  if (catalogCache === undefined) {
+    const parsed = adapterCatalogSchema.safeParse(await getLocal<unknown>(CATALOG_KEY, null));
+    catalogCache = parsed.success ? (parsed.data as Catalog) : null;
+  }
+  return catalogCache;
 }
 
 /** The adapter sends the whole catalog at once, built from the web app's
- * own lists (model/catalog.ts). */
+ * own lists (model/catalog.ts). The payload is already validated by the
+ * router's `catalog.save` schema, so it becomes the cache as-is. */
 export async function handleCatalogSave(catalog: Catalog): Promise<{ ok: true }> {
   await setLocal(CATALOG_KEY, catalog);
+  catalogCache = catalog;
   playerNames = null;
   return { ok: true };
+}
+
+/** Test-only: drop the in-memory catalog cache so a fresh `catalog.get`
+ * re-reads and re-validates storage. Not used by the running code. */
+export function __resetCatalogCacheForTests(): void {
+  catalogCache = undefined;
+  playerNames = null;
 }
 
 let playerNames: Map<number, string> | null = null;
