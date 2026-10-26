@@ -1,0 +1,166 @@
+{
+  "suite": "catalog",
+  "at": "2026-10-26T13:06:26.760Z",
+  "results": [
+    {
+      "name": "catalog.get cold 20k",
+      "ms": 27.67,
+      "max": 65.43,
+      "runs": 3
+    },
+    {
+      "name": "catalog.get warm 20k",
+      "ms": 17.26,
+      "max": 22.04,
+      "runs": 5
+    },
+    {
+      "name": "catalog.get cold 50k",
+      "ms": 44.21,
+      "max": 53.5,
+      "runs": 3
+    },
+    {
+      "name": "catalog.get warm 50k",
+      "ms": 73.58,
+      "max": 110.67,
+      "runs": 5
+    },
+    {
+      "name": "search 20k common bigram \"an\"",
+      "ms": 19.44,
+      "max": 25.66,
+      "runs": 5,
+      "meta": {
+        "hits": 12
+      }
+    },
+    {
+      "name": "search 20k surname \"silva\"",
+      "ms": 8.07,
+      "max": 9.05,
+      "runs": 5,
+      "meta": {
+        "hits": 12
+      }
+    },
+    {
+      "name": "search 20k rare \"mbappe\"",
+      "ms": 7.92,
+      "max": 8.96,
+      "runs": 5,
+      "meta": {
+        "hits": 12
+      }
+    },
+    {
+      "name": "search 20k mid-word \"ald\"",
+      "ms": 8.17,
+      "max": 9.19,
+      "runs": 5,
+      "meta": {
+        "hits": 12
+      }
+    },
+    {
+      "name": "search 20k no result \"zzqx\"",
+      "ms": 7.9,
+      "max": 8.55,
+      "runs": 5,
+      "meta": {
+        "hits": 0
+      }
+    },
+    {
+      "name": "search 20k two words \"jose rod\"",
+      "ms": 7.82,
+      "max": 8.26,
+      "runs": 5,
+      "meta": {
+        "hits": 12
+      }
+    },
+    {
+      "name": "search 20k typing \"bellingham\" (10 keys)",
+      "ms": 72.05,
+      "max": 73.64,
+      "runs": 5,
+      "meta": {
+        "hits": 108
+      }
+    },
+    {
+      "name": "search 50k common bigram \"an\"",
+      "ms": 27.77,
+      "max": 29.33,
+      "runs": 5,
+      "meta": {
+        "hits": 12
+      }
+    },
+    {
+      "name": "search 50k surname \"silva\"",
+      "ms": 20.58,
+      "max": 23.74,
+      "runs": 5,
+      "meta": {
+        "hits": 12
+      }
+    },
+    {
+      "name": "search 50k rare \"mbappe\"",
+      "ms": 20.3,
+      "max": 21.02,
+      "runs": 5,
+      "meta": {
+        "hits": 12
+      }
+    },
+    {
+      "name": "search 50k mid-word \"ald\"",
+      "ms": 20.85,
+      "max": 21.26,
+      "runs": 5,
+      "meta": {
+        "hits": 12
+      }
+    },
+    {
+      "name": "search 50k no result \"zzqx\"",
+      "ms": 19.78,
+      "max": 20.01,
+      "runs": 5,
+      "meta": {
+        "hits": 0
+      }
+    },
+    {
+      "name": "search 50k two words \"jose rod\"",
+      "ms": 19.85,
+      "max": 20.47,
+      "runs": 5,
+      "meta": {
+        "hits": 12
+      }
+    },
+    {
+      "name": "search 50k typing \"bellingham\" (10 keys)",
+      "ms": 188.52,
+      "max": 204.62,
+      "runs": 5,
+      "meta": {
+        "hits": 108
+      }
+    },
+    {
+      "name": "parseGalleryList 300 lines / 20k",
+      "ms": 2297.86,
+      "max": 2413.01,
+      "runs": 3,
+      "meta": {
+        "cards": 300,
+        "problems": 0
+      }
+    }
+  ]
+}

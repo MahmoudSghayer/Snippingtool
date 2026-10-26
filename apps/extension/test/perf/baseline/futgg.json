@@ -1,0 +1,52 @@
+{
+  "suite": "futgg",
+  "at": "2026-10-26T13:06:14.033Z",
+  "results": [
+    {
+      "name": "futggSets cold (250 Sets)",
+      "ms": 14.83,
+      "max": 22.92,
+      "runs": 3,
+      "meta": {
+        "fetches": 1
+      }
+    },
+    {
+      "name": "futggSets warm",
+      "ms": 0,
+      "max": 0.01,
+      "runs": 5,
+      "meta": {
+        "fetches": 0
+      }
+    },
+    {
+      "name": "futggSets 5 concurrent callers (cold)",
+      "ms": 80.45,
+      "max": 95.13,
+      "runs": 2,
+      "meta": {
+        "fetches": 5
+      }
+    },
+    {
+      "name": "futggLineup x20 cold",
+      "ms": 33.84,
+      "max": 38.2,
+      "runs": 2,
+      "meta": {
+        "fetches": 41,
+        "cards": 300
+      }
+    },
+    {
+      "name": "futggLineup same Set again (warm)",
+      "ms": 0.25,
+      "max": 0.29,
+      "runs": 5,
+      "meta": {
+        "fetches": 0
+      }
+    }
+  ]
+}
