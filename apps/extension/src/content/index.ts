@@ -163,9 +163,15 @@ async function main(): Promise<void> {
   // before this script was listening.
   // Automation builds only: the listable build has no Sniping Bot page, and
   // its adapter builds no catalog.
+  // Set once the Nova page exists (below): lets a freshly-saved catalog push
+  // a re-render of the Snipe Targets choices, so the page never has to poll
+  // the whole catalog to notice EA's lists arriving.
+  let notifyCatalogSaved: (() => void) | null = null;
   if (AUTOMATION_ENABLED) {
     adapter.onCatalog((catalog) => {
-      void send('catalog.save', catalog);
+      // Notify only after the save resolved, so the page's catalog.get reads
+      // the new value (and its already-warm cache), not the old one.
+      void send('catalog.save', catalog).then(() => notifyCatalogSaved?.());
     });
     adapter.requestCatalog();
   }
@@ -998,6 +1004,7 @@ async function main(): Promise<void> {
       onEaNavigate: () => botPage.close(),
       onBounds: (bounds) => botPage.setBounds(bounds),
     });
+    notifyCatalogSaved = () => botPage.refreshCatalog();
     botPage.onOpenChange((open) => {
       nav.setActive(open);
       if (open) pileRefresher.tick(true);
