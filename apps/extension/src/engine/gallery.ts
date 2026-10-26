@@ -211,8 +211,46 @@ export function parseGalleryList(
  * marked completed. */
 export function galleryCardNeeded(card: GalleryCard, state: GalleryState): boolean {
   const done = state.completed;
-  return !(done && done.length > 0 && card.setIds && card.setIds.length > 0 && card.setIds.every((id) => done.includes(id)));
+  if (!done || done.length === 0 || !card.setIds || card.setIds.length === 0) return true;
+  const completed = completedSetOf(state);
+  return !card.setIds.every((id) => completed.has(id));
 }
+
+/** `state.completed` as a Set, kept with the state (which the page and the
+ * bot treat as immutable between changes): the needed-check runs per card
+ * on every summary, feed and signature pass. Rebuilt when the array is
+ * replaced. */
+const COMPLETED_SETS = new WeakMap<readonly number[], Set<number>>();
+function completedSetOf(state: GalleryState): Set<number> {
+  const done = state.completed ?? [];
+  let set = COMPLETED_SETS.get(done);
+  if (!set) {
+    set = new Set(done);
+    COMPLETED_SETS.set(done, set);
+  }
+  return set;
+}
+
+/** The list's cards grouped by the fut.gg Set they count for, in one pass
+ * (a card on two Sets is under both). */
+export function galleryCardsBySet(state: GalleryState): Map<number, GalleryCard[]> {
+  // Kept with the cards array: a card's step changes in place (the same
+  // card objects, so the grouping holds), and any change to which cards are
+  // on the list, or their order, is a new array.
+  const had = CARDS_BY_SET.get(state.cards);
+  if (had) return had;
+  const bySet = new Map<number, GalleryCard[]>();
+  for (const c of state.cards) {
+    for (const id of c.setIds ?? []) {
+      const list = bySet.get(id);
+      if (list) list.push(c);
+      else bySet.set(id, [c]);
+    }
+  }
+  CARDS_BY_SET.set(state.cards, bySet);
+  return bySet;
+}
+const CARDS_BY_SET = new WeakMap<readonly GalleryCard[], Map<number, GalleryCard[]>>();
 
 /** The next card to buy, or null once every card is done. */
 export function nextGalleryCard(state: GalleryState): GalleryCard | null {
@@ -606,9 +644,10 @@ function completedGrades(state: GalleryState, ids: readonly number[], fresh: Rea
 export function markCompletedSets(state: GalleryState, now = Date.now()): GallerySet[] {
   const done = new Set(state.completed ?? []);
   const marked: GallerySet[] = [];
+  const bySet = galleryCardsBySet(state);
   for (const set of state.sets ?? []) {
     if (done.has(set.id)) continue;
-    const mine = state.cards.filter((c) => c.setIds?.includes(set.id));
+    const mine = bySet.get(set.id) ?? [];
     if (mine.length === 0 || !mine.every((c) => c.status === 'owned' || c.status === 'club' || c.status === 'listed')) continue;
     done.add(set.id);
     marked.push(set);
@@ -832,16 +871,21 @@ export interface GallerySetProgress {
 
 /** Where each fut.gg Set on the list stands. */
 export function gallerySetProgress(state: GalleryState): GallerySetProgress[] {
+  const bySet = galleryCardsBySet(state);
   return (state.sets ?? []).map((set) => {
-    const mine = state.cards.filter((c) => c.setIds?.includes(set.id));
-    const skipped = mine.filter((c) => c.status === 'skipped');
-    return {
-      set,
-      cards: mine.length,
-      done: mine.filter((c) => c.status === 'owned' || c.status === 'club' || c.status === 'listed').length,
-      skipped: skipped.length,
-      skippedScore: skipped.reduce((sum, c) => sum + (c.score ?? 0), 0),
-    };
+    let cards = 0;
+    let done = 0;
+    let skipped = 0;
+    let skippedScore = 0;
+    for (const c of bySet.get(set.id) ?? []) {
+      cards++;
+      if (c.status === 'owned' || c.status === 'club' || c.status === 'listed') done++;
+      else if (c.status === 'skipped') {
+        skipped++;
+        skippedScore += c.score ?? 0;
+      }
+    }
+    return { set, cards, done, skipped, skippedScore };
   });
 }
 
@@ -871,11 +915,10 @@ const BLOCKER_ORDER: GallerySetBlockerReason[] = ['buy', 'skipped', 'sbc', 'coll
  * Set can say what is holding it up. Empty for a completed Set, or one whose
  * every card is collected (in the club, listed, or owned already).
  */
-export function gallerySetBlockers(state: GalleryState, setId: number): GallerySetBlocker[] {
-  if ((state.completed ?? []).includes(setId)) return [];
+export function gallerySetBlockers(state: GalleryState, setId: number, bySet: Map<number, GalleryCard[]> = galleryCardsBySet(state)): GallerySetBlocker[] {
+  if (completedSetOf(state).has(setId)) return [];
   const groups = new Map<GallerySetBlockerReason, GallerySetBlocker>();
-  for (const c of state.cards) {
-    if (!c.setIds?.includes(setId)) continue;
+  for (const c of bySet.get(setId) ?? []) {
     if (c.status === 'owned' || c.status === 'club' || c.status === 'listed') continue;
     const reason: GallerySetBlockerReason =
       c.status === 'sbc' ? 'sbc' : c.status === 'skipped' ? 'skipped' : c.status === 'bought' ? 'collecting' : 'buy';

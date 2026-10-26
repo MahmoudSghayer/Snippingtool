@@ -68,9 +68,12 @@ function matching(cards: readonly FutggCard[], rule: FutggTag['rule']): { cards:
         const v = value(c);
         if (v == null || Array.isArray(v)) continue;
         const key = String(v);
-        groups.set(key, [...(groups.get(key) ?? []), c]);
+        const group = groups.get(key);
+        if (group) group.push(c);
+        else groups.set(key, [c]);
       }
-      const most = Math.max(0, ...[...groups.values()].map((g) => g.length));
+      let most = 0;
+      for (const g of groups.values()) if (g.length > most) most = g.length;
       return { cards: [...groups.values()].filter((g) => g.length === most).flat(), count: most };
     }
     case 'COUNT_DIFF': {

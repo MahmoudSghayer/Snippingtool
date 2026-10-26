@@ -162,6 +162,15 @@ describe('Nova AI page', () => {
   }, 120_000);
 
   it('Gallery mode: 300 cards over 20 Sets, 250 fut.gg Sets loaded', async () => {
+    // jsdom lays nothing out, so the picker would draw every row; give its
+    // viewport a height, as a browser would, so the window is what is drawn.
+    const clientHeight = Object.getOwnPropertyDescriptor(Element.prototype, 'clientHeight');
+    Object.defineProperty(Element.prototype, 'clientHeight', {
+      configurable: true,
+      get(this: Element) {
+        return this.classList.contains('g-sets') ? 280 : 0;
+      },
+    });
     const gallery = makeGallery(300, 20);
     const sets = makeFutggSets(250);
     const { page, root } = mount(catalog, { ...DEFAULT_BOT_MODE_SETTINGS, mode: 'gallery' }, gallery, { sets });
@@ -169,10 +178,14 @@ describe('Nova AI page', () => {
     page.open();
     suite.record('gallery open cold → visible', performance.now() - t0);
     await vi.advanceTimersByTimeAsync(10);
+    perf.reset();
+    perf.enable(true);
     (root.querySelector('#g-futgg') as HTMLElement).click();
     const t1 = performance.now();
     await vi.advanceTimersByTimeAsync(10);
     suite.record('fut.gg Sets drawn after the answer (250 Sets)', performance.now() - t1);
+    perf.enable(false);
+    for (const [name, v] of Object.entries(perf.snapshot().summary)) suite.record(`  ↳ sets: ${name} (n=${v.n})`, v.total);
     expect(root.querySelector('.g-spacer')).not.toBeNull();
     suite.bench(
       'gallery reopen warm (250 Sets listed)',
@@ -206,5 +219,6 @@ describe('Nova AI page', () => {
     await vi.advanceTimersByTimeAsync(50);
     suite.record('add 1 Set (lineup + club check + redraw)', performance.now() - t2);
     page.close();
+    if (clientHeight) Object.defineProperty(Element.prototype, 'clientHeight', clientHeight);
   }, 120_000);
 });

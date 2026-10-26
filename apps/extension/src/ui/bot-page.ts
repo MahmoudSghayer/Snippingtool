@@ -81,6 +81,7 @@ import {
   futggClubIds,
   futggSbcCards,
   galleryCardNeeded,
+  galleryCardsBySet,
   gallerySetBlockers,
   gallerySetProgress,
   gallerySummary,
@@ -362,6 +363,20 @@ const PLAY = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9.5
 const STOP = `<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="10" height="10" rx="1.5" fill="currentColor"/></svg>`;
 /** EA's back arrow, beside its screen titles. */
 const BACK = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 2.5 5 8l5.5 5.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
+/** `fn` over `items`, at most `limit` at a time, results in order. */
+async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i]!);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
 
 function esc(s: unknown): string {
   return String(s).replace(
@@ -1176,11 +1191,42 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     return `<details class="card" ${open ? 'open' : ''}><summary>${esc(title)}${extra}<span class="chev">⌄</span></summary><div class="inner">${body}</div></details>`;
   }
 
+  /** What each section of the settings column was last drawn from, so an
+   * open with nothing changed since (a warm reopen) draws nothing: every
+   * section's inputs, as a string, or the objects themselves. Interaction
+   * handlers keep calling the plain `render*` functions — only `open()`
+   * goes through this. */
+  const drawn = {
+    targets: '',
+    knobs: '',
+    recent: null as { list: RecentSearch[]; day: string } | null,
+    gallery: null as { g: GalleryState; sets: FutggSetSummary[] | null; key: string } | null,
+  };
+  const targetsKey = (): string =>
+    [JSON.stringify(form), catalog?.capturedAt ?? 0, openDd ?? '', modeSettings.mode, JSON.stringify(shown().autoSell), shown().thresholds.maxBuyPrice, deps.getSniper()?.isRunning() ?? false].join('|');
+  const knobsKey = (): string => `${JSON.stringify(shown())}|${JSON.stringify(modeSettings)}`;
+  const galleryKey = (g: GalleryState, running: boolean): string =>
+    `${gallerySignature(g, running)}|${futggBusy ?? ''}|${galleryDraft ?? ''}|${galleryProblems.join('\n')}|${futggProblems.join('\n')}|${futggPicked.size}|${running}`;
+
+  /** The settings column as the page opens: each section drawn only when
+   * its inputs changed since it was last drawn. The Gallery section is the
+   * dear one (fut.gg's Sets, the list's progress): drawn in Gallery mode,
+   * else only once (the mode switch draws it again). */
   function renderSettings(): void {
-    renderTargets();
-    renderRecent();
-    renderGallery();
-    renderKnobs();
+    const t = targetsKey();
+    if (t !== drawn.targets) renderTargets();
+    else syncSearch();
+    const day = new Date().toDateString();
+    if (drawn.recent?.list !== recent || drawn.recent.day !== day) renderRecent();
+    const g = currentGallery();
+    const running = deps.getSniper()?.isRunning() ?? false;
+    if (galleryMode() || !drawn.gallery) {
+      const key = galleryKey(g, running);
+      if (drawn.gallery?.g !== g || drawn.gallery.sets !== futggSets || drawn.gallery.key !== key) renderGallery();
+      else perf.count('open.gallery.kept');
+    } else perf.count('open.gallery.skipped');
+    if (knobsKey() !== drawn.knobs) renderKnobs();
+    else perf.count('open.knobs.kept');
   }
 
   // ---- Gallery mode -------------------------------------------------------
@@ -1230,13 +1276,14 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     if (!el) return;
     const g = currentGallery();
     const running = deps.getSniper()?.isRunning() ?? false;
+    drawn.gallery = { g, sets: futggSets, key: galleryKey(g, running) };
     const off = running ? ' disabled' : '';
     if (galleryDraft == null) galleryDraft = galleryText(g);
     // Redrawn on every change: the Set list keeps where it was scrolled to
     // (mountFutggList restores it, since the virtualized list needs its spacer
     // sized before the scroll position can be set).
     futggScroll = (el.querySelector('.g-sets') as HTMLElement | null)?.scrollTop ?? futggScroll;
-    el.innerHTML =
+    const html = perf.time('gallery.html', () =>
       (deps.futggSets ? section('fut.gg Sets', futggHtml(g, off)) : '') +
       section(
         'Gallery list',
@@ -1259,8 +1306,12 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         )}
         <div class="g-sum" id="g-sum">${esc(gallerySumText(g))}</div>
         <div class="g-actions"><button type="button" class="ghost" id="g-reset-spent"${off}>Reset spent</button></div>`,
-      );
-    mountFutggList();
+      ),
+    );
+    perf.time('gallery.innerHTML', () => {
+      el.innerHTML = html;
+    });
+    perf.time('gallery.mount', mountFutggList);
   }
 
   /** The Add button's count, as Sets are ticked (no redraw). */
@@ -1270,6 +1321,10 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
 
   /** fut.gg's Sets for the grade picked, by category, ticked and added,
    * and the Sets on the list. */
+  /** What the picker rows were last built from: built again only when one
+   * of these changed (the Sets, the list, the lock state). */
+  let pickerBuilt: { sets: FutggSetSummary[]; g: GalleryState; key: string; rows: { items: PickerRow[]; total: number } } | null = null;
+
   function futggHtml(g: GalleryState, off: string): string {
     const completed = new Set(g.completed ?? []);
     const busy = futggBusy !== null ? ' disabled' : '';
@@ -1281,7 +1336,14 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       // The picker is virtualized: build every row once (futggItemsCache), but
       // the DOM only ever holds the rows in view (mountFutggList fills a spacer
       // sized to the whole list). This keeps a list of hundreds smooth to scroll.
-      futggItemsCache = buildPickerRows(g, off, busy);
+      const key = `${off}|${busy}`;
+      if (pickerBuilt && pickerBuilt.sets === futggSets && pickerBuilt.g === g && pickerBuilt.key === key) {
+        perf.count('picker.rows.kept');
+        futggItemsCache = pickerBuilt.rows;
+      } else {
+        futggItemsCache = perf.time('picker.rows.build', () => buildPickerRows(g, off, busy));
+        pickerBuilt = { sets: futggSets, g, key, rows: futggItemsCache };
+      }
       list =
         futggItemsCache.items.length === 0
           ? `<div class="hint">fut.gg lists no Set with a lineup to buy right now.</div>`
@@ -1291,6 +1353,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       futggItemsCache = null;
     }
     const progress = gallerySetProgress(g);
+    const bySet = galleryCardsBySet(g);
+    const setsById = new Map((futggSets ?? []).map((x) => [x.id, x]));
     const mine =
       progress.length === 0
         ? ''
@@ -1300,14 +1364,14 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
               const mark = isDone
                 ? `<button type="button" class="ghost" data-uncomplete="${p.set.id}"${off}>Completed${completedWhen(g, p.set.id)} ✓ · Undo</button>`
                 : `<button type="button" class="ghost" data-complete="${p.set.id}"${off}>Mark completed</button>`;
-              const blockers = isDone ? [] : gallerySetBlockers(g, p.set.id);
+              const blockers = isDone ? [] : gallerySetBlockers(g, p.set.id, bySet);
               const note = isDone ? null : blockerNote(blockers);
               const why = note ? ` · <span class="g-why" title="${esc(note.detail)}">not done: ${esc(note.summary)}</span>` : '';
               // Let the trader re-plan a Set at any other grade fut.gg has a
               // lineup for — a higher tier when one is available, or a lower,
               // cheaper one. (Nova also drops a stuck Set to a buyable tier on
               // its own mid-run; this is the manual control.) Highest first.
-              const setSummary = futggSets?.find((x) => x.id === p.set.id);
+              const setSummary = setsById.get(p.set.id);
               const curIdx = GALLERY_GRADES.indexOf(p.set.grade);
               const others =
                 !isDone && setSummary
@@ -1406,6 +1470,12 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     const vp = root.getElementById('gallery')?.querySelector('.g-sets') as HTMLElement | null;
     const spacer = vp?.querySelector('.g-spacer') as HTMLElement | null;
     if (!vp || !spacer || !futggItemsCache) return;
+    // Hidden: no window to fill (it is filled once the page shows); then,
+    // without layout (jsdom), every row.
+    if (page.hidden) {
+      spacer.innerHTML = '';
+      return;
+    }
     const vpH = vp.clientHeight || Infinity;
     const min = vp.scrollTop - PICKER_OVERSCAN;
     const max = vp.scrollTop + vpH + PICKER_OVERSCAN;
@@ -1462,25 +1532,35 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     futggBusy = 'add';
     futggProblems = [];
     renderGallery();
+    // Each Set's lineup (and, for one added below its best grade because that
+    // grade needs an SBC/Objective card, the best grade's lineup too, to name
+    // the blocking card(s) and keep that grade as the upgrade target): three
+    // Sets at a time, the results in the order the Sets were ticked.
+    const futggLineup = deps.futggLineup;
+    const picked = [...futggPicked].flatMap(([id, grade]) => {
+      const set = futggSets!.find((x) => x.id === id);
+      return set ? [{ id, grade, set }] : [];
+    });
+    const fetched = await perf.timeAsync('futgg.add.lineups', () =>
+      mapLimit(picked, 3, async ({ id, grade, set }) => {
+        const lineup = await futggLineup(id, grade).catch(() => null);
+        if (!lineup) return { set, grade, lineup: null, upgrade: undefined };
+        const best = bestFutggTier(set);
+        let upgrade: GallerySet['upgrade'] | undefined;
+        if (best && best.grade !== grade && (best.sbc ?? 0) > 0) {
+          const bestLineup = await futggLineup(id, best.grade).catch(() => null);
+          upgrade = { grade: best.grade, tokens: best.tokens, cards: bestLineup ? futggSbcCards(bestLineup) : [] };
+        }
+        return { set, grade, lineup, upgrade };
+      }),
+    );
     const lineups: { lineup: FutggLineup; upgrade?: GallerySet['upgrade'] }[] = [];
-    for (const [id, grade] of [...futggPicked]) {
-      const set = futggSets.find((x) => x.id === id);
-      if (!set) continue;
-      const lineup = await deps.futggLineup(id, grade).catch(() => null);
-      if (!lineup) {
-        futggProblems.push(`${set.name}: fut.gg did not send its grade ${grade} lineup — try again`);
+    for (const r of fetched) {
+      if (!r.lineup) {
+        futggProblems.push(`${r.set.name}: fut.gg did not send its grade ${r.grade} lineup — try again`);
         continue;
       }
-      // Added below its best grade because that grade needs an SBC/Objective
-      // card? Read the best grade's lineup to name the blocking card(s), and
-      // keep it as the Set's upgrade target.
-      const best = bestFutggTier(set);
-      let upgrade: GallerySet['upgrade'] | undefined;
-      if (best && best.grade !== grade && (best.sbc ?? 0) > 0) {
-        const bestLineup = await deps.futggLineup(id, best.grade).catch(() => null);
-        upgrade = { grade: best.grade, tokens: best.tokens, cards: bestLineup ? futggSbcCards(bestLineup) : [] };
-      }
-      lineups.push({ lineup, upgrade });
+      lineups.push({ lineup: r.lineup, upgrade: r.upgrade });
     }
     let g = currentGallery();
     let added = 0;
@@ -1702,6 +1782,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   let startedWhileLoading: RecentSearch[] | null = null;
 
   function renderRecent(): void {
+    drawn.recent = { list: recent, day: new Date().toDateString() };
     const wasOpen = root.querySelector('#recent details')?.hasAttribute('open') ?? true;
     const body = recent.length
       ? recent
@@ -1924,6 +2005,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   }
 
   function renderKnobs(): void {
+    drawn.knobs = knobsKey();
     const s = shown();
     const delayPreset = SEARCH_DELAY_PRESETS.find(
       (p) => p.min === s.searchDelay.min && p.max === s.searchDelay.max,
@@ -2361,6 +2443,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   }
 
   function renderTargets(): void {
+    drawn.targets = targetsKey();
     // A fresh suggestion box: whatever it showed is gone with the old one.
     suggestedIds = '';
     const players = catalog?.players.length ?? 0;
@@ -3470,6 +3553,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     const buying = running ? g.cards.find((c) => c.status === 'todo' && galleryCardNeeded(c, g))?.key : undefined;
     const completed = new Set(g.completed ?? []);
     // Each fut.gg Set: the grade its lineup is for, and how far it got.
+    const bySet = galleryCardsBySet(g);
     const sets = gallerySetProgress(g)
       .map((p) => {
         if (completed.has(p.set.id))
@@ -3478,19 +3562,24 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
           p.skipped > 0
             ? ` · <span class="warn">${p.skipped} skipped (${fmt(p.skippedScore)} points): retry ${p.skipped === 1 ? 'it' : 'them'}, or the Set may miss grade ${p.set.grade}</span>`
             : '';
-        const note = blockerNote(gallerySetBlockers(g, p.set.id));
+        const note = blockerNote(gallerySetBlockers(g, p.set.id, bySet));
         const why = note ? ` · <span class="g-why" title="${esc(note.detail)}">not done: ${esc(note.summary)}</span>` : '';
         return `<div class="g-sethead"><b>${esc(p.set.name)}</b> · grade ${p.set.grade} needs ${fmt(p.set.threshold)} points, the lineup makes ${fmt(p.set.score)} · ${p.done} of ${p.cards} collected${risk}${why}</div>`;
       })
       .join('');
     // Still to buy first; cards on their way, then the done ones, after.
     const groups: { title: string; cards: GalleryCard[] }[] = [
-      { title: 'To buy', cards: g.cards.filter((c) => c.status === 'todo' && galleryCardNeeded(c, g)) },
-      { title: 'On the way to the market', cards: g.cards.filter((c) => c.status === 'bought' || c.status === 'club') },
-      { title: 'SBC/Objective — collect in the game', cards: g.cards.filter((c) => c.status === 'sbc') },
-      { title: 'Skipped', cards: g.cards.filter((c) => c.status === 'skipped') },
-      { title: 'Done', cards: g.cards.filter((c) => c.status === 'listed' || c.status === 'owned' || (c.status === 'todo' && !galleryCardNeeded(c, g))) },
+      { title: 'To buy', cards: [] },
+      { title: 'On the way to the market', cards: [] },
+      { title: 'SBC/Objective — collect in the game', cards: [] },
+      { title: 'Skipped', cards: [] },
+      { title: 'Done', cards: [] },
     ];
+    for (const c of g.cards) {
+      const at =
+        c.status === 'todo' ? (galleryCardNeeded(c, g) ? 0 : 4) : c.status === 'bought' || c.status === 'club' ? 1 : c.status === 'sbc' ? 2 : c.status === 'skipped' ? 3 : 4;
+      groups[at]!.cards.push(c);
+    }
     const rows = groups
       .filter((x) => x.cards.length > 0)
       .map((x) => {
@@ -3850,10 +3939,13 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         settings = deps.getSettings();
         modeSettings = deps.getModeSettings?.() ?? modeSettings;
         pending = null;
-        renderSettings();
+        // A list left open, or a name half typed, last time: closed.
+        openDd = null;
+        suggestions = [];
         page.hidden = false;
         // Lets the account button step aside while the page is open.
         host.dataset.open = '';
+        renderSettings();
         refreshLive();
       });
       void deps.prepare().then(() => {
