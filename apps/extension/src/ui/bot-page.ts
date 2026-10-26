@@ -101,8 +101,10 @@ import {
   portraitUrl,
   priceStep,
   raritiesForLevel,
-  searchPlayers,
+  catalogLookups,
+  searchIndex,
   type Catalog,
+  type CatalogLookups,
   type CatalogOption,
   type CatalogPlayer,
 } from '../model/catalog.js';
@@ -2057,6 +2059,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   let typeahead = '';
   let typeaheadTimer: ReturnType<typeof setTimeout> | null = null;
   let suggestions: CatalogPlayer[] = [];
+  /** The ids the suggestion box last drew. */
+  let suggestedIds = '';
 
   const DD_LABEL: Record<Dd, string> = {
     quality: 'Quality',
@@ -2141,6 +2145,12 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     const v = ddValue(dd);
     if (v == null) return null;
     const byValue = dd === 'quality' || dd === 'position';
+    if (!byValue && catalog && dd !== 'club') {
+      const list = dd === 'chem' ? 'playStyles' : dd === 'nation' ? 'nations' : dd === 'league' ? 'leagues' : 'rarities';
+      const o = catalogLookups(catalog).byId[list].get(Number(v));
+      // The rarity list is narrowed by the quality picked: only one in it counts.
+      return o && (dd !== 'rarity' || ddOptions(dd).includes(o)) ? o : null;
+    }
     return ddOptions(dd).find((o) => (byValue ? o.value : String(o.id)) === v) ?? null;
   }
 
@@ -2234,11 +2244,11 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   }
 
   function describeFilter(f: FilterCriteria): string[] {
-    const byId = (list: CatalogOption[] | undefined, id: number) =>
-      list?.find((e) => e.id === id)?.label;
+    const lookups = catalog ? catalogLookups(catalog) : null;
+    const byId = (list: keyof CatalogLookups['byId'], id: number) => lookups?.byId[list].get(id)?.label;
     const chips: string[] = [];
     if (f.resourceId != null) {
-      const p = catalog?.players.find((x) => x.id === f.resourceId);
+      const p = lookups?.players.byId.get(f.resourceId);
       chips.push(p ? `${p.rating ?? ''} ${p.name}`.trim() : `Player #${f.resourceId}`);
     }
     if (f.minRating != null || f.maxRating != null)
@@ -2250,21 +2260,18 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
           ?.label ?? f.quality,
       );
     }
-    if (f.rarity != null) chips.push(byId(catalog?.rarities, f.rarity) ?? `Rarity #${f.rarity}`);
-    if (f.zone != null) chips.push(byId(catalog?.positions, f.zone) ?? `Zone #${f.zone}`);
+    if (f.rarity != null) chips.push(byId('rarities', f.rarity) ?? `Rarity #${f.rarity}`);
+    if (f.zone != null) chips.push(byId('positions', f.zone) ?? `Zone #${f.zone}`);
     else if (f.position)
       chips.push(catalog?.positions.find((p) => p.value === f.position)?.label ?? f.position);
     if (f.chemistryStyle != null)
-      chips.push(byId(catalog?.playStyles, f.chemistryStyle) ?? `Chem #${f.chemistryStyle}`);
+      chips.push(byId('playStyles', f.chemistryStyle) ?? `Chem #${f.chemistryStyle}`);
     if (f.nationality != null)
-      chips.push(byId(catalog?.nations, f.nationality) ?? `Nation #${f.nationality}`);
-    if (f.league != null) chips.push(byId(catalog?.leagues, f.league) ?? `League #${f.league}`);
+      chips.push(byId('nations', f.nationality) ?? `Nation #${f.nationality}`);
+    if (f.league != null) chips.push(byId('leagues', f.league) ?? `League #${f.league}`);
     if (f.club != null) {
-      const clubs =
-        f.league != null
-          ? catalog?.clubs[String(f.league)]
-          : Object.values(catalog?.clubs ?? {}).flat();
-      chips.push(byId(clubs, f.club) ?? `Club #${f.club}`);
+      const club = f.league != null ? catalog?.clubs[String(f.league)]?.find((c) => c.id === f.club) : lookups?.clubsById.get(f.club);
+      chips.push(club?.label ?? `Club #${f.club}`);
     }
     if (f.minPrice != null) chips.push(`min ${fmt(f.minPrice)}`);
     chips.push(f.maxPrice != null ? `max ${fmt(f.maxPrice)}` : 'no max price');
@@ -2354,6 +2361,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   }
 
   function renderTargets(): void {
+    // A fresh suggestion box: whatever it showed is gone with the old one.
+    suggestedIds = '';
     const players = catalog?.players.length ?? 0;
     const hint = !catalog
       ? "Loading EA's lists and players. Keep the web app open; they appear here on their own."
@@ -2424,9 +2433,13 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     const box = root.getElementById('nf-suggest');
     const input = root.getElementById('nf-player');
     if (!box || !input) return;
-    suggestions = catalog ? searchPlayers(catalog.players, query) : [];
+    suggestions = catalog ? perf.time('search.suggest', () => searchIndex(catalogLookups(catalog!).players, query)) : [];
     box.hidden = suggestions.length === 0;
     input.setAttribute('aria-expanded', String(!box.hidden));
+    // The same twelve as last time: the box stands.
+    const ids = suggestions.map((p) => p.id).join(',');
+    if (ids === suggestedIds) return;
+    suggestedIds = ids;
     box.innerHTML = suggestions
       .map((p, i) => {
         const face = portraitUrl(catalog, p.id);

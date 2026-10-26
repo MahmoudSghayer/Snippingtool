@@ -41,7 +41,7 @@
  */
 import { EA_TAX_RATE, GALLERY_GRADES, GALLERY_LIMITS, MIN_SALE_PRICE, MIN_START_PRICE, stepPrice } from '@sl/shared';
 
-import { fold, searchPlayers } from '../model/catalog.js';
+import { fold, playerIndex, searchIndex } from '../model/catalog.js';
 
 import { galleryScore } from './gallery-score.js';
 
@@ -89,9 +89,13 @@ function findRarity(rarities: CatalogOption[], version: string): CatalogOption[]
  * card is the highest rated at or under the typed rating (a special card
  * rates above its player's base card). */
 function findPlayer(players: CatalogPlayer[], name: string, rating: number): CatalogPlayer[] {
+  // The index is built once per player list (and shared with the page's
+  // own search): a 300-line list is 300 lookups, not 300 passes over EA's
+  // whole player list.
+  const index = playerIndex(players);
   const wanted = fold(name.trim());
-  const exact = players.filter((p) => fold(p.name) === wanted);
-  const candidates = exact.length > 0 ? exact : searchPlayers(players, name, 12);
+  const exact = index.byFolded.get(wanted) ?? [];
+  const candidates = exact.length > 0 ? exact : searchIndex(index, name, 12);
   if (candidates.length <= 1 || exact.length === 0) return candidates;
   const under = candidates.filter((p) => p.rating != null && p.rating <= rating).sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
   return under.length > 0 ? [under[0]!] : [candidates[0]!];

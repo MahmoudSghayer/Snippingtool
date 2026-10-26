@@ -10,10 +10,13 @@ import {
   parsePlayersFile,
   portraitUrl,
   priceStep,
+  playerIndex,
   raritiesForLevel,
+  searchIndex,
   searchPlayers,
   type Catalog,
   type CatalogOption,
+  type CatalogPlayer,
 } from '../../src/model/catalog.js';
 
 describe('players.json', () => {
@@ -83,5 +86,57 @@ describe('form helpers', () => {
     expect(searchPlayers(players, 'mbappe').map((p) => p.id)).toEqual([1, 2, 3]);
     expect(searchPlayers(players, 'm')).toEqual([]);
     expect(fold('Nazário')).toBe('nazario');
+  });
+});
+
+describe('playerIndex / searchIndex', () => {
+  /** The search as it was before the index: a pass over every name. */
+  function linearSearch(players: CatalogPlayer[], query: string, limit = 12): CatalogPlayer[] {
+    const q = fold(query.trim());
+    if (q.length < 2) return [];
+    const hits: { p: CatalogPlayer; starts: boolean }[] = [];
+    for (const p of players) {
+      const n = fold(p.name);
+      const i = n.indexOf(q);
+      if (i < 0) continue;
+      hits.push({ p, starts: i === 0 || n[i - 1] === ' ' });
+    }
+    hits.sort((a, b) => Number(b.starts) - Number(a.starts) || (b.p.rating ?? 0) - (a.p.rating ?? 0));
+    return hits.slice(0, limit).map((h) => h.p);
+  }
+
+  const FIRST = ['José', 'João', 'Kylian', 'Erling', 'Mohamed', 'Rodrigo', 'Ángel', 'Jude', 'Luka', 'Lionel', 'Dušan', 'Çağlar'];
+  const LAST = ['Silva', 'Rodríguez', 'Müller', 'Mbappé', 'Haaland', 'Salah', 'Bellingham', 'Modrić', 'Messi', 'Ronaldo', 'Kombappez', 'Leão'];
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31);
+  const players: CatalogPlayer[] = Array.from({ length: 3_000 }, (_, i) => ({
+    id: i + 1,
+    name: rnd() < 0.1 ? LAST[Math.floor(rnd() * LAST.length)]! : `${FIRST[Math.floor(rnd() * FIRST.length)]} ${LAST[Math.floor(rnd() * LAST.length)]}${rnd() < 0.2 ? ` ${LAST[Math.floor(rnd() * LAST.length)]}` : ''}`,
+    rating: rnd() < 0.05 ? null : 45 + Math.floor(rnd() * 50),
+  }));
+
+  it('gives exactly what a pass over every name gives, in the same order', () => {
+    const queries = ['an', 'silva', 'mbappe', 'ald', 'bappe', 'ron', 'jose rod', 'zzqx', 'm', 'MÜLLER', 'é', 'ão', 'ic', 'modric', 'ko', 'ha', 'sa', 'es'];
+    for (const q of queries) {
+      expect(searchPlayers(players, q), q).toEqual(linearSearch(players, q));
+      expect(searchPlayers(players, q, 3), q).toEqual(linearSearch(players, q, 3));
+      expect(searchPlayers(players, q, 100), q).toEqual(linearSearch(players, q, 100));
+    }
+  });
+
+  it('is built once per list and finds a player by id and by exact folded name', () => {
+    const index = playerIndex(players);
+    expect(playerIndex(players)).toBe(index);
+    expect(index.byId.get(10)).toBe(players[9]);
+    const silvas = index.byFolded.get('silva') ?? [];
+    expect(silvas).toEqual(players.filter((p) => fold(p.name) === 'silva'));
+    expect(playerIndex([...players])).not.toBe(index);
+  });
+
+  it('finds a mid-word match through its first bigram', () => {
+    const index = playerIndex([{ id: 1, name: 'Cristiano Ronaldo', rating: 86 }]);
+    expect(searchIndex(index, 'ald').map((p) => p.id)).toEqual([1]);
+    expect(searchIndex(index, 'naldo').map((p) => p.id)).toEqual([1]);
+    expect(searchIndex(index, 'xq')).toEqual([]);
   });
 });
