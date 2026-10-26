@@ -44,6 +44,7 @@ import browser from 'webextension-polyfill';
 
 import { refreshOnStartup } from '../lib/auth.js';
 import { logger } from '../lib/logger.js';
+import { perf } from '../lib/perf.js';
 import { recentMarketPrice } from '../model/market-price.js';
 import { margin, maxSnipePrice, summarise } from '../model/prices.js';
 import * as db from '../store/db.js';
@@ -65,6 +66,7 @@ import {
   handleCardNames,
   handleCatalogGet,
   handleCatalogSave,
+  watchCatalogStorage,
 } from './bot.js';
 import {
   handleEngineLockAcquire,
@@ -108,6 +110,9 @@ import { installWelcomeHandler } from './welcome.js';
 
 import type { BackgroundResponse } from '@sl/shared';
 import type { Runtime } from 'webextension-polyfill';
+
+/** `storage.local` flag that turns lib/perf.ts's timings on at boot. */
+const PERF_FLAG_KEY = 'sl.perf.v1';
 
 const WINDOW_MS = 7 * 24 * 60 * 60 * 1000; // a week of history per card
 
@@ -330,7 +335,15 @@ function startAlarms(): void {
   ensureLifecycleSeedAlarm();
 }
 
+// Timings for the hot paths (lib/perf.ts), on when storage says so.
+void browser.storage.local
+  .get(PERF_FLAG_KEY)
+  .then((r) => {
+    if (r[PERF_FLAG_KEY] === true) perf.enable(true);
+  })
+  .catch(() => undefined);
 installGlobalErrorHandlers();
+if (AUTOMATION_ENABLED) watchCatalogStorage();
 installUpdateHandler();
 installWelcomeHandler();
 startAlarms();

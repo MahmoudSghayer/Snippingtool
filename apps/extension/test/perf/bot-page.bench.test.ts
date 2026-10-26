@@ -7,6 +7,7 @@ import { DEFAULT_BOT_MODE_SETTINGS, DEFAULT_BOT_SETTINGS, type BotModeSettings, 
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Sniper } from '../../src/engine/sniper.js';
+import { perf } from '../../src/lib/perf.js';
 import { createBotPage } from '../../src/ui/bot-page.js';
 import { captureShadowRoots, trustTestEvents, untrustedEvents } from '../unit/ui-test-helpers.js';
 
@@ -184,6 +185,8 @@ describe('Nova AI page', () => {
     await vi.advanceTimersByTimeAsync(10);
     // The Gallery feed tab: its first draw and the per-second tick after it.
     (root.querySelector('.ftab[data-feed="gallery"]') as HTMLElement).click();
+    perf.reset();
+    perf.enable(true);
     suite.bench(
       '1 s tick x10 (gallery feed open, nothing changed)',
       () => {
@@ -191,6 +194,9 @@ describe('Nova AI page', () => {
       },
       { runs: 3 },
     );
+    perf.enable(false);
+    for (const [name, v] of Object.entries(perf.snapshot().summary)) suite.record(`  ↳ ${name} (mean of ${v.n})`, v.mean);
+    for (const [name, v] of Object.entries(perf.snapshot().counts)) suite.record(`  ↳ count ${name}`, v);
     // A Set ticked and added: lineup, club check, list update, redraw.
     const first = root.querySelector<HTMLInputElement>('input[data-futgg]')!;
     first.checked = true;

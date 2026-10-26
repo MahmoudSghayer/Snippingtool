@@ -39,10 +39,13 @@ import {
   type GalleryState,
   type MarketCardHistoryResponse,
 } from '@sl/shared';
+import browser from 'webextension-polyfill';
+
 
 import { apiJson, NetworkError } from '../lib/api.js';
 import { isAuthenticated } from '../lib/auth.js';
 import { logger } from '../lib/logger.js';
+import { perf } from '../lib/perf.js';
 import { getLocal, setLocal } from '../lib/storage.js';
 
 import type { Catalog } from '../model/catalog.js';
@@ -436,20 +439,67 @@ export async function handleBotBudgetSet(budget: BotBudgetState): Promise<{ ok: 
   return { ok: true };
 }
 
-/** The saved catalog, re-validated on the way out against the same strict
- * schema `catalog.save` and content applied on the way in (an older build's
- * catalog, or an edited `storage.local`, reads as none). */
+/** The catalog as last read or saved, kept in memory: `catalog.get` is
+ * asked for it on every Nova AI page open (and used to be polled every 3 s),
+ * and validating 20k players against the strict schema each time was the
+ * page's biggest stall. Read from storage and validated once per worker
+ * life (`loaded`), then served as is; a save replaces it with the payload
+ * the router already validated. `null` once loaded means storage holds no
+ * usable catalog. */
+let catalogCache: { loaded: boolean; value: Catalog | null } = { loaded: false, value: null };
+
+/** The saved catalog, re-validated on the way out of storage against the
+ * same strict schema `catalog.save` and content applied on the way in (an
+ * older build's catalog, or an edited `storage.local`, reads as none) — once
+ * per worker life; after that the memory copy. */
 export async function handleCatalogGet(): Promise<Catalog | null> {
-  const parsed = adapterCatalogSchema.safeParse(await getLocal<unknown>(CATALOG_KEY, null));
-  return parsed.success ? (parsed.data as Catalog) : null;
+  if (catalogCache.loaded) {
+    perf.count('catalog.get.cached');
+    return catalogCache.value;
+  }
+  const value = await perf.timeAsync('catalog.get.cold', async () => {
+    const parsed = adapterCatalogSchema.safeParse(await getLocal<unknown>(CATALOG_KEY, null));
+    return parsed.success ? (parsed.data as Catalog) : null;
+  });
+  catalogCache = { loaded: true, value };
+  return value;
 }
 
 /** The adapter sends the whole catalog at once, built from the web app's
- * own lists (model/catalog.ts). */
+ * own lists (model/catalog.ts). The payload passed the router's
+ * `catalog.save` schema already, so it goes straight into the cache. */
 export async function handleCatalogSave(catalog: Catalog): Promise<{ ok: true }> {
   await setLocal(CATALOG_KEY, catalog);
+  catalogCache = { loaded: true, value: catalog };
   playerNames = null;
   return { ok: true };
+}
+
+/** Forgets the memory copy, so the next `catalog.get` reads storage again:
+ * another tab's save (the userscript build keeps one copy of the
+ * background per tab, and reports the other tabs' writes through
+ * `storage.onChanged`; the extension's one service worker sees every save
+ * itself). A change to the catalog this cache already holds is left alone. */
+export function invalidateCatalogCache(saved?: unknown): void {
+  const capturedAt = (saved as { capturedAt?: unknown } | null | undefined)?.capturedAt;
+  if (catalogCache.loaded && catalogCache.value && capturedAt === catalogCache.value.capturedAt) return;
+  catalogCache = { loaded: false, value: null };
+  playerNames = null;
+}
+
+/** Follows the catalog's key in storage for `invalidateCatalogCache`. Called
+ * at boot (background/index.ts), not at import: nothing here touches
+ * `browser.storage` before the worker is up. */
+export function watchCatalogStorage(): void {
+  browser.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName === 'local' && Object.hasOwn(changes, CATALOG_KEY)) invalidateCatalogCache(changes[CATALOG_KEY]?.newValue);
+  });
+}
+
+/** Tests: forget the memory copy. */
+export function resetCatalogCacheForTests(): void {
+  catalogCache = { loaded: false, value: null };
+  playerNames = null;
 }
 
 let playerNames: Map<number, string> | null = null;

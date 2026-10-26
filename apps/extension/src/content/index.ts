@@ -43,8 +43,9 @@ import { createBackgroundTimer } from '../lib/background-timer.js';
 import { riskLevelChangeEvent } from '../lib/bot-safety.js';
 import { createLogThrottle, droppedSuffix } from '../lib/log-throttle.js';
 import { logger } from '../lib/logger.js';
+import { perf } from '../lib/perf.js';
 import { PILE_MIN_GAP_MS, createPileRefresher } from '../lib/pile-refresh.js';
-import { singleFlight } from '../lib/single-flight.js';
+import { sharedFlight, singleFlight } from '../lib/single-flight.js';
 import { buildBoughtTrade } from '../lib/trade-report.js';
 import { createTransferListTracker } from '../lib/transfer-list.js';
 import { createBotPage, type LiveSearch } from '../ui/bot-page.js';
@@ -123,6 +124,8 @@ const LIVE_TICK_MS = 30000;
 /** How often the engine lease is renewed (background/engine-lease.ts's
  * `ENGINE_LEASE_RENEW_MS`; a lease lasts three minutes). */
 const LEASE_RENEW_MS = 20000;
+/** `storage.local` flag that turns lib/perf.ts's timings on at boot. */
+const PERF_FLAG_KEY = 'sl.perf.v1';
 
 // ---- background messaging ---------------------------------------------------
 
@@ -142,6 +145,13 @@ function nowIso(): string {
 // ---- boot --------------------------------------------------------------------
 
 async function main(): Promise<void> {
+  // Timings for the hot paths (lib/perf.ts), on when storage says so.
+  void browser.storage.local
+    .get(PERF_FLAG_KEY)
+    .then((r) => {
+      if (r[PERF_FLAG_KEY] === true) perf.enable(true);
+    })
+    .catch(() => undefined);
   // The act-channel nonce content/handoff.ts minted at document_start (the
   // userscript's setup.ts, in that build). Without it every act call fails
   // closed (assist/automation cannot buy); M1 recording does not need it.
@@ -163,12 +173,34 @@ async function main(): Promise<void> {
   // before this script was listening.
   // Automation builds only: the listable build has no Sniping Bot page, and
   // its adapter builds no catalog.
+  // Kept in memory here as well: the Nova AI page reads it from here on
+  // every open (and is told of a new one as it lands) rather than asking
+  // background — whose answer is the whole catalog, validated and copied —
+  // on a timer. A catalog saved on an earlier page load is read from
+  // background once, the first time the page asks.
+  let latestCatalog: Catalog | null = null;
+  const catalogListeners = new Set<(catalog: Catalog) => void>();
   if (AUTOMATION_ENABLED) {
     adapter.onCatalog((catalog) => {
+      if (latestCatalog && catalog.capturedAt <= latestCatalog.capturedAt) {
+        perf.count('catalog.push.unchanged');
+        return;
+      }
+      latestCatalog = catalog;
+      for (const cb of catalogListeners) cb(catalog);
       void send('catalog.save', catalog);
     });
     adapter.requestCatalog();
   }
+  const catalogNow = (): Catalog | null => latestCatalog;
+  const getCatalog = sharedFlight(async (): Promise<Catalog | null> => {
+    if (latestCatalog) return latestCatalog;
+    const stored = await perf.timeAsync('catalog.get', () => send<Catalog | null>('catalog.get'));
+    // The adapter may have posted one meanwhile: the newer wins.
+    const pushed = catalogNow();
+    if (stored && (!pushed || stored.capturedAt > pushed.capturedAt)) latestCatalog = stored;
+    return catalogNow();
+  });
 
   // ---- M1: passive observation (always on, no account required) -----------
 
@@ -775,6 +807,8 @@ async function main(): Promise<void> {
       // Signed in since the page loaded (from the account view): the
       // account's Gallery list, not the one this browser had at load.
       if (fresh) botGallery = (await send<GalleryState | null>('bot.galleryGet')) ?? botGallery;
+      // Another run got here first while this one awaited: one bot only.
+      if (sniper) return;
       // Timed off the main thread, so the bot keeps its pace while the tab
       // is minimised or in the background (lib/background-timer.ts).
       const timer = createBackgroundTimer();
@@ -932,7 +966,8 @@ async function main(): Promise<void> {
     const botPage = createBotPage({
       getSniper: () => sniper,
       getUnavailableReason: () => (sniper ? null : unavailableReason),
-      prepare: () => prepareSniper(true),
+      // Shared between opens that overlap: one bootstrap, one bot.
+      prepare: sharedFlight(() => prepareSniper(true)),
       getSettings: () => botSettings ?? DEFAULT_BOT_SETTINGS,
       saveSettings: async (next) => {
         // A change of risk level is reported, so admins can see who runs
@@ -964,7 +999,11 @@ async function main(): Promise<void> {
         liveSearch = search;
       },
       resolveNames: async (resourceIds) => (await send<Record<string, string | null>>('cards.names', { resourceIds })) ?? {},
-      getCatalog: () => send<Catalog | null>('catalog.get'),
+      getCatalog,
+      onCatalog: (cb) => {
+        catalogListeners.add(cb);
+        return () => catalogListeners.delete(cb);
+      },
       // The signed-in account's list, through background, so every browser
       // shows the same one; a copy in extension storage (Tampermonkey's in
       // the userscript build), which EA's page cannot read, for when the

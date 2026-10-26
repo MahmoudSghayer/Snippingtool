@@ -28,8 +28,10 @@
  *     `storage.onChanged` fires for changes this tab's own code makes (the
  *     background half writing the settings cache, the options drawer saving
  *     hotkeys), which is what content/live-settings.ts needs to apply them
- *     without a reload. Another tab's writes are not reported: each tab has
- *     its own background copy, which writes its own cache.
+ *     without a reload. Another tab's writes are not reported (each tab has
+ *     its own background copy, which writes its own cache) — except for the
+ *     few keys in `REMOTE_WATCHED_KEYS`, which a tab keeps in memory and
+ *     must drop when another tab replaces them.
  *
  *   alarms
  *     `setInterval`. There is no service worker to wake, so an alarm only
@@ -57,6 +59,27 @@ type StorageChangeListener = (changes: StorageChanges, areaName: string) => void
 const messageListeners = new Set<MessageListener>();
 const alarmListeners = new Set<AlarmListener>();
 const storageListeners = new Set<StorageChangeListener>();
+
+/** Keys whose writes by *another* EA tab are reported through
+ * `storage.onChanged` too (`GM_addValueChangeListener`, one per key): the
+ * catalog, which each tab's background keeps a copy of in memory
+ * (background/bot.ts `invalidateCatalogCache`). Everything else stays as
+ * the header says: this tab's own writes only. */
+const REMOTE_WATCHED_KEYS = ['sl.catalog.v1'];
+
+if (typeof GM_addValueChangeListener === 'function') {
+  for (const key of REMOTE_WATCHED_KEYS) {
+    try {
+      GM_addValueChangeListener(key, (_name, oldValue, newValue, remote) => {
+        // This tab's own write was reported from `set()` already.
+        if (!remote) return;
+        notifyStorage({ [key]: { ...(newValue !== undefined ? { newValue } : {}), ...(oldValue !== undefined ? { oldValue } : {}) } }, 'local');
+      });
+    } catch {
+      /* an older script manager without it: other tabs' writes go unreported, as before */
+    }
+  }
+}
 
 function notifyStorage(changes: StorageChanges, areaName: string): void {
   if (Object.keys(changes).length === 0) return;

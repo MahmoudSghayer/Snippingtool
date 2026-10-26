@@ -917,10 +917,14 @@ const EA_REST_MS = [15 * 60_000, 30 * 60_000];
 const EA_REST_WINDOW_MS = 2 * 60 * 60_000;
 
 function copyGallery(g: GalleryState): GalleryState {
-  const copy: GalleryState = { budget: g.budget, spent: g.spent, cards: g.cards.map((c) => ({ ...c, ...(c.setIds ? { setIds: [...c.setIds] } : {}) })) };
-  if (g.sets) copy.sets = g.sets.map((x) => ({ ...x }));
+  // Every field, so nothing the page or the account keeps on the list (the
+  // grade each Set was completed at, say) is dropped on the way through the
+  // bot: a spread of the whole state, then its own copies of what is nested.
+  const copy: GalleryState = { ...g, cards: g.cards.map((c) => ({ ...c, ...(c.setIds ? { setIds: [...c.setIds] } : {}) })) };
+  if (g.sets) copy.sets = g.sets.map((x) => ({ ...x, ...(x.tiers ? { tiers: x.tiers.map((t) => ({ ...t })) } : {}), ...(x.spares ? { spares: x.spares.map((t) => ({ ...t })) } : {}), ...(x.upgrade ? { upgrade: { ...x.upgrade, cards: [...x.upgrade.cards] } } : {}) }));
   if (g.completed) copy.completed = [...g.completed];
   if (g.completedAt) copy.completedAt = { ...g.completedAt };
+  if (g.completedGrade) copy.completedGrade = { ...g.completedGrade };
   return copy;
 }
 
@@ -1022,6 +1026,7 @@ export class Sniper {
    * Stop/Start on this page load: the adapter can move them until a
    * reload), and a buy EA has not answered yet. */
   private gallery: GalleryState = { cards: [], budget: 0, spent: 0 };
+  private galleryVersion = 0;
   private galleryWork: GalleryWork | null = null;
   private galleryJobs: GalleryJob[] = [];
   private galleryLate: { key: string; until: number } | null = null;
@@ -1269,12 +1274,20 @@ export class Sniper {
   setGallery(state: GalleryState): void {
     if (this.isRunning()) return;
     this.gallery = copyGallery(state);
+    this.galleryVersion++;
     this.galleryWork = null;
   }
 
   /** Gallery mode's list with each card's progress (a copy). */
   getGallery(): GalleryState {
     return copyGallery(this.gallery);
+  }
+
+  /** Goes up on every change to the list (a card bought, listed, skipped,
+   * a Set completed, a list set): the page keeps its copy until it does,
+   * rather than taking a fresh copy of 300 cards every second. */
+  getGalleryVersion(): number {
+    return this.galleryVersion;
   }
 
   /** While Bid mode runs: its open bids out of the user's max, and the
@@ -2683,6 +2696,7 @@ export class Sniper {
   }
 
   private saveGallery(): void {
+    this.galleryVersion++;
     this.deps.saveGallery?.(copyGallery(this.gallery));
   }
 

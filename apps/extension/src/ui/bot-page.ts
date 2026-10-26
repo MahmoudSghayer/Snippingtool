@@ -93,6 +93,7 @@ import {
   type GallerySetBlockerReason,
   type GalleryUpgrade,
 } from '../engine/gallery.js';
+import { perf } from '../lib/perf.js';
 import { TRANSFER_LIST_SIZE, type TransferListSummary } from '../lib/transfer-list.js';
 import {
   SPECIAL_LEVEL,
@@ -105,6 +106,7 @@ import {
   type CatalogOption,
   type CatalogPlayer,
 } from '../model/catalog.js';
+
 
 import { NOVA_LOGO_SVG } from './brand.js';
 import { readWallet } from './ea-wallet.js';
@@ -153,8 +155,14 @@ export interface BotPageDeps {
   setLiveSearch: (search: LiveSearch | null) => void;
   resolveNames: (resourceIds: number[]) => Promise<Record<string, string | null>>;
   /** EA's player/club/league/nation lists, if the web app has loaded them
-   * since the extension was installed (model/catalog.ts). */
+   * since the extension was installed (model/catalog.ts). Asked once per
+   * page open while none has arrived; after that `onCatalog` brings each
+   * new one. */
   getCatalog: () => Promise<Catalog | null>;
+  /** Called with every catalog the web app builds from here on (the page
+   * never polls for one). Returns the unsubscribe. Omitted: the catalog is
+   * only ever read through `getCatalog`. */
+  onCatalog?: (cb: (catalog: Catalog) => void) => () => void;
   /** Where the recent-searches log is kept between page loads (the
    * account's copy, content/recent-searches.ts). Read again each time the
    * page opens. Without it the log lasts until the page reloads. */
@@ -1050,18 +1058,41 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   let ringFrame: number | null = null;
   let refreshQueued = false;
   let catalog: Catalog | null = null;
-  let catalogPoll: ReturnType<typeof setInterval> | null = null;
   let livePoll: ReturnType<typeof setInterval> | null = null;
+  /** Whether a catalog was ever read: after that the web app's pushes
+   * (`deps.onCatalog`) are the only source, and nothing is asked for. */
+  let catalogRead = false;
 
-  /** Takes the latest catalog; re-renders only when it changed, and never
-   * while a list is open (the user may be scrolling it). */
+  /** Takes a catalog: kept whenever it is newer, drawn at once only when the
+   * page shows the search and nothing is in the middle of it (a list open, a
+   * name being typed); otherwise the next draw of the search picks it up. */
+  function applyCatalog(c: Catalog | null): void {
+    if (!c || c.capturedAt === catalog?.capturedAt) {
+      perf.count('catalog.unchanged');
+      return;
+    }
+    catalog = c;
+    const typing = root.activeElement?.id === 'nf-player';
+    if (page.hidden || openDd || typing) {
+      perf.count('catalog.deferredDraw');
+      return;
+    }
+    renderTargets();
+  }
+
+  /** Asks for the catalog once (a catalog kept from an earlier page load):
+   * nothing is sent while the page is hidden, nor once one has been read. */
   function loadCatalog(): void {
+    if (page.hidden || catalogRead) {
+      perf.count(page.hidden ? 'catalog.get.skippedHidden' : 'catalog.get.skippedRead');
+      return;
+    }
     void deps.getCatalog().then((c) => {
-      if (!c || page.hidden || c.capturedAt === catalog?.capturedAt || openDd) return;
-      catalog = c;
-      renderTargets();
+      if (c) catalogRead = true;
+      applyCatalog(c);
     });
   }
+  deps.onCatalog?.(applyCatalog);
 
   // Laid out like EA's own "Search the Transfer Market" screen: a back
   // arrow and title over the pitch artwork, the search on a floating panel
@@ -1152,9 +1183,21 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
 
   // ---- Gallery mode -------------------------------------------------------
 
-  /** The list as the running bot has it, else as saved. */
+  /** The list as the running bot has it, else as saved. The bot's copy is
+   * taken once per change to it (`getGalleryVersion`), not on every read:
+   * the per-second tick and every redraw read it. */
+  let galleryHeld: { sniper: Sniper; version: number; state: GalleryState } | null = null;
   function currentGallery(): GalleryState {
-    return deps.getGallery?.() ?? EMPTY_GALLERY;
+    const sniper = deps.getSniper();
+    if (!sniper || !deps.getGallery) return deps.getGallery?.() ?? EMPTY_GALLERY;
+    const version = sniper.getGalleryVersion();
+    if (galleryHeld && galleryHeld.sniper === sniper && galleryHeld.version === version) {
+      perf.count('gallery.read.held');
+      return galleryHeld.state;
+    }
+    const state = deps.getGallery();
+    galleryHeld = { sniper, version, state };
+    return state;
   }
 
   /** The list back as text: what the box shows until the trader edits it. */
@@ -3295,6 +3338,9 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
    * runs. The feed draws from each card's own name, so it never waits on the
    * async name lookup the log and results feeds use. */
   let gallerySig = '';
+  /** The list changed while the Gallery feed was not the tab shown: drawn
+   * when it is. */
+  let galleryFeedStale = false;
 
   /** The cheap signature the Gallery feed is memoised on. */
   function gallerySignature(g: GalleryState, running: boolean): string {
@@ -3307,40 +3353,74 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   /** Bid mode's open bids (`Sniper.getActiveBids`): where each stands and
    * how long it has left, redrawn every second while the page is open. In
    * Gallery mode, its list's cards and where each one is. */
+  /** The feeds' fixed elements (the skeleton is built once): looked up once,
+   * since this runs every second and the shadow tree can hold hundreds of
+   * rows to walk. */
+  const feeds = {
+    tabs: [...root.querySelectorAll<HTMLElement>('.ftab')],
+    galleryTab: root.querySelector<HTMLElement>('.ftab[data-feed="gallery"]')!,
+    box: root.querySelector<HTMLElement>('.feeds')!,
+    results: $('results'),
+    bids: $('bids'),
+    gallery: $('gallery-feed'),
+    galleryCount: $('gallery-count'),
+    bidsCount: $('bids-count'),
+  };
+  /** The Gallery summary line's last text and the element it was written to. */
+  let gallerySumShown: { el: Element; text: string } | null = null;
+
   function renderBids(): void {
     const sniper = deps.getSniper();
-    root.querySelector<HTMLElement>('.ftab[data-feed="gallery"]')!.hidden = !galleryMode();
-    const picked = feedTab === 'gallery' && !galleryMode() ? null : feedTab;
-    const tab = picked ?? (galleryMode() ? 'gallery' : bidMode() ? 'bids' : 'results');
-    for (const el of root.querySelectorAll<HTMLElement>('.ftab')) el.setAttribute('aria-selected', String(el.dataset.feed === tab));
-    $('results').hidden = tab !== 'results';
-    $('bids').hidden = tab !== 'bids';
-    $('gallery-feed').hidden = tab !== 'gallery';
-    root.querySelector('.feeds')!.classList.toggle('bids-open', tab === 'bids' || tab === 'gallery');
-    if (galleryMode()) {
+    perf.count('renderBids');
+    const inGallery = galleryMode();
+    feeds.galleryTab.hidden = !inGallery;
+    const picked = feedTab === 'gallery' && !inGallery ? null : feedTab;
+    const tab = picked ?? (inGallery ? 'gallery' : bidMode() ? 'bids' : 'results');
+    for (const el of feeds.tabs) {
+      const selected = String(el.dataset.feed === tab);
+      if (el.getAttribute('aria-selected') !== selected) el.setAttribute('aria-selected', selected);
+    }
+    feeds.results.hidden = tab !== 'results';
+    feeds.bids.hidden = tab !== 'bids';
+    feeds.gallery.hidden = tab !== 'gallery';
+    feeds.box.classList.toggle('bids-open', tab === 'bids' || tab === 'gallery');
+    if (inGallery) {
       const g = currentGallery();
-      const n = gallerySummary(g);
-      const count = n.total > 0 ? `${n.total - n.todo}/${n.total}` : '';
-      const countEl = $('gallery-count');
-      if (countEl.textContent !== count) countEl.textContent = count;
+      const running = sniper?.isRunning() ?? false;
+      // The list is unchanged since the last tick (same copy): the summary,
+      // the count and the feed are all as they were.
+      const sig = gallerySignature(g, running);
       const sum = root.getElementById('g-sum');
-      if (sum && sum.textContent !== gallerySumText(g)) sum.textContent = gallerySumText(g);
-      if (tab === 'gallery') {
-        const running = sniper?.isRunning() ?? false;
-        const sig = gallerySignature(g, running);
-        if (sig !== gallerySig) {
-          gallerySig = sig;
-          setHtml($('gallery-feed'), galleryFeedHtml(g, running));
+      if (sig !== gallerySig || !sum || gallerySumShown?.el !== sum) {
+        const n = gallerySummary(g);
+        const count = n.total > 0 ? `${n.total - n.todo}/${n.total}` : '';
+        if (feeds.galleryCount.textContent !== count) feeds.galleryCount.textContent = count;
+        if (sum) {
+          const text = gallerySumText(g);
+          if (gallerySumShown?.el !== sum || gallerySumShown.text !== text) {
+            sum.textContent = text;
+            gallerySumShown = { el: sum, text };
+          }
         }
       }
+      if (sig !== gallerySig) {
+        gallerySig = sig;
+        if (tab === 'gallery') {
+          perf.count('gallery.feed.rebuilt');
+          setHtml(feeds.gallery, perf.time('gallery.feed.html', () => galleryFeedHtml(g, running)));
+        } else galleryFeedStale = true;
+      } else if (tab === 'gallery' && galleryFeedStale) {
+        perf.count('gallery.feed.rebuilt');
+        setHtml(feeds.gallery, perf.time('gallery.feed.html', () => galleryFeedHtml(g, running)));
+      }
+      if (tab === 'gallery') galleryFeedStale = false;
     }
     const view = sniper?.getActiveBids() ?? null;
     const count = view && view.bids.length > 0 ? `${view.bids.length}/${view.max}` : '';
-    const countEl = $('bids-count');
-    if (countEl.textContent !== count) countEl.textContent = count;
+    if (feeds.bidsCount.textContent !== count) feeds.bidsCount.textContent = count;
     if (tab !== 'bids') return;
     wantNames(view?.bids.map((b) => b.assetId) ?? []);
-    setHtml($('bids'), bidsHtml(view, sniper?.isRunning() ?? false, Date.now()));
+    setHtml(feeds.bids, bidsHtml(view, sniper?.isRunning() ?? false, Date.now()));
   }
 
   function bidsHtml(view: ReturnType<Sniper['getActiveBids']> | null, running: boolean, now: number): string {
@@ -3716,35 +3796,60 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     if (e.key === 'Escape' && !page.hidden) api.close();
   });
 
+  /** The per-second tick, while the page is open *and* can be seen: EA
+   * updates its top bar after every buy, sale and pack, so the wallet
+   * follows it; the transfer list figures ride on the same tick, for a list
+   * EA's page loads while the bot is stopped (nothing else refreshes the
+   * dash then); the open bids' time left counts down on it too. When
+   * nothing changed each is one compare. Stopped whenever the tab is hidden
+   * (`visibilitychange`), not only on close. */
+  function startTicking(): void {
+    if (livePoll || page.hidden || doc.visibilityState === 'hidden') return;
+    livePoll = setInterval(() => {
+      if (page.hidden || doc.visibilityState === 'hidden') {
+        perf.count('tick.skippedHidden');
+        return;
+      }
+      perf.time('panel.tick', () => {
+        perf.time('panel.tick.wallet', renderWallet);
+        perf.time('panel.tick.transferList', renderTransferList);
+        perf.time('panel.tick.bids', renderBids);
+      });
+    }, 1_000);
+  }
+  function stopTicking(): void {
+    if (livePoll) clearInterval(livePoll);
+    livePoll = null;
+  }
+  doc.addEventListener('visibilitychange', () => {
+    if (doc.visibilityState === 'hidden') stopTicking();
+    else if (!page.hidden) {
+      startTicking();
+      queueRefresh();
+    }
+  });
+
   const api: BotPage = {
     open() {
       if (!page.hidden) return;
-      settings = deps.getSettings();
-      modeSettings = deps.getModeSettings?.() ?? modeSettings;
-      pending = null;
-      renderSettings();
-      page.hidden = false;
-      // Lets the account button step aside while the page is open.
-      host.dataset.open = '';
-      refreshLive();
+      perf.start('panel.open.interactive');
+      perf.time('panel.open.visible', () => {
+        settings = deps.getSettings();
+        modeSettings = deps.getModeSettings?.() ?? modeSettings;
+        pending = null;
+        renderSettings();
+        page.hidden = false;
+        // Lets the account button step aside while the page is open.
+        host.dataset.open = '';
+        refreshLive();
+      });
       void deps.prepare().then(() => {
         if (!page.hidden) refreshLive();
+        perf.end('panel.open.interactive');
       });
       loadCatalog();
       loadRecent();
-      // EA's lists arrive in two steps (files, then the web app's own lists
-      // once it has started); pick each one up while the page is open.
-      catalogPoll = setInterval(loadCatalog, 3_000);
-      // EA updates its top bar after every buy, sale and pack: follow it.
-      // The transfer list figures ride on the same tick, for a list EA's
-      // page loads while the bot is stopped (nothing else refreshes the
-      // dash then). When nothing changed the check is one string compare.
-      // The open bids' time left counts down on it too.
-      livePoll = setInterval(() => {
-        renderWallet();
-        renderTransferList();
-        renderBids();
-      }, 1_000);
+      startTicking();
       // refreshLive() above already drew the ring and, if the bot is running,
       // started the per-frame loop — so idle panels run no animation frame.
       openListeners.forEach((cb) => cb(true));
@@ -3754,10 +3859,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       page.hidden = true;
       delete host.dataset.open;
       if (ringFrame != null) cancelAnimationFrame(ringFrame);
-      if (catalogPoll) clearInterval(catalogPoll);
-      catalogPoll = null;
-      if (livePoll) clearInterval(livePoll);
-      livePoll = null;
+      stopTicking();
       ringFrame = null;
       openListeners.forEach((cb) => cb(false));
     },
