@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Nova Trade \u2014 MV3 Chrome extension. Build targets from one codebase: `ledger` (listable: M1 recorder + M2 assist), `ledger-auto` (adds M3 automation) and `userscript` (the same M1\u2013M3 as one Tampermonkey script).",
+  "description": "Nova Trade — MV3 Chrome extension. Build targets from one codebase: `ledger` (listable: M1 recorder + M2 assist), `ledger-auto` (adds M3 automation) and `userscript` (the same M1–M3 as one Tampermonkey script).",
   "scripts": {
     "dev": "node scripts/build.mjs ledger --watch",
     "build": "pnpm run build:ledger && pnpm run build:auto",
@@ -36,6 +36,7 @@
     "jsdom": "^30.1.3",
     "typescript": "^6.0.3",
     "vite": "^8.3.4",
-    "vitest": "^5.0.5"
+    "vitest": "^5.0.5",
+    "zod": "^4.6.7"
   }
 }
