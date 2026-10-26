@@ -119,9 +119,13 @@ export function installLauncher(): void {
     fab.hidden = botOpen;
     if (botOpen) hide();
   };
+  // Watch only the `data-open` attribute, not childList: the page's open
+  // state is the one thing that hides the button, and it rides on that
+  // attribute. Watching childList here fired this callback on every node EA
+  // added or removed anywhere on its market page — thousands of times a
+  // minute — for no gain.
   new MutationObserver(syncWithBotPage).observe(document.body, {
     subtree: true,
-    childList: true,
     attributes: true,
     attributeFilter: ['data-open'],
   });

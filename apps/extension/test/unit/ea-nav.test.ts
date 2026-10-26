@@ -134,6 +134,33 @@ describe('Nova AI nav item', () => {
     expect(onBounds).toHaveBeenLastCalledWith(expect.objectContaining({ left: 96, top: 72 }));
   });
 
+  it('does not re-measure on EA re-renders that keep the nav and the item', async () => {
+    // The lag fix: EA mutates its market DOM constantly, and measuring reads
+    // layout (a reflow). Re-renders that leave the nav and our item in place
+    // must not trigger a measure — only a change that moves the bounds (the
+    // nav re-found, or our item rebuilt) may.
+    fakeEaNav();
+    const onBounds = vi.fn();
+    installNavItem({ onToggle: vi.fn(), onEaNavigate: vi.fn(), onBounds });
+    const initial = onBounds.mock.calls.length;
+    expect(initial).toBeGreaterThanOrEqual(1);
+
+    for (let i = 0; i < 5; i++) {
+      document.body.appendChild(document.createElement('div'));
+      await Promise.resolve(); // deliver the MutationObserver callback
+      vi.runAllTimers(); // flush the rAF it coalesces into
+    }
+    expect(onBounds.mock.calls.length).toBe(initial);
+
+    // But when EA drops our item, the observer re-adds it and measures again.
+    document.getElementById('sl-sniping-bot-nav')!.remove();
+    document.body.appendChild(document.createElement('div'));
+    await Promise.resolve();
+    vi.runAllTimers();
+    expect(document.getElementById('sl-sniping-bot-nav')).not.toBeNull();
+    expect(onBounds.mock.calls.length).toBe(initial + 1);
+  });
+
   it('ignores clicks a page script makes', () => {
     fakeEaNav();
     const onToggle = vi.fn();
