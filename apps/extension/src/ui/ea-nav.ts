@@ -138,11 +138,31 @@ export function installNavItem(hooks: NavHooks, doc: Document = document): NavIt
     );
   }
 
+  // The nav's own size changes (EA's responsive sidebar ↔ top/bottom bar)
+  // move the content bounds without changing the nav element or the window,
+  // so watch for them here rather than re-measuring on every DOM mutation.
+  const navSize =
+    typeof ResizeObserver === 'function'
+      ? new ResizeObserver(() => {
+          if (navEl) measure(navEl);
+        })
+      : null;
+
   function ensure(): void {
     const nav = findNav(doc);
     if (!nav) return;
+    // Measuring reads layout (getBoundingClientRect), which forces a reflow.
+    // EA mutates its market DOM constantly, so measuring on every mutation
+    // was a per-frame reflow that made the whole UI lag. Measure only when
+    // something that moves the bounds actually changed: the nav was (re)found
+    // or our item was rebuilt. Plain re-renders that leave both in place cost
+    // nothing here now.
+    let changed = false;
     if (nav !== navEl) {
       navEl = nav;
+      changed = true;
+      navSize?.disconnect();
+      navSize?.observe(nav);
       // Capture phase, so this runs before EA's own handler and even if EA
       // stops propagation. It only closes the page; EA's click goes on.
       onTrusted(
@@ -162,9 +182,10 @@ export function installNavItem(hooks: NavHooks, doc: Document = document): NavIt
       const transfers = nav.querySelector(TRANSFERS_SELECTOR);
       if (transfers?.parentElement) transfers.insertAdjacentElement('afterend', btn);
       else nav.appendChild(btn);
+      changed = true;
     }
     paint(btn);
-    measure(nav);
+    if (changed) measure(nav);
   }
 
   // EA renders the navigation after login and re-renders it on some screens.
@@ -178,7 +199,13 @@ export function installNavItem(hooks: NavHooks, doc: Document = document): NavIt
     });
   });
   observer.observe(doc.body, { childList: true, subtree: true });
-  (doc.defaultView ?? window).addEventListener('resize', ensure);
+  // A viewport resize changes the bounds even when the nav element is the
+  // same, so measure directly rather than relying on `ensure`'s changed-only
+  // path (and fall back to `ensure` if the nav has not been found yet).
+  (doc.defaultView ?? window).addEventListener('resize', () => {
+    if (navEl) measure(navEl);
+    else ensure();
+  });
   ensure();
 
   return {

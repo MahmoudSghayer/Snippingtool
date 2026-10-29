@@ -206,6 +206,10 @@ export interface BotPage {
   isOpen(): boolean;
   /** Re-render the live side (call when the sniper changes). */
   refresh(): void;
+  /** Pick up a newly-saved catalog (call after `catalog.save`): re-renders
+   * the Snipe Targets choices if the page is open, and does nothing if not.
+   * Replaces the old 3s catalog poll. */
+  refreshCatalog(): void;
   /** Keep the page inside EA's content area: clear of its navigation and top bar. */
   setBounds(bounds: PageBounds): void;
   onOpenChange(cb: (open: boolean) => void): void;
@@ -1110,6 +1114,47 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     });
   }
   deps.onCatalog?.(applyCatalog);
+
+  /** Asks for the catalog again, read or not: content's save hook (a
+   * catalog built after the page last asked), the same as a push. */
+  function refreshCatalog(): void {
+    catalogRead = false;
+    loadCatalog();
+  }
+
+  /** The once-a-second live tick: EA's top-bar wallet, the transfer-list
+   * figures and the open bids' countdown. Each render redraws only on a
+   * change (a string compare or a memo), and this guard skips even that work
+   * when the page is hidden. */
+  function liveTick(): void {
+    if (page.hidden) return;
+    renderWallet();
+    renderTransferList();
+    renderBids();
+  }
+
+  /** Runs the live tick only while the page is both open and the tab is
+   * visible — a background tab has nothing for the user to see, and its
+   * `setInterval` would just block the thread when it is foregrounded. */
+  function startLive(): void {
+    if (livePoll != null || page.hidden || doc.hidden || doc.visibilityState === 'hidden') return;
+    livePoll = setInterval(liveTick, 1_000);
+  }
+  function stopLive(): void {
+    if (livePoll != null) clearInterval(livePoll);
+    livePoll = null;
+  }
+
+  // Pause the live tick when the tab is hidden, resume it when the tab comes
+  // back and the page is open. (Navigating to another web-app page closes the
+  // page, which stops the tick in close().)
+  doc.addEventListener('visibilitychange', () => {
+    if (doc.hidden || doc.visibilityState === 'hidden' || page.hidden) stopLive();
+    else {
+      startLive();
+      queueRefresh();
+    }
+  });
 
   // Laid out like EA's own "Search the Transfer Market" screen: a back
   // arrow and title over the pitch artwork, the search on a floating panel
@@ -3898,39 +3943,6 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     if (e.key === 'Escape' && !page.hidden) api.close();
   });
 
-  /** The per-second tick, while the page is open *and* can be seen: EA
-   * updates its top bar after every buy, sale and pack, so the wallet
-   * follows it; the transfer list figures ride on the same tick, for a list
-   * EA's page loads while the bot is stopped (nothing else refreshes the
-   * dash then); the open bids' time left counts down on it too. When
-   * nothing changed each is one compare. Stopped whenever the tab is hidden
-   * (`visibilitychange`), not only on close. */
-  function startTicking(): void {
-    if (livePoll || page.hidden || doc.visibilityState === 'hidden') return;
-    livePoll = setInterval(() => {
-      if (page.hidden || doc.visibilityState === 'hidden') {
-        perf.count('tick.skippedHidden');
-        return;
-      }
-      perf.time('panel.tick', () => {
-        perf.time('panel.tick.wallet', renderWallet);
-        perf.time('panel.tick.transferList', renderTransferList);
-        perf.time('panel.tick.bids', renderBids);
-      });
-    }, 1_000);
-  }
-  function stopTicking(): void {
-    if (livePoll) clearInterval(livePoll);
-    livePoll = null;
-  }
-  doc.addEventListener('visibilitychange', () => {
-    if (doc.visibilityState === 'hidden') stopTicking();
-    else if (!page.hidden) {
-      startTicking();
-      queueRefresh();
-    }
-  });
-
   const api: BotPage = {
     open() {
       if (!page.hidden) return;
@@ -3954,7 +3966,16 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       });
       loadCatalog();
       loadRecent();
-      startTicking();
+      // EA's lists arrive in two steps (files, then the web app's own lists
+      // once it has started). The adapter rebuilds the catalog as each
+      // arrives and content calls refreshCatalog() then, so the page picks
+      // them up without polling the whole 100k-player catalog every 3s.
+      //
+      // EA updates its top bar after every buy, sale and pack: follow it on a
+      // once-a-second tick. The transfer-list figures ride along (for a list
+      // EA loaded while the bot was stopped), as does the open bids'
+      // countdown. Each render redraws only on a change.
+      startLive();
       // refreshLive() above already drew the ring and, if the bot is running,
       // started the per-frame loop — so idle panels run no animation frame.
       openListeners.forEach((cb) => cb(true));
@@ -3964,8 +3985,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       page.hidden = true;
       delete host.dataset.open;
       if (ringFrame != null) cancelAnimationFrame(ringFrame);
-      stopTicking();
       ringFrame = null;
+      stopLive();
       openListeners.forEach((cb) => cb(false));
     },
     toggle() {
@@ -3974,6 +3995,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     },
     isOpen: () => !page.hidden,
     refresh: queueRefresh,
+    refreshCatalog,
     setBounds({ left, top, right, bottom }) {
       const px = (n: number) => `${Math.max(0, Math.round(n))}px`;
       page.style.setProperty('--left', px(left));

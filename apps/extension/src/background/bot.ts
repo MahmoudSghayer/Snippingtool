@@ -502,6 +502,9 @@ export function resetCatalogCacheForTests(): void {
   playerNames = null;
 }
 
+/** The name main's bot-catalog-cache test knows the helper by. */
+export const __resetCatalogCacheForTests = resetCatalogCacheForTests;
+
 let playerNames: Map<number, string> | null = null;
 
 async function catalogName(id: number): Promise<string | null> {

@@ -71,7 +71,17 @@ export function obfuscateUserscriptCode(code, keepVerbatim = []) {
   return JavaScriptObfuscator.obfuscate(code, {
     ...BASE,
     stringArray: true,
-    stringArrayEncoding: ['base64'],
+    // No base64 encoding and no call-wrapper transform. The bundle is one
+    // file — our src/** and bundled libraries (Zod above all) together — and
+    // the obfuscator cannot be pointed at our code alone. With base64
+    // encoding on, its atob string-array decoder ran inside Zod's hot loops:
+    // a Chrome trace showed it at ~44% of a 2.4s freeze every time the panel
+    // validated the 100k-player catalog. Plain strings in the array keep our
+    // code hidden (identifiers are still renamed to hex) without a per-access
+    // decode, and dropping the calls transform removes the extra accessor
+    // indirection from those same loops. See docs/06-extension.md.
+    stringArrayEncoding: [],
+    stringArrayCallsTransform: false,
     stringArrayThreshold: 0.75,
     reservedStrings: [...RESERVED_STRINGS, ...keepVerbatim.map(escapeRegExp)],
   }).getObfuscatedCode();

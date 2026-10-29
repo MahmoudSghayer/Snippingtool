@@ -287,11 +287,31 @@ builds, never the `==UserScript==` header or the `.meta.js` file.
 `scripts/obfuscate.mjs` (javascript-obfuscator) runs inside `buildUserscript`
 for the normal and `--template` builds alike. It is deliberately light:
 identifier renaming (hexadecimal names) plus string hiding (string array,
-base64, ~0.75 threshold), and **none** of the transforms that would cost the
-trading hot path or risk EA's page — no control-flow flattening, dead-code
-injection, debug protection, self-defending or global renaming. It raises the
-published file by roughly 15% (about 0.9 MB → 1.05 MB). No source map is
+~0.75 threshold), and **none** of the transforms that would cost the trading
+hot path or risk EA's page — no control-flow flattening, dead-code injection,
+debug protection, self-defending or global renaming. The string array is kept
+**unencoded** (no base64) with the calls transform **off**: the bundle is one
+file — our `src/**` and the libraries it pulls in, Zod above all, together —
+and the obfuscator cannot be pointed at our code alone, so base64 encoding put
+its atob string-array decoder inside Zod's hot loops. A Chrome trace of the
+open panel showed that at ~44% of a ~2.4s main-thread freeze every time the
+100k-player catalog was validated; plain strings keep the code hidden
+(identifiers are still hex) without a per-access decode. No source map is
 produced or shipped.
+
+The build also prepends one line to the top of the userscript body, after
+obfuscation so it is never renamed:
+`const { Promise, Object, Array, Map, Set, JSON, Math, Number, String, Symbol, Reflect, Error } = globalThis;`.
+Tampermonkey runs the script inside a sandbox whose globals are reached
+through a `with(proxy)` scope; binding the built-ins once at the top turns
+every later bare `Promise`/`Object`/… into a local lookup (the same trace put
+the proxy walk at ~16% of each freeze).
+
+Separately, `catalog.get` validates the stored catalog once and then serves it
+from an in-memory cache in `background/bot.ts` (`catalog.save` refreshes the
+cache), and the Nova page no longer polls it every 3s — content pushes
+`refreshCatalog()` after a save instead. That removed the repeated 100k-player
+`safeParse` the panel was running on a timer.
 
 Two things have to survive obfuscation untouched, and the build enforces both:
 
