@@ -412,7 +412,9 @@ export const adapterActionResultMessageSchema = z.object({
      * tradeable copies of the card ids asked about, each under the key a
      * `move` and a `list` name it by (Gallery mode's stuck cards). */
     clubCards: z
-      .array(z.object({ resourceId: z.number().int().positive(), tradeId: z.string().min(1).max(40) }))
+      .array(
+        z.object({ resourceId: z.number().int().positive(), tradeId: z.string().min(1).max(40) }),
+      )
       .max(100)
       .optional(),
     /** A second result for a `buy` whose first result was

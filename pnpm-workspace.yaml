@@ -13,3 +13,12 @@ allowBuilds:
   esbuild: true
   msgpackr-extract: true
   unrs-resolver: true
+
+# seroval <=1.6.7 (pulled in by @tanstack/react-router's router-core; the
+# router's latest release still pins it) carries three high advisories
+# (GHSA-97r2-qh9m-474h, GHSA-wp97-x4hv-qvhp, GHSA-7rv5-mrxv-xcr9) that fail
+# CI's `pnpm audit --prod --audit-level=high`. The patched line is 1.6.8+;
+# both packages move together. Drop once the router depends on it itself.
+overrides:
+  seroval: '>=1.6.8'
+  seroval-plugins: '>=1.6.8'
