@@ -19,9 +19,17 @@ export const AUTOMATION_BACKGROUND_MESSAGE_TYPES = [
   'bot.modeGet',
   'bot.modeSet',
   /** Gallery mode's list of cards, their progress and its coin budget
-   * (`GalleryState`, `storage.local`). Local only. */
+   * (`GalleryState`): this browser's copy in `storage.local`, and the
+   * account's at `/api/v1/extension/gallery`, so every browser the trader
+   * signs in on shows the same list and the same completed Sets. */
   'bot.galleryGet',
   'bot.gallerySet',
+  /** How this browser's list stands with the account (`GallerySyncStatus`:
+   * saved, saved without the fields an older API does not know, pending,
+   * refused, signed out, offline), and a send-it-now for the page's Sync
+   * now button, which answers the same. */
+  'bot.gallerySyncGet',
+  'bot.gallerySyncNow',
   /** fut.gg's Gallery Sets, and one Set's cheapest lineup for a grade, for
    * Gallery mode (`FutggSetSummary[]`, `FutggLineup`). Background fetches
    * fut.gg's public JSON and keeps it a few minutes; anything unreadable is

@@ -109,6 +109,11 @@ const EXCEPTIONS: Record<string, { missing: Column[]; reason: string }> = {
     missing: ['deleted_at'],
     reason: 'one row per user, replaced whole on every save and cascades with the user (§6.7)',
   },
+  user_gallery_completions: {
+    missing: ['deleted_at'],
+    reason:
+      'append-only log of completed Sets; undone_at is the terminal state, not soft-delete (§6.7)',
+  },
   settings_history: {
     missing: ['updated_at', 'deleted_at', 'row_version'],
     reason: 'append-only snapshot on every settings change (§6.7)',

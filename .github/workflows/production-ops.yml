@@ -14,6 +14,11 @@ name: Production ops
 #   trader-report a trader's whole Nova AI picture (profit per player, the
 #                market by hour and day in Israel time, pace, risk signals,
 #                settings), encrypted to report_pubkey like session-report
+#   gallery-report a trader's whole Gallery mode picture: the list as last
+#                saved, every Set's progress, the completed Sets newest
+#                first, the cards uncompleted Sets still need, the window's
+#                buys and the completed-Sets log; email_sha256 empty = the
+#                trader most recently active. Encrypted like session-report
 #   admin-panels what the admin dashboard's Overview/Activity/System pages
 #                are drawn from (row counts, latest timestamps, versions) and
 #                the API's failed /api/v1/admin/ requests; aggregates only,
@@ -37,6 +42,7 @@ on:
             account,
             session-report,
             trader-report,
+            gallery-report,
             ea-probe,
             admin-panels,
           ]
@@ -46,7 +52,7 @@ on:
         required: false
         default: ''
       email_sha256:
-        description: 'account: sha256 hex of the lowercased email (never the email)'
+        description: 'account / session-report / trader-report / gallery-report: sha256 hex of the lowercased email (never the email); gallery-report: empty = the trader most recently active'
         required: false
         default: ''
       password_hash:
@@ -54,7 +60,7 @@ on:
         required: false
         default: ''
       report_pubkey:
-        description: 'session-report / trader-report: base64 PEM public key the report is encrypted to'
+        description: 'session-report / trader-report / gallery-report: base64 PEM public key the report is encrypted to'
         required: false
         default: ''
       player:
@@ -62,7 +68,7 @@ on:
         required: false
         default: ''
       hours:
-        description: 'session-report / trader-report: how many hours back'
+        description: 'session-report / trader-report / gallery-report: how many hours back'
         required: false
         default: '36'
 

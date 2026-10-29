@@ -69,6 +69,7 @@ import {
   type GalleryGrade,
   type GallerySet,
   type GalleryState,
+  type GallerySyncStatus,
 } from '@sl/shared';
 
 import {
@@ -149,6 +150,13 @@ export interface BotPageDeps {
    * upgrading a Set reuses cards collected before and now sold. Null: the
    * catalogue could not be read. Omitted: not used. */
   galleryOwned?: () => Promise<readonly number[] | null>;
+  /** How this browser's Gallery list stands with the account (null: never
+   * saved or loaded), and a send-it-now that answers the same. Omitted: the
+   * page says nothing about the account. */
+  gallerySync?: {
+    get: () => Promise<GallerySyncStatus | null>;
+    now: () => Promise<GallerySyncStatus | null>;
+  };
   /** The search the bot should run from now on (null: none). */
   setLiveSearch: (search: LiveSearch | null) => void;
   resolveNames: (resourceIds: number[]) => Promise<Record<string, string | null>>;
@@ -392,7 +400,12 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
  * times were kept. */
 function completedWhen(g: GalleryState, setId: number, now = Date.now()): string {
   const at = g.completedAt?.[String(setId)];
-  if (at === undefined) return '';
+  return at === undefined ? '' : dayWord(at, now);
+}
+
+/** The day `at` falls on, by the trader's own clock, after a space:
+ * " today", " yesterday", else " 20 Oct" (with the year when not this one). */
+function dayWord(at: number, now = Date.now()): string {
   const day = new Date(at);
   const today = new Date(now);
   const yesterday = new Date(now);
@@ -401,6 +414,17 @@ function completedWhen(g: GalleryState, setId: number, now = Date.now()): string
   if (day.toDateString() === yesterday.toDateString()) return ' yesterday';
   const year = day.getFullYear() === today.getFullYear() ? '' : ` ${day.getFullYear()}`;
   return ` ${day.getDate()} ${MONTHS[day.getMonth()]}${year}`;
+}
+
+/** "14:02", by the trader's own clock. */
+function clockOf(at: number): string {
+  const d = new Date(at);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+/** " today 14:02", " 20 Oct 09:15": when something happened, after a space. */
+function whenAt(at: number, now = Date.now()): string {
+  return `${dayWord(at, now)} ${clockOf(at)}`;
 }
 
 /** The grade a completed fut.gg Set was completed at, or null when the list
@@ -526,6 +550,10 @@ const GALLERY_STATUS: Record<GalleryCard['status'], string> = {
  * drawing them all made the feed slow to scroll and to redraw. The group
  * header still shows the true count; the rest are a "+N more" line. */
 const GALLERY_FEED_GROUP_MAX = 60;
+/** Most completed Sets the Completed Sets log draws (newest first). */
+const COMPLETED_LOG_MAX = 30;
+/** How often the account sync line is read again while the page is open. */
+const SYNC_POLL_MS = 3_000;
 
 /** Under the Buy Now price in Bid mode: what the max price means there. */
 const BID_MAX_HINT =
@@ -705,6 +733,12 @@ const CSS = `
   .g-mine-actions { display: inline-flex; gap: 6px; flex-shrink: 0; }
   .g-sethead .warn { color: var(--ea-warning); }
   .g-why { color: var(--ea-muted); cursor: help; text-decoration: underline dotted; text-underline-offset: 2px; }
+  .g-sync { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; margin: 0 0 8px; font-size: 12px; line-height: 16px; color: var(--ea-muted); }
+  .g-sync.part { color: var(--ea-accent); }
+  .g-sync.bad { color: var(--ea-warning); }
+  .g-log { display: flex; align-items: center; gap: 8px; padding: 4px 6px; font-size: 13px; color: var(--ea-text-2); }
+  .g-log .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .g-log .tok { color: var(--ea-muted); font-size: 12px; white-space: nowrap; }
   .g-alt { height: 40px; box-sizing: border-box; display: flex; flex-wrap: wrap; align-content: center; align-items: center; gap: 0 6px; padding: 4px 10px 4px 31px; font-size: 12px; line-height: 15px; color: var(--ea-muted); border-bottom: 1px solid var(--ea-line); overflow: hidden; }
   .g-upgrade { color: var(--ea-accent, var(--ea-muted)); font-size: 12px; padding-left: 2px; }
   .g-switch { color: var(--ea-muted); font-size: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding-left: 2px; }
@@ -1037,6 +1071,11 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
    * Load said about it. */
   let galleryDraft: string | null = null;
   let galleryProblems: string[] = [];
+  /** Where this browser's list stands with the account, as last read, and
+   * whether a Sync now is on its way. */
+  let gallerySync: GallerySyncStatus | null = null;
+  let gallerySyncBusy = false;
+  let gallerySyncLoad: Promise<void> | null = null;
   /** The fut.gg picker: its Sets once loaded (null: not yet), the ones
    * ticked, whether only grade S Sets show, and what the last add said. */
   let futggSets: FutggSetSummary[] | null = null;
@@ -1055,6 +1094,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   let refreshQueued = false;
   let catalog: Catalog | null = null;
   let livePoll: ReturnType<typeof setInterval> | null = null;
+  let syncPoll: ReturnType<typeof setInterval> | null = null;
 
   /** Takes the latest catalog; re-renders only when it changed, and never
    * while a list is open (the user may be scrolling it). The guard comes
@@ -1087,10 +1127,17 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   function startLive(): void {
     if (livePoll != null || page.hidden || doc.hidden) return;
     livePoll = setInterval(liveTick, 1_000);
+    // The account sync line follows the background's uploads (one every
+    // 2 s while the bot runs): asked every few seconds, redrawn on a change.
+    syncPoll ??= setInterval(() => {
+      if (galleryMode()) refreshGallerySync();
+    }, SYNC_POLL_MS);
   }
   function stopLive(): void {
     if (livePoll != null) clearInterval(livePoll);
     livePoll = null;
+    if (syncPoll != null) clearInterval(syncPoll);
+    syncPoll = null;
   }
 
   // Pause the live tick when the tab is hidden, resume it when the tab comes
@@ -1229,11 +1276,13 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     // (mountFutggList restores it, since the virtualized list needs its spacer
     // sized before the scroll position can be set).
     futggScroll = (el.querySelector('.g-sets') as HTMLElement | null)?.scrollTop ?? futggScroll;
+    const completedCount = g.completed?.length ?? 0;
     el.innerHTML =
       (deps.futggSets ? section('fut.gg Sets', futggHtml(g, off)) : '') +
+      section('Completed Sets', completedLogHtml(g), completedCount > 0 ? ` · ${completedCount}` : '', completedCount > 0) +
       section(
         'Gallery list',
-        `<textarea class="g-list" id="g-list" spellcheck="false" aria-label="Gallery list"${off}
+        `${gallerySyncHtml()}<textarea class="g-list" id="g-list" spellcheck="false" aria-label="Gallery list"${off}
           placeholder="# Set name&#10;Hugo Ekitiké 85&#10;Florian Wirtz 86">${esc(galleryDraft)}</textarea>
         <div class="g-actions">
           <button type="button" class="preset" id="g-load"${off}><b>Load list</b></button>
@@ -1254,6 +1303,99 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         <div class="g-actions"><button type="button" class="ghost" id="g-reset-spent"${off}>Reset spent</button></div>`,
       );
     mountFutggList();
+    refreshGallerySync();
+  }
+
+  /** Where this browser's list stands with the account, for the Gallery
+   * section and the Gallery feed: a save that never got there is said so,
+   * with why, and Sync now sends it again. Empty when the page has no
+   * account to speak of. */
+  function gallerySyncHtml(): string {
+    if (!deps.gallerySync) return '';
+    const s = gallerySync;
+    const button = `<button type="button" class="g-link" data-sync-now${gallerySyncBusy ? ' disabled' : ''}>${gallerySyncBusy ? 'Syncing…' : 'Sync now'}</button>`;
+    let tone = '';
+    let text: string;
+    if (!s) text = 'Not saved to your account yet.';
+    else if (s.state === 'saved') text = `Saved to your account${s.savedAt ? whenAt(s.savedAt) : ''} ✓`;
+    else if (s.state === 'pending') text = 'Saving to your account…';
+    else if (s.state === 'partial') {
+      tone = ' part';
+      text = `Saved to your account${s.savedAt ? whenAt(s.savedAt) : ''} without ${(s.omitted ?? []).join(', ')}: the server runs an older version than this build. Your progress is on your account; the rest follows once the server is updated.`;
+    } else {
+      tone = ' bad';
+      text = `⚠ ${s.message ?? 'Not saved to your account.'}`;
+    }
+    return `<div class="g-sync${tone}"${s?.message ? ` title="${esc(s.message)}"` : ''}><span>${esc(text)}</span>${button}</div>`;
+  }
+
+  /** Redraws every sync line in place (no full re-render: the trader may
+   * be typing in the list box). */
+  function paintGallerySync(): void {
+    const html = gallerySyncHtml();
+    if (!html) return;
+    for (const el of root.querySelectorAll<HTMLElement>('.g-sync')) {
+      const holder = doc.createElement('div');
+      holder.innerHTML = html;
+      const next = holder.firstElementChild;
+      if (next) el.replaceWith(next);
+    }
+  }
+
+  /** Reads the sync status again and redraws it when it changed. */
+  function refreshGallerySync(): void {
+    if (!deps.gallerySync || gallerySyncLoad || gallerySyncBusy) return;
+    gallerySyncLoad = deps.gallerySync
+      .get()
+      .then((s) => {
+        gallerySyncLoad = null;
+        if (JSON.stringify(s) === JSON.stringify(gallerySync)) return;
+        gallerySync = s;
+        paintGallerySync();
+      })
+      .catch(() => {
+        gallerySyncLoad = null;
+      });
+  }
+
+  /** Sync now: sends this browser's list to the account and shows how it went. */
+  async function syncGalleryNow(): Promise<void> {
+    if (!deps.gallerySync || gallerySyncBusy) return;
+    gallerySyncBusy = true;
+    paintGallerySync();
+    try {
+      gallerySync = await deps.gallerySync.now();
+    } catch {
+      // The status line keeps saying what it said.
+    }
+    gallerySyncBusy = false;
+    paintGallerySync();
+  }
+
+  /** The Sets marked completed, newest first: what to finish in the game
+   * (Gallery, the Set, Autocomplete, then Confirm Changes). A Set's name
+   * comes from the list's own Set entry, else from fut.gg's list when it is
+   * loaded. */
+  function completedLogHtml(g: GalleryState): string {
+    const ids = [...(g.completed ?? [])];
+    if (ids.length === 0) return '<div class="hint">No Set completed yet. A Set is marked completed once every card of its lineup has been through your club; it then shows here, on every browser you sign in on.</div>';
+    const at = (id: number) => g.completedAt?.[String(id)] ?? 0;
+    ids.sort((a, b) => at(b) - at(a));
+    const shown = ids.slice(0, COMPLETED_LOG_MAX);
+    const rows = shown
+      .map((id) => {
+        const set = g.sets?.find((s) => s.id === id);
+        const summary = futggSets?.find((s) => s.id === id);
+        const name = set?.name ?? summary?.name ?? `Set #${id}`;
+        const grade = completedGradeOf(g, id) ?? set?.grade ?? null;
+        const tokens = set?.tokens ?? (grade ? summary?.tiers.find((t) => t.grade === grade)?.tokens : undefined);
+        const when = at(id) > 0 ? `completed${whenAt(at(id))}` : 'completed';
+        const gradeHtml = grade ? `<span class="gr g${grade}">${grade}</span>` : '';
+        return `<div class="g-log"><span class="g-check">✓</span><span class="nm">${esc(name)}</span>${gradeHtml}<span class="tok">${tokens != null ? `${fmt(tokens)} tokens · ` : ''}${esc(when)}</span></div>`;
+      })
+      .join('');
+    const more = ids.length - shown.length;
+    return `${rows}${more > 0 ? `<div class="g-more">+${fmt(more)} more, completed earlier</div>` : ''}<div class="hint">Finish each one in the game: Gallery, the Set, Autocomplete, then Confirm Changes. Undo is on the Set's row above.</div>`;
   }
 
   /** The Add button's count, as Sets are ticked (no redraw). */
@@ -1637,6 +1779,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     void deps.saveGallery?.(next).then(() => {
       say(message, false);
       setTimeout(() => ($('saved').textContent = ''), 1500);
+      // The account takes the save within 2 s: show how that went.
+      setTimeout(refreshGallerySync, SYNC_POLL_MS);
     });
     renderGallery();
     renderRunbar();
@@ -3449,7 +3593,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         return `<div class="g-group">${esc(x.title)} · ${fmt(x.cards.length)}</div>${body}${extra}`;
       })
       .join('');
-    return `<div class="bids-head">${esc(gallerySumText(g))}</div>${sets}${rows}`;
+    return `<div class="bids-head">${esc(gallerySumText(g))}</div>${gallerySyncHtml()}${sets}${rows}`;
   }
 
   function galleryRowHtml(c: GalleryCard, buying: boolean, running: boolean, g: GalleryState): string {
@@ -3657,6 +3801,10 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   });
   // The Gallery tab: a card bought but not listed by Nova, listed by hand.
   onTrusted($('gallery-feed'), 'click', (e) => {
+    if ((e.target as HTMLElement).closest('button[data-sync-now]')) {
+      void syncGalleryNow();
+      return;
+    }
     const key = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-handled]')?.dataset.handled;
     if (!key || deps.getSniper()?.isRunning()) return;
     const g = currentGallery();
@@ -3671,9 +3819,14 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   });
   // Gallery mode's list box, its buttons and its budget.
   onTrusted($('gallery'), 'click', (e) => {
-    const id = (e.target as HTMLElement).closest<HTMLButtonElement>('button[id^="g-"]')?.id;
-    if (id) onGalleryClick(id);
     const target = e.target as HTMLElement;
+    // Sync now works while the bot runs too: it only sends what is saved.
+    if (target.closest('button[data-sync-now]')) {
+      void syncGalleryNow();
+      return;
+    }
+    const id = target.closest<HTMLButtonElement>('button[id^="g-"]')?.id;
+    if (id) onGalleryClick(id);
     // Upgrade a completed Set to the higher grade fut.gg now lists (reusing the
     // cards already owned): a look-and-add, so it is blocked while the bot runs.
     const upgrade = Number(target.closest<HTMLButtonElement>('button[data-upgrade]')?.dataset.upgrade);

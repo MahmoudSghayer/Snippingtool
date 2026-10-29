@@ -81,6 +81,7 @@ import type {
   FutggLineup,
   FutggSetSummary,
   GalleryState,
+  GallerySyncStatus,
   RiskBudgetEvent,
   SavedFilter,
   SnipingAttempt,
@@ -966,6 +967,13 @@ async function main(): Promise<void> {
       // The account's collected-card catalogue, so a Set upgrade reuses cards
       // collected before (and since sold) and buys only the higher grade's delta.
       galleryOwned: () => send<number[] | null>('bot.galleryOwnedGet'),
+      // How this browser's list stands with the account (saved, saved
+      // without the fields an older API does not know, pending, refused,
+      // signed out, offline), and the page's Sync now.
+      gallerySync: {
+        get: () => send<GallerySyncStatus | null>('bot.gallerySyncGet'),
+        now: () => send<GallerySyncStatus | null>('bot.gallerySyncNow'),
+      },
       setLiveSearch: (search) => {
         liveSearch = search;
       },

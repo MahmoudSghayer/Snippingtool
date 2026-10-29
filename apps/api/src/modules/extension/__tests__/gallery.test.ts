@@ -519,3 +519,129 @@ describe('extension module: Gallery owned catalogue', () => {
     }
   });
 });
+
+describe('extension module: Gallery completions log', () => {
+  let app: FastifyInstance;
+  const LOG_URL = '/api/v1/extension/gallery/completions';
+
+  beforeAll(async () => {
+    process.env.NODE_ENV = 'test';
+    app = await buildApp({ logger: false });
+    await app.ready();
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  beforeEach(async () => {
+    await resetDatabase(app.db);
+    app.mailer.sentEmails.length = 0;
+  });
+
+  const put = (token: string, state: GalleryState) =>
+    app.inject({ method: 'PUT', url: URL, headers: bearer(token), payload: { state } });
+  const log = (token: string, query = '') =>
+    app.inject({ method: 'GET', url: `${LOG_URL}${query}`, headers: bearer(token) });
+
+  it('requires a signed-in user', async () => {
+    const res = await app.inject({ method: 'GET', url: LOG_URL });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('logs a Set newly marked completed with the name, grade, tokens and time the list carries, newest first', async () => {
+    const { accessToken } = await signIn(app, 'gallery-log@example.com', '198.51.100.120');
+    expect((await log(accessToken)).json()).toEqual({ items: [] });
+
+    // Completed at the time the list kept, at the grade it kept.
+    const done = withSet('listed', [90]);
+    done.completedGrade = { '90': 'A' };
+    expect((await put(accessToken, done)).statusCode).toBe(200);
+    const first = (await log(accessToken)).json() as { items: unknown[] };
+    expect(first.items).toEqual([
+      {
+        setId: 90,
+        name: 'Malaga CF',
+        grade: 'A',
+        tokens: 28,
+        completedAt: new Date(1_792_000_000_000).toISOString(),
+        undoneAt: null,
+      },
+    ]);
+
+    // The same list saved again (the bot saves after every card): nothing twice.
+    expect((await put(accessToken, done)).statusCode).toBe(200);
+    expect(((await log(accessToken)).json() as { items: unknown[] }).items).toHaveLength(1);
+
+    // A Set the list no longer describes (cleared from it) is logged by its id
+    // and grade-less, at the save's time.
+    const bare: GalleryState = { ...EMPTY_GALLERY, completed: [90, 77] };
+    const before = Date.now();
+    expect((await put(accessToken, bare)).statusCode).toBe(200);
+    const items = (
+      (await log(accessToken)).json() as {
+        items: {
+          setId: number;
+          name: string;
+          grade: string | null;
+          tokens: number | null;
+          completedAt: string;
+        }[];
+      }
+    ).items;
+    expect(items.map((i) => i.setId)).toEqual([77, 90]);
+    expect(items[0]).toMatchObject({ name: 'Set #77', grade: null, tokens: null });
+    expect(new Date(items[0]!.completedAt).getTime()).toBeGreaterThanOrEqual(before - 1_000);
+  });
+
+  it('marks a Set undone when it leaves the list, hides it unless asked, and logs it again when re-completed', async () => {
+    const { accessToken } = await signIn(app, 'gallery-undo@example.com', '198.51.100.121');
+    await put(accessToken, withSet('listed', [90]));
+    // Undo: the list no longer marks it.
+    await put(accessToken, withSet('listed'));
+    expect((await log(accessToken)).json()).toEqual({ items: [] });
+    const withUndone = (
+      (await log(accessToken, '?undone=include')).json() as {
+        items: { setId: number; undoneAt: string | null }[];
+      }
+    ).items;
+    expect(withUndone).toHaveLength(1);
+    expect(withUndone[0]!.setId).toBe(90);
+    expect(withUndone[0]!.undoneAt).not.toBeNull();
+
+    // Completed again, later: a second row; the undone one keeps its mark.
+    const again = withSet('listed', [90]);
+    again.completedAt = { '90': 1_792_000_500_000 };
+    await put(accessToken, again);
+    const items = (
+      (await log(accessToken, '?undone=include')).json() as {
+        items: { completedAt: string; undoneAt: string | null }[];
+      }
+    ).items;
+    expect(items).toHaveLength(2);
+    expect(items[0]!.undoneAt).toBeNull();
+    expect(items[0]!.completedAt).toBe(new Date(1_792_000_500_000).toISOString());
+    expect(items[1]!.undoneAt).not.toBeNull();
+    expect(((await log(accessToken)).json() as { items: unknown[] }).items).toHaveLength(1);
+  });
+
+  it('is per user, honours the limit, and refuses a bad query', async () => {
+    const a = await signIn(app, 'gallery-log-a@example.com', '198.51.100.122');
+    const b = await signIn(app, 'gallery-log-b@example.com', '198.51.100.123');
+    await put(a.accessToken, withSet('listed', [90]));
+    expect((await log(b.accessToken)).json()).toEqual({ items: [] });
+    const many: GalleryState = {
+      ...EMPTY_GALLERY,
+      completed: [1, 2, 3],
+      completedAt: { '1': 1_000, '2': 2_000, '3': 3_000 },
+    };
+    await put(b.accessToken, many);
+    const limited = (
+      (await log(b.accessToken, '?limit=2')).json() as { items: { setId: number }[] }
+    ).items;
+    expect(limited.map((i) => i.setId)).toEqual([3, 2]);
+    expect((await log(b.accessToken, '?limit=0')).statusCode).toBe(400);
+    expect((await log(b.accessToken, '?undone=maybe')).statusCode).toBe(400);
+    expect(((await log(a.accessToken)).json() as { items: unknown[] }).items).toHaveLength(1);
+  });
+});
