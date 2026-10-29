@@ -375,6 +375,7 @@ export const adapterActionResultMessageSchema = z.object({
       'move',
       'club',
       'owned',
+      'fromClub',
       'clearSold',
       'relistAll',
       'unsold',
@@ -407,6 +408,15 @@ export const adapterActionResultMessageSchema = z.object({
     /** Only present for a successful `action: 'owned'`: which of the card
      * ids asked about the trader's club holds (loans left out). */
     owned: z.array(z.number().int().positive()).max(100).optional(),
+    /** Only present for a successful `action: 'fromClub'`: the club's
+     * tradeable copies of the card ids asked about, each under the key a
+     * `move` and a `list` name it by (Gallery mode's stuck cards). */
+    clubCards: z
+      .array(
+        z.object({ resourceId: z.number().int().positive(), tradeId: z.string().min(1).max(40) }),
+      )
+      .max(100)
+      .optional(),
     /** A second result for a `buy` whose first result was
      * `error: 'timeout_unknown'`: EA's answer arrived after the adapter
      * stopped waiting, and `ok` says whether it bought. */
@@ -529,6 +539,18 @@ export const adapterActRequestMessageSchema = z.object({
      * `main/adapter.ts`'s `asActRequest` re-checks this shape by hand. */
     z.object({
       action: z.literal('owned'),
+      requestId: z.string().min(1),
+      resourceIds: z.array(z.number().int().positive()).min(1).max(100),
+    }),
+    /** Automation builds (Gallery mode): the club's tradeable copies of
+     * these cards (EA's card ids), through the same club search as `owned`,
+     * each kept as a card a `move` and a `list` may take to the market
+     * under the key the result names (`clubCards`). For Gallery cards Nova
+     * sent to the club and could not move on (a full transfer list), so
+     * they reach the market after all. `main/adapter.ts`'s `asActRequest`
+     * re-checks this shape by hand. */
+    z.object({
+      action: z.literal('fromClub'),
       requestId: z.string().min(1),
       resourceIds: z.array(z.number().int().positive()).min(1).max(100),
     }),

@@ -94,10 +94,26 @@ export interface BiddingShape {
    * (Gallery mode). Rejects on anything it cannot read. Absent on a shape
    * with no known call. */
   clubOwned?(services: Record<string, unknown>, resourceIds: number[]): Promise<number[]>;
+  /** The club's tradeable copies of these cards (EA's card ids), loans and
+   * untradeable cards left out, with their entities: what `moveToTransferList`
+   * and `list` take a card Gallery mode left in the club to the market
+   * with. Rejects on anything it cannot read. Absent on a shape with no
+   * known call. */
+  clubItems?(services: Record<string, unknown>, resourceIds: number[]): Promise<ClubItem[]>;
   /** Take finished auctions (their entities) off the watch list, as the
    * web app's Transfer Targets "Clear expired" does. Absent on a shape with
    * no known call. */
   untarget?(services: Record<string, unknown>, entities: unknown[]): Promise<void>;
+}
+
+/** One of the club's cards, as `BiddingShape.clubItems` reads it. */
+export interface ClubItem {
+  /** EA's card id (`definitionId`). */
+  resourceId: number;
+  /** EA's item id, as a string. */
+  itemId: string;
+  /** The web app's item entity, for `moveToTransferList` and `list`. */
+  entity: unknown;
 }
 
 /** Search options that are not filter fields. */

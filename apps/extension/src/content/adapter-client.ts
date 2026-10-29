@@ -42,6 +42,9 @@ export interface ActionOutcome {
   /** Only for a successful `owned()`: which of the cards asked about the
    * club holds. */
   owned?: number[];
+  /** Only for a successful `fromClub()`: the club's copies of the cards
+   * asked about, each under the key `move()` and `list()` take it by. */
+  clubCards?: { resourceId: number; tradeId: string }[];
   /** Only for a buy that came back `timeout_unknown`: settles with EA's
    * late answer if the adapter sends one (signed, like every result), or
    * `ok: false` after a few minutes without one. */
@@ -92,6 +95,11 @@ export interface AdapterClient {
   /** Automation builds (Gallery mode): which of these cards (EA's card ids)
    * the club holds, in `outcome.owned`. Read only. */
   owned(resourceIds: number[]): Promise<ActionOutcome>;
+  /** Automation builds (Gallery mode): the club's tradeable copies of these
+   * cards (EA's card ids), in `outcome.clubCards`, each kept by the adapter
+   * as a card `move()` and `list()` may take to the market under its key.
+   * For cards Nova sent to the club and could not move on. */
+  fromClub(resourceIds: number[]): Promise<ActionOutcome>;
   /** Automation builds (Bid mode): take the finished auctions the last watch
    * list read saw (expired, or lost) off the watch list, like Transfer
    * Targets' "Clear expired". Never a won or running one. */
@@ -167,6 +175,7 @@ type ActAction =
   | 'move'
   | 'club'
   | 'owned'
+  | 'fromClub'
   | 'clearSold'
   | 'relistAll'
   | 'unsold'
@@ -313,6 +322,7 @@ export function createAdapterClient(target: Window, nonce: string | null, option
           unsold: data.unsold,
           cleared: data.cleared,
           owned: data.owned,
+          clubCards: data.clubCards,
           signed: true,
           latencyMs: data.completedAt - data.requestedAt,
         };
@@ -419,6 +429,7 @@ export function createAdapterClient(target: Window, nonce: string | null, option
     move: (tradeId) => call({ action: 'move', tradeId }),
     club: (tradeId) => call({ action: 'club', tradeId }),
     owned: (resourceIds) => call({ action: 'owned', resourceIds }),
+    fromClub: (resourceIds) => call({ action: 'fromClub', resourceIds }),
     clearExpired: () => call({ action: 'clearExpired' }),
     refreshPile: () => call({ action: 'pile' }),
     clearSold: () => call({ action: 'clearSold' }),

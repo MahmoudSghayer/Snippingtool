@@ -94,6 +94,7 @@ import {
   type GallerySetBlockerReason,
   type GalleryUpgrade,
 } from '../engine/gallery.js';
+import { type AutoClearSoldStatus } from '../lib/auto-clear-sold.js';
 import { TRANSFER_LIST_SIZE, type TransferListSummary } from '../lib/transfer-list.js';
 import {
   SPECIAL_LEVEL,
@@ -181,6 +182,9 @@ export interface BotPageDeps {
   transferTools?: {
     clearSold: () => Promise<{ ok: boolean; message: string }>;
     relist: (step: -1 | 0 | 1, onProgress: (done: number, total: number) => void) => Promise<{ ok: boolean; message: string }>;
+    /** The automatic Clear Sold (lib/auto-clear-sold.ts): how often it runs,
+     * when it last did and what it did, for the card. Omitted: none. */
+    autoClear?: () => AutoClearSoldStatus;
   };
   /** The coin balance EA's own responses last stated (a market, trade-pile
    * or buy answer), and when it arrived: EA's top bar is not always redrawn
@@ -971,6 +975,11 @@ const CSS = `
   .tl .relist .tl-btn { padding: 3px 4px; }
   .tl .msg { min-height: 15px; margin-top: 4px; color: var(--ea-muted); font-size: 11px; }
   .tl .msg.bad { color: var(--ea-danger); }
+  .tl .auto { margin-top: 6px; color: var(--ea-muted); font-size: 11px; }
+  .tl .auto.bad { color: var(--ea-danger); }
+  .g-group .g-link { text-transform: none; letter-spacing: 0; font-weight: 400; margin-left: 8px; }
+  .g-group .g-note { text-transform: none; letter-spacing: 0; font-weight: 400; margin-left: 8px; }
+  .g-group .g-note.bad { color: var(--ea-danger); }
   .bar { height: 6px; border-radius: 3px; background: var(--ea-line); margin-top: 8px; overflow: hidden; }
   .bar > i { display: block; height: 100%; background: var(--ea-success); }
 
@@ -3122,6 +3131,11 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   let tlBusy: string | null = null;
   /** What the last button press did, for the card. */
   let tlResult: { ok: boolean; message: string } | null = null;
+  /** The Gallery feed's Relist from club at work: what the group says
+   * meanwhile, or null when it is not. */
+  let relistBusy: string | null = null;
+  /** What the last Relist from club did, for the group. */
+  let relistResult: { ok: boolean; message: string } | null = null;
 
   /** The dash is built once, with the ring in it, and updated in place. */
   function buildDash(): void {
@@ -3151,7 +3165,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
             ? `<div class="relist" id="d-tl-relist">Relist unsold<div class="steps">${RELIST_CHOICES.map(
                 (c) => `<button type="button" class="tl-btn" data-step="${c.step}" title="${esc(c.title)}" disabled>${c.label}</button>`,
               ).join('')}</div></div>
-        <div class="msg" id="d-tl-msg"></div>`
+        <div class="msg" id="d-tl-msg"></div>
+        <div class="auto" id="d-tl-auto"></div>`
             : ''
         }
       </div>
@@ -3168,7 +3183,9 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
    * figures changed. */
   function renderTransferList(): void {
     const s = deps.getTransferList?.() ?? null;
-    const key = `${s ? `${s.total}/${s.sold}/${s.soldCleared}/${s.unsold}/${s.listed}/${s.unlisted}/${s.seenAt}` : 'none'}|${tlBusy ?? ''}|${tlResult?.message ?? ''}`;
+    const auto = deps.transferTools?.autoClear?.() ?? null;
+    const autoText = auto ? autoClearText(auto) : '';
+    const key = `${s ? `${s.total}/${s.sold}/${s.soldCleared}/${s.unsold}/${s.listed}/${s.unlisted}/${s.seenAt}` : 'none'}|${tlBusy ?? ''}|${tlResult?.message ?? ''}|${autoText}`;
     if (key === tlShown || !root.getElementById('d-tl')) return;
     tlShown = key;
     const title = s ? `Your Transfer List as EA last showed it, at ${timeOfDay(s.seenAt)}` : TL_WAITING;
@@ -3190,6 +3207,17 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     const msg = $('d-tl-msg');
     setText(msg, tlBusy ?? tlResult?.message ?? '');
     msg.classList.toggle('bad', !tlBusy && tlResult?.ok === false);
+    const autoEl = $('d-tl-auto');
+    setText(autoEl, autoText);
+    autoEl.classList.toggle('bad', auto?.lastResult?.ok === false);
+  }
+
+  /** The automatic Clear Sold's line: that it runs, and what it last did. */
+  function autoClearText(auto: AutoClearSoldStatus): string {
+    const every = `Sold cards are cleared on their own every ${Math.round(auto.everyMs / 60_000)} minutes`;
+    if (auto.busy) return `${every} · clearing now…`;
+    if (auto.lastResult && auto.lastAt != null) return `${every} · ${auto.lastResult.message} at ${timeOfDay(auto.lastAt)}`;
+    return every;
   }
 
   /** The Transfer list card's buttons: each runs to its end before another
@@ -3483,7 +3511,31 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     const buying = running ? (g.cards.find((c) => c.status === 'todo' && galleryCardNeeded(c, g))?.key ?? '') : '';
     let statuses = '';
     for (const c of g.cards) statuses += c.status[0];
-    return `${running ? 1 : 0}|${g.spent}|${g.cards.length}|${buying}|${(g.completed ?? []).join(',')}|${statuses}`;
+    return `${running ? 1 : 0}|${g.spent}|${g.cards.length}|${buying}|${(g.completed ?? []).join(',')}|${statuses}|${relistBusy ?? ''}|${relistResult?.message ?? ''}`;
+  }
+
+  /** The Gallery feed's Relist from club: the cards Nova sent to the club
+   * and could not move on (the transfer list was full), found in the club
+   * again and taken to the market, one at a time (`Sniper.relistStuck`).
+   * For after the trader has made room on the list. */
+  function relistFromClub(): void {
+    const sniper = deps.getSniper();
+    if (!sniper || sniper.isRunning() || relistBusy) return;
+    relistBusy = 'Relisting from your club…';
+    relistResult = null;
+    renderBids();
+    void sniper
+      .relistStuck((done, total) => {
+        relistBusy = `Relisting ${done} of ${total} from your club…`;
+        renderBids();
+      })
+      .catch((err: unknown) => ({ ok: false, message: `Something went wrong: ${String(err)}` }))
+      .then((result) => {
+        relistBusy = null;
+        relistResult = result;
+        renderBids();
+        renderGallery();
+      });
   }
 
   /** Bid mode's open bids (`Sniper.getActiveBids`): where each stands and
@@ -3590,7 +3642,17 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         const more = x.cards.length - shown.length;
         const body = shown.map((c) => galleryRowHtml(c, c.key === buying, running, g)).join('');
         const extra = more > 0 ? `<div class="g-more">+${fmt(more)} more</div>` : '';
-        return `<div class="g-group">${esc(x.title)} · ${fmt(x.cards.length)}</div>${body}${extra}`;
+        // Cards waiting in the club (EA would not move them to a full
+        // transfer list): once there is room, back to the market from here,
+        // without a Start.
+        const stuck = x.title === 'On the way to the market' ? x.cards.filter((c) => c.status === 'club').length : 0;
+        const relist = relistBusy
+          ? `<span class="g-note">${esc(relistBusy)}</span>`
+          : stuck > 0 && !running && deps.getSniper()
+            ? `<button type="button" class="g-link" data-relist-club="1" title="Find the ${stuck === 1 ? 'card' : `${fmt(stuck)} cards`} waiting in your club and put ${stuck === 1 ? 'it' : 'them'} on the transfer market (make room on your transfer list first: Clear sold)">Relist from club${stuck === 1 ? '' : ` (${fmt(stuck)})`}</button>`
+            : '';
+        const result = x.title === 'On the way to the market' && !relistBusy && relistResult ? `<span class="g-note${relistResult.ok ? '' : ' bad'}">${esc(relistResult.message)}</span>` : '';
+        return `<div class="g-group">${esc(x.title)} · ${fmt(x.cards.length)}${x.title === 'On the way to the market' ? relist : ''}${result}</div>${body}${extra}`;
       })
       .join('');
     return `<div class="bids-head">${esc(gallerySumText(g))}</div>${gallerySyncHtml()}${sets}${rows}`;
@@ -3799,10 +3861,15 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     feedTab = tab;
     renderBids();
   });
-  // The Gallery tab: a card bought but not listed by Nova, listed by hand.
+  // The Gallery tab: a card bought but not listed by Nova, listed by hand;
+  // and the cards waiting in the club, relisted from there.
   onTrusted($('gallery-feed'), 'click', (e) => {
     if ((e.target as HTMLElement).closest('button[data-sync-now]')) {
       void syncGalleryNow();
+      return;
+    }
+    if ((e.target as HTMLElement).closest<HTMLButtonElement>('button[data-relist-club]')) {
+      relistFromClub();
       return;
     }
     const key = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-handled]')?.dataset.handled;
