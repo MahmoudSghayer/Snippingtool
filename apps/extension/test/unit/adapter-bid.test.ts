@@ -304,6 +304,58 @@ describe("Gallery mode's club read", () => {
     }
   });
 
+  it("reads the club's tradeable copies with their entities (Gallery mode's cards stuck in the club)", async () => {
+    const shape = createObservableShape(1_000);
+    (window as unknown as { UTSearchCriteriaDTO?: unknown }).UTSearchCriteriaDTO = Criteria;
+    try {
+      const copy = { ...clubItem(243312), id: 9001 };
+      const untradeable = { ...clubItem(243312), id: 9002, untradeable: true };
+      const loan = { ...clubItem(243312, true), id: 9003 };
+      const noId = clubItem(243312);
+      const search = vi.fn((_c: Criteria): unknown => observable({ success: true, response: { items: [copy, untradeable, loan, noId, { ...clubItem(50_574_960), id: 9004 }] } }));
+      const items = await shape.bidding!.clubItems!({ Club: { search } } as never, [243312]);
+      expect(items).toEqual([{ resourceId: 243312, itemId: '9001', entity: copy }]);
+      expect(search.mock.calls[0]![0].defId).toEqual([243312]);
+      const unfiltered = vi.fn((): unknown => observable({ success: true, response: { items: [clubItem(77)] } }));
+      await expect(shape.bidding!.clubItems!({ Club: { search: unfiltered } } as never, [243312])).rejects.toThrow(/^owned_unfiltered/);
+    } finally {
+      delete (window as unknown as { UTSearchCriteriaDTO?: unknown }).UTSearchCriteriaDTO;
+    }
+  });
+
+  it('hands the club copies to a move and a list under their own keys (the fromClub act), and nothing else in the club', async () => {
+    const svc = biddingServices();
+    const copy = { ...clubItem(243312), id: 9001 };
+    const search = vi.fn((): unknown => observable({ success: true, response: { items: [copy] } }));
+    install({ ...svc.services, Club: { search } });
+    (window as unknown as { UTSearchCriteriaDTO?: unknown }).UTSearchCriteriaDTO = Criteria;
+    try {
+      const res = await act({ action: 'fromClub', resourceIds: [243312, 6] });
+      expect(res.data).toMatchObject({ action: 'fromClub', ok: true, clubCards: [{ resourceId: 243312, tradeId: 'club:9001' }] });
+      expect(await signer.verify(canonicalActMessage('action_result', res.data), res.mac!)).toBe(true);
+      expect(adapterActionResultMessageSchema.safeParse({ channel: ADAPTER_CHANNEL, kind: 'action_result', data: res.data, mac: res.mac }).success).toBe(true);
+      // Never two reads within a few seconds.
+      expect((await act({ action: 'fromClub', resourceIds: [6] })).data).toMatchObject({ ok: false, error: 'from_club_too_soon' });
+      expect(search).toHaveBeenCalledTimes(1);
+      // The copy goes to the transfer list and the market by its key, as a bought card does.
+      expect((await act({ action: 'move', tradeId: 'club:9001' })).data).toMatchObject({ ok: true });
+      expect(svc.move).toHaveBeenCalledTimes(1);
+      expect(svc.move.mock.calls[0]![0]).toBe(copy);
+      expect((await act({ action: 'list', tradeId: 'club:9001', startPrice: 1_300, buyNowPrice: 1_400 })).data).toMatchObject({ ok: true });
+      expect(svc.list.mock.calls[0]![0]).toBe(copy);
+      // Listed: no second listing under the key, and no other club item by any key.
+      expect((await act({ action: 'list', tradeId: 'club:9001', startPrice: 1_300, buyNowPrice: 1_400 })).data).toMatchObject({ ok: false, error: 'list_not_bought' });
+      expect((await act({ action: 'move', tradeId: 'club:9002' })).data).toMatchObject({ ok: false, error: 'move_not_bought' });
+      // The request is checked like a club read.
+      expect(await actIgnored({ action: 'fromClub', resourceIds: [] })).toBe(true);
+      expect(await actIgnored({ action: 'fromClub', resourceIds: [0] })).toBe(true);
+      install(promiseServices().services);
+      expect((await act({ action: 'fromClub', resourceIds: [1] })).data).toMatchObject({ ok: false, error: 'from_club_unsupported' });
+    } finally {
+      delete (window as unknown as { UTSearchCriteriaDTO?: unknown }).UTSearchCriteriaDTO;
+    }
+  });
+
   it('says the promise shape has no club read, and drops a malformed request', async () => {
     install(promiseServices().services);
     expect((await act({ action: 'owned', resourceIds: [1] })).data).toMatchObject({ ok: false, error: 'owned_unsupported' });
