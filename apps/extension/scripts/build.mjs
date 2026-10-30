@@ -42,6 +42,8 @@ import {
 } from './obfuscate.mjs';
 import { TEMPLATE_PLACEHOLDERS } from './template-placeholders.mjs';
 import { buildUserscriptHeader } from './userscript-header.mjs';
+import { USERSCRIPT_PRELUDE } from './userscript-prelude.mjs';
+import { missingZodMembers } from './userscript-vendor.mjs';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(dirname, '..');
@@ -273,7 +275,9 @@ function adapterSourcePlugin(source) {
   };
 }
 
-/** Runs a library-mode IIFE build without writing it, returning the code. */
+/** Runs a library-mode IIFE build without writing it, returning the code.
+ * `external` names modules left out of the bundle, each read from the
+ * global `globals` maps it to at runtime. */
 async function buildIifeInMemory(entry, globalName, extra = {}) {
   const base = baseConfig(false);
   const result = await build({
@@ -291,7 +295,11 @@ async function buildIifeInMemory(entry, globalName, extra = {}) {
         name: globalName,
         fileName: () => 'out.js',
       },
-      rollupOptions: { treeshake: extra.treeshake ?? TREESHAKE, output: { extend: true } },
+      rollupOptions: {
+        treeshake: extra.treeshake ?? TREESHAKE,
+        ...(extra.external ? { external: extra.external } : {}),
+        output: { extend: extra.extend ?? true, ...(extra.globals ? { globals: extra.globals } : {}) },
+      },
     },
   });
   const outputs = Array.isArray(result) ? result : [result];
@@ -299,6 +307,12 @@ async function buildIifeInMemory(entry, globalName, extra = {}) {
   if (!chunk) throw new Error(`no output chunk for ${entry}`);
   return chunk.code;
 }
+
+// Third-party code (zod) is built as its own minified chunk and never
+// obfuscated (src/userscript/vendor.ts has why): the main bundle reads it
+// from this global instead of bundling it.
+const VENDOR_GLOBAL = '__novaVendor';
+const VENDOR_MODULES = ['zod'];
 
 // Bound once at the top of the userscript body, so the hot path reads these
 // built-ins from a local binding instead of Tampermonkey's sandbox proxy
@@ -319,15 +333,24 @@ async function buildUserscript() {
   const adapterSource = obfuscateAdapterSource(
     await buildIifeInMemory(adapter.entry, adapter.globalName),
   );
+  const vendorPath = path.join(root, 'src/userscript/vendor.ts');
+  const missing = missingZodMembers([path.join(root, 'src'), path.resolve(root, '../../packages/shared/src')], vendorPath);
+  if (missing.length > 0) throw new Error(`src/userscript/vendor.ts does not export z.${missing.join(', z.')}: add ${missing.length === 1 ? 'it' : 'them'} to its \`z\` (the userscript would read undefined there)`);
+  // A plain `var`, not `this.__novaVendor`: a local of the script's own
+  // scope, like the prelude's bindings.
+  const vendorBundle = await buildIifeInMemory('src/userscript/vendor.ts', VENDOR_GLOBAL, { extend: false });
   const mainBundle = await buildIifeInMemory(entry.entry, entry.globalName, {
     plugins: [adapterSourcePlugin(ADAPTER_SOURCE_SENTINEL)],
     alias: { 'webextension-polyfill': path.join(root, 'src/userscript/browser-shim.ts') },
     treeshake: USERSCRIPT_TREESHAKE,
     minify: false,
+    external: VENDOR_MODULES,
+    globals: Object.fromEntries(VENDOR_MODULES.map((m) => [m, VENDOR_GLOBAL])),
   });
+  if (!mainBundle.includes(VENDOR_GLOBAL)) throw new Error(`the main bundle does not read ${VENDOR_GLOBAL}: zod was bundled, not externalised`);
   // `version` stays verbatim: it is compiled into the bundle so the page can
   // show which build runs, and the publish workflow greps it out of the file.
-  const code = injectAdapterSource(obfuscateUserscriptCode(mainBundle, [version]), adapterSource);
+  const code = `${USERSCRIPT_PRELUDE}\n${vendorBundle}\n${injectAdapterSource(obfuscateUserscriptCode(mainBundle, [version]), adapterSource)}`;
 
   const header = buildUserscriptHeader({
     version,

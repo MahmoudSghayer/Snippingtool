@@ -130,22 +130,122 @@ export function fold(s: string): string {
   return s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
 }
 
+/**
+ * The player list, indexed for the searches the page runs on every
+ * keystroke and the Gallery list parser runs per line. Built once per list
+ * (`playerIndex` memoises by the array: every producer makes a fresh one,
+ * never edits one in place) — the 20k `fold`s it costs used to be paid on
+ * every keystroke.
+ *
+ * `bigrams` maps every two-character slice of a folded name to the players
+ * whose names hold it, so a substring search looks only at the names that
+ * hold the query's first two characters — every substring of two or more
+ * characters starts with one of its own bigrams, so nothing is missed.
+ */
+export interface PlayerIndex {
+  players: readonly CatalogPlayer[];
+  /** `fold(name)`, parallel to `players`. */
+  folded: string[];
+  byId: Map<number, CatalogPlayer>;
+  /** Exact folded name → the players with it, in list order. */
+  byFolded: Map<string, CatalogPlayer[]>;
+  /** Bigram → indices into `players` holding it, ascending, each once. */
+  bigrams: Map<string, number[]>;
+}
+
+const INDEXES = new WeakMap<readonly CatalogPlayer[], PlayerIndex>();
+
+export function playerIndex(players: readonly CatalogPlayer[]): PlayerIndex {
+  const had = INDEXES.get(players);
+  if (had) return had;
+  const folded = new Array<string>(players.length);
+  const byId = new Map<number, CatalogPlayer>();
+  const byFolded = new Map<string, CatalogPlayer[]>();
+  const bigrams = new Map<string, number[]>();
+  for (let i = 0; i < players.length; i++) {
+    const p = players[i]!;
+    const n = fold(p.name);
+    folded[i] = n;
+    byId.set(p.id, p);
+    const same = byFolded.get(n);
+    if (same) same.push(p);
+    else byFolded.set(n, [p]);
+    for (let j = 0; j + 1 < n.length; j++) {
+      const key = n.slice(j, j + 2);
+      const bucket = bigrams.get(key);
+      if (!bucket) bigrams.set(key, [i]);
+      else if (bucket[bucket.length - 1] !== i) bucket.push(i);
+    }
+  }
+  const index: PlayerIndex = { players, folded, byId, byFolded, bigrams };
+  INDEXES.set(players, index);
+  return index;
+}
+
+interface Hit {
+  p: CatalogPlayer;
+  starts: boolean;
+}
+
+/** Word-start matches first, then the highest rated. */
+const byRank = (a: Hit, b: Hit): number => Number(b.starts) - Number(a.starts) || (b.p.rating ?? 0) - (a.p.rating ?? 0);
+
 /** Players whose name contains `query`, names starting with it first, then
- * highest rated. */
-export function searchPlayers(
-  players: CatalogPlayer[],
-  query: string,
-  limit = 12,
-): CatalogPlayer[] {
+ * highest rated — from the index: only the names that hold the query's first
+ * bigram are looked at, and only the top `limit` are kept as they are found
+ * (a later equal hit never passes an earlier one, so the order is the one a
+ * stable sort of every hit gives). */
+export function searchIndex(index: PlayerIndex, query: string, limit = 12): CatalogPlayer[] {
   const q = fold(query.trim());
   if (q.length < 2) return [];
-  const hits: { p: CatalogPlayer; starts: boolean }[] = [];
-  for (const p of players) {
-    const n = fold(p.name);
-    const i = n.indexOf(q);
-    if (i < 0) continue;
-    hits.push({ p, starts: i === 0 || n[i - 1] === ' ' });
+  const candidates = index.bigrams.get(q.slice(0, 2));
+  if (!candidates) return [];
+  const top: Hit[] = [];
+  for (const i of candidates) {
+    const n = index.folded[i]!;
+    const at = n.indexOf(q);
+    if (at < 0) continue;
+    const hit: Hit = { p: index.players[i]!, starts: at === 0 || n[at - 1] === ' ' };
+    let pos = top.length;
+    while (pos > 0 && byRank(hit, top[pos - 1]!) < 0) pos--;
+    if (pos < limit) {
+      top.splice(pos, 0, hit);
+      if (top.length > limit) top.pop();
+    }
   }
-  hits.sort((a, b) => Number(b.starts) - Number(a.starts) || (b.p.rating ?? 0) - (a.p.rating ?? 0));
-  return hits.slice(0, limit).map((h) => h.p);
+  return top.map((h) => h.p);
+}
+
+/** Players whose name contains `query`, names starting with it first, then
+ * highest rated. */
+export function searchPlayers(players: readonly CatalogPlayer[], query: string, limit = 12): CatalogPlayer[] {
+  return searchIndex(playerIndex(players), query, limit);
+}
+
+/** The catalog's lists as maps, for the lookups the page makes on every
+ * draw (a chosen entry's label, a player's name by id). Built once per
+ * catalog. */
+export interface CatalogLookups {
+  players: PlayerIndex;
+  /** Each list's entries by id. */
+  byId: { rarities: Map<number, CatalogOption>; positions: Map<number, CatalogOption>; playStyles: Map<number, CatalogOption>; nations: Map<number, CatalogOption>; leagues: Map<number, CatalogOption> };
+  /** Every club, whatever its league, by id. */
+  clubsById: Map<number, CatalogOption>;
+}
+
+const LOOKUPS = new WeakMap<Catalog, CatalogLookups>();
+
+export function catalogLookups(catalog: Catalog): CatalogLookups {
+  const had = LOOKUPS.get(catalog);
+  if (had) return had;
+  const map = (list: CatalogOption[]): Map<number, CatalogOption> => new Map(list.map((o) => [o.id, o]));
+  const clubsById = new Map<number, CatalogOption>();
+  for (const clubs of Object.values(catalog.clubs)) for (const c of clubs) if (!clubsById.has(c.id)) clubsById.set(c.id, c);
+  const lookups: CatalogLookups = {
+    players: playerIndex(catalog.players),
+    byId: { rarities: map(catalog.rarities), positions: map(catalog.positions), playStyles: map(catalog.playStyles), nations: map(catalog.nations), leagues: map(catalog.leagues) },
+    clubsById,
+  };
+  LOOKUPS.set(catalog, lookups);
+  return lookups;
 }

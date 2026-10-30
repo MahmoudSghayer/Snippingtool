@@ -74,3 +74,41 @@ describe('lib/single-flight.ts', () => {
     expect(inner).toHaveBeenCalledWith(42, 'x');
   });
 });
+
+describe('sharedFlight', () => {
+  it('a call made while the first is pending joins it: one run, the same answer for both', async () => {
+    const { sharedFlight } = await import('../../src/lib/single-flight.js');
+    const gate = deferred<number>();
+    const inner = vi.fn(() => gate.promise);
+    const shared = sharedFlight(inner);
+    const first = shared();
+    const second = shared();
+    expect(second).toBe(first);
+    expect(inner).toHaveBeenCalledTimes(1);
+    gate.resolve(7);
+    await expect(first).resolves.toBe(7);
+    await expect(second).resolves.toBe(7);
+    // Released: the next call runs again.
+    const third = shared();
+    expect(third).not.toBe(first);
+    expect(inner).toHaveBeenCalledTimes(2);
+    gate.resolve(7);
+    await third;
+  });
+
+  it('a rejection is shared too, and does not wedge the guard', async () => {
+    const { sharedFlight } = await import('../../src/lib/single-flight.js');
+    let calls = 0;
+    const shared = sharedFlight(async () => {
+      calls++;
+      if (calls === 1) throw new Error('first');
+      return 'ok';
+    });
+    const a = shared();
+    const b = shared();
+    await expect(a).rejects.toThrow('first');
+    await expect(b).rejects.toThrow('first');
+    await expect(shared()).resolves.toBe('ok');
+    expect(calls).toBe(2);
+  });
+});

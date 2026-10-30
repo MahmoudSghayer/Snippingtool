@@ -34,3 +34,20 @@ export function singleFlight<Args extends unknown[]>(
     }
   };
 }
+
+/** Wraps `fn` so a call made while a previous call is still in flight
+ * joins it: both get the same promise (and the same result or rejection),
+ * and `fn` runs once. The joined call's own arguments are not used. For
+ * work whose caller needs the outcome — the Nova AI page's `prepare()`,
+ * which must see the bot once it exists — where `singleFlight`'s dropped
+ * call would resolve to nothing. */
+export function sharedFlight<Args extends unknown[], T>(fn: (...args: Args) => Promise<T>): (...args: Args) => Promise<T> {
+  let inFlight: Promise<T> | null = null;
+  return (...args: Args): Promise<T> => {
+    if (inFlight) return inFlight;
+    inFlight = fn(...args).finally(() => {
+      inFlight = null;
+    });
+    return inFlight;
+  };
+}

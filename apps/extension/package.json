@@ -17,6 +17,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "perf": "vitest run test/perf; node scripts/perf-report.mjs",
     "tokens:sync": "node scripts/sync-tokens.mjs"
   },
   "dependencies": {
@@ -35,6 +36,7 @@
     "jsdom": "^30.1.3",
     "typescript": "^6.0.3",
     "vite": "^8.3.5",
-    "vitest": "^5.0.5"
+    "vitest": "^5.0.5",
+    "zod": "^4.6.7"
   }
 }

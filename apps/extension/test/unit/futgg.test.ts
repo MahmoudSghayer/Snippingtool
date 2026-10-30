@@ -5,7 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { handleFutggLineup, handleFutggSets, parseFutggHub, parseFutggPool, parseFutggTags, resetFutggCache } from '../../src/background/futgg.js';
+import { forgetFutggMemoryForTests as hubCacheGone, handleFutggLineup, handleFutggSets, parseFutggHub, parseFutggPool, parseFutggTags, resetFutggCache } from '../../src/background/futgg.js';
 import { setFetchImpl } from '../../src/lib/http.js';
 
 const tier = (grade: string, threshold: number, tokens: number, cost: number, peakPrice: number, totalScore: number, items: { eaId: number; price: number }[]) => ({
@@ -186,8 +186,52 @@ describe('handleFutggSets / handleFutggLineup', () => {
     expect(await handleFutggLineup({ setId: 90, grade: 'B' })).toEqual({ lineup: null });
     // The pool answers 404.
     expect(await handleFutggLineup({ setId: 90, grade: 'S' })).toEqual({ lineup: null });
-    resetFutggCache();
+    await resetFutggCache();
     setFetchImpl(async () => new Response('<html>blocked</html>', { status: 403 }));
     expect(await handleFutggSets()).toEqual({ sets: null });
+  });
+
+  it('callers that overlap share one read of the hub, the pool and the tags', async () => {
+    const urls: string[] = [];
+    serve(urls, { '/api/fut/gallery/fc27/hub/': HUB, '/api/fut/gallery/fc27/sets/90/pool/': POOL, '/api/fut/gallery/fc27/sets/laliga/malaga-cf/': SET_PAGE });
+    const [a, b, c] = await Promise.all([handleFutggSets(), handleFutggLineup({ setId: 90, grade: 'S' }), handleFutggLineup({ setId: 90, grade: 'A' })]);
+    expect(a.sets).toHaveLength(2);
+    expect(b.lineup?.cards.map((x) => x.resourceId)).toEqual([243312, 50_574_721]);
+    expect(c.lineup?.cards).toHaveLength(1);
+    expect(urls).toEqual(['https://www.fut.gg/api/fut/gallery/fc27/hub/', 'https://www.fut.gg/api/fut/gallery/fc27/sets/90/pool/', 'https://www.fut.gg/api/fut/gallery/fc27/sets/laliga/malaga-cf/']);
+  });
+
+  it('remembers a failed read for a minute, then asks again', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-21T08:00:00Z'));
+    let calls = 0;
+    setFetchImpl(async () => {
+      calls++;
+      return new Response('', { status: 503 });
+    });
+    expect(await handleFutggSets()).toEqual({ sets: null });
+    expect(await handleFutggSets()).toEqual({ sets: null });
+    expect(calls).toBe(1);
+    vi.setSystemTime(new Date('2026-10-21T08:01:01Z'));
+    expect(await handleFutggSets()).toEqual({ sets: null });
+    expect(calls).toBe(2);
+  });
+
+  it("serves the hub a stopped worker kept in session storage, while it is fresh", async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-21T08:00:00Z'));
+    const urls: string[] = [];
+    serve(urls, { '/api/fut/gallery/fc27/hub/': HUB, '/api/fut/gallery/fc27/sets/90/pool/': POOL, '/api/fut/gallery/fc27/sets/laliga/malaga-cf/': SET_PAGE });
+    expect((await handleFutggSets()).sets).toHaveLength(2);
+    // The worker restarts: memory gone, session storage not.
+    hubCacheGone();
+    expect((await handleFutggSets()).sets).toHaveLength(2);
+    expect((await handleFutggLineup({ setId: 90, grade: 'S' })).lineup?.cards).toHaveLength(2);
+    expect(urls.filter((u) => u.endsWith('/hub/'))).toHaveLength(1);
+    // Ten minutes on: read again.
+    vi.setSystemTime(new Date('2026-10-21T08:10:01Z'));
+    hubCacheGone();
+    expect((await handleFutggSets()).sets).toHaveLength(2);
+    expect(urls.filter((u) => u.endsWith('/hub/'))).toHaveLength(2);
   });
 });

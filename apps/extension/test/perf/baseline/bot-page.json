@@ -1,0 +1,90 @@
+{
+  "suite": "bot-page",
+  "at": "2026-10-26T13:06:21.367Z",
+  "results": [
+    {
+      "name": "open cold → visible",
+      "ms": 85.7,
+      "max": 85.7,
+      "runs": 1
+    },
+    {
+      "name": "open cold → catalog drawn",
+      "ms": 102.22,
+      "max": 102.22,
+      "runs": 1
+    },
+    {
+      "name": "reopen warm (close + open)",
+      "ms": 17.91,
+      "max": 30.73,
+      "runs": 10
+    },
+    {
+      "name": "30 s idle open (timers only)",
+      "ms": 53.56,
+      "max": 53.79,
+      "runs": 3,
+      "meta": {
+        "catalogGets": 10
+      }
+    },
+    {
+      "name": "catalog.get sends per 30 s idle",
+      "ms": 10,
+      "max": 10,
+      "runs": 1
+    },
+    {
+      "name": "typing \"bellingham\" (10 input events)",
+      "ms": 94,
+      "max": 95.1,
+      "runs": 5,
+      "meta": {
+        "suggestions": 12
+      }
+    },
+    {
+      "name": "one keystroke \"an\" (common)",
+      "ms": 12.02,
+      "max": 13.24,
+      "runs": 5
+    },
+    {
+      "name": "one keystroke \"silva\"",
+      "ms": 11.25,
+      "max": 14.22,
+      "runs": 5
+    },
+    {
+      "name": "gallery open cold → visible",
+      "ms": 137.52,
+      "max": 137.52,
+      "runs": 1
+    },
+    {
+      "name": "fut.gg Sets drawn after the answer (250 Sets)",
+      "ms": 240.55,
+      "max": 240.55,
+      "runs": 1
+    },
+    {
+      "name": "gallery reopen warm (250 Sets listed)",
+      "ms": 328.22,
+      "max": 390.79,
+      "runs": 10
+    },
+    {
+      "name": "1 s tick x10 (gallery feed open, nothing changed)",
+      "ms": 193.89,
+      "max": 227.46,
+      "runs": 3
+    },
+    {
+      "name": "add 1 Set (lineup + club check + redraw)",
+      "ms": 652.75,
+      "max": 652.75,
+      "runs": 1
+    }
+  ]
+}
