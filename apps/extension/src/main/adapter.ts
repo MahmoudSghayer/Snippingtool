@@ -258,7 +258,7 @@ function post(kind: string, data: unknown): void {
 }
 
 interface ActionResult {
-  action: 'search' | 'buy' | 'readResult' | 'diagnostics' | 'list' | 'pile' | 'bid' | 'watchlist' | 'move' | 'club' | 'owned' | 'clearSold' | 'relistAll' | 'unsold' | 'relist' | 'clearExpired';
+  action: 'search' | 'buy' | 'readResult' | 'diagnostics' | 'list' | 'pile' | 'bid' | 'watchlist' | 'move' | 'club' | 'owned' | 'fromClub' | 'clearSold' | 'relistAll' | 'unsold' | 'relist' | 'clearExpired';
   requestId: string;
   ok: boolean;
   requestedAt: number;
@@ -274,6 +274,7 @@ interface ActionResult {
   cleared?: number;
   /** Which of the cards asked about the club holds (`owned`). */
   owned?: number[];
+  clubCards?: { resourceId: number; tradeId: string }[];
   /** A second result for a buy that first came back `timeout_unknown`:
    * EA's answer arrived after all (lib/act-auth.ts). */
   late?: boolean;
@@ -1488,6 +1489,47 @@ async function actOwned(requestId: string, resourceIds: number[]): Promise<void>
   }
 }
 
+/** Least time between two reads of the club's copies (`fromClub`): Gallery
+ * mode asks once a run, and once when the trader presses Relist from club. */
+const FROM_CLUB_MIN_GAP_MS = 5_000;
+let lastFromClubAt = -Infinity;
+/** The key a club copy is kept under in `boughtItems`: EA's item id behind
+ * a prefix no tradeId carries, so a Gallery job can never name a bought
+ * card and a club copy with the same number. */
+const CLUB_KEY_PREFIX = 'club:';
+
+/** The club's tradeable copies of these cards (EA's card ids), through the
+ * web app's own club search (Gallery mode's stuck cards: sent to the club,
+ * then not moved on because the transfer list was full). Each copy is kept
+ * as a card `actMove` and `actList` may take to the market (`boughtItems`),
+ * under the key the result names: nothing else in the club is ever
+ * reachable, and only the content script names which card ids. */
+async function actFromClub(requestId: string, resourceIds: number[]): Promise<void> {
+  const requestedAt = now();
+  const { result, selection } = runProbeAndReport();
+  const shape = selection.shape;
+  if (!result.ok || !shape) return fail('fromClub', requestId, requestedAt, result.reason);
+  const read = shape.bidding?.clubItems;
+  if (!read || !shape.bidding?.moveToTransferList || !shape.list) return fail('fromClub', requestId, requestedAt, 'from_club_unsupported');
+  if (requestedAt - lastFromClubAt < FROM_CLUB_MIN_GAP_MS) return fail('fromClub', requestId, requestedAt, 'from_club_too_soon');
+  lastFromClubAt = requestedAt;
+  try {
+    const items = await apply(read, shape.bidding, [servicesRoot() as Record<string, unknown>, resourceIds]);
+    const clubCards: { resourceId: number; tradeId: string }[] = [];
+    for (let i = 0; i < items.length && clubCards.length < 100; i++) {
+      const item = items[i]!;
+      const tradeId = `${CLUB_KEY_PREFIX}${item.itemId}`;
+      if (tradeId.length > 40) continue;
+      rememberBought(tradeId, item.entity);
+      clubCards[clubCards.length] = { resourceId: item.resourceId, tradeId };
+    }
+    adapterLog.add(`from club ok (${shape.name}): ${clubCards.length} of ${resourceIds.length} cards in the club`);
+    postResult({ action: 'fromClub', requestId, ok: true, requestedAt, completedAt: now(), clubCards });
+  } catch (err) {
+    fail('fromClub', requestId, requestedAt, errorText(err), describeError(err));
+  }
+}
+
 /** Takes the finished auctions the last watch list read saw (expired, or
  * lost to another bid) off the watch list, as Transfer Targets' "Clear
  * expired" does. Never a won or running one (`finishedWatched`). */
@@ -1589,6 +1631,7 @@ type ActRequest =
   | { action: 'move'; requestId: string; tradeId: string }
   | { action: 'club'; requestId: string; tradeId: string }
   | { action: 'owned'; requestId: string; resourceIds: number[] }
+  | { action: 'fromClub'; requestId: string; resourceIds: number[] }
   | { action: 'diagnostics'; requestId: string }
   | { action: 'catalog'; requestId: string }
   | { action: 'pile'; requestId: string }
@@ -1630,7 +1673,7 @@ function asActRequest(value: unknown): ActRequest | null {
     d.action === 'clearExpired'
   )
     return d as unknown as ActRequest;
-  if (d.action === 'owned') {
+  if (d.action === 'owned' || d.action === 'fromClub') {
     const ids = d.resourceIds;
     if (!isArray(ids) || ids.length === 0 || ids.length > 100) return null;
     for (let i = 0; i < ids.length; i++) if (!isInteger(ids[i]) || (ids[i] as number) <= 0) return null;
@@ -1687,6 +1730,9 @@ async function handleActRequest(data: unknown, mac: unknown): Promise<void> {
   }
   else if (request.action === 'owned') {
     if (BIDDING_ENABLED) await actOwned(request.requestId, request.resourceIds);
+  }
+  else if (request.action === 'fromClub') {
+    if (BIDDING_ENABLED && LISTING_ENABLED) await actFromClub(request.requestId, request.resourceIds);
   }
   else if (request.action === 'clearExpired') {
     if (BIDDING_ENABLED) await actClearExpired(request.requestId);

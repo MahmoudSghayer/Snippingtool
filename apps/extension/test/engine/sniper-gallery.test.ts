@@ -18,7 +18,7 @@
 import { DEFAULT_BOT_MODE_SETTINGS, DEFAULT_BOT_SETTINGS, type BotSettings, type FilterCriteria, type GalleryCard, type GalleryState, type TrimmedAuction } from '@sl/shared';
 import { describe, expect, it } from 'vitest';
 
-import { Sniper, clubMissReason, ownedMissReason, type SniperDeps } from '../../src/engine/sniper.js';
+import { Sniper, clubMissReason, fromClubMissReason, ownedMissReason, type SniperDeps } from '../../src/engine/sniper.js';
 import { ACT_ERROR } from '../../src/lib/act-auth.js';
 
 import type { ActionOutcome } from '../../src/content/adapter-client.js';
@@ -67,6 +67,11 @@ interface Opts {
   ownedCatalogue?: number[];
   /** Searches before the test stops the bot. */
   maxSearches?: number;
+  /** The club's copies of the cards asked about (`fromClub`). Omitted: the
+   * page cannot read them. */
+  fromClub?: (resourceIds: number[]) => ActionOutcome;
+  /** EA's Clear Sold. Omitted: not available to the bot. */
+  clearSold?: () => ActionOutcome;
 }
 
 function setup(opts: Opts = {}) {
@@ -136,6 +141,20 @@ function setup(opts: Opts = {}) {
     adapter.owned = async (ids) => {
       h.calls.push(`owned ${ids.join(',')}`);
       return owned(ids);
+    };
+  }
+  if (opts.fromClub) {
+    const fromClub = opts.fromClub;
+    adapter.fromClub = async (ids) => {
+      h.calls.push(`fromClub ${ids.join(',')}`);
+      return fromClub(ids);
+    };
+  }
+  if (opts.clearSold) {
+    const clearSold = opts.clearSold;
+    adapter.clearSold = async () => {
+      h.calls.push('clearSold');
+      return clearSold();
     };
   }
   if (!opts.noClub)
@@ -575,6 +594,120 @@ describe('clubMissReason', () => {
     expect(clubMissReason('club_unsupported')).toBe('Nova AI cannot send cards to the club on this EA web app');
     expect(clubMissReason('move reported success: false (status 471)')).toBe('EA refused it (error 471): your club may already hold this card');
     expect(clubMissReason('act request timed out')).toBe('EA did not answer in time');
+  });
+});
+
+describe('Gallery mode — cards EA would not move from the club (a full transfer list)', () => {
+  const ok = (): ActionOutcome => ({ ok: true, signed: true, latencyMs: 5 });
+  const refused = (): ActionOutcome => ({ ok: false, signed: true, error: 'move reported success: false (status 473)', latencyMs: 5 });
+  const inClub = (tradeId = 'club:555'): ActionOutcome => ({ ok: true, signed: true, clubCards: [{ resourceId: 100, tradeId }], latencyMs: 5 });
+
+  it('clears the sold cards once to make room when EA refuses the move, then tries again', async () => {
+    let moves = 0;
+    const h = setup({ results: () => [listing('t1', 1_300)], moveResult: () => (++moves === 1 ? refused() : ok()), clearSold: ok });
+    h.sniper.start();
+    await h.done();
+    expect(h.calls).toEqual(['buy t1', 'club t1', 'move t1', 'clearSold', 'move t1', 'list t1']);
+    expect(h.gallery().cards[0]!.status).toBe('listed');
+    expect(h.log()).toContain('{card} not moved to the transfer list (EA refused the move (error 473): your transfer list may be full): cleared the sold cards to make room, trying again');
+  });
+
+  it('leaves a card EA keeps refusing in the club, saying what to do, and finds it there again at the next Start', async () => {
+    const h = setup({ results: () => [listing('t1', 1_300)], moveResult: refused, clearSold: ok, fromClub: () => inClub() });
+    h.sniper.start();
+    await h.done();
+    // Three tries of the move (one after the sold cards were cleared), then it stays in the club.
+    expect(h.calls).toEqual(['buy t1', 'club t1', 'move t1', 'clearSold', 'move t1', 'move t1', 'move t1']);
+    expect(h.gallery().cards[0]).toEqual(
+      card({
+        status: 'club',
+        price: 1_300,
+        market: 4_000,
+        note: 'Not listed: EA refused the move (error 473): your transfer list may be full. In your club: make room on your transfer list (Clear sold), then Relist from club on the Gallery tab, or Start again',
+      }),
+    );
+    expect(h.sniper.state.stopReason).toBe('gallery_done');
+    expect(h.saved.at(-1)).toEqual(h.gallery());
+
+    // Room made (the trader cleared the list): the next Start asks the club for the
+    // card, and takes the copy it holds to the market, from the club's own copy.
+    const again = setup({ gallery: h.gallery(), moveResult: ok, fromClub: () => inClub() });
+    again.sniper.start();
+    await again.done();
+    expect(again.calls).toEqual(['fromClub 100', 'move club:555', 'list club:555']);
+    expect(again.lists).toEqual([['club:555', 1_300, 1_400]]);
+    expect(again.gallery().cards[0]).toEqual(card({ status: 'listed', price: 1_300, market: 4_000, listPrice: 1_400 }));
+    expect(again.log()).toContain('Gallery: 1 card waiting in your club found there, on its way to the market');
+    expect(again.sniper.state.stopReason).toBe('gallery_done');
+  });
+
+  it('counts the cards waiting in the club as work for a Start, and says when the club no longer holds one or cannot be read', async () => {
+    const stuck = { budget: 100_000, spent: 1_300, cards: [card({ status: 'club', price: 1_300 })] };
+    const gone = setup({ gallery: stuck, fromClub: () => ({ ok: true, signed: true, clubCards: [], latencyMs: 5 }) });
+    gone.sniper.start();
+    await gone.done();
+    expect(gone.calls).toEqual(['fromClub 100']);
+    expect(gone.gallery().cards[0]!.status).toBe('club');
+    expect(gone.log()).toContain('Gallery: none of the 1 card waiting in your club is in it any more: if you listed it yourself, press Listed it myself');
+    expect(gone.sniper.state.stopReason).toBe('gallery_done');
+
+    const unread = setup({ gallery: stuck, fromClub: () => ({ ok: false, signed: true, error: 'from_club_too_soon', latencyMs: 5 }) });
+    unread.sniper.start();
+    await unread.done();
+    expect(unread.log()).toContain('Gallery: 1 card waiting in your club could not be found there (your club was read a moment ago — try again in a few seconds): it stays in your club');
+    expect(unread.gallery().cards[0]!.status).toBe('club');
+
+    // Without the club read (an older page), a card with no trade left is nothing to start on.
+    const old = setup({ gallery: stuck });
+    old.sniper.start();
+    expect(old.sniper.state.stopReason).toBe('no_gallery');
+  });
+
+  it('relists the cards waiting in the club on the Gallery tab without a Start (Relist from club), one at a time', async () => {
+    const h = setup({
+      gallery: {
+        budget: 100_000,
+        spent: 2_600,
+        cards: [card({ status: 'club', price: 1_300, note: 'Not listed: EA did not move it' }), card({ key: '100:85#2', status: 'club', price: 1_300 })],
+      },
+      fromClub: () => ({ ok: true, signed: true, clubCards: [{ resourceId: 100, tradeId: 'club:1' }, { resourceId: 100, tradeId: 'club:2' }], latencyMs: 5 }),
+    });
+    const progress: [number, number][] = [];
+    const t0 = h.clock.t;
+    const result = await h.sniper.relistStuck((done, total) => progress.push([done, total]));
+    expect(result).toEqual({ ok: true, message: 'Relisted 2 of 2 cards from your club' });
+    expect(h.calls).toEqual(['fromClub 100', 'move club:1', 'list club:1', 'move club:2', 'list club:2']);
+    expect(progress).toEqual([[1, 2], [2, 2]]);
+    // A pause before each step, as the bot paces them (3 s at random() = 0).
+    expect(h.clock.t - t0).toBe(4 * 3 * SEC);
+    expect(h.gallery().cards.map((c) => [c.status, c.listPrice, c.note])).toEqual([['listed', 1_400, undefined], ['listed', 1_400, undefined]]);
+    expect(h.sniper.isRunning()).toBe(false);
+    expect(await h.sniper.relistStuck()).toEqual({ ok: true, message: 'No card is waiting in your club' });
+  });
+
+  it('says when a relist from the club cannot run, or lists only some', async () => {
+    const stuck = { budget: 100_000, spent: 1_300, cards: [card({ status: 'club', price: 1_300 })] };
+    const old = setup({ gallery: stuck });
+    expect(await old.sniper.relistStuck()).toEqual({
+      ok: false,
+      message: '1 card waiting in your club could not be found there (Nova AI cannot move cards from your club on this EA web app): it stays in your club',
+    });
+    const failing = setup({ gallery: stuck, fromClub: () => inClub(), listResult: () => ({ ok: false, signed: true, error: 'list reported success: false', latencyMs: 5 }) });
+    expect(await failing.sniper.relistStuck()).toEqual({ ok: false, message: 'Relisted 0 of 1 card from your club; 1 not listed: see the Gallery tab' });
+    expect(failing.calls).toEqual(['fromClub 100', 'move club:555', 'list club:555', 'list club:555', 'list club:555']);
+    expect(failing.gallery().cards[0]!.note).toBe('Not listed: list reported success: false. It is in your transfer list');
+    // Not while the bot runs: a Start does it on its own.
+    const running = setup({ gallery: stuck, fromClub: () => inClub(), results: () => [] });
+    running.sniper.start();
+    expect(await running.sniper.relistStuck()).toEqual({ ok: false, message: 'Nova AI is running: it relists these on its own' });
+    running.sniper.stop('manual');
+    await running.done();
+  });
+
+  it('names why the club could not be read', () => {
+    expect(fromClubMissReason('from_club_unsupported')).toBe('Nova AI cannot move cards from your club on this EA web app');
+    expect(fromClubMissReason('from_club_too_soon')).toBe('your club was read a moment ago — try again in a few seconds');
+    expect(fromClubMissReason('owned_unsupported')).toBe(ownedMissReason('owned_unsupported'));
   });
 });
 

@@ -464,7 +464,15 @@ The **Transfer list** panel has two small tools (automation builds,
 the panel:
 
 - **Clear sold** (when the list has sold cards): the adapter's `clearSold`
-  act, the web app's own Clear Sold, then a reload of the list.
+  act, the web app's own Clear Sold, then a reload of the list. The same
+  runs on its own every ten minutes (`lib/auto-clear-sold.ts`,
+  `AUTO_CLEAR_SOLD_EVERY_MS`): every interval the content script looks at
+  the list as EA last showed it and, when sold cards sit on it, clears them
+  through the same path (nothing is asked of EA when none do, or the list
+  has not been seen); the panel says so under the buttons, with what the
+  last run did and when. The button stays: a full list of sold cards never
+  stops the bot, or Gallery mode's cards on their way from the club, from
+  listing more.
 - **Relist unsold** (when it has unsold cards): **Same** is the adapter's
   `relistAll` act, the web app's own Re-list All (one request, every
   expired card at its last prices), then a reload. **−1 step** / **+1 step**
@@ -1030,6 +1038,25 @@ governor):
    it (`club_not_bought` / `move_not_bought`), and its row says to send it to
    the club and list it by hand; **Listed it myself** on its row marks it
    done.
+   A move EA refuses is, nine times in ten, a full transfer list: the bot
+   then runs EA's Clear Sold once (the adapter's `clearSold` act) and tries
+   the move again; after three refusals the card stays in the club
+   (status `club`, its row: "Not listed: … In your club: make room on your
+   transfer list (Clear sold), then Relist from club on the Gallery tab, or
+   Start again"). A card in the club is found there again whenever room is
+   made, page reload or not: the adapter's `fromClub` act reads the club's
+   tradeable copies of the cards' ids through the same club search as
+   `owned` (`BiddingShape.clubItems`: loans and untradeable cards left out)
+   and keeps each entity under `club:<itemId>`, a key a `move` and a `list`
+   then take it to the market by, exactly as a bought card goes (nothing
+   else in the club is ever reachable, and only content names which card
+   ids). A Start in Gallery mode does this before its first search (and the
+   cards waiting in the club count as work for it, so a list with nothing
+   left to buy still starts), and the Gallery feed's **Relist from club**
+   button on the "On the way to the market" group (while the bot is
+   stopped) does it without a Start — for the trader who has just cleared
+   the list by hand: `Sniper.relistStuck` moves and lists each card with
+   the bot's own pauses between, saying how it goes in the group header.
    EA's help ("How do Gallery Sets work in EA SPORTS FC 27?") says a card
    that passes through the club still counts toward the Gallery after it is
    sold, and that one card can count for several Sets. The trader then adds

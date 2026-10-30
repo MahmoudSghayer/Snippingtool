@@ -46,6 +46,7 @@ function fakeAdapter(clock: { now: number }) {
     move: vi.fn(async () => ({ ok: true, latencyMs: 5 })),
     club: vi.fn(async () => ({ ok: true, latencyMs: 5 })),
     owned: vi.fn(async () => ({ ok: true, owned: [], latencyMs: 5 })),
+    fromClub: vi.fn(async () => ({ ok: true, clubCards: [], latencyMs: 5 })),
     onCredits: () => () => undefined,
     diagnostics: vi.fn(async () => ({ ok: false, latencyMs: 0 })),
     onProbe: () => () => undefined,

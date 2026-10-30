@@ -58,10 +58,10 @@
  */
 import { ACT_ERROR } from '../lib/act-auth.js';
 
-import { normaliseListing, normaliseWatchedItem } from './ea-listing.js';
+import { normaliseListing, normaliseWatchedItem, readItemId } from './ea-listing.js';
 import { ShapeError, assertSucceeded, extractListingArray, settle } from './ea-response.js';
 
-import type { BidTarget, BiddingShape, BuyTarget, ListTarget, SearchOptions, ServiceShape } from './shapes.js';
+import type { BidTarget, BiddingShape, BuyTarget, ClubItem, ListTarget, SearchOptions, ServiceShape } from './shapes.js';
 import type { FilterCriteria } from '@sl/shared';
 
 const apply = Reflect.apply;
@@ -204,6 +204,51 @@ function transferPile(): number | string | null {
 const REFRESH_TIMEOUT_MS = 4_000;
 
 /** Bid mode on this shape (see the header: ASSUMED SHAPE). */
+/** The club's copies of these cards (EA's card ids) through the web app's
+ * own club search, as its Player Picks screen asks it: each copy with its
+ * card id, loans and other versions of the players left out. Rejects on
+ * anything it cannot read. */
+async function clubSearch(services: Record<string, unknown>, resourceIds: number[], timeoutMs: number): Promise<{ id: number; item: Obj }[]> {
+  const club = (services as Obj).Club as Obj | undefined;
+  const search = club?.search;
+  if (!club || typeof search !== 'function') throw new ShapeError('window.services.Club.search is not a function');
+  const Dto = (window as unknown as Obj).UTSearchCriteriaDTO;
+  if (typeof Dto !== 'function') throw new ShapeError('window.UTSearchCriteriaDTO is not available');
+  const criteria = construct(Dto as new () => Obj, []);
+  // `type` first, as the market search and the web app's Player Picks do:
+  // the DTO's `type` setter resets other fields, and EA's club search
+  // ignores a criteria with no `type` — it answers with the whole club
+  // (players not asked about), which reads as "could not check" and makes
+  // Gallery mode buy every card.
+  criteria.type = playerSearchType();
+  criteria.defId = [...resourceIds];
+  const returned = apply(search as (...args: unknown[]) => unknown, club, [criteria]);
+  if (!isAsync(returned)) throw new ShapeError('services.Club.search returned neither an observable nor a promise');
+  const r = assertSucceeded(await settle(returned, timeoutMs), 'Club.search', true);
+  const items = ((r as Obj).response as Obj | undefined)?.items;
+  if (!Array.isArray(items)) throw new ShapeError('Club.search answered without an item list');
+  const asked = new Set(resourceIds);
+  // EA's card ids: a special version is its player's base id plus a
+  // multiple of 2^24.
+  const players = new Set<number>();
+  for (const id of resourceIds) players.add(id % 2 ** 24);
+  const found: { id: number; item: Obj }[] = [];
+  for (const item of items as Obj[]) {
+    const id = item?.definitionId;
+    if (typeof id !== 'number') continue;
+    // A player not asked about: the search ignored the card filter (and
+    // answered with the club's first page), so it cannot say "none".
+    if (!players.has(id % 2 ** 24)) throw new ShapeError('owned_unfiltered: Club.search answered with players not asked about');
+    // Another version of a player asked about.
+    if (!asked.has(id)) continue;
+    // A loan does not count for the Gallery, and cannot be listed.
+    const limited = item.isLimitedUse;
+    if (typeof limited === 'function' && apply(limited as () => unknown, item, []) === true) continue;
+    found[found.length] = { id, item };
+  }
+  return found;
+}
+
 function createBidding(timeoutMs: number): BiddingShape {
   return {
     detect(services) {
@@ -265,44 +310,22 @@ function createBidding(timeoutMs: number): BiddingShape {
       if (!bidSucceeded(r)) throw new ShapeError('move to club did not report success: true');
     },
     async clubOwned(services, resourceIds) {
-      const club = (services as Obj).Club as Obj | undefined;
-      const search = club?.search;
-      if (!club || typeof search !== 'function') throw new ShapeError('window.services.Club.search is not a function');
-      const Dto = (window as unknown as Obj).UTSearchCriteriaDTO;
-      if (typeof Dto !== 'function') throw new ShapeError('window.UTSearchCriteriaDTO is not available');
-      const criteria = construct(Dto as new () => Obj, []);
-      // `type` first, as the market search and the web app's Player Picks do:
-      // the DTO's `type` setter resets other fields, and EA's club search
-      // ignores a criteria with no `type` — it answers with the whole club
-      // (players not asked about), which reads as "could not check" and makes
-      // Gallery mode buy every card.
-      criteria.type = playerSearchType();
-      criteria.defId = [...resourceIds];
-      const returned = apply(search as (...args: unknown[]) => unknown, club, [criteria]);
-      if (!isAsync(returned)) throw new ShapeError('services.Club.search returned neither an observable nor a promise');
-      const r = assertSucceeded(await settle(returned, timeoutMs), 'Club.search', true);
-      const items = ((r as Obj).response as Obj | undefined)?.items;
-      if (!Array.isArray(items)) throw new ShapeError('Club.search answered without an item list');
-      const asked = new Set(resourceIds);
-      // EA's card ids: a special version is its player's base id plus a
-      // multiple of 2^24.
-      const players = new Set<number>();
-      for (const id of resourceIds) players.add(id % 2 ** 24);
       const owned = new Set<number>();
-      for (const item of items as Obj[]) {
-        const id = item?.definitionId;
-        if (typeof id !== 'number') continue;
-        // A player not asked about: the search ignored the card filter (and
-        // answered with the club's first page), so it cannot say "none".
-        if (!players.has(id % 2 ** 24)) throw new ShapeError('owned_unfiltered: Club.search answered with players not asked about');
-        // Another version of a player asked about.
-        if (!asked.has(id)) continue;
-        // A loan does not count for the Gallery.
-        const limited = item.isLimitedUse;
-        if (typeof limited === 'function' && apply(limited as () => unknown, item, []) === true) continue;
-        owned.add(id);
-      }
+      for (const { id } of await clubSearch(services, resourceIds, timeoutMs)) owned.add(id);
       return [...owned];
+    },
+    async clubItems(services, resourceIds) {
+      // The same search, for the entities: a card with no readable item id
+      // cannot be named to a later move or list, and an untradeable one can
+      // never be listed, so neither is offered.
+      const found: ClubItem[] = [];
+      for (const { id, item } of await clubSearch(services, resourceIds, timeoutMs)) {
+        if (item.untradeable === true) continue;
+        const itemId = readItemId(item);
+        if (itemId === null) continue;
+        found[found.length] = { resourceId: id, itemId, entity: item };
+      }
+      return found;
     },
     async untarget(services, entities) {
       // Transfer Targets' "Clear expired", as community autobuyers describe
