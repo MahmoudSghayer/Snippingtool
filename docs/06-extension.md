@@ -432,9 +432,38 @@ the account version this browser's copy is based on. At load:
 
 The content script reads the list at page load and again when the bot is
 first prepared after the trader signs in from the account view, so that
-sign-in shows the account's list without a reload. The API holds the list to
-`galleryStateSchema` (a field added there needs the API deployed first: until
-then the upload is refused and the local copy, still pending, stays in use).
+sign-in shows the account's list without a reload.
+
+**An API older than the extension.** The API holds the list to a strict
+`galleryStateSchema`, so when it runs an older build than the extension (a
+field added to the schema, the API not deployed yet) it refuses the whole
+list as `VALIDATION_FAILED`, naming the keys it does not know. Background
+then sends the list again without exactly those keys (`unknownGalleryKeys`
+reads them from the error's issues, `withoutKeys` drops them at every object
+on each path), so every card's status, the Sets and the completed Sets still
+reach the account and every other browser, instead of the whole session
+staying on one browser. The save keeps its pending mark (the whole list is
+still to go up, once the API is updated), and the keys are left out of the
+next saves for 10 minutes without asking again, so a running bot's saves are
+not two requests each; **Sync now** tries the whole list at once. A refusal
+for anything else is reported, not worked around.
+
+**The sync status.** What the last upload or load came to is kept beside the
+list (`sl.bot.gallery.sync.v1`, `GallerySyncStatus`: `saved` and when,
+`partial` with the fields omitted, `pending`, `failed` with why, `signed_out`,
+`offline`) and shown on the page's Gallery section and Gallery feed, with
+a **Sync now** button (`bot.gallerySyncGet` / `bot.gallerySyncNow`), read
+again every few seconds while the page is open, so a save that never reached
+the account is never silent.
+
+**Completed Sets.** The page's Completed Sets section lists the Sets marked
+completed newest first (name, grade, tokens, when), to finish in the game.
+The account keeps a durable log of them too (`user_gallery_completions`,
+`GET /extension/gallery/completions`, docs/03-api.md): the API appends to it
+on every save (a Set id newly in `completed`, with the name, grade, tokens
+and time the list carries) and marks a Set undone when its id leaves, so the
+log survives Clear list, Reset and the 500-Set cap; the dashboard's Account
+page shows it, with the Sets in progress and the cards they still need.
 
 The dash's **Sold** and **Unsold** counters and its **Transfer list** panel
 (cards on the list out of EA's 100, then how many are listed and not
@@ -464,7 +493,15 @@ The **Transfer list** panel has two small tools (automation builds,
 the panel:
 
 - **Clear sold** (when the list has sold cards): the adapter's `clearSold`
-  act, the web app's own Clear Sold, then a reload of the list.
+  act, the web app's own Clear Sold, then a reload of the list. The same
+  runs on its own every ten minutes (`lib/auto-clear-sold.ts`,
+  `AUTO_CLEAR_SOLD_EVERY_MS`): every interval the content script looks at
+  the list as EA last showed it and, when sold cards sit on it, clears them
+  through the same path (nothing is asked of EA when none do, or the list
+  has not been seen); the panel says so under the buttons, with what the
+  last run did and when. The button stays: a full list of sold cards never
+  stops the bot, or Gallery mode's cards on their way from the club, from
+  listing more.
 - **Relist unsold** (when it has unsold cards): **Same** is the adapter's
   `relistAll` act, the web app's own Re-list All (one request, every
   expired card at its last prices), then a reload. **−1 step** / **+1 step**
@@ -1030,6 +1067,25 @@ governor):
    it (`club_not_bought` / `move_not_bought`), and its row says to send it to
    the club and list it by hand; **Listed it myself** on its row marks it
    done.
+   A move EA refuses is, nine times in ten, a full transfer list: the bot
+   then runs EA's Clear Sold once (the adapter's `clearSold` act) and tries
+   the move again; after three refusals the card stays in the club
+   (status `club`, its row: "Not listed: … In your club: make room on your
+   transfer list (Clear sold), then Relist from club on the Gallery tab, or
+   Start again"). A card in the club is found there again whenever room is
+   made, page reload or not: the adapter's `fromClub` act reads the club's
+   tradeable copies of the cards' ids through the same club search as
+   `owned` (`BiddingShape.clubItems`: loans and untradeable cards left out)
+   and keeps each entity under `club:<itemId>`, a key a `move` and a `list`
+   then take it to the market by, exactly as a bought card goes (nothing
+   else in the club is ever reachable, and only content names which card
+   ids). A Start in Gallery mode does this before its first search (and the
+   cards waiting in the club count as work for it, so a list with nothing
+   left to buy still starts), and the Gallery feed's **Relist from club**
+   button on the "On the way to the market" group (while the bot is
+   stopped) does it without a Start — for the trader who has just cleared
+   the list by hand: `Sniper.relistStuck` moves and lists each card with
+   the bot's own pauses between, saying how it goes in the group header.
    EA's help ("How do Gallery Sets work in EA SPORTS FC 27?") says a card
    that passes through the club still counts toward the Gallery after it is
    sold, and that one card can count for several Sets. The trader then adds

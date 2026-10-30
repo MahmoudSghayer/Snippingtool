@@ -39,6 +39,7 @@ import { rankCandidates, type ScoredOpportunity } from '../engine/ranker.js';
 import { countObservedSearches, governedSearch } from '../engine/search.js';
 import { attemptErrorCode, attemptTiming } from '../engine/types.js';
 import { handOffWasLate, readHandedOffNonce } from '../lib/act-auth.js';
+import { createAutoClearSold } from '../lib/auto-clear-sold.js';
 import { createBackgroundTimer } from '../lib/background-timer.js';
 import { riskLevelChangeEvent } from '../lib/bot-safety.js';
 import { createLogThrottle, droppedSuffix } from '../lib/log-throttle.js';
@@ -82,6 +83,7 @@ import type {
   FutggLineup,
   FutggSetSummary,
   GalleryState,
+  GallerySyncStatus,
   RiskBudgetEvent,
   SavedFilter,
   SnipingAttempt,
@@ -121,6 +123,9 @@ const ENTITLEMENT_CHECK_MS = 30000;
  * cached entitlement (refreshed by its heartbeat), so a plan change reaches
  * an open tab without a reload (settings arrive by `storage.onChanged`). */
 const LIVE_TICK_MS = 30000;
+/** How often the automatic Clear Sold looks at the clock (it runs every
+ * ten minutes: lib/auto-clear-sold.ts). */
+const AUTO_CLEAR_SOLD_TICK_MS = 30_000;
 /** How often the engine lease is renewed (background/engine-lease.ts's
  * `ENGINE_LEASE_RENEW_MS`; a lease lasts three minutes). */
 const LEASE_RENEW_MS = 20000;
@@ -759,6 +764,12 @@ async function main(): Promise<void> {
         return res?.costs ?? {};
       },
     };
+    // The sold cards cleared on their own every ten minutes, through the
+    // same path as the card's Clear sold button, when the list shows any.
+    const autoClearSold = createAutoClearSold({
+      sold: () => transferList.summary()?.sold ?? null,
+      clear: (count) => clearSoldCards(transferTools, count),
+    });
 
     const prepareSniper = async (fresh: boolean): Promise<void> => {
       if (sniper) {
@@ -841,10 +852,15 @@ async function main(): Promise<void> {
               if (moved.ok) pileRefresher.listed();
               return moved;
             },
-            // Gallery mode: a bought card sent to the club, and which fut.gg
-            // lineup cards the club holds already.
+            // Gallery mode: a bought card sent to the club, which fut.gg
+            // lineup cards the club holds already, and the club's copies of
+            // cards EA would not move on (a full transfer list), for the
+            // move and list steps; EA's Clear Sold makes room for a move the
+            // list refused.
             club: adapter.club,
             owned: adapter.owned,
+            fromClub: adapter.fromClub,
+            clearSold: adapter.clearSold,
             clearExpired: adapter.clearExpired,
             onAuctions: adapter.onAuctions,
             onBuyable: adapter.onBuyable,
@@ -995,6 +1011,13 @@ async function main(): Promise<void> {
       // The account's collected-card catalogue, so a Set upgrade reuses cards
       // collected before (and since sold) and buys only the higher grade's delta.
       galleryOwned: () => send<number[] | null>('bot.galleryOwnedGet'),
+      // How this browser's list stands with the account (saved, saved
+      // without the fields an older API does not know, pending, refused,
+      // signed out, offline), and the page's Sync now.
+      gallerySync: {
+        get: () => send<GallerySyncStatus | null>('bot.gallerySyncGet'),
+        now: () => send<GallerySyncStatus | null>('bot.gallerySyncNow'),
+      },
       setLiveSearch: (search) => {
         liveSearch = search;
       },
@@ -1029,6 +1052,7 @@ async function main(): Promise<void> {
           if (step !== 0) pileRefresher.listed();
           return result;
         },
+        autoClear: autoClearSold.status,
       },
       getCredits: () => eaCredits,
     });
@@ -1044,6 +1068,9 @@ async function main(): Promise<void> {
     // The every-few-minutes reloads: checked twice per minimum gap, cheap
     // when nothing is due.
     setInterval(() => pileRefresher.tick((sniper?.isRunning() ?? false) || botPage.isOpen()), PILE_MIN_GAP_MS / 2);
+    // The sold cards cleared on their own every ten minutes, when the list
+    // shows any (lib/auto-clear-sold.ts); the button stays for the trader.
+    setInterval(() => autoClearSold.tick(), AUTO_CLEAR_SOLD_TICK_MS);
   }
 
   async function refreshSummaries(listings: readonly TrimmedAuction[]): Promise<void> {

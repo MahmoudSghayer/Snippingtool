@@ -456,7 +456,9 @@ export type SniperStopReason =
   /** Gallery mode: the list's coin budget is spent. */
   | 'gallery_budget'
   /** Gallery mode: every card on the list is listed or skipped. */
-  | 'gallery_done';
+  | 'gallery_done'
+  /** Gallery mode: the Gallery tab's Relist from club is at work. */
+  | 'gallery_relisting';
 
 export interface SniperLogEntry {
   id: number;
@@ -763,6 +765,8 @@ interface GalleryJob {
   m: SniperMatch;
   step: 'club' | 'move' | 'list';
   tries: number;
+  /** EA's Clear Sold has been tried once to make room for this card's move. */
+  cleared?: boolean;
 }
 
 /** Gallery mode: how long a buy EA did not answer in time holds the card,
@@ -776,6 +780,18 @@ const GALLERY_RELOADED_NOTE =
 /** Gallery mode: how long a club read stays good enough to skip the one
  * before a run's first search. */
 const GALLERY_CLUB_FRESH_MS = 60_000;
+/** Gallery mode: what to do about a card EA would not move from the club
+ * to the transfer list (a full list, mostly): it stays in the club, and
+ * Start (or the Gallery tab's Relist from club) finds it there again. */
+const GALLERY_STUCK_HINT = 'make room on your transfer list (Clear sold), then Relist from club on the Gallery tab, or Start again';
+
+/** Why the club's copies of Gallery cards could not be read, in the user's
+ * words (`fromClub`). */
+export function fromClubMissReason(error: string | undefined): string {
+  if (error === 'from_club_unsupported') return 'Nova AI cannot move cards from your club on this EA web app';
+  if (error === 'from_club_too_soon') return 'your club was read a moment ago — try again in a few seconds';
+  return ownedMissReason(error);
+}
 
 /** Gallery mode: the pause before each step of a card's way to the club and
  * back on the market, in seconds: about as long as doing it by hand, so a
@@ -819,7 +835,7 @@ export interface SniperDeps {
   /** `bid`, `watchlist` and `move` are Bid mode's: without the first two it
    * refuses to start in Bid mode (`bid_unavailable`). */
   adapter: Pick<AdapterClient, 'search' | 'buy' | 'list' | 'onAuctions' | 'onBuyable' | 'onProbe' | 'onShape'> &
-    Partial<Pick<AdapterClient, 'onEaError' | 'bid' | 'watchlist' | 'move' | 'club' | 'owned' | 'clearExpired'>>;
+    Partial<Pick<AdapterClient, 'onEaError' | 'bid' | 'watchlist' | 'move' | 'club' | 'owned' | 'fromClub' | 'clearSold' | 'clearExpired'>>;
   getFilters: () => SniperFilter[];
   /** The coin balance EA's own answers last stated (null: none seen). Bid
    * mode bids only what it leaves after the coins its other bids hold.
@@ -1029,6 +1045,8 @@ export class Sniper {
   private galleryVersion = 0;
   private galleryWork: GalleryWork | null = null;
   private galleryJobs: GalleryJob[] = [];
+  /** The Gallery tab's Relist from club at work (`relistStuck`). */
+  private relisting = false;
   private galleryLate: { key: string; until: number } | null = null;
   /** When the club was last read for the list (`checkGalleryClub`): a run
    * that starts soon after the page's own check does not ask again. */
@@ -1390,14 +1408,17 @@ export class Sniper {
       return;
     }
     if (mode === 'gallery') {
-      // Cards an earlier run left on their way to the market count as work.
+      // Cards an earlier run left on their way to the market count as work,
+      // the ones waiting in the club (`stuckGalleryCards`) too.
       this.resumeGalleryJobs();
-      const reason: SniperStopReason | null =
-        !this.deps.adapter.club || !this.deps.adapter.move
+      const work = this.galleryJobs.length > 0 || (!!this.deps.adapter.fromClub && this.stuckGalleryCards().length > 0);
+      const reason: SniperStopReason | null = this.relisting
+        ? 'gallery_relisting'
+        : !this.deps.adapter.club || !this.deps.adapter.move
           ? 'gallery_unavailable'
-          : !nextGalleryCard(this.gallery) && this.galleryJobs.length === 0
+          : !nextGalleryCard(this.gallery) && !work
             ? 'no_gallery'
-            : nextGalleryCard(this.gallery) && this.gallery.budget - this.gallery.spent < MIN_SALE_PRICE && this.galleryJobs.length === 0
+            : nextGalleryCard(this.gallery) && this.gallery.budget - this.gallery.spent < MIN_SALE_PRICE && !work
               ? 'gallery_budget'
               : null;
       if (reason) {
@@ -2192,6 +2213,17 @@ export class Sniper {
       await this.checkGalleryClub();
       if (signal.aborted) return;
     }
+    // Cards an earlier run sent to the club and could not move on (EA refused
+    // the move: a full transfer list): found in the club again and put back
+    // on their way, before any search.
+    if (this.deps.adapter.fromClub && this.stuckGalleryCards().length > 0) {
+      if (this.applyKillSwitch() || this.applyEntitlement() || this.applyExclusive()) return;
+      if ((await this.waitOutEaBackoff(signal)) && signal.aborted) return;
+      const r = await this.queueStuckGalleryCards();
+      if (signal.aborted) return;
+      this.addLog({ kind: r.why || (r.queued === 0 && r.stuck > 0) ? 'blocked' : 'info', message: `Gallery: ${stuckQueuedText(r)}` });
+      this.deps.onChange();
+    }
     while (!signal.aborted) {
       if (this.galleryJobs.length > 0) {
         await this.collectGallery(signal);
@@ -2412,7 +2444,12 @@ export class Sniper {
    * no longer holds them), and they say to finish them by hand. */
   private resumeGalleryJobs(): void {
     const queued = new Set(this.galleryJobs.map((j) => j.key));
+    // A card in the club is found there again through the club search
+    // (`queueStuckGalleryCards`), which works after a page reload too, where
+    // the page can read the club; its tradeId from the buy is then not needed.
+    const fromClub = !!this.deps.adapter.fromClub;
     for (const card of this.gallery.cards) {
+      if (fromClub && card.status === 'club') continue;
       if (!card.tradeId || card.price == null || queued.has(card.key) || (card.status !== 'bought' && card.status !== 'club')) continue;
       const m: SniperMatch = {
         tradeId: card.tradeId,
@@ -2423,6 +2460,106 @@ export class Sniper {
         expiresAt: null,
       };
       this.galleryJobs.push({ key: card.key, m, step: card.status === 'bought' ? 'club' : 'move', tries: 0 });
+    }
+  }
+
+  /** Gallery cards sent to the club and not on the market: a run that
+   * stopped between the two steps, or (mostly) a move EA refused because the
+   * transfer list was full. Not the ones already queued. */
+  private stuckGalleryCards(): GalleryCard[] {
+    const queued = new Set(this.galleryJobs.map((j) => j.key));
+    return this.gallery.cards.filter((c) => c.status === 'club' && c.price != null && !queued.has(c.key));
+  }
+
+  /**
+   * Gallery mode: the cards waiting in the club (`stuckGalleryCards`),
+   * found there again through the web app's own club search (`fromClub`)
+   * and put back on their way to the market: the move and the list steps,
+   * as after a buy. One club copy per card, in the list's order. A card the
+   * club no longer holds (the trader listed or used it) is left as it is.
+   * `why`: the club could not be read (nothing was queued).
+   */
+  private async queueStuckGalleryCards(): Promise<{ queued: number; stuck: number; why?: string }> {
+    const stuck = this.stuckGalleryCards();
+    if (stuck.length === 0) return { queued: 0, stuck: 0 };
+    const fromClub = this.deps.adapter.fromClub;
+    if (!fromClub) return { queued: 0, stuck: stuck.length, why: fromClubMissReason('from_club_unsupported') };
+    const ids = [...new Set(stuck.map((c) => c.resourceId ?? c.playerId))].slice(0, 100);
+    const r = await fromClub(ids).catch(() => null);
+    if (!r?.ok || !r.clubCards) return { queued: 0, stuck: stuck.length, why: fromClubMissReason(r?.error) };
+    const copies = new Map<number, string[]>();
+    for (const c of r.clubCards) {
+      const list = copies.get(c.resourceId) ?? [];
+      list.push(c.tradeId);
+      copies.set(c.resourceId, list);
+    }
+    let queued = 0;
+    for (const card of stuck) {
+      const resourceId = card.resourceId ?? card.playerId;
+      const tradeId = copies.get(resourceId)?.shift();
+      if (!tradeId) continue;
+      const m: SniperMatch = { tradeId, resourceId, assetId: card.playerId, rating: card.rating, buyNow: card.price!, expiresAt: null };
+      // Its tradeId from the buy is no use after a page reload; the job
+      // carries the club copy's key instead.
+      delete card.tradeId;
+      delete card.note;
+      this.galleryJobs.push({ key: card.key, m, step: 'move', tries: 0 });
+      queued++;
+    }
+    this.saveGallery();
+    return { queued, stuck: stuck.length };
+  }
+
+  /**
+   * The Gallery tab's Relist from club: every card Nova sent to the club and
+   * could not move on (`stuckGalleryCards`), found in the club again and
+   * taken to the market, moved then listed as the bot lists it
+   * (`galleryListPrices`), one card at a time with the bot's own pauses
+   * between. For when the transfer list was full: once the trader has made
+   * room (Clear sold), without a Start, which does the same on its own.
+   * `onProgress` hears each card done. Refused while the bot runs.
+   */
+  async relistStuck(onProgress?: (done: number, total: number) => void): Promise<{ ok: boolean; message: string }> {
+    if (this.isRunning()) return { ok: false, message: 'Nova AI is running: it relists these on its own' };
+    if (this.relisting) return { ok: false, message: 'Already relisting' };
+    const ks = this.deps.killSwitch();
+    if (ks.active) return { ok: false, message: `Not relisted: ${ks.reason ?? STOP_MESSAGES.kill_switch}` };
+    if (this.deps.entitled && !this.deps.entitled()) return { ok: false, message: `Not relisted: ${STOP_MESSAGES.not_entitled}` };
+    if (!this.deps.adapter.move) return { ok: false, message: `Not relisted: ${STOP_MESSAGES.gallery_unavailable}` };
+    this.relisting = true;
+    const controller = new AbortController();
+    try {
+      const r = await this.queueStuckGalleryCards();
+      if (r.stuck === 0) return { ok: true, message: 'No card is waiting in your club' };
+      if (r.why) return { ok: false, message: stuckQueuedText(r) };
+      if (r.queued === 0) return { ok: false, message: stuckQueuedText(r) };
+      this.addLog({ kind: 'info', message: `Gallery: ${stuckQueuedText(r)} — relisting ${r.queued === 1 ? 'it' : 'them'} now` });
+      this.deps.onChange();
+      const total = r.queued;
+      let listed = 0;
+      let failed = 0;
+      let done = 0;
+      while (this.galleryJobs.length > 0) {
+        // Each step a few seconds apart, as the bot paces them.
+        await this.sleep(this.pickSeconds(GALLERY_STEP_GAP) * 1000, controller.signal);
+        if (this.deps.killSwitch().active) break;
+        const key = this.galleryJobs[0]!.key;
+        const outcome = await this.galleryStep();
+        this.saveGallery();
+        this.deps.onChange();
+        if (outcome === 'more') continue;
+        if (outcome === 'listed') listed++;
+        else failed++;
+        // A job of this key is gone: one card done, however it ended.
+        if (!this.galleryJobs.some((j) => j.key === key)) onProgress?.(++done, total);
+      }
+      const parts = [`Relisted ${listed} of ${plural(total, 'card')} from your club`];
+      if (failed > 0) parts.push(`${failed} not listed: see the Gallery tab`);
+      if (this.galleryJobs.length > 0) parts.push(`stopped by the kill switch with ${plural(this.galleryJobs.length, 'card')} to go`);
+      return { ok: failed === 0 && this.galleryJobs.length === 0, message: parts.join('; ') };
+    } finally {
+      this.relisting = false;
+      controller.abort();
     }
   }
 
@@ -2624,11 +2761,23 @@ export class Sniper {
     if (signal.aborted || this.applyKillSwitch() || this.applyEntitlement() || this.applyExclusive()) return;
     // EA asked the bot to slow down: these calls wait it out like searches.
     if (await this.waitOutEaBackoff(signal)) return;
+    await this.galleryStep();
+    this.saveGallery();
+    this.deps.onChange();
+  }
+
+  /** The step itself (`collectGallery`, and `relistStuck` between its own
+   * pauses): `listed` when the card reached the market, `given_up` when it
+   * is no longer Nova's to finish (the card says why), `more` when the job
+   * goes on (its next step, or the same one tried again). */
+  private async galleryStep(): Promise<'listed' | 'given_up' | 'more'> {
     const job = this.galleryJobs[0]!;
     const card = this.gallery.cards.find((c) => c.key === job.key);
     const ids = { resourceId: job.m.resourceId, assetId: job.m.assetId, rating: job.m.rating };
+    let outcome: 'listed' | 'given_up' | 'more' = 'more';
     const done = (status: GalleryCard['status'] | null, note?: string) => {
       this.galleryJobs.shift();
+      outcome = status === 'listed' ? 'listed' : 'given_up';
       if (card && status) card.status = status;
       if (card && note) card.note = note.slice(0, 200);
       // Finished, or no longer Nova's to finish.
@@ -2670,10 +2819,23 @@ export class Sniper {
       } else if (r.ok) {
         job.step = 'list';
         job.tries = 0;
+      } else if (!job.cleared && this.deps.adapter.clearSold && r.error !== 'move_unsupported') {
+        // EA refuses a move onto a full transfer list, and sold cards waiting
+        // to be cleared are what fills it most often: clear them once (EA's
+        // own Clear Sold), then try the move again.
+        job.cleared = true;
+        const cleared = await this.deps.adapter.clearSold().catch(() => null);
+        this.addLog({
+          kind: 'info',
+          ...ids,
+          message: cleared?.ok
+            ? `{card} not moved to the transfer list (${moveMissReason(r.error)}): cleared the sold cards to make room, trying again`
+            : `{card} not moved to the transfer list (${moveMissReason(r.error)}), and the sold cards could not be cleared to make room: trying again`,
+        });
       } else if (++job.tries >= COLLECT_TRIES) {
         const why = moveMissReason(r.error);
-        done(null, `Not listed: ${why}. It is in your club or unassigned items`);
-        this.addLog({ kind: 'blocked', ...ids, message: `{card} not moved to the transfer list: ${why}` });
+        done(null, `Not listed: ${why}. In your club: ${GALLERY_STUCK_HINT}`);
+        this.addLog({ kind: 'blocked', ...ids, message: `{card} not moved to the transfer list: ${why} — it stays in your club: ${GALLERY_STUCK_HINT}` });
       }
     } else {
       // One step over what it cost, or the lowest price that covers EA's tax.
@@ -2691,8 +2853,7 @@ export class Sniper {
         this.addLog({ kind: 'blocked', ...ids, message: `not listed: ${why}` });
       }
     }
-    this.saveGallery();
-    this.deps.onChange();
+    return outcome;
   }
 
   private saveGallery(): void {
@@ -3861,4 +4022,14 @@ const STOP_MESSAGES: Record<SniperStopReason, string> = {
     "Gallery mode needs to send cards to your club and move them through EA's web app, and this page does not let Nova AI do that",
   gallery_budget: 'your Gallery budget is spent: raise it on the Gallery tab to go on',
   gallery_done: 'every card on your Gallery list is done: listed, or in your club already',
+  gallery_relisting: 'Relist from club is at work on the Gallery tab: wait for it to finish, then Start',
 };
+
+/** What `queueStuckGalleryCards` found, in the user's words. */
+function stuckQueuedText(r: { queued: number; stuck: number; why?: string }): string {
+  const waiting = plural(r.stuck, 'card');
+  if (r.why) return `${waiting} waiting in your club could not be found there (${r.why}): ${r.stuck === 1 ? 'it stays' : 'they stay'} in your club`;
+  if (r.queued === 0) return `none of the ${waiting} waiting in your club is in it any more: if you listed ${r.stuck === 1 ? 'it' : 'them'} yourself, press Listed it myself`;
+  const left = r.stuck - r.queued;
+  return `${r.queued === r.stuck ? waiting : `${r.queued} of the ${waiting}`} waiting in your club found there, on ${r.queued === 1 ? 'its' : 'their'} way to the market${left > 0 ? ` (${left} no longer in your club)` : ''}`;
+}

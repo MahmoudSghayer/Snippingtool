@@ -27,6 +27,7 @@ const EXPECTED_TABLES = [
   'user_recent_searches',
   'user_bot_settings',
   'user_gallery',
+  'user_gallery_completions',
   'settings_history',
   'notifications',
   'payments',

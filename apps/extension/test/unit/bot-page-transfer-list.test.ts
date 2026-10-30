@@ -193,6 +193,33 @@ describe('the Sold / Unsold counters and the Transfer list panel', () => {
   });
 });
 
+describe('the automatic Clear Sold line', () => {
+  it('says that the sold cards are cleared on their own, and what the last run did', () => {
+    let status = { everyMs: 10 * 60_000, lastAt: null as number | null, lastResult: null as { ok: boolean; message: string } | null, nextAt: 0, busy: false };
+    const list = createTransferListTracker();
+    list.update(cards(1, 3, 'closed'), true);
+    const m = mount(() => list.summary(), { transferTools: { clearSold: vi.fn(), relist: vi.fn(), autoClear: () => status } });
+    m.page.open();
+    const line = () => m.$('d-tl-auto');
+    expect(line().textContent).toBe('Sold cards are cleared on their own every 10 minutes');
+    // The button stays for the trader.
+    expect((m.$('d-tl-clear') as HTMLButtonElement).disabled).toBe(false);
+    // The line follows the status on the page's one-second tick.
+    status = { ...status, busy: true };
+    vi.advanceTimersByTime(1_000);
+    expect(line().textContent).toBe('Sold cards are cleared on their own every 10 minutes · clearing now…');
+    status = { ...status, busy: false, lastAt: new Date(2026, 0, 1, 12, 40, 5).getTime(), lastResult: { ok: true, message: 'Cleared 3 sold cards' } };
+    vi.advanceTimersByTime(1_000);
+    expect(line().textContent).toMatch(/^Sold cards are cleared on their own every 10 minutes · Cleared 3 sold cards at 12:40:05/);
+    expect(line().classList.contains('bad')).toBe(false);
+    status = { ...status, lastResult: { ok: false, message: 'Sold cards not cleared: EA did not answer in time' } };
+    vi.advanceTimersByTime(1_000);
+    expect(line().textContent).toContain('Sold cards not cleared: EA did not answer in time');
+    expect(line().classList.contains('bad')).toBe(true);
+    m.page.close();
+  });
+});
+
 describe('the Transfer list buttons', () => {
   function withTools(list = createTransferListTracker()) {
     let finishClear: (r: { ok: boolean; message: string }) => void = () => undefined;

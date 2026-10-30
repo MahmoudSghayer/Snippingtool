@@ -509,10 +509,44 @@ it('lets the trader mark a card Nova bought but could not list as listed by hand
     cards: [{ key: '1:80', name: 'Someone', rating: 80, playerId: 1, resourceId: 1, status: 'club', price: 1_300, tradeId: 't9', note: 'Bought before the page reloaded' }],
   };
   const { root, click, sniper } = await mount({ ...DEFAULT_BOT_MODE_SETTINGS, mode: 'gallery' }, gallery);
-  expect(root.querySelector('#gallery-feed .g-group')!.textContent).toBe('On the way to the market · 1');
+  // A card in the club can also be relisted from there (below).
+  expect(root.querySelector('#gallery-feed .g-group')!.textContent).toBe('On the way to the market · 1Relist from club');
   click('#gallery-feed [data-handled="1:80"]');
   expect(sniper.getGallery().cards[0]).toEqual({ key: '1:80', name: 'Someone', rating: 80, playerId: 1, resourceId: 1, status: 'listed', price: 1_300, note: 'Listed by hand' });
   expect(root.querySelector('#gallery-feed .g-group')!.textContent).toBe('Done · 1');
+});
+
+it('relists the cards waiting in the club from the Gallery feed, saying how it goes, and offers it only while the bot is stopped', async () => {
+  const gallery: GalleryState = {
+    budget: 100_000,
+    spent: 2_600,
+    cards: [
+      { key: '1:80', name: 'Someone', rating: 80, playerId: 1, resourceId: 1, status: 'club', price: 1_300, note: 'Not listed: EA did not move it' },
+      { key: '2:80', name: 'Other', rating: 80, playerId: 2, resourceId: 2, status: 'club', price: 1_300 },
+      { key: '3:80', name: 'Third', rating: 80, playerId: 3, resourceId: 3, status: 'bought', price: 1_300, tradeId: 't3' },
+    ],
+  };
+  const { root, click, sniper } = await mount({ ...DEFAULT_BOT_MODE_SETTINGS, mode: 'gallery' }, gallery);
+  let progress: (done: number, total: number) => void = () => undefined;
+  let finish: (r: { ok: boolean; message: string }) => void = () => undefined;
+  const relist = vi.spyOn(sniper, 'relistStuck').mockImplementation((onProgress) => {
+    progress = onProgress ?? progress;
+    return new Promise((resolve) => (finish = resolve));
+  });
+  const head = () => root.querySelector('#gallery-feed .g-group')!;
+  // Two of the three on the way wait in the club: the button counts those.
+  expect(head().textContent).toBe('On the way to the market · 3Relist from club (2)');
+  click('#gallery-feed [data-relist-club]');
+  expect(relist).toHaveBeenCalledTimes(1);
+  expect(head().textContent).toBe('On the way to the market · 3Relisting from your club…');
+  // No second press while one runs: the button is gone.
+  expect(root.querySelector('#gallery-feed [data-relist-club]')).toBeNull();
+  progress(1, 2);
+  expect(head().textContent).toBe('On the way to the market · 3Relisting 1 of 2 from your club…');
+  finish({ ok: false, message: 'Relisted 1 of 2 cards from your club; 1 not listed: see the Gallery tab' });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(head().textContent).toBe('On the way to the market · 3Relist from club (2)Relisted 1 of 2 cards from your club; 1 not listed: see the Gallery tab');
+  expect(root.querySelector('#gallery-feed .g-note.bad')).not.toBeNull();
 });
 
 it('says when fut.gg cannot be reached', async () => {

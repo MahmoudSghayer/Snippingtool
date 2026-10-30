@@ -163,7 +163,7 @@ const ITEM_ID = /^[1-9][0-9]{0,19}$/;
 /** The item's own id, as a string, or null. UTAS keeps it as
  * `itemData.id`; an entity carries it as `id` (both assumptions,
  * docs/06-extension.md). */
-function readItemId(item: Obj): string | null {
+export function readItemId(item: Record<string, unknown>): string | null {
   const raw = item.id;
   if (typeof raw !== 'number' && typeof raw !== 'string') return null;
   const id = toStr(raw);
