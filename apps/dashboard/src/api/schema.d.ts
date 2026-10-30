@@ -5388,11 +5388,12 @@ export interface paths {
                                     score?: number;
                                     guide?: number;
                                     /** @enum {string} */
-                                    status: "todo" | "bought" | "club" | "listed" | "skipped" | "owned";
+                                    status: "todo" | "bought" | "club" | "listed" | "skipped" | "owned" | "sbc";
                                     price?: number;
                                     market?: number;
                                     listPrice?: number;
                                     note?: string;
+                                    misses?: number;
                                     tradeId?: string;
                                 }[];
                                 sets?: {
@@ -5405,10 +5406,31 @@ export interface paths {
                                     score: number;
                                     tokens: number;
                                     cost: number;
+                                    tiers?: {
+                                        /** @enum {string} */
+                                        grade: "D" | "C" | "B" | "A" | "S";
+                                        threshold: number;
+                                    }[];
+                                    spares?: {
+                                        resourceId: number;
+                                        playerId: number;
+                                        name: string;
+                                        rating: number;
+                                        score: number;
+                                    }[];
+                                    upgrade?: {
+                                        /** @enum {string} */
+                                        grade: "D" | "C" | "B" | "A" | "S";
+                                        tokens: number;
+                                        cards: string[];
+                                    };
                                 }[];
                                 completed?: number[];
                                 completedAt?: {
                                     [key: string]: number;
+                                };
+                                completedGrade?: {
+                                    [key: string]: "D" | "C" | "B" | "A" | "S";
                                 };
                                 budget: number;
                                 spent: number;
@@ -5445,11 +5467,12 @@ export interface paths {
                                 score?: number;
                                 guide?: number;
                                 /** @enum {string} */
-                                status: "todo" | "bought" | "club" | "listed" | "skipped" | "owned";
+                                status: "todo" | "bought" | "club" | "listed" | "skipped" | "owned" | "sbc";
                                 price?: number;
                                 market?: number;
                                 listPrice?: number;
                                 note?: string;
+                                misses?: number;
                                 tradeId?: string;
                             }[];
                             sets?: {
@@ -5462,10 +5485,31 @@ export interface paths {
                                 score: number;
                                 tokens: number;
                                 cost: number;
+                                tiers?: {
+                                    /** @enum {string} */
+                                    grade: "D" | "C" | "B" | "A" | "S";
+                                    threshold: number;
+                                }[];
+                                spares?: {
+                                    resourceId: number;
+                                    playerId: number;
+                                    name: string;
+                                    rating: number;
+                                    score: number;
+                                }[];
+                                upgrade?: {
+                                    /** @enum {string} */
+                                    grade: "D" | "C" | "B" | "A" | "S";
+                                    tokens: number;
+                                    cards: string[];
+                                };
                             }[];
                             completed?: number[];
                             completedAt?: {
                                 [key: string]: number;
+                            };
+                            completedGrade?: {
+                                [key: string]: "D" | "C" | "B" | "A" | "S";
                             };
                             budget: number;
                             spent: number;
@@ -5489,6 +5533,119 @@ export interface paths {
             };
         };
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/extension/gallery/completions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    limit?: number;
+                    undone?: "include" | "exclude";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: {
+                                setId: number;
+                                name: string;
+                                grade: ("D" | "C" | "B" | "A" | "S") | null;
+                                tokens: number | null;
+                                /** Format: date-time */
+                                completedAt: string;
+                                undoneAt: string | null;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/extension/gallery/owned": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            resourceIds: number[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        resourceIds: number[];
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            added: number;
+                            total: number;
+                        };
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;

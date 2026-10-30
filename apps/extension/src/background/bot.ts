@@ -30,6 +30,7 @@ import {
   GALLERY_OWNED_BATCH_MAX,
   galleryOwnedResponseSchema,
   gallerySyncResponseSchema,
+  gallerySyncStatusSchema,
   galleryStateSchema,
   putGalleryResponseSchema,
   type BotBudgetState,
@@ -37,10 +38,11 @@ import {
   type BotModeSettings,
   type BotSettings,
   type GalleryState,
+  type GallerySyncStatus,
   type MarketCardHistoryResponse,
 } from '@sl/shared';
 
-import { apiJson, NetworkError } from '../lib/api.js';
+import { ApiError, apiJson, NetworkError } from '../lib/api.js';
 import { isAuthenticated } from '../lib/auth.js';
 import { logger } from '../lib/logger.js';
 import { getLocal, setLocal } from '../lib/storage.js';
@@ -67,6 +69,15 @@ const GALLERY_SYNCED_KEY = 'sl.bot.gallery.synced.v1';
 /** A running bot saves its list after every card step: at most one upload
  * this often, always the latest list, so steady saves never hold it back. */
 const GALLERY_UPLOAD_EVERY_MS = 2_000;
+/** How this browser's list stands with the account (`GallerySyncStatus`),
+ * for the Nova AI page: a save that never reached the account is never
+ * silent. */
+const GALLERY_SYNC_KEY = 'sl.bot.gallery.sync.v1';
+/** Once the API has refused a list for fields it does not know (it runs an
+ * older version than this build), uploads leave those fields out for this
+ * long before trying the whole list again, so a running bot's steady saves
+ * are not two requests each. */
+const GALLERY_LEAN_FOR_MS = 10 * 60 * 1000;
 /** Set (to the save's time) while a save has not reached the account yet. */
 const SETTINGS_PENDING_KEY = 'sl.bot.settings.pending.v1';
 /** A burst of edits (a slider dragged) goes up as one save. */
@@ -189,19 +200,141 @@ async function localGallery(): Promise<GalleryState | null> {
   return parsed.success ? parsed.data : null;
 }
 
-/** Sends `state` to the account. False when it did not get there (signed
- * out, offline, or refused: the local copy stays the one in use). */
-async function uploadGallery(state: GalleryState): Promise<boolean> {
-  if (!(await isAuthenticated())) return false;
-  try {
-    const body = await apiJson<unknown>('/api/v1/extension/gallery', { method: 'PUT', body: JSON.stringify({ state }) }, { retries: 1 });
-    const saved = putGalleryResponseSchema.safeParse(body);
-    if (saved.success) await setLocal(GALLERY_BASE_KEY, saved.data.updatedAt);
-    return true;
-  } catch (err) {
-    if (!(err instanceof NetworkError)) logger.warn(`Gallery list not saved to the account: ${String(err)}`, 'bot');
+/** Records how this browser's list stands with the account. */
+async function setGallerySync(status: Omit<GallerySyncStatus, 'at'>): Promise<void> {
+  await setLocal(GALLERY_SYNC_KEY, { ...status, at: Date.now() } satisfies GallerySyncStatus);
+}
+
+/** The fields the API's validation error says it does not know, by where
+ * they sit in the request body with array indices dropped (`state.sets`
+ * for the keys of every Set): apps/api's error handler sends
+ * fastify-type-provider-zod's issues under `details.issues`, each with the
+ * zod issue (`unrecognized_keys`, its `keys` and `path`) under
+ * `params.issue`. Empty when the refusal was about something else. */
+export function unknownGalleryKeys(details: Record<string, unknown> | undefined): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  const issues = details?.issues;
+  if (!Array.isArray(issues)) return out;
+  for (const raw of issues) {
+    const wrapped = raw as { params?: { issue?: unknown }; keyword?: unknown; instancePath?: unknown } | null;
+    const issue = (wrapped?.params?.issue ?? raw) as { code?: unknown; keys?: unknown; path?: unknown } | null;
+    if ((issue?.code ?? wrapped?.keyword) !== 'unrecognized_keys' || !Array.isArray(issue?.keys)) continue;
+    const path: unknown[] | null = Array.isArray(issue.path)
+      ? issue.path
+      : typeof wrapped?.instancePath === 'string'
+        ? wrapped.instancePath.split('/').filter((p) => p !== '')
+        : null;
+    if (!path) continue;
+    const where = path.filter((p): p is string => typeof p === 'string' && !/^\d+$/.test(p)).join('.');
+    const keys = out.get(where) ?? new Set<string>();
+    for (const k of issue.keys) if (typeof k === 'string') keys.add(k);
+    if (keys.size > 0) out.set(where, keys);
+  }
+  return out;
+}
+
+/** `value` without the keys in `unknown` at every object on each path (an
+ * array's elements sit at the array's own path). */
+export function withoutKeys(value: unknown, unknown: ReadonlyMap<string, ReadonlySet<string>>, where = ''): unknown {
+  if (Array.isArray(value)) return value.map((v) => withoutKeys(v, unknown, where));
+  if (value === null || typeof value !== 'object') return value;
+  const drop = unknown.get(where);
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (drop?.has(k)) continue;
+    out[k] = withoutKeys(v, unknown, where === '' ? k : `${where}.${k}`);
+  }
+  return out;
+}
+
+/** The fields the API last refused as unknown, and until when uploads leave
+ * them out without asking again (GALLERY_LEAN_FOR_MS). */
+let galleryUnknown: { keys: Map<string, Set<string>>; omitted: string[]; until: number } | null = null;
+
+/** Tests only: forgets which fields the API refused. */
+export function forgetGalleryUnknownForTests(): void {
+  galleryUnknown = null;
+}
+
+/** What `PUT /extension/gallery` answered. */
+async function putGallery(body: unknown): Promise<void> {
+  const answer = await apiJson<unknown>('/api/v1/extension/gallery', { method: 'PUT', body: JSON.stringify(body) }, { retries: 1 });
+  const saved = putGalleryResponseSchema.safeParse(answer);
+  if (saved.success) await setLocal(GALLERY_BASE_KEY, saved.data.updatedAt);
+}
+
+/** Sends `state` without the fields in `unknown`: the account then holds
+ * the trader's progress (every card and its status, the Sets, the completed
+ * ones) even while the API runs an older version than this build. */
+async function putLeanGallery(state: GalleryState, unknown: { keys: Map<string, Set<string>>; omitted: string[] }): Promise<void> {
+  await putGallery(withoutKeys({ state }, unknown.keys));
+  galleryUnknown = { ...unknown, until: Date.now() + GALLERY_LEAN_FOR_MS };
+  await setGallerySync({
+    state: 'partial',
+    savedAt: Date.now(),
+    omitted: unknown.omitted,
+    message: `The server runs an older version than this Nova build and does not know ${unknown.omitted.join(', ')} yet: your progress is saved to your account without them, and the whole list follows once the server is updated.`,
+  });
+}
+
+/** What an upload came to: the whole list is on the account (`full`), the
+ * list without the fields the API does not know yet (`partial`), or
+ * nothing (signed out, offline, or refused: the local copy stays the one
+ * in use). */
+type GalleryUpload = 'full' | 'partial' | false;
+
+/** Sends `state` to the account. An API older than this build refuses a
+ * list for the fields it does not know (a strict schema): the list then
+ * goes up without exactly those fields, so a Set completed on this browser
+ * still shows on every other, instead of the whole session staying on this
+ * browser alone. */
+async function uploadGallery(state: GalleryState): Promise<GalleryUpload> {
+  if (!(await isAuthenticated())) {
+    await setGallerySync({ state: 'signed_out', message: 'Sign in to Nova Trade to keep your Gallery list on your account.' });
     return false;
   }
+  if (galleryUnknown && Date.now() < galleryUnknown.until) {
+    try {
+      await putLeanGallery(state, galleryUnknown);
+      return 'partial';
+    } catch (err) {
+      galleryUnknown = null;
+      return galleryUploadFailed(err);
+    }
+  }
+  try {
+    await putGallery({ state });
+    galleryUnknown = null;
+    await setGallerySync({ state: 'saved', savedAt: Date.now() });
+    return 'full';
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 400 && err.code === 'VALIDATION_FAILED') {
+      const keys = unknownGalleryKeys(err.details);
+      if (keys.size > 0) {
+        const omitted = [...keys].flatMap(([where, names]) => [...names].map((k) => (where === 'state' ? k : `${where.replace(/^state\./, '')}.${k}`)));
+        logger.warn(`Gallery list saved to the account without ${omitted.join(', ')}: the API does not know them yet (deploy it)`, 'bot');
+        try {
+          await putLeanGallery(state, { keys, omitted });
+          return 'partial';
+        } catch (again) {
+          return galleryUploadFailed(again);
+        }
+      }
+    }
+    return galleryUploadFailed(err);
+  }
+}
+
+/** Records why an upload came to nothing. */
+async function galleryUploadFailed(err: unknown): Promise<false> {
+  if (err instanceof NetworkError) {
+    await setGallerySync({ state: 'offline', message: 'Nova Trade could not be reached: your Gallery list is saved on this browser and goes to your account when it can.' });
+    return false;
+  }
+  const why = err instanceof ApiError ? `${err.message} (${err.code})` : String(err);
+  logger.error(`Gallery list not saved to the account: ${why}`, 'bot');
+  await setGallerySync({ state: 'failed', message: `Your account refused the Gallery list: ${why}. Your progress is only on this browser until a save goes through.` });
+  return false;
 }
 
 /** The account's list and when it was saved there (both null: it has
@@ -209,14 +342,22 @@ async function uploadGallery(state: GalleryState): Promise<boolean> {
  * be asked (signed out, offline, refused), which must never read as
  * "none": the local copy would then overwrite the account's. */
 async function accountGallery(): Promise<{ state: GalleryState | null; updatedAt: string | null } | undefined> {
-  if (!(await isAuthenticated())) return undefined;
+  if (!(await isAuthenticated())) {
+    await setGallerySync({ state: 'signed_out', message: 'Sign in to Nova Trade to see the Gallery list saved on your account.' });
+    return undefined;
+  }
   try {
     // One retry: the page is waiting on this to show the list.
     const body = await apiJson<unknown>('/api/v1/extension/gallery', {}, { retries: 1 });
     const parsed = gallerySyncResponseSchema.safeParse(body);
     return parsed.success ? parsed.data : undefined;
   } catch (err) {
-    if (!(err instanceof NetworkError)) logger.warn(`Gallery list not read from the account: ${String(err)}`, 'bot');
+    if (err instanceof NetworkError) {
+      await setGallerySync({ state: 'offline', message: 'Nova Trade could not be reached: showing the Gallery list saved on this browser.' });
+    } else {
+      logger.warn(`Gallery list not read from the account: ${String(err)}`, 'bot');
+      await setGallerySync({ state: 'failed', message: `Your account's Gallery list could not be read: ${String(err)}. Showing the list saved on this browser.` });
+    }
     return undefined;
   }
 }
@@ -226,15 +367,17 @@ async function accountGallery(): Promise<{ state: GalleryState | null; updatedAt
 let galleryUploads: Promise<unknown> = Promise.resolve();
 let galleryQueued = 0;
 
-/** Queues `state` for the account; once it is there, clears the pending
- * mark of the save at `savedAt` (unless a later save set it again). */
+/** Queues `state` for the account; once the whole of it is there, clears
+ * the pending mark of the save at `savedAt` (unless a later save set it
+ * again). A partial upload keeps the mark: the whole list is still to go
+ * up, at the next load or save, once the API is updated. */
 function queueGalleryUpload(state: GalleryState, savedAt: number | null): Promise<boolean> {
   const seq = ++galleryQueued;
   const run = galleryUploads.then(async () => {
     if (seq !== galleryQueued) return false;
-    const ok = await uploadGallery(state);
-    if (ok && savedAt != null) await clearGalleryPendingIf(savedAt);
-    return ok;
+    const sent = await uploadGallery(state);
+    if (sent === 'full' && savedAt != null) await clearGalleryPendingIf(savedAt);
+    return sent !== false;
   });
   galleryUploads = run.catch(() => undefined);
   return run;
@@ -290,9 +433,16 @@ async function takeAccountGallery(
   await setLocal(GALLERY_BASE_KEY, updatedAt);
   if (merged === account) {
     if (pending != null) await clearGalleryPendingIf(pending);
+    await setGallerySync({ state: 'saved', savedAt: savedAtOf(updatedAt) });
     return { state: merged, upload: null };
   }
   return { state: merged, upload: queueGalleryUpload(merged, pending) };
+}
+
+/** The account's save time as epoch ms (now, when it cannot be read). */
+function savedAtOf(updatedAt: string | null): number {
+  const t = updatedAt ? Date.parse(updatedAt) : NaN;
+  return Number.isFinite(t) && t > 0 ? t : Date.now();
 }
 
 /**
@@ -338,12 +488,37 @@ export async function handleBotGalleryGet(): Promise<GalleryState | null> {
     }
     await setLocal(GALLERY_KEY, account.state);
     await setLocal(GALLERY_BASE_KEY, account.updatedAt);
+    await setGallerySync({ state: 'saved', savedAt: savedAtOf(account.updatedAt) });
     if (!synced) await syncedOnce(null);
     return account.state;
   }
   if (local) void syncedOnce(queueGalleryUpload(local, null));
   else if (!synced) await syncedOnce(null);
   return local;
+}
+
+/** How this browser's list stands with the account (`bot.gallerySyncGet`):
+ * the last upload's or load's outcome, or `pending` while a save is still
+ * on its way. Null before anything was ever saved or loaded. */
+export async function handleBotGallerySyncGet(): Promise<GallerySyncStatus | null> {
+  const parsed = gallerySyncStatusSchema.safeParse(await getLocal<unknown>(GALLERY_SYNC_KEY, null));
+  if (!parsed.success) return null;
+  const status = parsed.data;
+  // A save made since the last upload landed (the mark of the save that
+  // upload carried was cleared when it landed), still throttled or queued.
+  const pending = await getLocal<number | null>(GALLERY_PENDING_KEY, null);
+  if (pending != null && status.state === 'saved') return { ...status, state: 'pending' };
+  return status;
+}
+
+/** Sends this browser's list to the account now (`bot.gallerySyncNow`:
+ * the page's Sync now), the whole of it, even if the API refused fields
+ * before (it may have been updated since), and answers how it went. */
+export async function handleBotGallerySyncNow(): Promise<GallerySyncStatus | null> {
+  galleryUnknown = null;
+  const local = await localGallery();
+  if (local) await queueGalleryUpload(local, await getLocal<number | null>(GALLERY_PENDING_KEY, null));
+  return handleBotGallerySyncGet();
 }
 
 /** The account's collected-card catalogue (user_gallery_owned): every card id

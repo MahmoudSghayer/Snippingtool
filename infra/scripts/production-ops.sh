@@ -31,6 +31,13 @@
 #                           in REPORT_TZ, default Asia/Jerusalem, pace, risk
 #                           signals, settings), as CSV sections, encrypted
 #                           like session-report
+#   OPS_ACTION=gallery-report [EMAIL_SHA=...] REPORT_PUBKEY_B64=... [REPORT_HOURS]
+#                           [REPORT_TZ]: a trader's whole Gallery mode picture
+#                           (the list, every Set's progress, the completed
+#                           Sets newest first, the cards uncompleted Sets
+#                           still need, the window's buys, the completed
+#                           log); EMAIL_SHA empty = the trader most recently
+#                           active. Encrypted like session-report
 #   OPS_ACTION=admin-panels the data behind the admin dashboard's Overview,
 #                           Activity and System pages (row counts, latest
 #                           timestamps, versions) and the API's failed
@@ -774,6 +781,144 @@ SELECT n.player, po.source, po.platform, po.price_kind, po.price,
   CROSS JOIN LATERAL (SELECT * FROM price_observations p WHERE p.card_id = c.id
                        ORDER BY p.observed_at DESC LIMIT 3) po
  ORDER BY 1, po.observed_at DESC;
+SQL
+    print_encrypted_report "$work"
+    ;;
+
+  gallery-report)
+    # A trader's whole Gallery mode picture, to pick a session up on another
+    # browser or to finish Sets in the game: the account's list as it
+    # stands (when it was last saved, each Set's progress), the Sets marked
+    # completed newest first, every card a Set not completed still needs
+    # (to buy, not on the market, SBC/Objective, on its way), the window's
+    # buys matched to the list's cards, the cards clubbed for the Gallery,
+    # and the completed-Sets log (user_gallery_completions, 0043) where the
+    # database has it. EMAIL_SHA picks the account; empty, the trader most
+    # recently active (the last heartbeat, buy attempt or trade in 30 days).
+    # The trader's own data, so encrypted exactly like session-report.
+    sha="${EMAIL_SHA:-}"
+    [ -z "$sha" ] || [[ "$sha" =~ ^[0-9a-f]{64}$ ]] || { echo 'EMAIL_SHA is not a sha256' >&2; exit 1; }
+    hours="${REPORT_HOURS:-48}"
+    [[ "$hours" =~ ^[0-9]{1,4}$ ]] || { echo 'REPORT_HOURS must be a number' >&2; exit 1; }
+    tz="${REPORT_TZ:-Asia/Jerusalem}"
+    [[ "$tz" =~ ^[A-Za-z_]+(/[A-Za-z0-9_+-]+){0,2}$ ]] || { echo 'REPORT_TZ is not a time zone name' >&2; exit 1; }
+    command -v openssl >/dev/null || { echo 'openssl is not installed on the server' >&2; exit 1; }
+    work="$(mktemp -d)"
+    trap 'rm -rf "$work"' EXIT
+    printf '%s' "${REPORT_PUBKEY_B64:?set REPORT_PUBKEY_B64}" | base64 -d >"$work/pub.pem"
+    openssl pkey -pubin -in "$work/pub.pem" -noout 2>/dev/null ||
+      { echo 'REPORT_PUBKEY_B64 is not a public key' >&2; exit 1; }
+    openssl rand -hex 32 >"$work/key"
+    pg="$(container postgres)"
+    [ -n "$pg" ] || { echo "no running postgres container in $project" >&2; exit 1; }
+    docker exec -i -e EMAIL_SHA="$sha" -e HOURS="$hours" -e TZNAME="$tz" "$pg" sh -c \
+      'psql -X -q -v ON_ERROR_STOP=1 -P pager=off -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v email_sha="$EMAIL_SHA" -v hours="$HOURS" -v tz="$TZNAME"' \
+      >"$work/report.txt" 2>&1 <<'SQL' || true
+\pset footer off
+SELECT u.id AS uid, coalesce(u.timezone, 'UTC') AS tz,
+       CASE WHEN :'email_sha' <> '' THEN 'the account with that email' ELSE 'the trader most recently active' END AS how
+  FROM users u
+ WHERE u.deleted_at IS NULL
+   AND CASE WHEN :'email_sha' <> ''
+            THEN encode(sha256(convert_to(lower(u.email::text), 'UTF8')), 'hex') = :'email_sha'
+            ELSE u.id = (SELECT a.user_id FROM user_activity a
+                          WHERE a.occurred_at > now() - interval '30 days'
+                            AND a.type IN ('heartbeat', 'login')
+                          ORDER BY a.occurred_at DESC LIMIT 1)
+       END
+ LIMIT 1 \gset
+\if :{?uid}
+\echo 'account:' :how '· window: last' :hours 'hours · times in' :tz
+\else
+\echo 'no account: no user with that email, or no trader active in the last 30 days'
+\quit
+\endif
+
+\echo
+\echo '== the account''s Gallery list (as last saved to the account)'
+SELECT to_char(g.updated_at AT TIME ZONE :'tz', 'YYYY-MM-DD HH24:MI') AS last_saved_local,
+       jsonb_array_length(CASE WHEN jsonb_typeof(g.state -> 'sets') = 'array' THEN g.state -> 'sets' ELSE '[]'::jsonb END) AS sets_on_list,
+       jsonb_array_length(CASE WHEN jsonb_typeof(g.state -> 'completed') = 'array' THEN g.state -> 'completed' ELSE '[]'::jsonb END) AS sets_completed,
+       jsonb_array_length(CASE WHEN jsonb_typeof(g.state -> 'cards') = 'array' THEN g.state -> 'cards' ELSE '[]'::jsonb END) AS cards,
+       g.state ->> 'spent' AS spent, g.state ->> 'budget' AS budget
+  FROM user_gallery g WHERE g.user_id = :'uid';
+
+\echo '== Sets on the list: progress (collected = through your club: in the club, listed, or owned already)'
+WITH g AS (SELECT state AS st FROM user_gallery WHERE user_id = :'uid'),
+     cd AS (SELECT jsonb_array_elements(CASE WHEN jsonb_typeof((SELECT st FROM g) -> 'cards') = 'array' THEN (SELECT st FROM g) -> 'cards' ELSE '[]'::jsonb END) AS c),
+     st AS (SELECT jsonb_array_elements(CASE WHEN jsonb_typeof((SELECT st FROM g) -> 'sets') = 'array' THEN (SELECT st FROM g) -> 'sets' ELSE '[]'::jsonb END) AS s),
+     cp AS (SELECT jsonb_array_elements_text(CASE WHEN jsonb_typeof((SELECT st FROM g) -> 'completed') = 'array' THEN (SELECT st FROM g) -> 'completed' ELSE '[]'::jsonb END) AS cid)
+SELECT s ->> 'name' AS set, s ->> 'grade' AS grade, s ->> 'tokens' AS tokens,
+       (SELECT count(*) FROM cd WHERE c -> 'setIds' @> to_jsonb((s ->> 'id')::bigint) AND c ->> 'status' IN ('owned', 'club', 'listed')) AS collected,
+       (SELECT count(*) FROM cd WHERE c -> 'setIds' @> to_jsonb((s ->> 'id')::bigint)) AS total,
+       (SELECT count(*) FROM cd WHERE c -> 'setIds' @> to_jsonb((s ->> 'id')::bigint) AND c ->> 'status' = 'todo') AS to_buy,
+       (SELECT count(*) FROM cd WHERE c -> 'setIds' @> to_jsonb((s ->> 'id')::bigint) AND c ->> 'status' IN ('bought', 'club')) AS on_the_way,
+       (SELECT count(*) FROM cd WHERE c -> 'setIds' @> to_jsonb((s ->> 'id')::bigint) AND c ->> 'status' = 'skipped') AS skipped,
+       (SELECT count(*) FROM cd WHERE c -> 'setIds' @> to_jsonb((s ->> 'id')::bigint) AND c ->> 'status' = 'sbc') AS sbc,
+       EXISTS (SELECT 1 FROM cp WHERE cid = s ->> 'id') AS completed,
+       CASE WHEN ((SELECT st FROM g) -> 'completedAt' ->> (s ->> 'id')) ~ '^[0-9]{1,16}$'
+            THEN to_char(to_timestamp(((SELECT st FROM g) -> 'completedAt' ->> (s ->> 'id'))::bigint / 1000.0) AT TIME ZONE :'tz', 'MM-DD HH24:MI')
+            END AS completed_local
+  FROM st ORDER BY completed, set;
+
+\echo '== completed Sets, newest first (the list''s own record; a Set the list no longer describes shows by its id)'
+WITH g AS (SELECT state AS st FROM user_gallery WHERE user_id = :'uid'),
+     cp AS (SELECT jsonb_array_elements_text(CASE WHEN jsonb_typeof((SELECT st FROM g) -> 'completed') = 'array' THEN (SELECT st FROM g) -> 'completed' ELSE '[]'::jsonb END) AS cid),
+     st AS (SELECT jsonb_array_elements(CASE WHEN jsonb_typeof((SELECT st FROM g) -> 'sets') = 'array' THEN (SELECT st FROM g) -> 'sets' ELSE '[]'::jsonb END) AS s)
+SELECT cp.cid AS set_id,
+       coalesce((SELECT s ->> 'name' FROM st WHERE s ->> 'id' = cp.cid LIMIT 1), 'Set #' || cp.cid) AS set,
+       coalesce((SELECT st FROM g) -> 'completedGrade' ->> cp.cid, (SELECT s ->> 'grade' FROM st WHERE s ->> 'id' = cp.cid LIMIT 1)) AS grade,
+       (SELECT s ->> 'tokens' FROM st WHERE s ->> 'id' = cp.cid LIMIT 1) AS tokens,
+       CASE WHEN ((SELECT st FROM g) -> 'completedAt' ->> cp.cid) ~ '^[0-9]{1,16}$'
+            THEN to_char(to_timestamp(((SELECT st FROM g) -> 'completedAt' ->> cp.cid)::bigint / 1000.0) AT TIME ZONE :'tz', 'YYYY-MM-DD HH24:MI')
+            END AS completed_local
+  FROM cp
+ ORDER BY CASE WHEN ((SELECT st FROM g) -> 'completedAt' ->> cp.cid) ~ '^[0-9]{1,16}$'
+               THEN ((SELECT st FROM g) -> 'completedAt' ->> cp.cid)::bigint END DESC NULLS LAST;
+
+\echo '== cards Sets not completed still need (todo = to buy; skipped = nobody lists it; sbc = collect it in the game; bought/club = on its way)'
+WITH g AS (SELECT state AS st FROM user_gallery WHERE user_id = :'uid'),
+     cd AS (SELECT jsonb_array_elements(CASE WHEN jsonb_typeof((SELECT st FROM g) -> 'cards') = 'array' THEN (SELECT st FROM g) -> 'cards' ELSE '[]'::jsonb END) AS c),
+     st AS (SELECT jsonb_array_elements(CASE WHEN jsonb_typeof((SELECT st FROM g) -> 'sets') = 'array' THEN (SELECT st FROM g) -> 'sets' ELSE '[]'::jsonb END) AS s),
+     cp AS (SELECT jsonb_array_elements_text(CASE WHEN jsonb_typeof((SELECT st FROM g) -> 'completed') = 'array' THEN (SELECT st FROM g) -> 'completed' ELSE '[]'::jsonb END) AS cid)
+SELECT s ->> 'name' AS set, c ->> 'name' AS player, c ->> 'rating' AS rating, c ->> 'version' AS version,
+       c ->> 'status' AS status, c ->> 'guide' AS futgg_price, c ->> 'market' AS market_price, c ->> 'price' AS paid,
+       left(c ->> 'note', 90) AS note
+  FROM st, cd
+ WHERE c -> 'setIds' @> to_jsonb((s ->> 'id')::bigint)
+   AND NOT EXISTS (SELECT 1 FROM cp WHERE cid = s ->> 'id')
+   AND coalesce(c ->> 'status', '') NOT IN ('owned', 'club', 'listed')
+ ORDER BY set, status, (c ->> 'rating')::int DESC NULLS LAST;
+
+\echo '== buys in the window (every trade; matched to the list''s cards by card id where it is on the list)'
+WITH g AS (SELECT state AS st FROM user_gallery WHERE user_id = :'uid'),
+     cd AS (SELECT jsonb_array_elements(CASE WHEN jsonb_typeof((SELECT st FROM g) -> 'cards') = 'array' THEN (SELECT st FROM g) -> 'cards' ELSE '[]'::jsonb END) AS c)
+SELECT to_char(t.bought_at AT TIME ZONE :'tz', 'MM-DD HH24:MI') AS bought_local, t.buy_price, t.status, t.sell_price,
+       coalesce(x.c ->> 'name', (SELECT coalesce(k.common_name, k.name) FROM cards k WHERE k.resource_id = t.resource_id LIMIT 1), t.resource_id) AS player,
+       coalesce(x.c ->> 'rating', t.rating::text) AS rating, x.c ->> 'set' AS set, x.c ->> 'status' AS card_status
+  FROM trades t
+  LEFT JOIN LATERAL (SELECT c FROM cd WHERE (c ->> 'resourceId') = t.resource_id LIMIT 1) x ON true
+ WHERE t.user_id = :'uid' AND t.deleted_at IS NULL
+   AND t.bought_at > now() - make_interval(hours => :hours)
+ ORDER BY t.bought_at;
+
+\echo '== cards clubbed for the Gallery (user_gallery_owned): in the window, and ever'
+SELECT count(*) FILTER (WHERE first_seen_at > now() - make_interval(hours => :hours)) AS clubbed_in_window,
+       to_char(max(first_seen_at) AT TIME ZONE :'tz', 'MM-DD HH24:MI') AS last_local,
+       count(*) AS clubbed_ever
+  FROM user_gallery_owned WHERE user_id = :'uid';
+
+SELECT to_regclass('public.user_gallery_completions') IS NOT NULL AS has_log \gset
+\if :has_log
+\echo '== completed Sets log (user_gallery_completions: kept after the list is cleared), newest first'
+SELECT set_id, set_name, grade, tokens,
+       to_char(completed_at AT TIME ZONE :'tz', 'YYYY-MM-DD HH24:MI') AS completed_local,
+       to_char(undone_at AT TIME ZONE :'tz', 'YYYY-MM-DD HH24:MI') AS undone_local
+  FROM user_gallery_completions WHERE user_id = :'uid'
+ ORDER BY completed_at DESC LIMIT 100;
+\else
+\echo '== completed Sets log: not in this database yet (migration 0043 comes with the next deploy)'
+\endif
 SQL
     print_encrypted_report "$work"
     ;;

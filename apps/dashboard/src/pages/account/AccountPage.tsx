@@ -1,10 +1,11 @@
 // /account: the customer's "My account" page, inside the website's header
 // and footer (routes/SiteLayout.tsx). A "Getting started" checklist for new
-// customers, then five sections in the order a customer needs them: what
-// they have, the download, how to pay, where they're signed in, and how
-// they sign in.
+// customers, then six sections in the order a customer needs them: what
+// they have, the download, their Gallery (what Nova AI saved from their
+// browser), how to pay, where they're signed in, and how they sign in.
 import { PaymentHistory, PayWithPayPal, SubmitPayment } from '@/components/account/BuyPass.js';
 import { DevicesCard } from '@/components/account/DevicesCard.js';
+import { GallerySection } from '@/components/account/GallerySection.js';
 import { GettingStarted } from '@/components/account/GettingStarted.js';
 import { PassSummary } from '@/components/account/PassSummary.js';
 import { ChangePasswordCard, DeleteAccountCard, EmailCard } from '@/components/account/Security.js';
@@ -74,8 +75,17 @@ export function AccountPage() {
       </AccountSection>
 
       <AccountSection
-        id="buy"
+        id="gallery"
         index={3}
+        title="Gallery"
+        description="Nova AI's Gallery mode as saved on your account: the Sets in progress and every card they still need, and the Sets you completed lately. Another browser you sign in on picks the list up from here."
+      >
+        <GallerySection />
+      </AccountSection>
+
+      <AccountSection
+        id="buy"
+        index={4}
         title="Buy or renew"
         description={
           <>
@@ -98,14 +108,14 @@ export function AccountPage() {
 
       <AccountSection
         id="devices"
-        index={4}
+        index={5}
         title="Devices"
         description="Browsers signed in to your account. Your plan sets how many you can use; revoke one you no longer use to free a slot."
       >
         <DevicesCard />
       </AccountSection>
 
-      <AccountSection id="security" index={5} title="Account and security">
+      <AccountSection id="security" index={6} title="Account and security">
         <EmailCard />
         <ChangePasswordCard />
         {/* No two-factor card: login 2FA is off (apps/api MFA_ENABLED). */}

@@ -432,9 +432,38 @@ the account version this browser's copy is based on. At load:
 
 The content script reads the list at page load and again when the bot is
 first prepared after the trader signs in from the account view, so that
-sign-in shows the account's list without a reload. The API holds the list to
-`galleryStateSchema` (a field added there needs the API deployed first: until
-then the upload is refused and the local copy, still pending, stays in use).
+sign-in shows the account's list without a reload.
+
+**An API older than the extension.** The API holds the list to a strict
+`galleryStateSchema`, so when it runs an older build than the extension (a
+field added to the schema, the API not deployed yet) it refuses the whole
+list as `VALIDATION_FAILED`, naming the keys it does not know. Background
+then sends the list again without exactly those keys (`unknownGalleryKeys`
+reads them from the error's issues, `withoutKeys` drops them at every object
+on each path), so every card's status, the Sets and the completed Sets still
+reach the account and every other browser, instead of the whole session
+staying on one browser. The save keeps its pending mark (the whole list is
+still to go up, once the API is updated), and the keys are left out of the
+next saves for 10 minutes without asking again, so a running bot's saves are
+not two requests each; **Sync now** tries the whole list at once. A refusal
+for anything else is reported, not worked around.
+
+**The sync status.** What the last upload or load came to is kept beside the
+list (`sl.bot.gallery.sync.v1`, `GallerySyncStatus`: `saved` and when,
+`partial` with the fields omitted, `pending`, `failed` with why, `signed_out`,
+`offline`) and shown on the page's Gallery section and Gallery feed, with
+a **Sync now** button (`bot.gallerySyncGet` / `bot.gallerySyncNow`), read
+again every few seconds while the page is open, so a save that never reached
+the account is never silent.
+
+**Completed Sets.** The page's Completed Sets section lists the Sets marked
+completed newest first (name, grade, tokens, when), to finish in the game.
+The account keeps a durable log of them too (`user_gallery_completions`,
+`GET /extension/gallery/completions`, docs/03-api.md): the API appends to it
+on every save (a Set id newly in `completed`, with the name, grade, tokens
+and time the list carries) and marks a Set undone when its id leaves, so the
+log survives Clear list, Reset and the 500-Set cap; the dashboard's Account
+page shows it, with the Sets in progress and the cards they still need.
 
 The dash's **Sold** and **Unsold** counters and its **Transfer list** panel
 (cards on the list out of EA's 100, then how many are listed and not

@@ -186,7 +186,7 @@ describe('describePass', () => {
 });
 
 describe('AccountPage', () => {
-  it('shows the getting-started checklist, then the five sections in order', async () => {
+  it('shows the getting-started checklist, then the six sections in order', async () => {
     mockApi(subscription({}));
     await renderAccount();
 
@@ -195,6 +195,7 @@ describe('AccountPage', () => {
       'Getting started',
       'Your pass',
       'Get the extension',
+      'Gallery',
       'Buy or renew',
       'Devices',
       'Account and security',

@@ -15,9 +15,11 @@ import {
   userActivity,
   userBotSettings,
   userGallery,
+  userGalleryCompletions,
   userGalleryOwned,
   userRecentSearches,
   users,
+  type Database,
 } from '@sl/db';
 import {
   addGalleryOwnedRequestSchema,
@@ -28,6 +30,8 @@ import {
   bootstrapResponseSchema,
   extensionErrorReportSchema,
   FEATURE_KEYS,
+  galleryCompletionsQuerySchema,
+  galleryCompletionsResponseSchema,
   galleryOwnedResponseSchema,
   gallerySyncResponseSchema,
   galleryStateSchema,
@@ -47,6 +51,9 @@ import {
   telemetryFlushRequestSchema,
   type BootstrapResponse,
   type BotSettingsSyncResponse,
+  type GalleryCompletionsResponse,
+  type GalleryGrade,
+  type GalleryState,
   type GallerySyncResponse,
   type LicenseDto,
   type AddGalleryOwnedResponse,
@@ -57,7 +64,7 @@ import {
   type RecentSearchesResponse,
   type SubscriptionDto,
 } from '@sl/shared';
-import { and, desc, eq, gte, isNotNull, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import fp from 'fastify-plugin';
 import { z } from 'zod';
 
@@ -234,6 +241,79 @@ function toGalleryResponse(
   if (!row) return { state: null, updatedAt: null };
   const parsed = galleryStateSchema.safeParse(row.state);
   return { state: parsed.success ? parsed.data : null, updatedAt: row.updatedAt.toISOString() };
+}
+
+/** A Drizzle transaction handle (what `db.transaction(cb)` passes `cb`). */
+type Transaction = Parameters<Parameters<Database['transaction']>[0]>[0];
+
+const GALLERY_GRADE_SET: ReadonlySet<string> = new Set(['D', 'C', 'B', 'A', 'S']);
+
+/** The Set ids a stored list marks completed. The row is whatever an
+ * earlier build saved (`toGalleryResponse` reads one the schema no longer
+ * accepts as none), so only the one array is read, and only its numbers. */
+function completedIdsOf(state: Record<string, unknown> | undefined): Set<number> {
+  const ids = state?.completed;
+  if (!Array.isArray(ids)) return new Set();
+  return new Set(ids.filter((id): id is number => Number.isInteger(id) && id > 0));
+}
+
+/**
+ * Keeps the account's log of completed Sets (user_gallery_completions,
+ * 0043) in step with a list being saved: a Set id newly in `completed` is
+ * logged with the name, grade, tokens and time the list carries (its id
+ * and the save's time when it carries none), and one no longer there is
+ * marked undone. A re-send of the same list logs nothing twice (the unique
+ * constraint on the completion time). The list stays the source of truth
+ * for what stands completed; the log remembers it after the list is
+ * cleared, reset or capped.
+ */
+async function logCompletions(
+  tx: Transaction,
+  userId: string,
+  before: Record<string, unknown> | undefined,
+  after: GalleryState,
+): Promise<void> {
+  const was = completedIdsOf(before);
+  const now = new Set(after.completed ?? []);
+  const added = [...now].filter((id) => !was.has(id));
+  const gone = [...was].filter((id) => !now.has(id));
+  if (added.length > 0) {
+    const sets = new Map((after.sets ?? []).map((s) => [s.id, s]));
+    await tx
+      .insert(userGalleryCompletions)
+      .values(
+        added.map((setId) => {
+          const set = sets.get(setId);
+          // The list's time for it (epoch ms); the save's own when it has
+          // none, or one no Date can hold (the schema allows any positive
+          // integer, and an invalid Date is not a timestamptz).
+          const at = new Date(after.completedAt?.[String(setId)] ?? NaN);
+          const grade = after.completedGrade?.[String(setId)] ?? set?.grade ?? null;
+          return {
+            id: newId(),
+            userId,
+            setId,
+            setName: set?.name ?? `Set #${setId}`,
+            grade: grade !== null && GALLERY_GRADE_SET.has(grade) ? grade : null,
+            tokens: set?.tokens ?? null,
+            completedAt: Number.isNaN(at.getTime()) ? new Date() : at,
+          };
+        }),
+      )
+      .onConflictDoNothing();
+  }
+  if (gone.length > 0) {
+    await tx
+      .update(userGalleryCompletions)
+      .set({ undoneAt: new Date() })
+      .where(
+        and(
+          eq(userGalleryCompletions.userId, userId),
+          inArray(userGalleryCompletions.setId, gone),
+          isNull(userGalleryCompletions.undoneAt),
+        ),
+      );
+  }
 }
 
 export default fp(
@@ -568,14 +648,73 @@ export default fp(
       async (request): Promise<PutGalleryResponse> => {
         const userId = request.authUser!.id;
         const { state } = request.body;
-        // One row per user (user_id is unique): the first save creates it,
-        // every later one replaces the list.
-        const [row] = await fastify.db
-          .insert(userGallery)
-          .values({ id: newId(), userId, state })
-          .onConflictDoUpdate({ target: userGallery.userId, set: { state } })
-          .returning({ updatedAt: userGallery.updatedAt });
-        return { updatedAt: row!.updatedAt.toISOString() };
+        return fastify.db.transaction(async (tx) => {
+          // What the list marked completed before this save, for the log.
+          const before = await tx.query.userGallery.findFirst({
+            where: eq(userGallery.userId, userId),
+            columns: { state: true },
+          });
+          // One row per user (user_id is unique): the first save creates it,
+          // every later one replaces the list.
+          const [row] = await tx
+            .insert(userGallery)
+            .values({ id: newId(), userId, state })
+            .onConflictDoUpdate({ target: userGallery.userId, set: { state } })
+            .returning({ updatedAt: userGallery.updatedAt });
+          await logCompletions(tx, userId, before?.state, state);
+          return { updatedAt: row!.updatedAt.toISOString() };
+        });
+      },
+    );
+
+    // The account's log of completed Sets (user_gallery_completions, 0043),
+    // newest first: what the trader finished lately, to Autocomplete in the
+    // game, on any browser and on the dashboard's Gallery section. Kept
+    // after the list is cleared or reset; a Set undone is hidden unless
+    // asked for (`undone=include`). Ungated like the list itself.
+    app.get(
+      '/api/v1/extension/gallery/completions',
+      {
+        onRequest: [fastify.authenticate],
+        config: { rateLimit: INGEST_RATE_LIMIT },
+        schema: {
+          tags: ['extension'],
+          querystring: galleryCompletionsQuerySchema,
+          response: { 200: galleryCompletionsResponseSchema },
+        },
+      },
+      async (request): Promise<GalleryCompletionsResponse> => {
+        const userId = request.authUser!.id;
+        const { limit, undone } = request.query;
+        const rows = await fastify.db
+          .select({
+            setId: userGalleryCompletions.setId,
+            setName: userGalleryCompletions.setName,
+            grade: userGalleryCompletions.grade,
+            tokens: userGalleryCompletions.tokens,
+            completedAt: userGalleryCompletions.completedAt,
+            undoneAt: userGalleryCompletions.undoneAt,
+          })
+          .from(userGalleryCompletions)
+          .where(
+            and(
+              eq(userGalleryCompletions.userId, userId),
+              undone === 'include' ? undefined : isNull(userGalleryCompletions.undoneAt),
+            ),
+          )
+          .orderBy(desc(userGalleryCompletions.completedAt), desc(userGalleryCompletions.createdAt))
+          .limit(limit);
+        return {
+          items: rows.map((r) => ({
+            setId: r.setId,
+            name: r.setName,
+            grade:
+              r.grade !== null && GALLERY_GRADE_SET.has(r.grade) ? (r.grade as GalleryGrade) : null,
+            tokens: r.tokens,
+            completedAt: r.completedAt.toISOString(),
+            undoneAt: r.undoneAt?.toISOString() ?? null,
+          })),
+        };
       },
     );
 

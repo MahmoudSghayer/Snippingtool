@@ -250,6 +250,88 @@ export const putGalleryResponseSchema = z.object({ updatedAt: z.string().datetim
 export type PutGalleryResponse = z.infer<typeof putGalleryResponseSchema>;
 
 // ---------------------------------------------------------------------------
+// How this browser's list stands with the account (apps/extension
+// background/bot.ts keeps it beside the list; the Nova AI page shows it), so
+// a save that never reached the account is never silent.
+
+export const GALLERY_SYNC_STATES = [
+  /** The account holds this browser's latest list (or this browser took the
+   * account's). */
+  'saved',
+  /** The account holds this browser's list without the fields the deployed
+   * API does not know yet (`omitted`: it runs an older version than this
+   * build); the whole list goes up once the API is updated. */
+  'partial',
+  /** A save is still on its way to the account. */
+  'pending',
+  /** The account refused the last save (`message` says why). */
+  'failed',
+  /** Not signed in: nothing goes to the account. */
+  'signed_out',
+  /** The API could not be reached. */
+  'offline',
+] as const;
+export type GallerySyncState = (typeof GALLERY_SYNC_STATES)[number];
+
+export const gallerySyncStatusSchema = z
+  .object({
+    state: z.enum(GALLERY_SYNC_STATES),
+    /** When this status was set (epoch ms). */
+    at: z.number().int().positive(),
+    /** When the account last took this browser's list, or this browser the
+     * account's (epoch ms). */
+    savedAt: z.number().int().positive().optional(),
+    /** What went wrong, or what was left out, in the trader's words. */
+    message: z.string().max(400).optional(),
+    /** `partial`: the fields left out of what was saved ("sets.tiers"). */
+    omitted: z.array(z.string().max(80)).max(40).optional(),
+  })
+  .strict();
+export type GallerySyncStatus = z.infer<typeof gallerySyncStatusSchema>;
+
+// ---------------------------------------------------------------------------
+// The account's log of completed Sets (user_gallery_completions, 0043): one
+// row each time a Set is marked completed, kept after the list is cleared,
+// reset or the Set undone (`undoneAt`), so "what did I finish lately" has an
+// answer on any browser and on the dashboard. The API appends to it from
+// each `PUT /extension/gallery` (a Set id newly in `completed`) and marks
+// rows undone when an id leaves `completed`.
+
+/** The most completions one `GET /extension/gallery/completions` returns. */
+export const GALLERY_COMPLETIONS_MAX = 200;
+
+export const galleryCompletionSchema = z
+  .object({
+    setId: z.number().int().positive(),
+    /** The Set's name as the list had it when it was completed. */
+    name: z.string().min(1).max(GALLERY_LIMITS.setLength),
+    /** The grade it was completed at; null when the list did not say (a
+     * Set completed before the list kept grades). */
+    grade: z.enum(GALLERY_GRADES).nullable(),
+    /** Gallery Tokens the Set gives up to that grade, when the list knew. */
+    tokens: z.number().int().min(0).max(10_000).nullable(),
+    completedAt: z.string().datetime(),
+    /** Set when the Set was later undone (Undo) or re-planned; null while
+     * it stands completed. */
+    undoneAt: z.string().datetime().nullable(),
+  })
+  .strict();
+export type GalleryCompletion = z.infer<typeof galleryCompletionSchema>;
+
+/** `GET /extension/gallery/completions` — newest first; undone ones only on
+ * `undone=include`. */
+export const galleryCompletionsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(GALLERY_COMPLETIONS_MAX).default(100),
+  undone: z.enum(['include', 'exclude']).default('exclude'),
+});
+export type GalleryCompletionsQuery = z.infer<typeof galleryCompletionsQuerySchema>;
+
+export const galleryCompletionsResponseSchema = z
+  .object({ items: z.array(galleryCompletionSchema).max(GALLERY_COMPLETIONS_MAX) })
+  .strict();
+export type GalleryCompletionsResponse = z.infer<typeof galleryCompletionsResponseSchema>;
+
+// ---------------------------------------------------------------------------
 // The account's collected-card catalogue (user_gallery_owned, 0042).
 //
 // A card counts for FC's Gallery once it has passed through your club, so

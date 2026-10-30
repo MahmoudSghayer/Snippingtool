@@ -1,6 +1,7 @@
 // Matches migrations/0015_settings.sql, 0016_notifications.sql,
 // 0037_user_recent_searches.sql, 0039_user_bot_settings.sql,
-// 0041_user_gallery.sql.
+// 0041_user_gallery.sql, 0042_user_gallery_owned.sql,
+// 0043_user_gallery_completions.sql.
 
 import { isNull, relations } from 'drizzle-orm';
 import {
@@ -132,6 +133,42 @@ export const userGalleryOwned = pgTable(
 
 export const userGalleryOwnedRelations = relations(userGalleryOwned, ({ one }) => ({
   user: one(users, { fields: [userGalleryOwned.userId], references: [users.id] }),
+}));
+
+/** The account's log of completed Gallery Sets: one row per completion
+ * (the Set, its name, grade and tokens as the list knew them, and when),
+ * kept after the list is cleared or the Set undone (`undoneAt`), so "which
+ * Sets did I finish lately" has an answer on any browser and the dashboard.
+ * Appended by `PUT /api/v1/extension/gallery`, read by `GET
+ * /api/v1/extension/gallery/completions`. 0043_user_gallery_completions.sql. */
+export const userGalleryCompletions = pgTable(
+  'user_gallery_completions',
+  {
+    id: idPk(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** fut.gg's id for the Set. */
+    setId: bigint('set_id', { mode: 'number' }).notNull(),
+    setName: text('set_name').notNull(),
+    /** D..S, or null when the list did not say. */
+    grade: text('grade'),
+    tokens: integer('tokens'),
+    completedAt: timestamptz('completed_at').notNull(),
+    undoneAt: timestamptz('undone_at'),
+
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    rowVersion: rowVersion(),
+  },
+  (t) => [
+    index('user_gallery_completions_user_completed_idx').on(t.userId, t.completedAt),
+    uniqueIndex('user_gallery_completions_once').on(t.userId, t.setId, t.completedAt),
+  ],
+);
+
+export const userGalleryCompletionsRelations = relations(userGalleryCompletions, ({ one }) => ({
+  user: one(users, { fields: [userGalleryCompletions.userId], references: [users.id] }),
 }));
 
 // ---------------------------------------------------------------------------
