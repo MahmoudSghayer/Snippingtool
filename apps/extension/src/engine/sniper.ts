@@ -1464,7 +1464,7 @@ export class Sniper {
       this.galleryLate = null;
       this.addLog({
         kind: 'info',
-        message: `Bot started in Gallery mode: ${plural(left, 'card')} to buy, ${coins(this.gallery.budget - this.gallery.spent)} left of your Gallery budget. Each card goes to your club, then back on the market one step over what it cost (higher when EA's 5% tax would make that a loss)`,
+        message: `Bot started in Gallery mode: ${plural(left, 'card')} to buy, ${coins(this.gallery.budget - this.gallery.spent)} left of your Gallery budget. Each card goes to your club, then back on the market one step over what it cost`,
       });
     } else this.addLog({ kind: 'info', message: 'Bot started' });
     const timing = this.deps.timingMode?.();
@@ -2738,8 +2738,8 @@ export class Sniper {
   }
 
   /** One step of the first bought card's way: to the club, to the transfer
-   * list, listed one step over what it cost (or the lowest price that
-   * covers EA's tax: `galleryListPrices`). A step EA refuses is
+   * list, listed one step over what it cost, whatever the price
+   * (`galleryListPrices`). A step EA refuses is
    * tried again (COLLECT_TRIES in all); a card the club refused (one it
    * holds already, say) still goes back on the market, so its coins come
    * back, and the card says so. */
@@ -2825,15 +2825,14 @@ export class Sniper {
         this.addLog({ kind: 'blocked', ...ids, message: `{card} not moved to the transfer list: ${why} — it stays in your club: ${GALLERY_STUCK_HINT}` });
       }
     } else {
-      // One step over what it cost, or the lowest price that covers EA's tax.
-      const { startPrice, buyNowPrice, coversTax } = galleryListPrices(job.m.buyNow);
+      // One step over what it cost, whatever the price.
+      const { startPrice, buyNowPrice } = galleryListPrices(job.m.buyNow);
       const r = await this.deps.adapter.list(job.m.tradeId, startPrice, buyNowPrice);
       if (!r.ok) this.noteStepLimit(r.error);
       if (r.ok) {
         if (card) card.listPrice = buyNowPrice;
         done('listed');
-        const how = coversTax ? "the lowest price that covers EA's 5% tax on what it cost" : 'one step over what it cost';
-        this.addLog({ kind: 'listed', ...ids, price: buyNowPrice, message: `Gallery: ${how} (${coins(job.m.buyNow)})` });
+        this.addLog({ kind: 'listed', ...ids, price: buyNowPrice, message: `Gallery: one step over what it cost (${coins(job.m.buyNow)})` });
       } else if (++job.tries >= COLLECT_TRIES) {
         const why = r.error ?? 'EA did not accept the listing';
         done(null, `Not listed: ${why}. It is in your transfer list`);
