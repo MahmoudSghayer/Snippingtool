@@ -17,6 +17,7 @@ const GRANTS = [
   'GM_getValue',
   'GM_setValue',
   'GM_deleteValue',
+  'GM_addValueChangeListener',
   'GM_addElement',
   'GM_openInTab',
   'GM_registerMenuCommand',

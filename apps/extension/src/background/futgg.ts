@@ -46,11 +46,25 @@ import {
 } from '@sl/shared';
 
 import { externalFetch } from '../lib/http.js';
+import { perf } from '../lib/perf.js';
+import { getSession, removeSession, setSession } from '../lib/storage.js';
 
 import { futbinYear } from './futbin.js';
 
 const CACHE_TTL_MS = 10 * 60_000;
+/** How long a failed read (unreachable, blocked, unreadable) is remembered
+ * before fut.gg is asked again: a site that is down is not asked on every
+ * click meanwhile. */
+const FAILED_TTL_MS = 60_000;
 const MAX_POOLS = 50;
+/** No answer in this long: given up (the picker says "try again"). */
+const FETCH_TIMEOUT_MS = 15_000;
+/** The hub, kept in `storage.session` as well as memory: an MV3 service
+ * worker is stopped after a short idle, and the hub (hundreds of Sets) is
+ * the one read worth keeping across that. Bounded, so a hub larger than
+ * session storage's quota is not even tried. */
+const HUB_SESSION_KEY = 'sl.futgg.hub.v1';
+const HUB_SESSION_MAX_BYTES = 800_000;
 
 type Obj = Record<string, unknown>;
 
@@ -58,13 +72,41 @@ interface Hub {
   sets: FutggSetSummary[];
   /** Each Set's cheapest lineup per grade: card ids and prices. */
   lineups: Map<number, Map<GalleryGrade, { resourceId: number; price: number }[]>>;
+  /** `sets` by id. */
+  byId: Map<number, FutggSetSummary>;
+}
+
+/** A Set's card list, and its other cards (not in any lineup read so far)
+ * best first, worked out once per pool. */
+interface Pool {
+  cards: Map<number, Obj>;
+  /** Every card of the pool as a lineup card (null: not described well
+   * enough), by id, worked out on first use. */
+  named: Map<number, FutggCard | null>;
 }
 
 let hubCache: { at: number; hub: Hub | null } | null = null;
-const poolCache = new Map<number, { at: number; pool: Map<number, Obj> | null }>();
+const poolCache = new Map<number, { at: number; pool: Pool | null }>();
 const tagsCache = new Map<string, { at: number; tags: FutggTag[] | null }>();
+/** Reads under way, so a second caller joins the first rather than asking
+ * fut.gg again (two EA tabs, or the picker and an add). */
+let hubFlight: Promise<Hub | null> | null = null;
+const poolFlights = new Map<number, Promise<Pool | null>>();
+const tagsFlights = new Map<string, Promise<FutggTag[] | null>>();
 /** The Set's other cards a lineup carries, best scores first. */
 const MAX_OTHERS = 100;
+
+/** Whether a cached read is still good: a value for `CACHE_TTL_MS`, a
+ * failure for `FAILED_TTL_MS`. */
+const fresh = (at: number, value: unknown, now = Date.now()): boolean => now - at < (value ? CACHE_TTL_MS : FAILED_TTL_MS);
+
+/** Drops the oldest entry once a map is full (insertion order): the one
+ * least likely to be asked for again, rather than everything. */
+function trim<K, V>(map: Map<K, V>): void {
+  if (map.size < MAX_POOLS) return;
+  const oldest = map.keys().next();
+  if (!oldest.done) map.delete(oldest.value);
+}
 
 const base = (): string => `https://www.fut.gg/api/fut/gallery/fc${futbinYear()}`;
 
@@ -131,7 +173,48 @@ export function parseFutggHub(json: unknown): Hub | null {
       lineups.set(id, cards);
     }
   }
-  return sets.length > 0 ? { sets, lineups } : null;
+  return sets.length > 0 ? { sets, lineups, byId: new Map(sets.map((x) => [x.id, x])) } : null;
+}
+
+/** The hub as `storage.session` keeps it (Maps as entries), and back. */
+interface StoredHub {
+  at: number;
+  sets: FutggSetSummary[];
+  lineups: [number, [GalleryGrade, { resourceId: number; price: number }[]][]][];
+}
+
+function storedHub(at: number, hub: Hub): StoredHub {
+  return { at, sets: hub.sets, lineups: [...hub.lineups].map(([id, grades]) => [id, [...grades]]) };
+}
+
+function hubFromStored(raw: unknown): { at: number; hub: Hub } | null {
+  const o = obj(raw);
+  const at = int(o?.at);
+  if (!o || at == null || !Array.isArray(o.sets) || !Array.isArray(o.lineups)) return null;
+  const sets: FutggSetSummary[] = [];
+  for (const x of o.sets) {
+    const parsed = futggSetSummarySchema.safeParse(x);
+    if (!parsed.success) return null;
+    sets.push(parsed.data);
+  }
+  const lineups: Hub['lineups'] = new Map();
+  for (const entry of o.lineups) {
+    if (!Array.isArray(entry) || entry.length !== 2) return null;
+    const [id, grades] = entry as [unknown, unknown];
+    if (!int(id) || !Array.isArray(grades)) return null;
+    const byGrade = new Map<GalleryGrade, { resourceId: number; price: number }[]>();
+    for (const g of grades) {
+      if (!Array.isArray(g) || g.length !== 2 || !isGrade(g[0]) || !Array.isArray(g[1])) return null;
+      const items = (g[1] as unknown[]).flatMap((i) => {
+        const resourceId = int(obj(i)?.resourceId);
+        const price = int(obj(i)?.price);
+        return resourceId && price != null ? [{ resourceId, price }] : [];
+      });
+      byGrade.set(g[0], items);
+    }
+    lineups.set(id as number, byGrade);
+  }
+  return sets.length > 0 ? { at, hub: { sets, lineups, byId: new Map(sets.map((x) => [x.id, x])) } } : null;
 }
 
 /** A Set's cards, by EA card id. */
@@ -208,49 +291,129 @@ function lineupCard(item: { resourceId: number; price: number }, card: Obj | und
 }
 
 async function getJson(url: string): Promise<unknown> {
-  const res = await externalFetch(url, { headers: { accept: 'application/json' } });
-  if (!res.ok) throw new Error(`fut.gg answered ${res.status}`);
-  return JSON.parse(await res.text()) as unknown;
+  // A fetch that never answers would leave the picker on "Loading…" for
+  // good: given up after a while instead.
+  const abort = typeof AbortController === 'function' ? new AbortController() : null;
+  const timer = abort ? setTimeout(() => abort.abort(), FETCH_TIMEOUT_MS) : null;
+  try {
+    const res = await externalFetch(url, { headers: { accept: 'application/json' }, ...(abort ? { signal: abort.signal } : {}) });
+    if (!res.ok) throw new Error(`fut.gg answered ${res.status}`);
+    return JSON.parse(await res.text()) as unknown;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/** The hub `storage.session` kept from before this worker started, if it is
+ * still fresh. */
+async function storedHubRead(): Promise<{ at: number; hub: Hub } | null> {
+  try {
+    const kept = hubFromStored(await getSession<unknown>(HUB_SESSION_KEY, null));
+    return kept && fresh(kept.at, kept.hub) ? kept : null;
+  } catch {
+    return null;
+  }
+}
+
+function storedHubWrite(at: number, h: Hub): void {
+  try {
+    const value = storedHub(at, h);
+    if (JSON.stringify(value).length > HUB_SESSION_MAX_BYTES) return;
+    void setSession(HUB_SESSION_KEY, value).catch(() => undefined);
+  } catch {
+    /* no session storage here: memory only, as before */
+  }
 }
 
 async function hub(): Promise<Hub | null> {
-  if (hubCache && Date.now() - hubCache.at < CACHE_TTL_MS && hubCache.hub) return hubCache.hub;
-  let parsed: Hub | null = null;
-  try {
-    parsed = parseFutggHub(await getJson(`${base()}/hub/`));
-  } catch {
-    // Unreachable, blocked, or not JSON: no Sets.
+  if (hubCache && fresh(hubCache.at, hubCache.hub)) {
+    perf.count('futgg.hub.cached');
+    return hubCache.hub;
   }
-  hubCache = { at: Date.now(), hub: parsed };
-  return parsed;
+  if (hubFlight) {
+    perf.count('futgg.hub.joined');
+    return hubFlight;
+  }
+  hubFlight = (async () => {
+    const kept = await storedHubRead();
+    if (kept) {
+      perf.count('futgg.hub.fromSession');
+      hubCache = kept;
+      return kept.hub;
+    }
+    let parsed: Hub | null = null;
+    try {
+      parsed = await perf.timeAsync('futgg.hub.fetch', async () => parseFutggHub(await getJson(`${base()}/hub/`)));
+    } catch {
+      // Unreachable, blocked, or not JSON: no Sets.
+    }
+    const at = Date.now();
+    hubCache = { at, hub: parsed };
+    if (parsed) storedHubWrite(at, parsed);
+    return parsed;
+  })().finally(() => {
+    hubFlight = null;
+  });
+  return hubFlight;
 }
 
 async function tags(path: string): Promise<FutggTag[] | null> {
   const hit = tagsCache.get(path);
-  if (hit && Date.now() - hit.at < CACHE_TTL_MS && hit.tags) return hit.tags;
-  let parsed: FutggTag[] | null = null;
-  try {
-    parsed = parseFutggTags(await getJson(`${base()}/sets/${path}/`));
-  } catch {
-    // As for the hub.
+  if (hit && fresh(hit.at, hit.tags)) return hit.tags;
+  const flight = tagsFlights.get(path);
+  if (flight) {
+    perf.count('futgg.tags.joined');
+    return flight;
   }
-  if (tagsCache.size >= MAX_POOLS) tagsCache.clear();
-  tagsCache.set(path, { at: Date.now(), tags: parsed });
-  return parsed;
+  const read = (async () => {
+    let parsed: FutggTag[] | null = null;
+    try {
+      parsed = parseFutggTags(await getJson(`${base()}/sets/${path}/`));
+    } catch {
+      // As for the hub.
+    }
+    tagsCache.delete(path);
+    trim(tagsCache);
+    tagsCache.set(path, { at: Date.now(), tags: parsed });
+    return parsed;
+  })().finally(() => tagsFlights.delete(path));
+  tagsFlights.set(path, read);
+  return read;
 }
 
-async function pool(setId: number): Promise<Map<number, Obj> | null> {
+async function pool(setId: number): Promise<Pool | null> {
   const hit = poolCache.get(setId);
-  if (hit && Date.now() - hit.at < CACHE_TTL_MS && hit.pool) return hit.pool;
-  let parsed: Map<number, Obj> | null = null;
-  try {
-    parsed = parseFutggPool(await getJson(`${base()}/sets/${setId}/pool/`));
-  } catch {
-    // As for the hub.
+  if (hit && fresh(hit.at, hit.pool)) return hit.pool;
+  const flight = poolFlights.get(setId);
+  if (flight) {
+    perf.count('futgg.pool.joined');
+    return flight;
   }
-  if (poolCache.size >= MAX_POOLS) poolCache.clear();
-  poolCache.set(setId, { at: Date.now(), pool: parsed });
-  return parsed;
+  const read = (async () => {
+    let parsed: Pool | null = null;
+    try {
+      const cards = parseFutggPool(await getJson(`${base()}/sets/${setId}/pool/`));
+      if (cards) parsed = { cards, named: new Map() };
+    } catch {
+      // As for the hub.
+    }
+    poolCache.delete(setId);
+    trim(poolCache);
+    poolCache.set(setId, { at: Date.now(), pool: parsed });
+    return parsed;
+  })().finally(() => poolFlights.delete(setId));
+  poolFlights.set(setId, read);
+  return read;
+}
+
+/** A pool card as a lineup card, worked out once per pool. */
+function namedCard(p: Pool, id: number, price: number): FutggCard | null {
+  let card = p.named.get(id);
+  if (card === undefined) {
+    card = lineupCard({ resourceId: id, price: 0 }, p.cards.get(id));
+    p.named.set(id, card);
+  }
+  return card ? { ...card, price } : null;
 }
 
 export async function handleFutggSets(): Promise<{ sets: FutggSetSummary[] | null }> {
@@ -261,35 +424,51 @@ export async function handleFutggSets(): Promise<{ sets: FutggSetSummary[] | nul
  * card list; null when fut.gg has none (or answers nothing readable). */
 export async function handleFutggLineup(payload: { setId: number; grade: GalleryGrade }): Promise<{ lineup: FutggLineup | null }> {
   const h = await hub();
-  const set = h?.sets.find((s) => s.id === payload.setId);
+  const set = h?.byId.get(payload.setId);
   const items = h?.lineups.get(payload.setId)?.get(payload.grade);
   if (!set || !items || items.length === 0) return { lineup: null };
-  const cards = await pool(payload.setId);
-  if (!cards) return { lineup: null };
-  const named = items.map((i) => lineupCard(i, cards.get(i.resourceId)));
+  const p = await pool(payload.setId);
+  if (!p) return { lineup: null };
+  const named = items.map((i) => namedCard(p, i.resourceId, i.price));
   // The Set's other cards, best first: owned ones can stand in for lineup cards.
   const inLineup = new Set(items.map((i) => i.resourceId));
-  const others = [...cards.entries()]
-    .filter(([id]) => !inLineup.has(id))
-    .map(([id, card]) => lineupCard({ resourceId: id, price: 0 }, card))
-    .filter((c): c is FutggCard => c !== null)
-    .sort((a, b) => b.score - a.score || a.resourceId - b.resourceId)
-    .slice(0, MAX_OTHERS);
+  const others: FutggCard[] = [];
+  for (const id of p.cards.keys()) {
+    if (inLineup.has(id)) continue;
+    const card = namedCard(p, id, 0);
+    if (card) others.push(card);
+  }
+  others.sort((a, b) => b.score - a.score || a.resourceId - b.resourceId);
   const setTags = await tags(set.path);
   const lineup = futggLineupSchema.safeParse({
     set,
     grade: payload.grade,
     cards: named.filter((c): c is FutggCard => c !== null),
     missing: named.filter((c) => c === null).length,
-    ...(others.length > 0 ? { others } : {}),
+    ...(others.length > 0 ? { others: others.slice(0, MAX_OTHERS) } : {}),
     ...(setTags ? { tags: setTags } : {}),
   });
   return { lineup: lineup.success ? lineup.data : null };
 }
 
-/** Tests: forget what was fetched. */
-export function resetFutggCache(): void {
+/** Tests: what a stopped service worker loses — memory, not session storage. */
+export function forgetFutggMemoryForTests(): void {
   hubCache = null;
   poolCache.clear();
   tagsCache.clear();
+}
+
+/** Tests: forget what was fetched, the session copy included. */
+export async function resetFutggCache(): Promise<void> {
+  hubCache = null;
+  hubFlight = null;
+  poolCache.clear();
+  poolFlights.clear();
+  tagsCache.clear();
+  tagsFlights.clear();
+  try {
+    await removeSession(HUB_SESSION_KEY);
+  } catch {
+    /* no session storage here */
+  }
 }

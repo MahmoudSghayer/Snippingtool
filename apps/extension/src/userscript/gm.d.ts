@@ -29,6 +29,12 @@ declare function GM_xmlhttpRequest(details: GmXhrDetails): { abort: () => void }
 declare function GM_getValue<T>(key: string, fallback?: T): T;
 declare function GM_setValue(key: string, value: unknown): void;
 declare function GM_deleteValue(key: string): void;
+/** Fires when `key` is written: `remote` is true when another tab (another
+ * copy of this script) wrote it. */
+declare function GM_addValueChangeListener(
+  key: string,
+  listener: (name: string, oldValue: unknown, newValue: unknown, remote: boolean) => void,
+): number;
 declare function GM_addElement(tag: string, attributes: Record<string, string>): HTMLElement;
 declare function GM_addElement(
   parent: Node,

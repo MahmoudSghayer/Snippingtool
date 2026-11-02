@@ -1,0 +1,88 @@
+{
+  "suite": "gallery",
+  "at": "2026-10-26T13:06:15.095Z",
+  "results": [
+    {
+      "name": "gallerySetProgress (20 Sets)",
+      "ms": 0.08,
+      "max": 0.08,
+      "runs": 5,
+      "meta": {
+        "sets": 20
+      }
+    },
+    {
+      "name": "gallerySetBlockers x20 Sets",
+      "ms": 0.26,
+      "max": 0.3,
+      "runs": 5,
+      "meta": {
+        "groups": 71
+      }
+    },
+    {
+      "name": "gallerySummary",
+      "ms": 0.03,
+      "max": 0.03,
+      "runs": 5,
+      "meta": {
+        "total": 300
+      }
+    },
+    {
+      "name": "nextGalleryCard",
+      "ms": 0,
+      "max": 0,
+      "runs": 5,
+      "meta": {
+        "found": 1
+      }
+    },
+    {
+      "name": "markCompletedSets",
+      "ms": 0.16,
+      "max": 0.18,
+      "runs": 5,
+      "meta": {
+        "done": 0
+      }
+    },
+    {
+      "name": "futggBestChoices (250 Sets)",
+      "ms": 0.05,
+      "max": 0.06,
+      "runs": 5,
+      "meta": {
+        "groups": 12
+      }
+    },
+    {
+      "name": "galleryUpgradable (250 Sets)",
+      "ms": 0.02,
+      "max": 0.08,
+      "runs": 5,
+      "meta": {
+        "upgrades": 0
+      }
+    },
+    {
+      "name": "one Set-list redraw worth of calculation",
+      "ms": 0.4,
+      "max": 10.51,
+      "runs": 5,
+      "meta": {
+        "n": 83
+      }
+    },
+    {
+      "name": "addFutggLineup x20 (15 cards each)",
+      "ms": 0.76,
+      "max": 1.45,
+      "runs": 3,
+      "meta": {
+        "added": 300,
+        "cards": 300
+      }
+    }
+  ]
+}

@@ -82,6 +82,7 @@ import {
   futggClubIds,
   futggSbcCards,
   galleryCardNeeded,
+  galleryCardsBySet,
   gallerySetBlockers,
   gallerySetProgress,
   gallerySummary,
@@ -95,6 +96,7 @@ import {
   type GalleryUpgrade,
 } from '../engine/gallery.js';
 import { type AutoClearSoldStatus } from '../lib/auto-clear-sold.js';
+import { perf } from '../lib/perf.js';
 import { TRANSFER_LIST_SIZE, type TransferListSummary } from '../lib/transfer-list.js';
 import {
   SPECIAL_LEVEL,
@@ -102,11 +104,14 @@ import {
   portraitUrl,
   priceStep,
   raritiesForLevel,
-  searchPlayers,
+  catalogLookups,
+  searchIndex,
   type Catalog,
+  type CatalogLookups,
   type CatalogOption,
   type CatalogPlayer,
 } from '../model/catalog.js';
+
 
 import { NOVA_LOGO_SVG } from './brand.js';
 import { readWallet } from './ea-wallet.js';
@@ -162,8 +167,14 @@ export interface BotPageDeps {
   setLiveSearch: (search: LiveSearch | null) => void;
   resolveNames: (resourceIds: number[]) => Promise<Record<string, string | null>>;
   /** EA's player/club/league/nation lists, if the web app has loaded them
-   * since the extension was installed (model/catalog.ts). */
+   * since the extension was installed (model/catalog.ts). Asked once per
+   * page open while none has arrived; after that `onCatalog` brings each
+   * new one. */
   getCatalog: () => Promise<Catalog | null>;
+  /** Called with every catalog the web app builds from here on (the page
+   * never polls for one). Returns the unsubscribe. Omitted: the catalog is
+   * only ever read through `getCatalog`. */
+  onCatalog?: (cb: (catalog: Catalog) => void) => () => void;
   /** Where the recent-searches log is kept between page loads (the
    * account's copy, content/recent-searches.ts). Read again each time the
    * page opens. Without it the log lasts until the page reloads. */
@@ -369,6 +380,20 @@ const STOP = `<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" widt
 /** EA's back arrow, beside its screen titles. */
 const BACK = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 2.5 5 8l5.5 5.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
+/** `fn` over `items`, at most `limit` at a time, results in order. */
+async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i]!);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
+
 function esc(s: unknown): string {
   return String(s).replace(
     /[&<>"']/g,
@@ -556,7 +581,9 @@ const GALLERY_STATUS: Record<GalleryCard['status'], string> = {
 const GALLERY_FEED_GROUP_MAX = 60;
 /** Most completed Sets the Completed Sets log draws (newest first). */
 const COMPLETED_LOG_MAX = 30;
-/** How often the account sync line is read again while the page is open. */
+/** The live tick: wallet, transfer list and bids, redrawn each second. */
+const LIVE_TICK_MS = 1_000;
+/** How often the account sync line is asked for while the page is open. */
 const SYNC_POLL_MS = 3_000;
 
 /** Under the Buy Now price in Bid mode: what the max price means there. */
@@ -1103,20 +1130,48 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   let refreshQueued = false;
   let catalog: Catalog | null = null;
   let livePoll: ReturnType<typeof setInterval> | null = null;
-  let syncPoll: ReturnType<typeof setInterval> | null = null;
+  /** Whether a catalog was ever read: after that the web app's pushes
+   * (`deps.onCatalog`) are the only source, and nothing is asked for. */
+  let catalogRead = false;
+  /** Live ticks since the account sync line was last asked for. */
+  let syncTicks = 0;
 
-  /** Takes the latest catalog; re-renders only when it changed, and never
-   * while a list is open (the user may be scrolling it). The guard comes
-   * first, before the message is sent: when the page is hidden or a dropdown
-   * is open there is nothing to draw, so no request (and no catalog
-   * validation behind it) is made at all. */
+  /** Takes a catalog: kept whenever it is newer, drawn at once only when the
+   * page shows the search and nothing is in the middle of it (a list open, a
+   * name being typed); otherwise the next draw of the search picks it up. */
+  function applyCatalog(c: Catalog | null): void {
+    if (!c || c.capturedAt === catalog?.capturedAt) {
+      perf.count('catalog.unchanged');
+      return;
+    }
+    catalog = c;
+    const typing = root.activeElement?.id === 'nf-player';
+    if (page.hidden || openDd || typing) {
+      perf.count('catalog.deferredDraw');
+      return;
+    }
+    renderTargets();
+  }
+
+  /** Asks for the catalog once (a catalog kept from an earlier page load):
+   * nothing is sent while the page is hidden, nor once one has been read. */
   function loadCatalog(): void {
-    if (page.hidden || openDd) return;
+    if (page.hidden || catalogRead) {
+      perf.count(page.hidden ? 'catalog.get.skippedHidden' : 'catalog.get.skippedRead');
+      return;
+    }
     void deps.getCatalog().then((c) => {
-      if (!c || page.hidden || c.capturedAt === catalog?.capturedAt || openDd) return;
-      catalog = c;
-      renderTargets();
+      if (c) catalogRead = true;
+      applyCatalog(c);
     });
+  }
+  deps.onCatalog?.(applyCatalog);
+
+  /** Asks for the catalog again, read or not: content's save hook (a
+   * catalog built after the page last asked), the same as a push. */
+  function refreshCatalog(): void {
+    catalogRead = false;
+    loadCatalog();
   }
 
   /** The once-a-second live tick: EA's top-bar wallet, the transfer-list
@@ -1128,33 +1183,35 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     renderWallet();
     renderTransferList();
     renderBids();
+    // The account sync line follows the background's uploads (one every
+    // 2 s while the bot runs): asked every few ticks, redrawn on a change.
+    if (++syncTicks * LIVE_TICK_MS >= SYNC_POLL_MS) {
+      syncTicks = 0;
+      if (galleryMode()) refreshGallerySync();
+    }
   }
 
   /** Runs the live tick only while the page is both open and the tab is
    * visible — a background tab has nothing for the user to see, and its
    * `setInterval` would just block the thread when it is foregrounded. */
   function startLive(): void {
-    if (livePoll != null || page.hidden || doc.hidden) return;
-    livePoll = setInterval(liveTick, 1_000);
-    // The account sync line follows the background's uploads (one every
-    // 2 s while the bot runs): asked every few seconds, redrawn on a change.
-    syncPoll ??= setInterval(() => {
-      if (galleryMode()) refreshGallerySync();
-    }, SYNC_POLL_MS);
+    if (livePoll != null || page.hidden || doc.hidden || doc.visibilityState === 'hidden') return;
+    livePoll = setInterval(liveTick, LIVE_TICK_MS);
   }
   function stopLive(): void {
     if (livePoll != null) clearInterval(livePoll);
     livePoll = null;
-    if (syncPoll != null) clearInterval(syncPoll);
-    syncPoll = null;
   }
 
   // Pause the live tick when the tab is hidden, resume it when the tab comes
   // back and the page is open. (Navigating to another web-app page closes the
   // page, which stops the tick in close().)
   doc.addEventListener('visibilitychange', () => {
-    if (doc.hidden || page.hidden) stopLive();
-    else startLive();
+    if (doc.hidden || doc.visibilityState === 'hidden' || page.hidden) stopLive();
+    else {
+      startLive();
+      queueRefresh();
+    }
   });
 
   // Laid out like EA's own "Search the Transfer Market" screen: a back
@@ -1237,18 +1294,61 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     return `<details class="card" ${open ? 'open' : ''}><summary>${esc(title)}${extra}<span class="chev">⌄</span></summary><div class="inner">${body}</div></details>`;
   }
 
+  /** What each section of the settings column was last drawn from, so an
+   * open with nothing changed since (a warm reopen) draws nothing: every
+   * section's inputs, as a string, or the objects themselves. Interaction
+   * handlers keep calling the plain `render*` functions — only `open()`
+   * goes through this. */
+  const drawn = {
+    targets: '',
+    knobs: '',
+    recent: null as { list: RecentSearch[]; day: string } | null,
+    gallery: null as { g: GalleryState; sets: FutggSetSummary[] | null; key: string } | null,
+  };
+  const targetsKey = (): string =>
+    [JSON.stringify(form), catalog?.capturedAt ?? 0, openDd ?? '', modeSettings.mode, JSON.stringify(shown().autoSell), shown().thresholds.maxBuyPrice, deps.getSniper()?.isRunning() ?? false].join('|');
+  const knobsKey = (): string => `${JSON.stringify(shown())}|${JSON.stringify(modeSettings)}`;
+  const galleryKey = (g: GalleryState, running: boolean): string =>
+    `${gallerySignature(g, running)}|${futggBusy ?? ''}|${galleryDraft ?? ''}|${galleryProblems.join('\n')}|${futggProblems.join('\n')}|${futggPicked.size}|${running}`;
+
+  /** The settings column as the page opens: each section drawn only when
+   * its inputs changed since it was last drawn. The Gallery section is the
+   * dear one (fut.gg's Sets, the list's progress): drawn in Gallery mode,
+   * else only once (the mode switch draws it again). */
   function renderSettings(): void {
-    renderTargets();
-    renderRecent();
-    renderGallery();
-    renderKnobs();
+    const t = targetsKey();
+    if (t !== drawn.targets) renderTargets();
+    else syncSearch();
+    const day = new Date().toDateString();
+    if (drawn.recent?.list !== recent || drawn.recent.day !== day) renderRecent();
+    const g = currentGallery();
+    const running = deps.getSniper()?.isRunning() ?? false;
+    if (galleryMode() || !drawn.gallery) {
+      const key = galleryKey(g, running);
+      if (drawn.gallery?.g !== g || drawn.gallery.sets !== futggSets || drawn.gallery.key !== key) renderGallery();
+      else perf.count('open.gallery.kept');
+    } else perf.count('open.gallery.skipped');
+    if (knobsKey() !== drawn.knobs) renderKnobs();
+    else perf.count('open.knobs.kept');
   }
 
   // ---- Gallery mode -------------------------------------------------------
 
-  /** The list as the running bot has it, else as saved. */
+  /** The list as the running bot has it, else as saved. The bot's copy is
+   * taken once per change to it (`getGalleryVersion`), not on every read:
+   * the per-second tick and every redraw read it. */
+  let galleryHeld: { sniper: Sniper; version: number; state: GalleryState } | null = null;
   function currentGallery(): GalleryState {
-    return deps.getGallery?.() ?? EMPTY_GALLERY;
+    const sniper = deps.getSniper();
+    if (!sniper || !deps.getGallery) return deps.getGallery?.() ?? EMPTY_GALLERY;
+    const version = sniper.getGalleryVersion();
+    if (galleryHeld && galleryHeld.sniper === sniper && galleryHeld.version === version) {
+      perf.count('gallery.read.held');
+      return galleryHeld.state;
+    }
+    const state = deps.getGallery();
+    galleryHeld = { sniper, version, state };
+    return state;
   }
 
   /** The list back as text: what the box shows until the trader edits it. */
@@ -1279,6 +1379,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     if (!el) return;
     const g = currentGallery();
     const running = deps.getSniper()?.isRunning() ?? false;
+    drawn.gallery = { g, sets: futggSets, key: galleryKey(g, running) };
     const off = running ? ' disabled' : '';
     if (galleryDraft == null) galleryDraft = galleryText(g);
     // Redrawn on every change: the Set list keeps where it was scrolled to
@@ -1286,7 +1387,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     // sized before the scroll position can be set).
     futggScroll = (el.querySelector('.g-sets') as HTMLElement | null)?.scrollTop ?? futggScroll;
     const completedCount = g.completed?.length ?? 0;
-    el.innerHTML =
+    const html = perf.time('gallery.html', () =>
       (deps.futggSets ? section('fut.gg Sets', futggHtml(g, off)) : '') +
       section('Completed Sets', completedLogHtml(g), completedCount > 0 ? ` · ${completedCount}` : '', completedCount > 0) +
       section(
@@ -1310,8 +1411,12 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         )}
         <div class="g-sum" id="g-sum">${esc(gallerySumText(g))}</div>
         <div class="g-actions"><button type="button" class="ghost" id="g-reset-spent"${off}>Reset spent</button></div>`,
-      );
-    mountFutggList();
+      ),
+    );
+    perf.time('gallery.innerHTML', () => {
+      el.innerHTML = html;
+    });
+    perf.time('gallery.mount', mountFutggList);
     refreshGallerySync();
   }
 
@@ -1414,6 +1519,10 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
 
   /** fut.gg's Sets for the grade picked, by category, ticked and added,
    * and the Sets on the list. */
+  /** What the picker rows were last built from: built again only when one
+   * of these changed (the Sets, the list, the lock state). */
+  let pickerBuilt: { sets: FutggSetSummary[]; g: GalleryState; key: string; rows: { items: PickerRow[]; total: number } } | null = null;
+
   function futggHtml(g: GalleryState, off: string): string {
     const completed = new Set(g.completed ?? []);
     const busy = futggBusy !== null ? ' disabled' : '';
@@ -1425,7 +1534,14 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       // The picker is virtualized: build every row once (futggItemsCache), but
       // the DOM only ever holds the rows in view (mountFutggList fills a spacer
       // sized to the whole list). This keeps a list of hundreds smooth to scroll.
-      futggItemsCache = buildPickerRows(g, off, busy);
+      const key = `${off}|${busy}`;
+      if (pickerBuilt && pickerBuilt.sets === futggSets && pickerBuilt.g === g && pickerBuilt.key === key) {
+        perf.count('picker.rows.kept');
+        futggItemsCache = pickerBuilt.rows;
+      } else {
+        futggItemsCache = perf.time('picker.rows.build', () => buildPickerRows(g, off, busy));
+        pickerBuilt = { sets: futggSets, g, key, rows: futggItemsCache };
+      }
       list =
         futggItemsCache.items.length === 0
           ? `<div class="hint">fut.gg lists no Set with a lineup to buy right now.</div>`
@@ -1435,6 +1551,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       futggItemsCache = null;
     }
     const progress = gallerySetProgress(g);
+    const bySet = galleryCardsBySet(g);
+    const setsById = new Map((futggSets ?? []).map((x) => [x.id, x]));
     const mine =
       progress.length === 0
         ? ''
@@ -1444,14 +1562,14 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
               const mark = isDone
                 ? `<button type="button" class="ghost" data-uncomplete="${p.set.id}"${off}>Completed${completedWhen(g, p.set.id)} ✓ · Undo</button>`
                 : `<button type="button" class="ghost" data-complete="${p.set.id}"${off}>Mark completed</button>`;
-              const blockers = isDone ? [] : gallerySetBlockers(g, p.set.id);
+              const blockers = isDone ? [] : gallerySetBlockers(g, p.set.id, bySet);
               const note = isDone ? null : blockerNote(blockers);
               const why = note ? ` · <span class="g-why" title="${esc(note.detail)}">not done: ${esc(note.summary)}</span>` : '';
               // Let the trader re-plan a Set at any other grade fut.gg has a
               // lineup for — a higher tier when one is available, or a lower,
               // cheaper one. (Nova also drops a stuck Set to a buyable tier on
               // its own mid-run; this is the manual control.) Highest first.
-              const setSummary = futggSets?.find((x) => x.id === p.set.id);
+              const setSummary = setsById.get(p.set.id);
               const curIdx = GALLERY_GRADES.indexOf(p.set.grade);
               const others =
                 !isDone && setSummary
@@ -1550,6 +1668,12 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     const vp = root.getElementById('gallery')?.querySelector('.g-sets') as HTMLElement | null;
     const spacer = vp?.querySelector('.g-spacer') as HTMLElement | null;
     if (!vp || !spacer || !futggItemsCache) return;
+    // Hidden: no window to fill (it is filled once the page shows); then,
+    // without layout (jsdom), every row.
+    if (page.hidden) {
+      spacer.innerHTML = '';
+      return;
+    }
     const vpH = vp.clientHeight || Infinity;
     const min = vp.scrollTop - PICKER_OVERSCAN;
     const max = vp.scrollTop + vpH + PICKER_OVERSCAN;
@@ -1606,25 +1730,35 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     futggBusy = 'add';
     futggProblems = [];
     renderGallery();
+    // Each Set's lineup (and, for one added below its best grade because that
+    // grade needs an SBC/Objective card, the best grade's lineup too, to name
+    // the blocking card(s) and keep that grade as the upgrade target): three
+    // Sets at a time, the results in the order the Sets were ticked.
+    const futggLineup = deps.futggLineup;
+    const picked = [...futggPicked].flatMap(([id, grade]) => {
+      const set = futggSets!.find((x) => x.id === id);
+      return set ? [{ id, grade, set }] : [];
+    });
+    const fetched = await perf.timeAsync('futgg.add.lineups', () =>
+      mapLimit(picked, 3, async ({ id, grade, set }) => {
+        const lineup = await futggLineup(id, grade).catch(() => null);
+        if (!lineup) return { set, grade, lineup: null, upgrade: undefined };
+        const best = bestFutggTier(set);
+        let upgrade: GallerySet['upgrade'] | undefined;
+        if (best && best.grade !== grade && (best.sbc ?? 0) > 0) {
+          const bestLineup = await futggLineup(id, best.grade).catch(() => null);
+          upgrade = { grade: best.grade, tokens: best.tokens, cards: bestLineup ? futggSbcCards(bestLineup) : [] };
+        }
+        return { set, grade, lineup, upgrade };
+      }),
+    );
     const lineups: { lineup: FutggLineup; upgrade?: GallerySet['upgrade'] }[] = [];
-    for (const [id, grade] of [...futggPicked]) {
-      const set = futggSets.find((x) => x.id === id);
-      if (!set) continue;
-      const lineup = await deps.futggLineup(id, grade).catch(() => null);
-      if (!lineup) {
-        futggProblems.push(`${set.name}: fut.gg did not send its grade ${grade} lineup — try again`);
+    for (const r of fetched) {
+      if (!r.lineup) {
+        futggProblems.push(`${r.set.name}: fut.gg did not send its grade ${r.grade} lineup — try again`);
         continue;
       }
-      // Added below its best grade because that grade needs an SBC/Objective
-      // card? Read the best grade's lineup to name the blocking card(s), and
-      // keep it as the Set's upgrade target.
-      const best = bestFutggTier(set);
-      let upgrade: GallerySet['upgrade'] | undefined;
-      if (best && best.grade !== grade && (best.sbc ?? 0) > 0) {
-        const bestLineup = await deps.futggLineup(id, best.grade).catch(() => null);
-        upgrade = { grade: best.grade, tokens: best.tokens, cards: bestLineup ? futggSbcCards(bestLineup) : [] };
-      }
-      lineups.push({ lineup, upgrade });
+      lineups.push({ lineup: r.lineup, upgrade: r.upgrade });
     }
     let g = currentGallery();
     let added = 0;
@@ -1848,6 +1982,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   let startedWhileLoading: RecentSearch[] | null = null;
 
   function renderRecent(): void {
+    drawn.recent = { list: recent, day: new Date().toDateString() };
     const wasOpen = root.querySelector('#recent details')?.hasAttribute('open') ?? true;
     const body = recent.length
       ? recent
@@ -2070,6 +2205,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   }
 
   function renderKnobs(): void {
+    drawn.knobs = knobsKey();
     const s = shown();
     const delayPreset = SEARCH_DELAY_PRESETS.find(
       (p) => p.min === s.searchDelay.min && p.max === s.searchDelay.max,
@@ -2205,6 +2341,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   let typeahead = '';
   let typeaheadTimer: ReturnType<typeof setTimeout> | null = null;
   let suggestions: CatalogPlayer[] = [];
+  /** The ids the suggestion box last drew. */
+  let suggestedIds = '';
 
   const DD_LABEL: Record<Dd, string> = {
     quality: 'Quality',
@@ -2289,6 +2427,12 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     const v = ddValue(dd);
     if (v == null) return null;
     const byValue = dd === 'quality' || dd === 'position';
+    if (!byValue && catalog && dd !== 'club') {
+      const list = dd === 'chem' ? 'playStyles' : dd === 'nation' ? 'nations' : dd === 'league' ? 'leagues' : 'rarities';
+      const o = catalogLookups(catalog).byId[list].get(Number(v));
+      // The rarity list is narrowed by the quality picked: only one in it counts.
+      return o && (dd !== 'rarity' || ddOptions(dd).includes(o)) ? o : null;
+    }
     return ddOptions(dd).find((o) => (byValue ? o.value : String(o.id)) === v) ?? null;
   }
 
@@ -2382,11 +2526,11 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   }
 
   function describeFilter(f: FilterCriteria): string[] {
-    const byId = (list: CatalogOption[] | undefined, id: number) =>
-      list?.find((e) => e.id === id)?.label;
+    const lookups = catalog ? catalogLookups(catalog) : null;
+    const byId = (list: keyof CatalogLookups['byId'], id: number) => lookups?.byId[list].get(id)?.label;
     const chips: string[] = [];
     if (f.resourceId != null) {
-      const p = catalog?.players.find((x) => x.id === f.resourceId);
+      const p = lookups?.players.byId.get(f.resourceId);
       chips.push(p ? `${p.rating ?? ''} ${p.name}`.trim() : `Player #${f.resourceId}`);
     }
     if (f.minRating != null || f.maxRating != null)
@@ -2398,21 +2542,18 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
           ?.label ?? f.quality,
       );
     }
-    if (f.rarity != null) chips.push(byId(catalog?.rarities, f.rarity) ?? `Rarity #${f.rarity}`);
-    if (f.zone != null) chips.push(byId(catalog?.positions, f.zone) ?? `Zone #${f.zone}`);
+    if (f.rarity != null) chips.push(byId('rarities', f.rarity) ?? `Rarity #${f.rarity}`);
+    if (f.zone != null) chips.push(byId('positions', f.zone) ?? `Zone #${f.zone}`);
     else if (f.position)
       chips.push(catalog?.positions.find((p) => p.value === f.position)?.label ?? f.position);
     if (f.chemistryStyle != null)
-      chips.push(byId(catalog?.playStyles, f.chemistryStyle) ?? `Chem #${f.chemistryStyle}`);
+      chips.push(byId('playStyles', f.chemistryStyle) ?? `Chem #${f.chemistryStyle}`);
     if (f.nationality != null)
-      chips.push(byId(catalog?.nations, f.nationality) ?? `Nation #${f.nationality}`);
-    if (f.league != null) chips.push(byId(catalog?.leagues, f.league) ?? `League #${f.league}`);
+      chips.push(byId('nations', f.nationality) ?? `Nation #${f.nationality}`);
+    if (f.league != null) chips.push(byId('leagues', f.league) ?? `League #${f.league}`);
     if (f.club != null) {
-      const clubs =
-        f.league != null
-          ? catalog?.clubs[String(f.league)]
-          : Object.values(catalog?.clubs ?? {}).flat();
-      chips.push(byId(clubs, f.club) ?? `Club #${f.club}`);
+      const club = f.league != null ? catalog?.clubs[String(f.league)]?.find((c) => c.id === f.club) : lookups?.clubsById.get(f.club);
+      chips.push(club?.label ?? `Club #${f.club}`);
     }
     if (f.minPrice != null) chips.push(`min ${fmt(f.minPrice)}`);
     chips.push(f.maxPrice != null ? `max ${fmt(f.maxPrice)}` : 'no max price');
@@ -2502,6 +2643,9 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   }
 
   function renderTargets(): void {
+    drawn.targets = targetsKey();
+    // A fresh suggestion box: whatever it showed is gone with the old one.
+    suggestedIds = '';
     const players = catalog?.players.length ?? 0;
     const hint = !catalog
       ? "Loading EA's lists and players. Keep the web app open; they appear here on their own."
@@ -2572,9 +2716,13 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     const box = root.getElementById('nf-suggest');
     const input = root.getElementById('nf-player');
     if (!box || !input) return;
-    suggestions = catalog ? searchPlayers(catalog.players, query) : [];
+    suggestions = catalog ? perf.time('search.suggest', () => searchIndex(catalogLookups(catalog!).players, query)) : [];
     box.hidden = suggestions.length === 0;
     input.setAttribute('aria-expanded', String(!box.hidden));
+    // The same twelve as last time: the box stands.
+    const ids = suggestions.map((p) => p.id).join(',');
+    if (ids === suggestedIds) return;
+    suggestedIds = ids;
     box.innerHTML = suggestions
       .map((p, i) => {
         const face = portraitUrl(catalog, p.id);
@@ -3505,6 +3653,9 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
    * runs. The feed draws from each card's own name, so it never waits on the
    * async name lookup the log and results feeds use. */
   let gallerySig = '';
+  /** The list changed while the Gallery feed was not the tab shown: drawn
+   * when it is. */
+  let galleryFeedStale = false;
 
   /** The cheap signature the Gallery feed is memoised on. */
   function gallerySignature(g: GalleryState, running: boolean): string {
@@ -3541,40 +3692,74 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   /** Bid mode's open bids (`Sniper.getActiveBids`): where each stands and
    * how long it has left, redrawn every second while the page is open. In
    * Gallery mode, its list's cards and where each one is. */
+  /** The feeds' fixed elements (the skeleton is built once): looked up once,
+   * since this runs every second and the shadow tree can hold hundreds of
+   * rows to walk. */
+  const feeds = {
+    tabs: [...root.querySelectorAll<HTMLElement>('.ftab')],
+    galleryTab: root.querySelector<HTMLElement>('.ftab[data-feed="gallery"]')!,
+    box: root.querySelector<HTMLElement>('.feeds')!,
+    results: $('results'),
+    bids: $('bids'),
+    gallery: $('gallery-feed'),
+    galleryCount: $('gallery-count'),
+    bidsCount: $('bids-count'),
+  };
+  /** The Gallery summary line's last text and the element it was written to. */
+  let gallerySumShown: { el: Element; text: string } | null = null;
+
   function renderBids(): void {
     const sniper = deps.getSniper();
-    root.querySelector<HTMLElement>('.ftab[data-feed="gallery"]')!.hidden = !galleryMode();
-    const picked = feedTab === 'gallery' && !galleryMode() ? null : feedTab;
-    const tab = picked ?? (galleryMode() ? 'gallery' : bidMode() ? 'bids' : 'results');
-    for (const el of root.querySelectorAll<HTMLElement>('.ftab')) el.setAttribute('aria-selected', String(el.dataset.feed === tab));
-    $('results').hidden = tab !== 'results';
-    $('bids').hidden = tab !== 'bids';
-    $('gallery-feed').hidden = tab !== 'gallery';
-    root.querySelector('.feeds')!.classList.toggle('bids-open', tab === 'bids' || tab === 'gallery');
-    if (galleryMode()) {
+    perf.count('renderBids');
+    const inGallery = galleryMode();
+    feeds.galleryTab.hidden = !inGallery;
+    const picked = feedTab === 'gallery' && !inGallery ? null : feedTab;
+    const tab = picked ?? (inGallery ? 'gallery' : bidMode() ? 'bids' : 'results');
+    for (const el of feeds.tabs) {
+      const selected = String(el.dataset.feed === tab);
+      if (el.getAttribute('aria-selected') !== selected) el.setAttribute('aria-selected', selected);
+    }
+    feeds.results.hidden = tab !== 'results';
+    feeds.bids.hidden = tab !== 'bids';
+    feeds.gallery.hidden = tab !== 'gallery';
+    feeds.box.classList.toggle('bids-open', tab === 'bids' || tab === 'gallery');
+    if (inGallery) {
       const g = currentGallery();
-      const n = gallerySummary(g);
-      const count = n.total > 0 ? `${n.total - n.todo}/${n.total}` : '';
-      const countEl = $('gallery-count');
-      if (countEl.textContent !== count) countEl.textContent = count;
+      const running = sniper?.isRunning() ?? false;
+      // The list is unchanged since the last tick (same copy): the summary,
+      // the count and the feed are all as they were.
+      const sig = gallerySignature(g, running);
       const sum = root.getElementById('g-sum');
-      if (sum && sum.textContent !== gallerySumText(g)) sum.textContent = gallerySumText(g);
-      if (tab === 'gallery') {
-        const running = sniper?.isRunning() ?? false;
-        const sig = gallerySignature(g, running);
-        if (sig !== gallerySig) {
-          gallerySig = sig;
-          setHtml($('gallery-feed'), galleryFeedHtml(g, running));
+      if (sig !== gallerySig || !sum || gallerySumShown?.el !== sum) {
+        const n = gallerySummary(g);
+        const count = n.total > 0 ? `${n.total - n.todo}/${n.total}` : '';
+        if (feeds.galleryCount.textContent !== count) feeds.galleryCount.textContent = count;
+        if (sum) {
+          const text = gallerySumText(g);
+          if (gallerySumShown?.el !== sum || gallerySumShown.text !== text) {
+            sum.textContent = text;
+            gallerySumShown = { el: sum, text };
+          }
         }
       }
+      if (sig !== gallerySig) {
+        gallerySig = sig;
+        if (tab === 'gallery') {
+          perf.count('gallery.feed.rebuilt');
+          setHtml(feeds.gallery, perf.time('gallery.feed.html', () => galleryFeedHtml(g, running)));
+        } else galleryFeedStale = true;
+      } else if (tab === 'gallery' && galleryFeedStale) {
+        perf.count('gallery.feed.rebuilt');
+        setHtml(feeds.gallery, perf.time('gallery.feed.html', () => galleryFeedHtml(g, running)));
+      }
+      if (tab === 'gallery') galleryFeedStale = false;
     }
     const view = sniper?.getActiveBids() ?? null;
     const count = view && view.bids.length > 0 ? `${view.bids.length}/${view.max}` : '';
-    const countEl = $('bids-count');
-    if (countEl.textContent !== count) countEl.textContent = count;
+    if (feeds.bidsCount.textContent !== count) feeds.bidsCount.textContent = count;
     if (tab !== 'bids') return;
     wantNames(view?.bids.map((b) => b.assetId) ?? []);
-    setHtml($('bids'), bidsHtml(view, sniper?.isRunning() ?? false, Date.now()));
+    setHtml(feeds.bids, bidsHtml(view, sniper?.isRunning() ?? false, Date.now()));
   }
 
   function bidsHtml(view: ReturnType<Sniper['getActiveBids']> | null, running: boolean, now: number): string {
@@ -3611,6 +3796,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     const buying = running ? g.cards.find((c) => c.status === 'todo' && galleryCardNeeded(c, g))?.key : undefined;
     const completed = new Set(g.completed ?? []);
     // Each fut.gg Set: the grade its lineup is for, and how far it got.
+    const bySet = galleryCardsBySet(g);
     const sets = gallerySetProgress(g)
       .map((p) => {
         if (completed.has(p.set.id))
@@ -3619,19 +3805,24 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
           p.skipped > 0
             ? ` · <span class="warn">${p.skipped} skipped (${fmt(p.skippedScore)} points): retry ${p.skipped === 1 ? 'it' : 'them'}, or the Set may miss grade ${p.set.grade}</span>`
             : '';
-        const note = blockerNote(gallerySetBlockers(g, p.set.id));
+        const note = blockerNote(gallerySetBlockers(g, p.set.id, bySet));
         const why = note ? ` · <span class="g-why" title="${esc(note.detail)}">not done: ${esc(note.summary)}</span>` : '';
         return `<div class="g-sethead"><b>${esc(p.set.name)}</b> · grade ${p.set.grade} needs ${fmt(p.set.threshold)} points, the lineup makes ${fmt(p.set.score)} · ${p.done} of ${p.cards} collected${risk}${why}</div>`;
       })
       .join('');
     // Still to buy first; cards on their way, then the done ones, after.
     const groups: { title: string; cards: GalleryCard[] }[] = [
-      { title: 'To buy', cards: g.cards.filter((c) => c.status === 'todo' && galleryCardNeeded(c, g)) },
-      { title: 'On the way to the market', cards: g.cards.filter((c) => c.status === 'bought' || c.status === 'club') },
-      { title: 'SBC/Objective — collect in the game', cards: g.cards.filter((c) => c.status === 'sbc') },
-      { title: 'Skipped', cards: g.cards.filter((c) => c.status === 'skipped') },
-      { title: 'Done', cards: g.cards.filter((c) => c.status === 'listed' || c.status === 'owned' || (c.status === 'todo' && !galleryCardNeeded(c, g))) },
+      { title: 'To buy', cards: [] },
+      { title: 'On the way to the market', cards: [] },
+      { title: 'SBC/Objective — collect in the game', cards: [] },
+      { title: 'Skipped', cards: [] },
+      { title: 'Done', cards: [] },
     ];
+    for (const c of g.cards) {
+      const at =
+        c.status === 'todo' ? (galleryCardNeeded(c, g) ? 0 : 4) : c.status === 'bought' || c.status === 'club' ? 1 : c.status === 'sbc' ? 2 : c.status === 'skipped' ? 3 : 4;
+      groups[at]!.cards.push(c);
+    }
     const rows = groups
       .filter((x) => x.cards.length > 0)
       .map((x) => {
@@ -3977,16 +4168,23 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   const api: BotPage = {
     open() {
       if (!page.hidden) return;
-      settings = deps.getSettings();
-      modeSettings = deps.getModeSettings?.() ?? modeSettings;
-      pending = null;
-      renderSettings();
-      page.hidden = false;
-      // Lets the account button step aside while the page is open.
-      host.dataset.open = '';
-      refreshLive();
+      perf.start('panel.open.interactive');
+      perf.time('panel.open.visible', () => {
+        settings = deps.getSettings();
+        modeSettings = deps.getModeSettings?.() ?? modeSettings;
+        pending = null;
+        // A list left open, or a name half typed, last time: closed.
+        openDd = null;
+        suggestions = [];
+        page.hidden = false;
+        // Lets the account button step aside while the page is open.
+        host.dataset.open = '';
+        renderSettings();
+        refreshLive();
+      });
       void deps.prepare().then(() => {
         if (!page.hidden) refreshLive();
+        perf.end('panel.open.interactive');
       });
       loadCatalog();
       loadRecent();
@@ -4019,7 +4217,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     },
     isOpen: () => !page.hidden,
     refresh: queueRefresh,
-    refreshCatalog: loadCatalog,
+    refreshCatalog,
     setBounds({ left, top, right, bottom }) {
       const px = (n: number) => `${Math.max(0, Math.round(n))}px`;
       page.style.setProperty('--left', px(left));

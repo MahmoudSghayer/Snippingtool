@@ -33,6 +33,8 @@ import {
   obfuscateUserscriptCode,
 } from '../../scripts/obfuscate.mjs';
 import { TEMPLATE_PLACEHOLDERS } from '../../scripts/template-placeholders.mjs';
+import { USERSCRIPT_PRELUDE } from '../../scripts/userscript-prelude.mjs';
+import { missingZodMembers, usedZodMembers, vendorZodMembers } from '../../scripts/userscript-vendor.mjs';
 
 import { TEST_PUBLIC_KEY_PEM } from './license-test-keys.js';
 
@@ -150,6 +152,21 @@ describe('built userscript --template (obfuscated)', () => {
     expect(meta).not.toMatch(OBFUSCATOR_SIGNATURE);
   });
 
+  it('starts the body with the sandbox prelude, then zod in the clear, then the obfuscated code', () => {
+    // The first statement binds the globals Tampermonkey's sandbox would
+    // otherwise proxy on every use (scripts/userscript-prelude.mjs).
+    expect(body.trimStart().startsWith(USERSCRIPT_PRELUDE)).toBe(true);
+    // Then the vendor chunk (zod, public code, minified only), read by the
+    // main bundle from its global; the obfuscated code comes after it.
+    const vendor = body.indexOf('var __novaVendor');
+    const obfuscated = body.search(OBFUSCATOR_SIGNATURE);
+    expect(vendor).toBeGreaterThan(-1);
+    expect(obfuscated).toBeGreaterThan(vendor);
+    expect(body.slice(vendor, obfuscated)).not.toMatch(OBFUSCATOR_SIGNATURE);
+    // zod's own error words are readable there: it was not obfuscated.
+    expect(body.slice(vendor, obfuscated)).toContain('invalid_type');
+  });
+
   it('obfuscates the code below the header', () => {
     expect(body).toMatch(OBFUSCATOR_SIGNATURE);
     // Identifiers that are plainly readable in the unobfuscated bundle.
@@ -194,5 +211,20 @@ describe('built ledger (NOT obfuscated)', () => {
       const text = readFileSync(path.join(outDir, file), 'utf8');
       expect(text, `${file} must not be obfuscated`).not.toMatch(OBFUSCATOR_SIGNATURE);
     }
+  });
+});
+
+describe('scripts/userscript-vendor.mjs', () => {
+  it("finds the runtime z.<name> members a source uses, types aside", () => {
+    expect([...usedZodMembers("const a: z.infer<typeof s> = z.object({ n: z.number() }); z.coerce.number()")].sort()).toEqual(['coerce', 'number', 'object']);
+  });
+
+  it('reads the members the vendor module exports', () => {
+    expect([...vendorZodMembers('export const z = {\n  ZodError,\n  enum: enum_,\n  null: null_,\n  string,\n};')]).toEqual(['ZodError', 'enum', 'null', 'string']);
+  });
+
+  it("the vendor module covers every z.<name> this project's sources use", () => {
+    const srcDirs = [path.join(extensionRoot, 'src'), path.resolve(extensionRoot, '../../packages/shared/src')];
+    expect(missingZodMembers(srcDirs, path.join(extensionRoot, 'src/userscript/vendor.ts'))).toEqual([]);
   });
 });
