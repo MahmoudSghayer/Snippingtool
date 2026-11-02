@@ -308,8 +308,17 @@ async function buildIifeInMemory(entry, globalName, extra = {}) {
 // wrapper, so the obfuscator never renames or string-arrays it and the names
 // stay the real globals the bundle below closes over. One proxy read each at
 // startup; local for every lookup after.
+//
+// `var`, never `const`/`let`: this prefix must survive being evaluated more
+// than once in the same scope without aborting the whole script. A duplicated
+// prefix (a dirty build) or a scope that already binds one of these names
+// (`const` there throws "Identifier 'Promise' has already been declared" at
+// parse time, which takes the entire userscript down — no adapter, no UI).
+// `var` redeclaration is a no-op and binding one of these over the matching
+// global just re-reads it, so the worst case is a wasted assignment, never a
+// SyntaxError.
 const SANDBOX_LOCALS =
-  'const { Promise, Object, Array, Map, Set, JSON, Math, Number, String, Symbol, Reflect, Error } = globalThis;';
+  'var { Promise, Object, Array, Map, Set, JSON, Math, Number, String, Symbol, Reflect, Error } = globalThis;';
 
 async function buildUserscript() {
   const { adapter, main: entry } = USERSCRIPT_ENTRIES;
