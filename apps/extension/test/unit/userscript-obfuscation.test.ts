@@ -156,6 +156,11 @@ describe('built userscript --template (obfuscated)', () => {
     // The first statement binds the globals Tampermonkey's sandbox would
     // otherwise proxy on every use (scripts/userscript-prelude.mjs).
     expect(body.trimStart().startsWith(USERSCRIPT_PRELUDE)).toBe(true);
+    // ...and exactly once. Two copies of the prelude in one scope was the
+    // production bug that took the panel down: with `const` the second copy
+    // throws "Identifier 'Promise' has already been declared" at parse time
+    // and the whole userscript dies before any UI mounts.
+    expect(body.split(USERSCRIPT_PRELUDE).length - 1).toBe(1);
     // Then the vendor chunk (zod, public code, minified only), read by the
     // main bundle from its global; the obfuscated code comes after it.
     const vendor = body.indexOf('var __novaVendor');
