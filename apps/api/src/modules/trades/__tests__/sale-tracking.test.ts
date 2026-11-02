@@ -246,10 +246,12 @@ describe('sale tracking (item ids, open trades, inferred and manual sales)', () 
         saleSource: 'observed',
       });
 
-      const [profitRow] = await app.db.query.profits.findMany({
-        where: eq(profits.userId, userId),
-      });
-      expect(profitRow).toMatchObject({ netProfit: 2 * 2825, tradesClosed: 2 });
+      // Summed: a trade's spend counts on its buy's UTC day and its profit on
+      // the sale's, so a run in the half hour after midnight splits them over
+      // two rows.
+      const profitRows = await app.db.query.profits.findMany({ where: eq(profits.userId, userId) });
+      expect(profitRows.reduce((sum, r) => sum + r.netProfit, 0)).toBe(2 * 2825);
+      expect(profitRows.reduce((sum, r) => sum + r.tradesClosed, 0)).toBe(2);
     });
   });
 

@@ -731,12 +731,6 @@ async function main(): Promise<void> {
     const transferTools = {
       adapter,
       sleep: (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
-      // What each unsold card cost, from the background's trade lifecycle, so a
-      // step-lower relist never lists a card under break-even (a sure loss).
-      costOf: async (itemIds: string[]): Promise<Record<string, number>> => {
-        const res = await send<{ costs: Record<string, number> }>('lifecycle.costs', { itemIds }).catch(() => null);
-        return res?.costs ?? {};
-      },
     };
     // The sold cards cleared on their own every ten minutes, through the
     // same path as the card's Clear sold button, when the list shows any.

@@ -59,13 +59,6 @@ describe('relist prices', () => {
     expect(relistPrices(200, -1)).toEqual({ startPrice: 150, buyNowPrice: 200 });
   });
 
-  it('never step a buy-now price below a break-even floor', () => {
-    // A 48,000 listing would step down to 47,750, but a floor of 48,750
-    // (break-even on a 46,250 card after EA's tax) holds it there instead.
-    expect(relistPrices(48_000, -1, 48_750)).toEqual({ startPrice: 48_500, buyNowPrice: 48_750 });
-    // A floor at or under the stepped price does nothing.
-    expect(relistPrices(2_100, -1, 1_000)).toEqual({ startPrice: 1_900, buyNowPrice: 2_000 });
-  });
 });
 
 describe('Clear sold', () => {
@@ -102,16 +95,13 @@ describe('Relist unsold', () => {
     expect(progress).toEqual(['1/3', '2/3', '3/3']);
   });
 
-  it('floors a step-lower relist at break-even, so a card is never relisted under what it cost', async () => {
-    const { deps, events } = setup([unsoldCard('1', 48_000), unsoldCard('2', 2_100)]);
-    // Card 1 cost 46,250 (break-even 48,750 after EA's 5% tax); card 2 has no
-    // record (bought before the lifecycle), so it steps lower as before.
-    deps.costOf = vi.fn(async () => ({ '1': 46_250 }));
+  it('a step lower goes one step lower even when that is under what the card cost', async () => {
+    // Listed at 48,000 after costing 47,500: one step lower is 47,750, below
+    // break-even after EA's tax, and the trader asked for it, so it is listed there.
+    const { deps, events } = setup([unsoldCard('1', 48_000)]);
     const result = await relistUnsold(deps, -1);
-    expect(deps.costOf).toHaveBeenCalledWith(['1', '2']);
-    expect(events[0]).toBe('relist 1 48500/48750');
-    expect(events.at(-1)).toBe('relist 2 1900/2000');
-    expect(result.message).toContain('1 kept at break-even');
+    expect(events).toEqual(['relist 1 47500/47750']);
+    expect(result).toEqual({ ok: true, message: 'Relisted 1 of 1 unsold card one step lower' });
   });
 
   it('a step higher too', async () => {

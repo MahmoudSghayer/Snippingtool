@@ -509,7 +509,9 @@ the panel:
   entities) and list each again with the `relist` act, one at a time 2.5–4.5
   s apart (never a burst EA answers with its limits): the buy-now price one
   step of EA's grid from the card's last one (never under 200), the starting
-  bid one step under it, for an hour, as auto-sell lists. The adapter only
+  bid one step under it, for an hour, as auto-sell lists. **−1 step** is not
+  held at what a card cost: when its last price was near that, one step lower
+  sells it under what it was bought for, as the trader asked. The adapter only
   relists a card that read returned as unsold, once (`relist_not_unsold`
   otherwise). A card listed without a buy-now price is left as it is; three
   refusals in a row stop the run. The counts follow with the reload after.
@@ -1054,10 +1056,10 @@ governor):
    adapter's `club` act (`Item.move(item, ItemPile.CLUB)`, the web app's own
    "Send to My Club"), then `move` to the transfer list and `list` one EA
    price step over what it cost (`galleryListPrices`), with a starting bid
-   a step under that. From about 2,000 coins EA's 5% tax is more than one
-   step adds (a 2,900 card listed at 3,000 brings back 2,850), so such a
-   card is listed at the lowest price whose sale brings back what it cost
-   (3,100; 9,800 for 9,300), and the log says so. A step EA refuses is
+   a step under that, whatever the price: from about 2,000 coins EA's 5% tax
+   takes more than the step adds (a 2,900 card listed at 3,000 brings back
+   2,850), a small loss taken so the card sells rather than sitting several
+   steps over what it cost. A step EA refuses is
    tried three times. A card the club refuses (EA refuses a card the club
    already holds) still goes back on the market, so its coins come back,
    and its row says "Not sent to your club (…): check the Set counted it".

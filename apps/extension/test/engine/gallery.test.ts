@@ -150,19 +150,19 @@ describe('Gallery prices', () => {
   });
 
   it('lists one step over what the card cost, with a starting bid a step under that', () => {
-    expect(galleryListPrices(1_400)).toEqual({ buyNowPrice: 1_500, startPrice: 1_400, coversTax: false });
-    expect(galleryListPrices(200)).toEqual({ buyNowPrice: 250, startPrice: 200, coversTax: false });
-    expect(galleryListPrices(950)).toEqual({ buyNowPrice: 1_000, startPrice: 950, coversTax: false });
-    // 2,000 brings back 1,900 after EA's 5% tax: no loss.
-    expect(galleryListPrices(1_900)).toEqual({ buyNowPrice: 2_000, startPrice: 1_900, coversTax: false });
+    expect(galleryListPrices(1_400)).toEqual({ buyNowPrice: 1_500, startPrice: 1_400 });
+    expect(galleryListPrices(200)).toEqual({ buyNowPrice: 250, startPrice: 200 });
+    expect(galleryListPrices(950)).toEqual({ buyNowPrice: 1_000, startPrice: 950 });
+    expect(galleryListPrices(1_900)).toEqual({ buyNowPrice: 2_000, startPrice: 1_900 });
   });
 
-  it("lists higher when EA's 5% tax on one step over would make it a loss: the lowest price that brings back what it cost", () => {
-    // 3,000 would bring back 2,850; 3,100 brings back 2,945.
-    expect(galleryListPrices(2_900)).toEqual({ buyNowPrice: 3_100, startPrice: 3_000, coversTax: true });
-    expect(galleryListPrices(9_300)).toEqual({ buyNowPrice: 9_800, startPrice: 9_700, coversTax: true });
+  it("lists one step over whatever the card cost, even when EA's 5% tax then takes more than the step adds", () => {
+    // 3,000 brings back 2,850 on a 2,900 card: still one step, never more.
+    expect(galleryListPrices(2_900)).toEqual({ buyNowPrice: 3_000, startPrice: 2_900 });
+    expect(galleryListPrices(9_300)).toEqual({ buyNowPrice: 9_400, startPrice: 9_300 });
     // Across a change in EA's step (100 under 10,000, 250 from it).
-    expect(galleryListPrices(9_900)).toEqual({ buyNowPrice: 10_500, startPrice: 10_250, coversTax: true });
+    expect(galleryListPrices(9_900)).toEqual({ buyNowPrice: 10_000, startPrice: 9_900 });
+    expect(galleryListPrices(10_000)).toEqual({ buyNowPrice: 10_250, startPrice: 10_000 });
     // Never past EA's highest price.
     expect(galleryListPrices(15_000_000).buyNowPrice).toBe(15_000_000);
   });
