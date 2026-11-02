@@ -53,6 +53,21 @@ function day(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
+/** A user's daily profit rows added up. Spend counts on the buy's UTC day
+ * and earnings on the sale's, so a trade bought just before midnight and
+ * sold after it is split over two rows: read the totals, not one row. */
+async function profitTotals(app: FastifyInstance, userId: string) {
+  const rows = await app.db.query.profits.findMany({ where: eq(profits.userId, userId) });
+  const sum = (k: 'coinsSpent' | 'coinsEarned' | 'netProfit' | 'tradesClosed') =>
+    rows.reduce((t, r) => t + r[k], 0);
+  return {
+    coinsSpent: sum('coinsSpent'),
+    coinsEarned: sum('coinsEarned'),
+    netProfit: sum('netProfit'),
+    tradesClosed: sum('tradesClosed'),
+  };
+}
+
 function tradePayload(overrides: Record<string, unknown> = {}) {
   return {
     id: newId(),
@@ -276,10 +291,7 @@ describe('trades module (/api/v1/trades)', () => {
     });
     expect(res.json().soldAt).not.toBeNull();
 
-    const [profitRow] = await app.db.query.profits.findMany({
-      where: eq(profits.userId, userId),
-    });
-    expect(profitRow).toMatchObject({
+    expect(await profitTotals(app, userId)).toEqual({
       coinsSpent: 20000,
       coinsEarned: 30000,
       netProfit: 8500,
@@ -332,10 +344,7 @@ describe('trades module (/api/v1/trades)', () => {
 
     const after = await app.db.query.trades.findFirst({ where: eq(trades.id, row!.id) });
     expect(after).toMatchObject({ status: 'sold', sellPrice: 30000, netProfit: 8500 });
-    const [profitRow] = await app.db.query.profits.findMany({
-      where: eq(profits.userId, userId),
-    });
-    expect(profitRow).toMatchObject({ netProfit: 8500, tradesClosed: 1 });
+    expect(await profitTotals(app, userId)).toMatchObject({ netProfit: 8500, tradesClosed: 1 });
   });
 
   it("batch: the extension's sale report closes the bought trade, and the server computes the profit", async () => {
