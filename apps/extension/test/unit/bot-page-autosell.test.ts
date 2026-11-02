@@ -80,6 +80,9 @@ it('turns on, steps the market price down, and switches to a fixed price on the 
   expect(saved().fixedPrice).toBe(10_250);
   expect(saved().steps).toBe(-2); // kept for when market price comes back
 
+  // "Never sell at a loss" starts off: selling at a loss is the user's call.
+  click('#as-noloss');
+  expect(saved().noLoss).toBe(true);
   click('#as-noloss');
   expect(saved().noLoss).toBe(false);
 });

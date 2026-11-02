@@ -677,9 +677,9 @@ for" and profit, and the minimum-profit check, use the price auto-sell lists
 at: the user's own sell price when set (even with auto-sell off), else the
 market price, moved by the steps when auto-sell is on.
 Prices go on EA's grid (`roundToPriceStep` / `stepPrice` in `@sl/shared`),
-the starting bid one step under the buy-now. "Never sell at a loss" (on by
-default) skips a price that, after EA's 5% tax, is below what the card
-cost. Every outcome is in the log. The listing itself is the adapter's
+the starting bid one step under the buy-now. "Never sell at a loss" (off by
+default: selling at a loss is the user's call) skips a price that, after
+EA's 5% tax, is below what the card cost. Every outcome is in the log. The listing itself is the adapter's
 `list` act (`services.Item.list(item, start, buyNow, 3600)` in the
 observable shape, UNVERIFIED like the rest of it; the promise shape has
 none and answers `list_unsupported`), and the adapter only lists an item
