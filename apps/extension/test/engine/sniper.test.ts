@@ -1434,7 +1434,8 @@ describe('Sniper — auto-sell after a buy', () => {
   it("shows the buy at the user's own sell price, not a market estimate they never chose", async () => {
     const h = setup({
       settings: {
-        ...autoSell({ mode: 'fixed', fixedPrice: 1_700 }),
+        // "Never sell at a loss" is off by default; on here, so the loss is skipped.
+        ...autoSell({ mode: 'fixed', fixedPrice: 1_700, noLoss: true }),
         thresholds: { ...DEFAULT_BOT_SETTINGS.thresholds, minProfit: 0 },
       },
       results: [[auction('t-a', 2_200)]],

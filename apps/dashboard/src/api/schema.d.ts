@@ -5230,7 +5230,7 @@ export interface paths {
                              *       "steps": 0,
                              *       "fixedPrice": 10000,
                              *       "platform": "console",
-                             *       "noLoss": true
+                             *       "noLoss": false
                              *     }
                              */
                             autoSell?: {

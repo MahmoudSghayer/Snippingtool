@@ -77,14 +77,16 @@ export const RECOMMENDED_BOT_SETTINGS = {
 
 const R = RECOMMENDED_BOT_SETTINGS;
 
-/** Auto-sell starts off: listing what the bot buys is the user's choice. */
+/** Auto-sell starts off: listing what the bot buys is the user's choice.
+ * So is selling at a loss: "Never sell at a loss" starts off too, and the
+ * user turns it on to have a loss-making price skipped. */
 const DEFAULT_AUTO_SELL = {
   enabled: false,
   mode: 'market' as const,
   steps: 0,
   fixedPrice: 10_000,
   platform: 'console' as const,
-  noLoss: true,
+  noLoss: false,
 };
 const rangeDefault = (r: { min: number; max: number }) => ({ min: r.min, max: r.max });
 

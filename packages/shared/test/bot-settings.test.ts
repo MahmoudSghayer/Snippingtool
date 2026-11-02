@@ -324,14 +324,14 @@ describe('botRiskLevel', () => {
 });
 
 describe('bot settings — auto-sell', () => {
-  it('starts off, at the market price, on console, never at a loss', () => {
+  it('starts off, at the market price, on console, with "Never sell at a loss" off', () => {
     expect(DEFAULT_BOT_SETTINGS.autoSell).toEqual({
       enabled: false,
       mode: 'market',
       steps: 0,
       fixedPrice: 10_000,
       platform: 'console',
-      noLoss: true,
+      noLoss: false,
     });
     // Settings saved before auto-sell existed still parse, with it off.
     const { autoSell: _drop, ...old } = DEFAULT_BOT_SETTINGS;
