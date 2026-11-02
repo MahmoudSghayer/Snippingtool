@@ -314,17 +314,6 @@ async function buildIifeInMemory(entry, globalName, extra = {}) {
 const VENDOR_GLOBAL = '__novaVendor';
 const VENDOR_MODULES = ['zod'];
 
-// Bound once at the top of the userscript body, so the hot path reads these
-// built-ins from a local binding instead of Tampermonkey's sandbox proxy
-// (every bare `Promise`/`Object`/… otherwise goes through its `with(proxy)`
-// scope — a Chrome trace put that at ~16% of each catalog-validation freeze).
-// Prepended AFTER obfuscation, as the first statement inside Tampermonkey's
-// wrapper, so the obfuscator never renames or string-arrays it and the names
-// stay the real globals the bundle below closes over. One proxy read each at
-// startup; local for every lookup after.
-const SANDBOX_LOCALS =
-  'const { Promise, Object, Array, Map, Set, JSON, Math, Number, String, Symbol, Reflect, Error } = globalThis;';
-
 async function buildUserscript() {
   const { adapter, main: entry } = USERSCRIPT_ENTRIES;
   // The adapter is built (minified) and obfuscated on its own, then embedded
@@ -365,7 +354,12 @@ async function buildUserscript() {
   });
 
   mkdirSync(outDir, { recursive: true });
-  writeFileSync(path.join(outDir, entry.fileName), `${header}\n\n${SANDBOX_LOCALS}\n${code}`);
+  // `code` already begins with USERSCRIPT_PRELUDE (above), so the body is just
+  // the header, a blank line, then the prelude + bundles. Do NOT prepend the
+  // prelude a second time here: two copies of its `var`/`const` declarations in
+  // one scope is a parse error that aborts the whole userscript before any UI
+  // mounts (the userscript-obfuscation test pins that it appears exactly once).
+  writeFileSync(path.join(outDir, entry.fileName), `${header}\n\n${code}`);
   writeFileSync(path.join(outDir, entry.metaFileName), `${header}\n`);
 }
 

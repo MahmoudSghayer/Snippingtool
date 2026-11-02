@@ -11,5 +11,11 @@
 // after obfuscation, so neither the bundler nor the obfuscator can rename
 // or strip it; and never inside the MAIN-world adapter, which runs in EA's
 // page, not the sandbox.
+//
+// `var`, not `const`/`let`: re-reading a global into the same `var` is a no-op,
+// so if this prelude is ever emitted twice in one scope (a build that prepends
+// it on top of a bundle that already carries it) the script still parses. With
+// `const` the second copy throws "Identifier 'Promise' has already been
+// declared" at parse time and the whole userscript dies before any UI mounts.
 export const USERSCRIPT_PRELUDE =
-  'const { Promise, Object, Array, Map, Set, JSON, Math, Number, String, Symbol, Reflect, Error } = globalThis;';
+  'var { Promise, Object, Array, Map, Set, JSON, Math, Number, String, Symbol, Reflect, Error } = globalThis;';
