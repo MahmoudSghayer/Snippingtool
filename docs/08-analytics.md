@@ -208,6 +208,16 @@ day neither 500 nor lose each other's rows, and swept hourly by the
 `/api/v1/profits` shows for the same range, and a trade logged a second ago
 is already in them.
 
+**Gallery trades are excluded.** Profit here is snipe + bid trading only.
+Gallery mode (`trades.mode = 'gallery'`, 0044) buys a card, sends it through
+the club to finish an FC Gallery Set for its token reward, then re-lists it at
+a deliberate loss — the loss is the cost of the grind, not a failed trade, so
+the rollup's coin/profit/closed-trade sums (and `getUserProfitSeriesInZone`)
+filter `mode IS DISTINCT FROM 'gallery'`. A `null` mode (trades from before
+the column, not since backfilled) counts as normal trading, so the filter can
+only under-exclude, never hide a real trade. Snipe/success **counts** still
+include Gallery buy-attempts (`sniping_activity` is not mode-tagged yet).
+
 | Function                                               | What it computes                                                                                                                                                                                                                                                                                                                                |
 | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `getPlatformProfitSeries(db, {from, to, granularity})` | Platform-wide series, bucketed (§7) and zero-filled. Each point: `netProfit`, `coinsSpent`, `coinsEarned`, `coinsTraded` (`coinsSpent + coinsEarned` — "total coins traded"), `snipes`, `successes`, `tradesClosed`, `activeTraders` (distinct `user_id` count in that bucket), `snipeSuccessRate` (`successes / snipes`, `0` if `snipes = 0`). |
