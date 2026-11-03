@@ -24,6 +24,17 @@ export type SaleSource = (typeof SALE_SOURCES)[number];
 /** What the extension may claim for a sale it reports: never `manual`. */
 export const REPORTED_SALE_SOURCES = ['observed', 'inferred'] as const;
 
+/** Which bot mode produced a trade (`trades.mode`). Profit analytics count
+ * `snipe` + `bid` only: `gallery` is the FC Gallery Set-completion grind,
+ * where cards are bought, sent through the club and re-listed at a deliberate
+ * loss to finish Sets for their token reward — real coin losses that are the
+ * cost of the grind, not failed trading. So `gallery` is excluded from every
+ * profit surface (the `profits` rollup and all the analytics read off it; see
+ * lib/analytics/rollup.ts). `null` for trades stored before the column
+ * existed and not since identified — treated as non-gallery, i.e. counted. */
+export const TRADE_MODES = ['snipe', 'bid', 'gallery'] as const;
+export type TradeMode = (typeof TRADE_MODES)[number];
+
 /** EA's id for the card itself (`itemData.id`): unlike the listing's
  * `tradeId` it survives the purchase and every relist, so it links a sale
  * to its buy (the extension's trade lifecycle keys on it). Bounded like
@@ -98,6 +109,10 @@ export const tradeSchema = z
      * stored before it existed); a report leaves it out for an observed
      * sale. */
     saleSource: z.enum(SALE_SOURCES).nullable().optional(),
+    /** Which bot mode bought the card (`TRADE_MODES`). The extension reports
+     * it on the buy; `null` on trades from before the field existed (and not
+     * since backfilled). Profit analytics exclude `gallery`. */
+    mode: z.enum(TRADE_MODES).nullable().optional(),
   })
   .strict();
 export type Trade = z.infer<typeof tradeSchema>;

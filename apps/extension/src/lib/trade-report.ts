@@ -44,6 +44,10 @@ export function buildBoughtTrade(
     status: 'bought',
     boughtAt,
     soldAt: null,
+    // Which bot mode bought the card, so the server can exclude Gallery's
+    // deliberate relist-losses from profit analytics. Null when the engine
+    // didn't say (assist/autobuyer buys — never Gallery, so counted).
+    mode: input.mode ?? null,
   };
   // `itemId: null` when the listing carried none: the buy cannot be
   // followed, and background counts it for the diagnostics report.

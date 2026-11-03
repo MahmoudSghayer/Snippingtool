@@ -211,7 +211,7 @@ export async function getUserProfitSeriesInZone(
       start(),
       sql` AND bought_at < `,
       end(),
-      sql`
+      sql` AND mode IS DISTINCT FROM 'gallery'
            UNION ALL
            SELECT `,
       localDay('sold_at'),
@@ -223,7 +223,7 @@ export async function getUserProfitSeriesInZone(
       start(),
       sql` AND sold_at < `,
       end(),
-      sql`
+      sql` AND mode IS DISTINCT FROM 'gallery'
            UNION ALL
            SELECT `,
       localDay('occurred_at'),

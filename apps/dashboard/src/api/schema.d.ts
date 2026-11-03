@@ -8089,6 +8089,7 @@ export interface paths {
                             soldAt: string | null;
                             /** @enum {string} */
                             saleSource?: "observed" | "inferred";
+                            mode?: ("snipe" | "bid" | "gallery") | null;
                         }[];
                     };
                 };
@@ -8165,6 +8166,7 @@ export interface paths {
                             boughtAt: string;
                             soldAt: string | null;
                             saleSource?: ("observed" | "inferred" | "manual") | null;
+                            mode?: ("snipe" | "bid" | "gallery") | null;
                         };
                     };
                 };
@@ -8228,6 +8230,7 @@ export interface paths {
                                 boughtAt: string;
                                 soldAt: string | null;
                                 saleSource?: ("observed" | "inferred" | "manual") | null;
+                                mode?: ("snipe" | "bid" | "gallery") | null;
                             }[];
                             skipped: {
                                 /** Format: uuid */
@@ -8336,6 +8339,7 @@ export interface paths {
                                 boughtAt: string;
                                 soldAt: string | null;
                                 saleSource?: ("observed" | "inferred" | "manual") | null;
+                                mode?: ("snipe" | "bid" | "gallery") | null;
                                 cardName: string | null;
                             }[];
                             nextCursor: string | null;

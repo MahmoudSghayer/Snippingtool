@@ -3733,6 +3733,10 @@ export class Sniper {
       tradeId: m.tradeId,
       resourceId: m.resourceId,
       buyPrice: m.buyNow,
+      // The mode that bought it: Gallery buys are the Set-completion grind
+      // (resold at a deliberate loss), so the server keeps them out of the
+      // profit analytics; snipe/bid are normal trading and count.
+      mode: this.modeSettings.mode,
       ...(won ? { itemId: won.itemId, assetId: m.assetId, rating: m.rating } : {}),
     });
   }

@@ -495,7 +495,7 @@ describe('Bid mode — what it wins', () => {
     expect(h.sniper.getStats().topSnipes).toEqual([expect.objectContaining({ kind: 'won', price: 10_000, sellPrice: 15_000, profit: 4_250 })]);
     // A purchase like a snipe: the attempt, and the trade the sale tracking follows.
     expect(h.attempts.find((a) => a.outcome === 'success')).toMatchObject({ tradeId: 'w', targetPrice: 10_000 });
-    expect(h.trades).toEqual([{ tradeId: 'w', resourceId: 100, buyPrice: 10_000, itemId: 'item-w', assetId: 100, rating: 85 }]);
+    expect(h.trades).toEqual([{ tradeId: 'w', resourceId: 100, buyPrice: 10_000, itemId: 'item-w', assetId: 100, rating: 85, mode: 'bid' }]);
     // Its coins stay spent.
     expect(h.sniper.getGovernor()!.snapshot().coinFlowLastHour).toBe(10_000);
   });

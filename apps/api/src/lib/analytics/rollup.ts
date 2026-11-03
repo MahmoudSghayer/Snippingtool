@@ -118,7 +118,7 @@ export async function rollupProfitsForUserDay(
       from(),
       sql`::timestamptz AND bought_at < `,
       to(),
-      sql`::timestamptz
+      sql`::timestamptz AND mode IS DISTINCT FROM 'gallery'
        ), sold AS (
          SELECT coalesce(sum(sell_price), 0)::bigint AS coins_earned,
                 coalesce(sum(net_profit), 0)::bigint AS net_profit,
@@ -130,7 +130,7 @@ export async function rollupProfitsForUserDay(
       from(),
       sql`::timestamptz AND sold_at < `,
       to(),
-      sql`::timestamptz
+      sql`::timestamptz AND mode IS DISTINCT FROM 'gallery'
        ), snipes AS (
          SELECT count(*)::int AS n,
                 (count(*) FILTER (WHERE outcome = 'success'))::int AS successes

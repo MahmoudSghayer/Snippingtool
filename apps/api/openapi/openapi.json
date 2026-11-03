@@ -21394,6 +21394,21 @@
                             "observed",
                             "inferred"
                           ]
+                        },
+                        "mode": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "snipe",
+                                "bid",
+                                "gallery"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         }
                       },
                       "required": [
@@ -21615,6 +21630,21 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "mode": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "snipe",
+                            "bid",
+                            "gallery"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     }
                   },
                   "required": [
@@ -21807,6 +21837,21 @@
                                   "observed",
                                   "inferred",
                                   "manual"
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "mode": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "snipe",
+                                  "bid",
+                                  "gallery"
                                 ]
                               },
                               {
@@ -22145,6 +22190,21 @@
                                   "observed",
                                   "inferred",
                                   "manual"
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "mode": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "snipe",
+                                  "bid",
+                                  "gallery"
                                 ]
                               },
                               {

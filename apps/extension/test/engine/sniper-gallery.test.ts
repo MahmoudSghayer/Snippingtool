@@ -203,7 +203,7 @@ describe('Gallery mode — buying and listing', () => {
     // One step over its 3,700, though that brings back 3,610 after EA's 5% tax.
     expect(h.lists).toEqual([['t1', 3_700, 3_800]]);
     expect(h.gallery()).toEqual({ budget: 100_000, spent: 3_700, cards: [card({ status: 'listed', price: 3_700, market: 4_000, listPrice: 3_800 })] });
-    expect(h.trades).toEqual([{ tradeId: 't1', resourceId: 100, buyPrice: 3_700 }]);
+    expect(h.trades).toEqual([{ tradeId: 't1', resourceId: 100, buyPrice: 3_700, mode: 'gallery' }]);
     expect(h.sniper.state.stopReason).toBe('gallery_done');
     expect(h.log()).toContain('Sent {card} to your club');
     expect(h.log()).toContain('Gallery: one step over what it cost (3,700 coins)');
