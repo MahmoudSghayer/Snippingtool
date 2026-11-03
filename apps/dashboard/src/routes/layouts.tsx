@@ -12,6 +12,7 @@ import {
   Flag,
   Gauge,
   Gift,
+  Images,
   LogOut,
   Menu,
   Receipt,
@@ -93,6 +94,12 @@ const adminNav = [
     label: 'Bot performance',
     href: '/admin/performance',
     icon: <Timer className="size-4" />,
+  },
+  {
+    key: 'admin-gallery',
+    label: 'Gallery',
+    href: '/admin/gallery',
+    icon: <Images className="size-4" />,
   },
   {
     key: 'admin-system',

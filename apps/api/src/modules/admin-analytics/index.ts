@@ -11,6 +11,9 @@ import {
   errorRatesResponseSchema,
   extensionUsageResponseSchema,
   featureUsageResponseSchema,
+  galleryCompletionsQuerySchema,
+  galleryCompletionsResponseSchema,
+  galleryUsageResponseSchema,
   kpiOverviewSchema,
   performanceResponseSchema,
   profitAnalyticsResponseSchema,
@@ -19,12 +22,14 @@ import {
   subscriptionMetricsResponseSchema,
 } from '@sl/shared';
 import fp from 'fastify-plugin';
+import { z } from 'zod';
 
 import { getActivitySeries } from '../../lib/analytics/activity.js';
 import { csvStream } from '../../lib/analytics/csv.js';
 import { getErrorRates } from '../../lib/analytics/errors.js';
 import { getExtensionUsage } from '../../lib/analytics/extension.js';
 import { getFeatureUsage } from '../../lib/analytics/features.js';
+import { getGalleryUsage, getGalleryUserCompletions } from '../../lib/analytics/gallery.js';
 import { getKpiOverview } from '../../lib/analytics/kpi.js';
 import { getPerformance } from '../../lib/analytics/performance.js';
 import {
@@ -328,6 +333,43 @@ export default fp(
             items,
           ),
         );
+      },
+    );
+
+    // -----------------------------------------------------------------
+    // Gallery usage (the dashboard's /admin/gallery tab): per-user totals
+    // over the three Gallery tables, and a user's completed-Set log.
+    // -----------------------------------------------------------------
+
+    app.get(
+      '/api/v1/admin/analytics/gallery',
+      {
+        onRequest: [gate],
+        schema: {
+          tags: ['admin-analytics'],
+          response: { 200: galleryUsageResponseSchema },
+        },
+      },
+      async () => {
+        return getGalleryUsage(fastify.db);
+      },
+    );
+
+    app.get(
+      '/api/v1/admin/analytics/gallery/:userId/completions',
+      {
+        onRequest: [gate],
+        schema: {
+          tags: ['admin-analytics'],
+          params: z.object({ userId: z.string().guid() }),
+          querystring: galleryCompletionsQuerySchema,
+          response: { 200: galleryCompletionsResponseSchema },
+        },
+      },
+      async (request) => {
+        const { userId } = request.params;
+        const { limit, undone } = request.query;
+        return getGalleryUserCompletions(fastify.db, userId, { limit, undone });
       },
     );
   },
