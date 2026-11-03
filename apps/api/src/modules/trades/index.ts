@@ -126,6 +126,10 @@ function batchValues(t: ReportTradesRequest['trades'][number], existing: TradeRo
     assetId: t.assetId != null ? String(t.assetId) : (existing?.assetId ?? null),
     rating: t.rating ?? existing?.rating ?? null,
     buyPrice: t.buyPrice,
+    // Which bot mode bought the card (snipe/bid/gallery), for excluding
+    // gallery from profit analytics. Set on the buy; a later sale report keeps
+    // the stored mode (and fills it if the buy predated the field).
+    mode: t.mode ?? existing?.mode ?? null,
     boughtAt: new Date(t.boughtAt),
   };
   // A sale the extension reports is one it saw, unless it says it inferred

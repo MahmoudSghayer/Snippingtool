@@ -151,6 +151,12 @@ export const tradeStatusEnum = pgEnum('trade_status', [
 /** How a sold trade's price is known (migrations/0040). */
 export const tradeSaleSourceEnum = pgEnum('trade_sale_source', ['observed', 'inferred', 'manual']);
 
+/** Which bot mode produced a trade (migrations/0044). Profit analytics count
+ * `snipe` + `bid` only; `gallery` is the Set-completion grind (bought, clubbed
+ * and re-listed at a deliberate loss) and is excluded from every profit
+ * surface. NULL for trades from before the column, not since backfilled. */
+export const tradeModeEnum = pgEnum('trade_mode', ['snipe', 'bid', 'gallery']);
+
 export const riskEventKindEnum = pgEnum('risk_event_kind', [
   'actions_per_hour',
   'session_length',

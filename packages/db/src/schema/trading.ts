@@ -22,6 +22,7 @@ import {
   idPk,
   rowVersion,
   timestamptz,
+  tradeModeEnum,
   tradeSaleSourceEnum,
   tradeStatusEnum,
   updatedAt,
@@ -51,6 +52,10 @@ export const trades = pgTable(
     status: tradeStatusEnum('status').notNull().default('bought'),
     /** observed | inferred | manual once sold; null before (0040). */
     saleSource: tradeSaleSourceEnum('sale_source'),
+    /** snipe | bid | gallery — which bot mode bought the card (0044). The
+     * profit rollup excludes `gallery`. NULL for trades from before the
+     * column, not since backfilled from the clubbed-cards catalogue. */
+    mode: tradeModeEnum('mode'),
     boughtAt: timestamptz('bought_at'),
     soldAt: timestamptz('sold_at'),
 

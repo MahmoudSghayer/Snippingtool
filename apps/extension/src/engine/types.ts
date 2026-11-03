@@ -9,7 +9,12 @@
  * attempt's error inside the schema's bound, for every engine, and
  * `attemptTiming` its timings.
  */
-import { SNIPE_ERROR_CODE_MAX, SNIPE_TIMING_MAX_MS, type SnipeOutcome } from '@sl/shared';
+import {
+  SNIPE_ERROR_CODE_MAX,
+  SNIPE_TIMING_MAX_MS,
+  type SnipeOutcome,
+  type TradeMode,
+} from '@sl/shared';
 
 /** An error as an attempt's `errorCode`: never empty, and cut to what the
  * schema allows (`SNIPE_ERROR_CODE_MAX`), or background would reject the
@@ -52,4 +57,9 @@ export interface TradeInput {
   itemId?: string | null;
   assetId?: number;
   rating?: number | null;
+  /** Which bot mode bought the card (snipe/bid/gallery), so the server can
+   * keep Gallery's deliberate relist-losses out of the profit analytics. The
+   * sniper sets it; assist/autobuyer buys leave it undefined (never gallery,
+   * so counted as normal trading). */
+  mode?: TradeMode | null;
 }

@@ -63,4 +63,21 @@ describe('buildBoughtTrade', () => {
     expect(buildBoughtTrade(won, listing({ rating: 91 }), BOUGHT_AT).trade).toMatchObject({ itemId: '900001', rating: 91 });
     expect(buildBoughtTrade({ ...won, rating: 120, itemId: null }, undefined, BOUGHT_AT).trade).toMatchObject({ rating: null });
   });
+
+  it('stamps the bot mode on the buy (gallery is excluded from profit server-side), null when the engine did not say', () => {
+    const gallery = buildBoughtTrade(
+      { tradeId: '5001', resourceId: 50_331_700, buyPrice: 4_000, mode: 'gallery' },
+      listing(),
+      BOUGHT_AT,
+    ).trade;
+    expect(gallery.mode).toBe('gallery');
+    expect(tradeIngestSchema.safeParse({ ...gallery, boughtAt: new Date().toISOString() }).success).toBe(true);
+
+    const bid = buildBoughtTrade({ tradeId: '5001', resourceId: 7, buyPrice: 1_300, mode: 'bid' }, undefined, BOUGHT_AT).trade;
+    expect(bid.mode).toBe('bid');
+
+    // Assist/autobuyer buys leave mode undefined -> null (counted as trading).
+    const untagged = buildBoughtTrade({ tradeId: '5001', resourceId: 7, buyPrice: 500 }, undefined, BOUGHT_AT).trade;
+    expect(untagged.mode).toBeNull();
+  });
 });
