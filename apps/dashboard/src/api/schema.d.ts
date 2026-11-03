@@ -1252,6 +1252,111 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/analytics/gallery": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: {
+                                userId: string;
+                                email: string;
+                                setsCompleted: number;
+                                tokensEarned: number;
+                                coinsSpent: number;
+                                coinsBudget: number;
+                                cardsCollected: number;
+                                firstCardAt: string | null;
+                                firstCompletedAt: string | null;
+                                lastCompletedAt: string | null;
+                            }[];
+                            totals: {
+                                users: number;
+                                setsCompleted: number;
+                                tokensEarned: number;
+                                coinsSpent: number;
+                                cardsCollected: number;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/analytics/gallery/{userId}/completions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    limit?: number;
+                    undone?: "include" | "exclude";
+                };
+                header?: never;
+                path: {
+                    userId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: {
+                                setId: number;
+                                name: string;
+                                grade: ("D" | "C" | "B" | "A" | "S") | null;
+                                tokens: number | null;
+                                /** Format: date-time */
+                                completedAt: string;
+                                undoneAt: string | null;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/audit": {
         parameters: {
             query?: never;

@@ -13,6 +13,7 @@ import {
   Flag,
   Gauge,
   Gift,
+  Images,
   Receipt,
   Search,
   Server,
@@ -71,6 +72,14 @@ const ROUTES: PaletteRoute[] = [
     icon: <Timer className="size-4" />,
     adminOnly: true,
     keywords: 'bot speed search reaction win rate snipe',
+  },
+  {
+    key: 'admin-gallery',
+    label: 'Admin · Gallery',
+    href: '/admin/gallery',
+    icon: <Images className="size-4" />,
+    adminOnly: true,
+    keywords: 'gallery sets completed tokens collected cards club fut',
   },
   {
     key: 'admin-system',

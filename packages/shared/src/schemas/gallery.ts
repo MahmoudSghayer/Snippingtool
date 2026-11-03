@@ -479,3 +479,66 @@ export const futggLineupSchema = z
   })
   .strict();
 export type FutggLineup = z.infer<typeof futggLineupSchema>;
+
+// ---------------------------------------------------------------------------
+// Admin: Gallery usage per user, for the dashboard's /admin/gallery tab.
+// Read-only aggregates over the three Gallery tables — completed Sets and the
+// Gallery Tokens they gave (user_gallery_completions), cards put through the
+// club (user_gallery_owned), and the live list's coin spend/budget
+// (user_gallery). Served by `GET /api/v1/admin/analytics/gallery` behind the
+// `analytics.read` permission; the per-user Set log reuses
+// `galleryCompletionsResponseSchema` via
+// `GET /api/v1/admin/analytics/gallery/:userId/completions`.
+
+/** The most users one `GET /admin/analytics/gallery` returns. */
+export const GALLERY_USAGE_MAX = 1000;
+
+/** One user's Gallery totals (a row of the admin table). */
+export const galleryUsageRowSchema = z
+  .object({
+    userId: z.string(),
+    email: z.string(),
+    /** Completed Sets that still stand (undone ones excluded). */
+    setsCompleted: z.number().int().min(0),
+    /** Gallery Tokens earned across those Sets (what the Sets give), as far
+     * as the list knew a Set's tokens; Sets logged without a token count add
+     * nothing. */
+    tokensEarned: z.number().int().min(0),
+    /** Coins spent on the user's *current* Gallery list
+     * (`user_gallery.state.spent`). It resets when the list is replaced, so
+     * it is the active list's spend, not an all-time total. */
+    coinsSpent: z.number().int().min(0),
+    /** The current list's coin budget, shown beside the spend for context. */
+    coinsBudget: z.number().int().min(0),
+    /** Card ids the account has put through its club (user_gallery_owned). */
+    cardsCollected: z.number().int().min(0),
+    /** When the first card was clubbed; null when the catalogue is empty. */
+    firstCardAt: z.string().datetime().nullable(),
+    /** First and most recent standing completion; null with no completions. */
+    firstCompletedAt: z.string().datetime().nullable(),
+    lastCompletedAt: z.string().datetime().nullable(),
+  })
+  .strict();
+export type GalleryUsageRow = z.infer<typeof galleryUsageRowSchema>;
+
+/** Platform-wide Gallery totals, shown as the tab's KPI tiles. */
+export const galleryUsageTotalsSchema = z
+  .object({
+    /** Users with any Gallery activity (a completion, a clubbed card, or a
+     * saved list). */
+    users: z.number().int().min(0),
+    setsCompleted: z.number().int().min(0),
+    tokensEarned: z.number().int().min(0),
+    coinsSpent: z.number().int().min(0),
+    cardsCollected: z.number().int().min(0),
+  })
+  .strict();
+export type GalleryUsageTotals = z.infer<typeof galleryUsageTotalsSchema>;
+
+export const galleryUsageResponseSchema = z
+  .object({
+    items: z.array(galleryUsageRowSchema).max(GALLERY_USAGE_MAX),
+    totals: galleryUsageTotalsSchema,
+  })
+  .strict();
+export type GalleryUsageResponse = z.infer<typeof galleryUsageResponseSchema>;

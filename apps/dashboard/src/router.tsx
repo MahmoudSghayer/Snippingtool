@@ -219,6 +219,13 @@ const adminPerformanceRoute = createRoute({
   beforeLoad: () => requireAdminNavPermission('admin-performance'),
 });
 
+const adminGalleryRoute = createRoute({
+  getParentRoute: () => adminLayoutRoute,
+  path: '/gallery',
+  component: lazyRouteComponent(() => import('@/pages/admin/GalleryPage.js'), 'GalleryPage'),
+  beforeLoad: () => requireAdminNavPermission('admin-gallery'),
+});
+
 const adminSystemRoute = createRoute({
   getParentRoute: () => adminLayoutRoute,
   path: '/system',
@@ -326,6 +333,7 @@ export const routeTree = rootRoute.addChildren([
         adminProfitsRoute,
         adminActivityRoute,
         adminPerformanceRoute,
+        adminGalleryRoute,
         adminSystemRoute,
         adminAuditRoute,
         adminSubscriptionsRoute,
@@ -379,6 +387,7 @@ const PAGE_TITLES: [string, string][] = [
   ['/admin/profits', 'Admin · Profits'],
   ['/admin/activity', 'Admin · Activity'],
   ['/admin/performance', 'Admin · Bot performance'],
+  ['/admin/gallery', 'Admin · Gallery'],
   ['/admin/system', 'Admin · System'],
   ['/admin/audit', 'Admin · Audit log'],
   ['/admin/subscriptions', 'Admin · Subscriptions'],
