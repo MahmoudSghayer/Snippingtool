@@ -239,8 +239,11 @@ versions). Without it, Tampermonkey catches the link but never opens its
 install dialog, and the user is left on its "Script installation" page at
 tampermonkey.net. For that case the card also shows a copy of the
 `installUrl` to paste into Tampermonkey → Dashboard → Utilities → "Import
-from URL". That skips the handoff page, and if the fetch itself fails
-(e.g. a network that blocks the API's host), Tampermonkey shows the error.
+from URL". That skips the handoff page, and if the fetch itself fails,
+Tampermonkey shows the error. Some internet providers' DNS blocks the
+API's `sslip.io` host, which looks like an endless load. Chrome's secure
+DNS (Cloudflare) gets around it, so the card says so. The setting has to
+stay on, because the script talks to the same host while it runs.
 No extension code forks for it; `src/userscript/` supplies what the manifest
 and the browser would otherwise provide:
 

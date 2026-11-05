@@ -155,9 +155,10 @@ function TampermonkeyStuckHelp({ installUrl }: { installUrl: string }) {
           <CopyField value={installUrl} label="Your install link" className="max-w-md" />
         </div>
         <p className="text-xs">
-          If Tampermonkey can't download it from there either, your network may be blocking our
-          server (some antivirus and DNS filters do). Try another network, such as your phone's
-          hotspot.
+          If Tampermonkey can't download it from there either, your internet provider's DNS may be
+          blocking our server. In Chrome, open chrome://settings/security, turn on “Use secure DNS”,
+          choose Cloudflare (1.1.1.1) and try again. Leave it on: Nova Trade talks to the same
+          server while it runs.
         </p>
       </div>
     </details>

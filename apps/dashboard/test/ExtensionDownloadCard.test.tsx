@@ -166,7 +166,8 @@ describe('ExtensionDownloadCard', () => {
     expect(help).toHaveTextContent('paste it under “Import from URL”');
     expect(within(help).getByText('Your install link')).toBeInTheDocument();
     expect(within(help).getByTestId('copy-field-value')).toHaveTextContent(INSTALL_URL);
-    expect(help).toHaveTextContent('your network may be blocking our server');
+    expect(help).toHaveTextContent("your internet provider's DNS may be blocking our server");
+    expect(help).toHaveTextContent('turn on “Use secure DNS”, choose Cloudflare (1.1.1.1)');
   });
 
   it('leaves the stalled-install help out until the install link has loaded', async () => {
