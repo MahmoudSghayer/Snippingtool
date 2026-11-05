@@ -2,8 +2,9 @@
 // extension zip built for this deployment, and explains how to load it
 // unpacked in Chrome. Under it, the optional one-click alternative: the same
 // build as a Tampermonkey userscript, installed from the user's signed link
-// (`GET /api/v1/downloads/userscript/link`). Used in the "Get the extension"
-// section of /account.
+// (`GET /api/v1/downloads/userscript/link`), with the Chrome switch it needs
+// and a fallback for when Tampermonkey's install handoff stalls. Used in the
+// "Get the extension" section of /account.
 import { Button, Card, CardContent, CardHeader, CardTitle, CopyField, cn } from '@sl/ui';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Download, ExternalLink, Puzzle } from 'lucide-react';
@@ -129,6 +130,40 @@ function InstallSteps() {
 
 const linkClass = 'text-gold underline underline-offset-2 hover:text-gold/80';
 
+/** For when the one-click install stalls on Tampermonkey's "Script
+ * installation" page (tampermonkey.net/script_installation.php), which is
+ * where it lands when it can't hand the script over to its install dialog:
+ * usually because user scripts are off for it in Chrome, otherwise because
+ * it can't fetch the script. "Import from URL" skips that page, and when the
+ * fetch is what fails it says why. */
+function TampermonkeyStuckHelp({ installUrl }: { installUrl: string }) {
+  return (
+    <details className="text-sm">
+      <summary className="cursor-pointer text-xs text-gold underline underline-offset-2 hover:text-gold/80">
+        Stuck on Tampermonkey's “Script installation” page?
+      </summary>
+      <div className="mt-3 flex flex-col gap-3 text-ink-2">
+        <p>
+          Check step 2 first, and that Tampermonkey's “Site access” on the same Details page is “On
+          all sites”. Then close that tab and click “Install Nova Trade script” again.
+        </p>
+        <div className="flex flex-col gap-1.5">
+          <span>
+            Still stuck? Install it from the link instead: copy it, open Tampermonkey's Dashboard,
+            go to the Utilities tab, paste it under “Import from URL” and click Install.
+          </span>
+          <CopyField value={installUrl} label="Your install link" className="max-w-md" />
+        </div>
+        <p className="text-xs">
+          If Tampermonkey can't download it from there either, your network may be blocking our
+          server (some antivirus and DNS filters do). Try another network, such as your phone's
+          hotspot.
+        </p>
+      </div>
+    </details>
+  );
+}
+
 /** The secondary install path: Tampermonkey, one click, automatic updates. */
 function TampermonkeyOption() {
   const link = useUserscriptLink(true);
@@ -157,6 +192,17 @@ function TampermonkeyOption() {
           </a>
           .
         </li>
+        <li>
+          <span>
+            In Chrome or Edge, let Tampermonkey run scripts: open this address (copy it into the
+            address bar), click “Details” under Tampermonkey and turn on “Allow User Scripts”.
+          </span>
+          <CopyField value="chrome://extensions" className="mt-1.5 max-w-xs" />
+          <span className="mt-1.5 block text-xs">
+            No such switch? Turn on Developer mode (top right) instead. In Edge the address is
+            edge://extensions. Firefox needs nothing here.
+          </span>
+        </li>
         <li className="flex flex-col items-start gap-1.5">
           <span>Click “Install Nova Trade script”, then confirm in Tampermonkey.</span>
           {installUrl ? (
@@ -181,6 +227,7 @@ function TampermonkeyOption() {
         </li>
         <li>Open the EA FC web app.</li>
       </ol>
+      {installUrl && <TampermonkeyStuckHelp installUrl={installUrl} />}
       <p className="text-xs text-ink-2">
         Tampermonkey updates the script automatically. It works in Chrome, Edge, Firefox and Opera.
         The link is yours alone: it stops working when your pass ends.

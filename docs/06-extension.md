@@ -232,8 +232,16 @@ publish's stamped `@version`, in a directory the API reads first
 (`USERSCRIPT_TEMPLATE_DIR`) and serves from the next request on, so installs
 from the dashboard update on every publish (`docs/11-devops.md` §4a).
 `GET /api/v1/downloads/userscript/link` gives the
-signed-in user their `installUrl`. No
-extension code forks for it; `src/userscript/` supplies what the manifest
+signed-in user their `installUrl`. The dashboard's install steps
+(`components/ExtensionDownload.tsx`) include turning on "Allow User
+Scripts" for Tampermonkey in Chrome and Edge (Developer mode on older
+versions). Without it, Tampermonkey catches the link but never opens its
+install dialog, and the user is left on its "Script installation" page at
+tampermonkey.net. For that case the card also shows a copy of the
+`installUrl` to paste into Tampermonkey → Dashboard → Utilities → "Import
+from URL". That skips the handoff page, and if the fetch itself fails
+(e.g. a network that blocks the API's host), Tampermonkey shows the error.
+No extension code forks for it; `src/userscript/` supplies what the manifest
 and the browser would otherwise provide:
 
 | Extension                         | Userscript                                                                                                                                                                              |

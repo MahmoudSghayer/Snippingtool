@@ -130,21 +130,64 @@ describe('ExtensionDownloadCard', () => {
     const steps = within(
       screen.getByRole('list', { name: 'Install with Tampermonkey' }),
     ).getAllByRole('listitem');
-    expect(steps).toHaveLength(3);
+    expect(steps).toHaveLength(4);
     expect(within(steps[0]!).getByRole('link', { name: 'Tampermonkey extension' })).toHaveAttribute(
       'href',
       'https://www.tampermonkey.net/',
     );
-    const install = await within(steps[1]!).findByRole('link', {
+    expect(steps[1]).toHaveTextContent('turn on “Allow User Scripts”');
+    expect(within(steps[1]!).getByTestId('copy-field-value')).toHaveTextContent(
+      'chrome://extensions',
+    );
+    expect(steps[1]).toHaveTextContent('Turn on Developer mode (top right) instead.');
+    const install = await within(steps[2]!).findByRole('link', {
       name: 'Install Nova Trade script',
     });
     expect(install).toHaveAttribute('href', INSTALL_URL);
     expect(install).toHaveAttribute('target', '_blank');
-    expect(steps[2]).toHaveTextContent('Open the EA FC web app.');
+    expect(steps[3]).toHaveTextContent('Open the EA FC web app.');
     expect(screen.getByText(/updates the script automatically/)).toHaveTextContent(
       'Chrome, Edge, Firefox and Opera',
     );
     expect(spy).toHaveBeenCalledWith('/api/v1/downloads/userscript/link');
+  });
+
+  it('offers Import from URL with a copyable link when the Tampermonkey install stalls', async () => {
+    mockApi(ENTITLED);
+    const { user } = renderCard();
+
+    const summary = await screen.findByText("Stuck on Tampermonkey's “Script installation” page?");
+    const help = summary.closest('details')!;
+    expect(help).not.toHaveAttribute('open');
+
+    await user.click(summary);
+
+    expect(help).toHaveAttribute('open');
+    expect(help).toHaveTextContent('paste it under “Import from URL”');
+    expect(within(help).getByText('Your install link')).toBeInTheDocument();
+    expect(within(help).getByTestId('copy-field-value')).toHaveTextContent(INSTALL_URL);
+    expect(help).toHaveTextContent('your network may be blocking our server');
+  });
+
+  it('leaves the stalled-install help out until the install link has loaded', async () => {
+    vi.spyOn(api, 'GET').mockImplementation(((path: string) => {
+      if (path === '/api/v1/downloads/extension/info') {
+        return Promise.resolve({
+          data: ENTITLED,
+          error: undefined,
+          response: new Response(null, { status: 200 }),
+        });
+      }
+      return Promise.resolve({
+        data: undefined,
+        error: { code: 'INTERNAL', message: 'Something went wrong.' },
+        response: new Response(null, { status: 500 }),
+      });
+    }) as never);
+    renderCard();
+
+    expect(await screen.findByText(/Couldn't load your install link/)).toBeInTheDocument();
+    expect(screen.queryByText(/Stuck on Tampermonkey's/)).not.toBeInTheDocument();
   });
 
   it('points users without the autobuyer to the plans', async () => {
