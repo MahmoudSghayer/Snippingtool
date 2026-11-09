@@ -596,6 +596,7 @@ const AUTO_SELL_MODES_HINT =
 
 /** Without a max price, Bid mode has no limit to bid up to. */
 const BID_NEEDS_MAX = 'Set a Max price: in Bid mode it is the most Nova AI bids for a player';
+const SNIPE_NEEDS_MAX = 'Set a Max price: Nova AI never buys a card above it';
 
 const PHASE_LABEL: Record<SniperPhase, string> = {
   idle: 'Ready',
@@ -2833,8 +2834,18 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     } else if (t.id === 'nf-ovr-lo')
       setOvr(Number(t.value), Math.max(Number(t.value), form.maxOvr));
     else if (t.id === 'nf-ovr-hi') setOvr(Math.min(Number(t.value), form.minOvr), Number(t.value));
-    else if (t.id === 'nf-sell' || t.id === 'nf-maxBuy') {
-      // The profit follows the typing; the price itself saves on change.
+    else if (t.id === 'nf-maxBuy' || t.id === 'nf-minBuy') {
+      // Apply the price as it is typed, not only on `change` (blur/Enter):
+      // the search handed to the bot must never be missing the Max the box
+      // shows — a missing Max is what let a snipe run with no price cap and
+      // buy over the limit. The box is reformatted on `change`, not here, so
+      // typing is left undisturbed.
+      form[t.id === 'nf-maxBuy' ? 'maxBuy' : 'minBuy'] = parsePrice(t.value);
+      renderProfit();
+      syncSearch();
+      return;
+    } else if (t.id === 'nf-sell') {
+      // The profit follows the typing; the sell price saves on change.
       renderProfit();
       return;
     } else return;
@@ -3213,8 +3224,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     } else if ('error' in r) {
       text = r.error;
       bad = true;
-    } else if (bidMode() && !hasMaxBid(r.search.filter)) {
-      text = BID_NEEDS_MAX;
+    } else if (!hasMaxBid(r.search.filter)) {
+      text = bidMode() ? BID_NEEDS_MAX : SNIPE_NEEDS_MAX;
       bad = true;
     } else {
       text = `${bidMode() ? 'Bids on' : 'Searches for'} ${r.search.name}`;
@@ -3998,8 +4009,12 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         renderRunbar();
         return;
       }
-      if (bidMode() && !hasMaxBid(r.search.filter)) {
-        say(BID_NEEDS_MAX);
+      if (!hasMaxBid(r.search.filter)) {
+        // Snipe needs a Max as much as Bid does: without one the search goes
+        // to EA with no price ceiling, so it buys at any price. (The engine
+        // refuses a capless snipe too, as `no_max_price`; this is the clear
+        // message, up front, before anything runs.)
+        say(bidMode() ? BID_NEEDS_MAX : SNIPE_NEEDS_MAX);
         renderRunbar();
         return;
       }
