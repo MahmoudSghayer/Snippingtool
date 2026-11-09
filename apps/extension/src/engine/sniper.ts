@@ -3173,6 +3173,17 @@ export class Sniper {
       else this.releaseBid(e.bid);
     }
     if (signal.aborted) return 'stopped';
+    // Hold every open bid to the trader's CURRENT max, not the one it carried
+    // when it was placed. Lowering the max, or switching to another player (its
+    // card then leaves the search, so `currentBidCap` is null), must stop the
+    // bot re-bidding or buying an already-open bid above the new max. EA cannot
+    // cancel a bid already placed, but the bot never adds to — or buys now — a
+    // bid over the trader's current max.
+    for (const b of this.book.bids()) {
+      const cap = this.currentBidCap(b);
+      if (cap == null) this.dropBid(b, { message: 'Stopped following {card}: it is not in your current search' });
+      else if (cap < b.maxBid) b.maxBid = cap;
+    }
     // Ended while the trader was outbid: lost, whatever the next read says,
     // and its slot is free for a new bid now.
     for (const b of this.book.bids()) {
@@ -3792,6 +3803,30 @@ export class Sniper {
       (n): n is number => n != null && n > 0,
     );
     return caps.length > 0 ? Math.min(...caps) : null;
+  }
+
+  /** Whether an open bid's card is one a search is for (Snipe mode's own
+   * target check, by id and rating band). */
+  private bidInFilter(bid: TrackedBid, f: FilterCriteria): boolean {
+    if (f.resourceId != null && bid.resourceId !== f.resourceId && bid.assetId !== f.resourceId) return false;
+    if (f.minRating != null && bid.rating < f.minRating) return false;
+    if (f.maxRating != null && bid.rating > f.maxRating) return false;
+    return true;
+  }
+
+  /** The max that applies to an open bid right now: the price cap of a current
+   * search that still matches its card, or null when none does (the trader
+   * switched to another player). Keeps an already-placed bid under the trader's
+   * CURRENT max — the one it was placed with can be higher after the trader
+   * lowers it or moves on. */
+  private currentBidCap(bid: TrackedBid): number | null {
+    for (const f of this.deps.getFilters()) {
+      if (this.bidInFilter(bid, f.filter)) {
+        const cap = this.priceCap(f.filter);
+        if (cap != null) return cap;
+      }
+    }
+    return null;
   }
 
   /** Guards against listings that reached the page from somewhere other than
