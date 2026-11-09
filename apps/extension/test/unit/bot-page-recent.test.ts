@@ -138,18 +138,18 @@ describe('the Recent searches log', () => {
     $('start')!.click(); // start
     $('start')!.click(); // stop
     typePlayer('');
-    setPrice('maxBuy', '');
+    setPrice('maxBuy', '8000');
     setPrice('minBuy', '1000');
     typePlayer('31432');
     $('start')!.click();
     $('start')!.click();
 
     expect(recent().map((b) => b.querySelector('.rc-name')!.textContent)).toEqual([
-      'Player #31432, min 1,000, no max price',
+      'Player #31432, min 1,000, max 8,000',
       'Player #20801, max 52,000',
     ]);
     expect(save).toHaveBeenLastCalledWith([
-      expect.objectContaining({ name: 'Player #31432, min 1,000, no max price' }),
+      expect.objectContaining({ name: 'Player #31432, min 1,000, max 8,000' }),
       expect.objectContaining({ name: 'Player #20801, max 52,000' }),
     ]);
 

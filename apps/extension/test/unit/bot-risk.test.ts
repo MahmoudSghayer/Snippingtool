@@ -197,6 +197,11 @@ describe('bot page — page scripts cannot drive it', () => {
     const player = $<HTMLInputElement>('nf-player')!;
     player.value = '20801';
     player.dispatchEvent(new Event('input', { bubbles: true }));
+    // A Max price too, so the snipe is allowed to start (Snipe now needs one,
+    // like Bid): set it while events are still trusted.
+    const max = $<HTMLInputElement>('nf-maxBuy')!;
+    max.value = '2000';
+    max.dispatchEvent(new Event('change', { bubbles: true }));
     untrustedEvents(); // from here on, the browser's rule: isTrusted only
 
     // A page script sets a limit and fires `change`: ignored.

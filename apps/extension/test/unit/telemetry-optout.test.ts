@@ -25,7 +25,7 @@ import { useRealChromeStorage } from './chrome-storage-stub.js';
 function fillQueueWithOneOfEach(): void {
   enqueueActivity([{ type: 'search', occurredAt: new Date().toISOString(), metadata: {} }] as never);
   enqueueSniping([{ resourceId: 1, targetPrice: 100, listedPrice: 100, outcome: 'success', latencyMs: 5, errorCode: null, occurredAt: new Date().toISOString() }] as never);
-  enqueueTrades([{ tradeId: 't-1', resourceId: 1, buyPrice: 100 }] as never);
+  enqueueTrades([{ id: crypto.randomUUID(), tradeId: 't-1', resourceId: 1, assetId: null, rating: null, buyPrice: 100, sellPrice: null, eaTax: 0, netProfit: null, status: 'bought', boughtAt: new Date().toISOString(), soldAt: null }] as never);
   enqueueFilterStats([{ filterId: 'f-1', windowStart: new Date().toISOString(), searches: 1, attempts: 1, successes: 1, coinsSpent: 100, coinsEarned: 150 }] as never);
   enqueueRiskEvents([{ kind: 'actions_per_hour', value: 1, threshold: 30, deviceId: 'd-1', sessionId: 's-1', occurredAt: new Date().toISOString() }] as never);
   enqueueTelemetry([{ type: 'version_ping', occurredAt: new Date().toISOString() }] as never);

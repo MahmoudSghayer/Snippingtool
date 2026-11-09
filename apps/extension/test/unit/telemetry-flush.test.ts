@@ -250,7 +250,7 @@ describe('lib/telemetry.ts: flush and enqueue correctness', () => {
       await clock.recordServerTime(new Date(now - 10 * MINUTE).toISOString(), now, now);
       telemetry.enqueueSniping([snipe()] as never);
       telemetry.enqueueTrades([
-        { tradeId: 't', resourceId: 1, assetId: null, rating: null, buyPrice: 100, sellPrice: null, eaTax: 0, netProfit: null, status: 'bought', boughtAt: new Date().toISOString(), soldAt: null },
+        { id: crypto.randomUUID(), tradeId: 't', resourceId: 1, assetId: null, rating: null, buyPrice: 100, sellPrice: null, eaTax: 0, netProfit: null, status: 'bought', boughtAt: new Date().toISOString(), soldAt: null },
       ] as never);
 
       fetchMock.mockImplementation(async () => json(503, { code: 'INTERNAL' }));
@@ -274,7 +274,7 @@ describe('lib/telemetry.ts: flush and enqueue correctness', () => {
 
     it('keeps trade reports up to 400 days old; activity and sniping only 7 days', async () => {
       telemetry.enqueueTrades([
-        { tradeId: 'old', resourceId: 1, assetId: null, rating: null, buyPrice: 100, sellPrice: null, eaTax: 0, netProfit: null, status: 'listed', boughtAt: new Date(Date.now() - 30 * DAY).toISOString(), soldAt: null },
+        { id: crypto.randomUUID(), tradeId: 'old', resourceId: 1, assetId: null, rating: null, buyPrice: 100, sellPrice: null, eaTax: 0, netProfit: null, status: 'listed', boughtAt: new Date(Date.now() - 30 * DAY).toISOString(), soldAt: null },
       ] as never);
       telemetry.enqueueSniping([snipe({ occurredAt: new Date(Date.now() - 8 * DAY).toISOString() })] as never);
       fetchMock.mockImplementation(async () => json(200, { accepted: 1 }));
@@ -282,6 +282,33 @@ describe('lib/telemetry.ts: flush and enqueue correctness', () => {
       const result = await telemetry.flush();
       expect(result).toEqual({ ok: true, sent: 1 });
       expect(pathOf(fetchMock.mock.calls[0]!)).toContain('/trades/batch');
+    });
+
+    it('drops only the trade the API would reject, and still sends the good ones', async () => {
+      fetchMock.mockImplementation(async () => json(200, { upserted: 2 }));
+      const good = () => ({
+        id: crypto.randomUUID(),
+        tradeId: crypto.randomUUID(),
+        resourceId: 1,
+        assetId: null,
+        rating: null,
+        buyPrice: 100,
+        sellPrice: null,
+        eaTax: 0,
+        netProfit: null,
+        status: 'bought',
+        boughtAt: new Date().toISOString(),
+        soldAt: null,
+      });
+      // The middle trade's buyPrice 0 is valid for the client Trade type but the
+      // API rejects it (buyPrice >= 1): it must not take the good trades with it.
+      telemetry.enqueueTrades([good(), { ...good(), buyPrice: 0 }, good()] as never);
+      await telemetry.flush();
+      const call = fetchMock.mock.calls.find((c) => pathOf(c).includes('/trades/batch'))!;
+      expect(call).toBeDefined();
+      const sent = bodyOf(call).trades ?? [];
+      expect(sent).toHaveLength(2);
+      expect(sent.every((t) => (t as { buyPrice: number }).buyPrice === 100)).toBe(true);
     });
   });
 });

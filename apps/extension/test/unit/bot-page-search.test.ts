@@ -156,6 +156,7 @@ describe('bot page — Start runs the search on the page', () => {
   it('applies an edit made while running to the next search', () => {
     const { $, sniper, live, setPrice, typePlayer } = mount();
     typePlayer('20801');
+    setPrice('maxBuy', '12000');
     $('start')!.click();
     vi.spyOn(sniper, 'isRunning').mockReturnValue(true);
     setPrice('maxBuy', '9000');
@@ -164,5 +165,26 @@ describe('bot page — Start runs the search on the page', () => {
     typePlayer('Ronal');
     expect(live()!.filter).toEqual({ resourceId: 20801, maxPrice: 9_000 });
     expect($('run-status')!.textContent).toContain('Search not updated');
+  });
+
+  it('applies the Max as it is typed, so the search handed over always carries the cap', () => {
+    // Regression: the Max used to reach the bot only on `change` (blur/Enter).
+    // If a refresh or the Start click landed first, the search went to EA with
+    // no cap and the bot bought at any price. Typing it must be enough.
+    const { $, live, typePlayer } = mount();
+    typePlayer('20801');
+    const max = $<HTMLInputElement>('nf-maxBuy')!;
+    max.value = '2000';
+    max.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(live()).toMatchObject({ filter: { resourceId: 20801, maxPrice: 2_000 } });
+  });
+
+  it('refuses to start a snipe with no Max price, the way Bid mode already does', () => {
+    const { $, start, typePlayer } = mount();
+    typePlayer('20801'); // a player, but no Max price
+    $('start')!.click();
+    expect(start).not.toHaveBeenCalled();
+    expect($('saved')!.textContent).toContain('Max price');
+    expect($('run-status')!.textContent).toContain('Max price');
   });
 });
