@@ -1237,3 +1237,57 @@ describe('plain reasons', () => {
     expect(moveMissReason('move reported success: false (status 473)')).toBe('EA refused the move (error 473): your transfer list may be full');
   });
 });
+
+describe('Bid mode — an open bid obeys the CURRENT max, not the one it was placed with', () => {
+  it('does not buy or re-bid an already-open bid above the max after the trader lowers it', async () => {
+    // Regression: a bid froze the max it was placed with, so lowering the max
+    // left open bids buying/bidding at the old, higher one (production: Weah
+    // bought ~35k after the max came down to 34k).
+    const filter: FilterCriteria = { resourceId: 100, maxPrice: 36_000 };
+    const h = setup({
+      filter,
+      // Buy-now above the initial max, so the bot bids rather than buys.
+      results: (n) => (n === 1 ? [auction('a', 180, { buyNow: 40_000 })] : []),
+      beforeRead: (_n, ea) => {
+        const e = ea.get('a');
+        if (!e) return;
+        // The trader lowers the max to 34,000 while the bid is open; the
+        // auction is now outbid and its buy-now sits between old and new max.
+        filter.maxPrice = 34_000;
+        Object.assign(e, { bidState: 'outbid', currentBid: 34_000 });
+        e.a = { ...e.a, buyNow: 35_000 };
+      },
+      stopWhen: (x) => x.buys.length > 0 || x.log().some((m) => m.startsWith('Max bid reached')),
+    });
+    h.sniper.start();
+    await h.done();
+    // The frozen max (36,000) would have bought it now at 35,000; the current
+    // max (34,000) must not — it drops the auction instead.
+    expect(h.buys).toEqual([]);
+    expect(h.bids.every(([, price]) => price <= 34_000)).toBe(true);
+    expect(h.log().some((m) => m.startsWith('Max bid reached'))).toBe(true);
+  });
+
+  it('stops buying an already-open bid once the trader switches to another player', async () => {
+    const filter: FilterCriteria = { resourceId: 100, maxPrice: 36_000 };
+    const h = setup({
+      filter,
+      results: (n) => (n === 1 ? [auction('a', 180, { buyNow: 40_000 })] : []),
+      beforeRead: (_n, ea) => {
+        const e = ea.get('a');
+        if (!e) return;
+        // The trader switches the search to a different player (and max): the
+        // open bid's card is no longer in any current search.
+        filter.resourceId = 999;
+        filter.maxPrice = 2_000;
+        Object.assign(e, { bidState: 'outbid', currentBid: 30_000 });
+        e.a = { ...e.a, buyNow: 35_000 };
+      },
+      stopWhen: (x) => x.buys.length > 0 || x.log().some((m) => m.includes('not in your current search')),
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.buys).toEqual([]);
+    expect(h.log().some((m) => m.includes('not in your current search'))).toBe(true);
+  });
+});
