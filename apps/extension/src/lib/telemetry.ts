@@ -59,7 +59,8 @@
  *    is sent again straight away.
  */
 
-import { isWithinIngestWindow, isWithinTradeWindow, TIMESTAMP_OUT_OF_WINDOW } from '@sl/shared';
+import { isWithinIngestWindow, isWithinTradeWindow, TIMESTAMP_OUT_OF_WINDOW, tradeIngestSchema } from '@sl/shared';
+import { z } from 'zod';
 
 import { ApiError, apiJson } from './api.js';
 import { hasAccount } from './auth.js';
@@ -249,8 +250,35 @@ export function enqueueSniping(attempts: SnipingAttempt[]): void {
     attempts.map((a) => (a.attemptId ? a : { ...a, attemptId: crypto.randomUUID() })),
   );
 }
+/** The ingest contract the API enforces on every trade, minus the time-window
+ * check — that is judged at flush on the server's clock (`dropOutOfWindow` and
+ * the out-of-window isolation), and a trade's timestamps are still on the local
+ * clock here, before `push`'s `onServerClock` correction. A trade that passes
+ * this passes the API's `tradeIngestSchema`. */
+const tradeShapeSchema = tradeIngestSchema
+  .extend({ boughtAt: z.string().datetime(), soldAt: z.string().datetime().nullable() })
+  .strict();
+
 export function enqueueTrades(trades: Trade[]): void {
-  push('trades', trades);
+  // The API validates every trade in a POST against `tradeIngestSchema` and
+  // rejects the WHOLE request on the first bad one (400 VALIDATION_FAILED), so
+  // one unusable trade — a buy whose price or card id was not read, say — used
+  // to drop a batch of good trades with it and leave the dashboard undercounting.
+  // Queue only the trades the API will accept (same contract, every enqueue path
+  // funnels through here); drop a bad one on its own and log its field so the
+  // cause shows up in the next report instead of a silent, batch-wide loss.
+  const valid: Trade[] = [];
+  for (const trade of trades) {
+    const parsed = tradeShapeSchema.safeParse(trade);
+    if (parsed.success) {
+      valid.push(trade);
+      continue;
+    }
+    const issue = parsed.error.issues[0];
+    const where = issue ? `${issue.path.join('.') || 'trade'}: ${issue.message}` : 'invalid';
+    logger.warn(`telemetry: dropping a trade the API would reject (${where}); the rest of the batch is kept`, 'telemetry');
+  }
+  if (valid.length > 0) push('trades', valid);
 }
 export function enqueueFilterStats(stats: FilterStats[]): void {
   push('filterStats', stats);

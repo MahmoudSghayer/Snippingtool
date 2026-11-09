@@ -54,7 +54,7 @@ describe('lib/telemetry.ts: the queue survives a simulated service-worker restar
   it('an item enqueued before the "restart" is still queued (pendingCount) after it, in a fresh module instance', async () => {
     const before = (await import('../../src/lib/telemetry.js')) as typeof TelemetryModule;
     before.enqueueActivity([{ type: 'search', occurredAt: new Date().toISOString(), metadata: {} }] as never);
-    before.enqueueTrades([{ tradeId: 'restart-test-1', resourceId: 1, buyPrice: 100 }] as never);
+    before.enqueueTrades([{ id: crypto.randomUUID(), tradeId: 'restart-test-1', resourceId: 1, assetId: null, rating: null, buyPrice: 100, sellPrice: null, eaTax: 0, netProfit: null, status: 'bought', boughtAt: new Date().toISOString(), soldAt: null }] as never);
     expect(before.pendingCount()).toBe(2);
 
     // Give the persist chain a chance to actually write to storage — this
