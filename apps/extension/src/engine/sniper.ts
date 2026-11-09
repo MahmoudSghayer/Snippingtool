@@ -442,6 +442,9 @@ export type SniperStopReason =
   | 'ea_rate_limited'
   /** Bid mode: the search has no max price, which is its max bid. */
   | 'no_max_bid'
+  /** Snipe mode: no max price (on the search, and no page max-buy-price), so
+   * the bot would buy at any price — stopped instead of buying uncapped. */
+  | 'no_max_price'
   /** Bid mode: the page cannot bid or read the watch list for Nova AI. */
   | 'bid_unavailable'
   /** Bid mode: the watch list could not be read, again and again. */
@@ -1441,6 +1444,14 @@ export class Sniper {
         return;
       }
     }
+    if (mode === 'snipe' && filters.some((f) => this.priceCap(f.filter) == null)) {
+      // A snipe with no max price (none on the search, and no page max-buy
+      // price) would buy at any price — the opposite of what a max is for.
+      // Stop with a clear reason instead of buying uncapped. (Bid mode makes
+      // the same check above, as 'no_max_bid'.)
+      this.setState({ phase: 'stopped', phaseEndsAt: null, stopReason: 'no_max_price', stopDetail: STOP_MESSAGES.no_max_price });
+      return;
+    }
     this.runMode = mode;
     this.abort = new AbortController();
     this.budgetHydrated = false;
@@ -1636,8 +1647,9 @@ export class Sniper {
       // `priceCheck`), whatever told the bot about it. Anything that
       // arrives after (a listing the search's answer makes buyable) follows.
       const tried = new Set<string>();
+      const cap = this.priceCap(target.filter);
       const first = search.matches();
-      const end = first.length > 0 ? await this.buyMatches(first, search, tried, signal) : 'done';
+      const end = first.length > 0 ? await this.buyMatches(first, search, tried, signal, cap) : 'done';
       if (end === 'stopped') return;
       const found = await search.done;
       if (signal.aborted) return;
@@ -1656,7 +1668,7 @@ export class Sniper {
         this.addSearchResult(target.name, found.matches, found.listings, found.cheapest, found.at);
         this.prefetchPrices(search.resourceIds());
         const rest = end === 'done' ? found.matches.filter((m) => !tried.has(m.tradeId)) : [];
-        if (rest.length > 0 && (await this.buyMatches(rest, search, tried, signal)) === 'stopped') return;
+        if (rest.length > 0 && (await this.buyMatches(rest, search, tried, signal, cap)) === 'stopped') return;
       }
       this.deps.onChange();
 
@@ -1978,6 +1990,10 @@ export class Sniper {
     search: SearchTimes,
     tried: Set<string>,
     signal: AbortSignal,
+    /** The user's max price for this batch (null only in Gallery mode, which
+     * buys at the market to complete a Set). A buy above it is refused and
+     * logged, never made. */
+    cap: number | null,
   ): Promise<BatchEnd> {
     const t = this.settings.thresholds;
     // Gallery mode buys one copy of the card it works on, at the price it
@@ -1989,6 +2005,15 @@ export class Sniper {
     for (const m of matches) {
       if (signal.aborted) return 'stopped';
       tried.add(m.tradeId);
+
+      // Hard cap: never buy above the user's max price, whatever a search,
+      // re-bid or EA answer produced. The match lists already apply the cap,
+      // so this is a last line of defence — and when it fires it is logged,
+      // never a silent over-max buy.
+      if (cap != null && m.buyNow > cap) {
+        this.logSkip(m, `its price of ${amount(m.buyNow)} is over your max price of ${amount(cap)}`);
+        continue;
+      }
 
       if (t.sessionCoinBudget > 0 && this.runTotals.coinsSpent + m.buyNow > t.sessionCoinBudget) {
         if (this.runTotals.coinsSpent >= t.sessionCoinBudget) {
@@ -2266,7 +2291,7 @@ export class Sniper {
       const wanted = (m: SniperMatch) =>
         card.exact ? m.resourceId === card.resourceId : card.rarity === undefined || card.resourceId === undefined || m.resourceId === card.resourceId;
       const first = plan.buy ? search.matches().filter(wanted) : [];
-      const end = first.length > 0 ? await this.buyMatches(first, search, tried, signal) : 'done';
+      const end = first.length > 0 ? await this.buyMatches(first, search, tried, signal, null) : 'done';
       if (end === 'stopped') return;
       const found = await search.done;
       if (signal.aborted) return;
@@ -2286,7 +2311,7 @@ export class Sniper {
         this.addSearchResult(plan.target.name, found.matches, found.listings, found.cheapest, found.at);
         const matches = found.matches.filter(wanted);
         const rest = plan.buy && end === 'done' && !bought() ? matches.filter((m) => !tried.has(m.tradeId)) : [];
-        if (rest.length > 0 && (await this.buyMatches(rest, search, tried, signal)) === 'stopped') return;
+        if (rest.length > 0 && (await this.buyMatches(rest, search, tried, signal, null)) === 'stopped') return;
         if (!bought() && this.galleryAfterSearch(card, w, matches) === 'budget') return this.stop('gallery_budget');
       }
       this.deps.onChange();
@@ -3175,7 +3200,7 @@ export class Sniper {
     if (b.buyNow > 0 && b.buyNow <= b.maxBid) {
       this.book.close(b.tradeId);
       if (!(await this.paceEaRequest(signal, 'bidding'))) return 'stopped';
-      const end = await this.buyMatches([bidMatch(b, b.buyNow)], { sentAt: this.now(), arrivedAt: () => undefined }, new Set(), signal);
+      const end = await this.buyMatches([bidMatch(b, b.buyNow)], { sentAt: this.now(), arrivedAt: () => undefined }, new Set(), signal, b.maxBid);
       this.noteEaRequest();
       return end === 'stopped' ? 'stopped' : 'done';
     }
@@ -3288,7 +3313,7 @@ export class Sniper {
     this.prefetchPrices(found.auctions.map((a) => a.resourceId));
     const buys = picks.filter((pick) => pick.action === 'buy').map(pickMatch);
     if (buys.length > 0) {
-      const end = await this.buyMatches(buys, found, new Set(), signal);
+      const end = await this.buyMatches(buys, found, new Set(), signal, maxBid);
       this.noteEaRequest();
       if (end === 'stopped') return 'stopped';
       // A pause after a buy left the rest stale, or a limit holds buying back.
@@ -3331,6 +3356,12 @@ export class Sniper {
     if (!(await this.paceEaRequest(signal, 'bidding', rebid !== null))) return { end: 'stopped' };
     // Ended while it waited its turn: the next watch list read says how.
     if (t.expiresAt <= this.now()) return { end: 'skipped' };
+    // Never bid above the user's max price. pickAuctions and the re-bid loop
+    // already cap every bid at it, so this is a last line of defence — and
+    // when it fires it is logged (the caller shows the reason), never a
+    // silent over-max bid.
+    if (t.maxBid > 0 && bid > t.maxBid)
+      return { end: 'skipped', why: `the ${amount(bid)} bid is over your max price of ${amount(t.maxBid)}` };
     // A re-bid on a read gone stale waits for the next read (`fresh`: the
     // price comes from EA's refusal just now, not from the read).
     if (rebid && !fresh && this.now() - this.watch.doneAt > REBID_FRESH_MS) return { end: 'dropped' };
@@ -4014,6 +4045,7 @@ const STOP_MESSAGES: Record<SniperStopReason, string> = {
   ea_rate_limited:
     'EA kept limiting your searches after two rests: your account is likely soft banned (EA has blocked transfer market searches for a while). Do not search for a few hours, then Start again with a longer search delay',
   no_max_bid: 'set a max price in Search first: in Bid mode it is the most Nova AI bids for a player',
+  no_max_price: 'set a max price in Search first, so Nova AI never buys above it',
   bid_unavailable:
     "Bid mode needs to bid and read your watch list through EA's web app, and this page does not let Nova AI do that — use Snipe mode",
   watchlist_failing:

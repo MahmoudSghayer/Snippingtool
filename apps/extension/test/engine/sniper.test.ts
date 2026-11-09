@@ -551,6 +551,34 @@ describe('Sniper — stops', () => {
     expect(h.sniper.state.stopReason).toBe('no_filters');
   });
 
+  it('refuses to snipe with no max price, rather than buy at any price', async () => {
+    // No max on the search and no page max-buy-price: the cap is null, which
+    // once let the bot buy a listing at any price. It must stop instead.
+    const h = setup({
+      filters: [{ id: 'f1', name: 'No max', filter: { resourceId: 100 } }],
+      settings: { thresholds: { ...DEFAULT_BOT_SETTINGS.thresholds, maxBuyPrice: 0 } },
+      results: [[auction('t-dear', 40_000)]],
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.sniper.isRunning()).toBe(false);
+    expect(h.sniper.state.stopReason).toBe('no_max_price');
+    expect(h.buys).toEqual([]);
+  });
+
+  it('never buys above the max price, even a dearer listing EA returns alongside', async () => {
+    const h = setup({
+      filters: [{ id: 'f1', name: 'Capped', filter: { resourceId: 100, maxPrice: 2_000 } }],
+      // EA answers with one listing under the cap and one over it.
+      results: [[auction('t-under', 1_900), auction('t-over', 2_500)]],
+      maxSearches: 1,
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.buys).toEqual(['t-under']);
+    expect(h.buys).not.toContain('t-over');
+  });
+
   it('stops after the purchase limit', async () => {
     const h = setup({
       settings: { thresholds: { ...DEFAULT_BOT_SETTINGS.thresholds, stopAfterPurchases: 1 } },
