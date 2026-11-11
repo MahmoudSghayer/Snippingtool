@@ -276,6 +276,19 @@ const PRICE_STALE_MS = 10 * 60_000;
 const MAX_CACHED_PRICES = 500;
 const MAX_SKIPS_REMEMBERED = 500;
 
+/** The most the bot pays over a card's known market price, buying or bidding —
+ * a hard, mode-wide ceiling so a loose cap, a max lowered after a bid is
+ * placed, or Gallery's budget-only limit can never turn into a gross overpay
+ * (production on 0.1.0.202611091339: Weah bought ~37k at a 26k max, Carreras
+ * ~2.5k at 2k, a Gallery holo 70k at a 54k market). With no known market price
+ * the ceiling does not apply and the user's max price still governs. */
+const MAX_FRACTION_OVER_MARKET = 0.05;
+/** Gallery mode has no max price and legitimately pays a premium to finish a
+ * set, so its ceiling is looser than Snipe/Bid's — enough to stop a gross
+ * overpay (the 70k-at-54k holo) without leaving sets unfinished over a card
+ * listed a little above market. */
+const MAX_FRACTION_OVER_MARKET_GALLERY = 0.2;
+
 /** A listing's estimated sell price and profit after EA's tax (null: unknown). */
 interface Estimate {
   sellPrice: number | null;
@@ -2015,6 +2028,20 @@ export class Sniper {
         continue;
       }
 
+      // Hard ceiling: never buy above the card's market price (plus a margin),
+      // whatever the cap. Gallery has no max price, so this is its only guard
+      // against overpaying for a set card; it waits for the price lookup
+      // (filling a set is not a race to the millisecond) and allows a wider
+      // margin. The snipe/bid path uses the price already looked up, never
+      // waiting on the hot path.
+      const gallery = this.runMode === 'gallery';
+      const marketMax = gallery ? await this.sellPrice(m.resourceId) : this.knownSellPrice(m.resourceId);
+      const overPct = gallery ? MAX_FRACTION_OVER_MARKET_GALLERY : MAX_FRACTION_OVER_MARKET;
+      if (marketMax != null && marketMax > 0 && m.buyNow > Math.floor(marketMax * (1 + overPct))) {
+        this.logSkip(m, `its price of ${amount(m.buyNow)} is over the card's market price of ${amount(marketMax)}`);
+        continue;
+      }
+
       if (t.sessionCoinBudget > 0 && this.runTotals.coinsSpent + m.buyNow > t.sessionCoinBudget) {
         if (this.runTotals.coinsSpent >= t.sessionCoinBudget) {
           this.stop('coin_budget');
@@ -3376,6 +3403,14 @@ export class Sniper {
     // A re-bid on a read gone stale waits for the next read (`fresh`: the
     // price comes from EA's refusal just now, not from the read).
     if (rebid && !fresh && this.now() - this.watch.doneAt > REBID_FRESH_MS) return { end: 'dropped' };
+    // Hard ceiling: never bid above the card's market price (plus a small
+    // margin). A placed bid cannot be recalled from EA — it can still win after
+    // the trader lowers the max or stops — so one over market only ever wins
+    // them a loss. Bids are not a race, so this waits for the price lookup
+    // (cached after the first, so a re-bid does not stall).
+    const marketMax = await this.sellPrice(t.resourceId);
+    if (marketMax != null && marketMax > 0 && bid > Math.floor(marketMax * (1 + MAX_FRACTION_OVER_MARKET)))
+      return { end: 'skipped', why: `the ${amount(bid)} bid is over the card's market price of ${amount(marketMax)}` };
     this.setState({ phase: 'bidding', phaseEndsAt: null, stopReason: null, stopDetail: null });
     if (this.applyKillSwitch() || this.applyEntitlement() || this.applyExclusive()) return { end: 'stopped' };
     // EA is limiting requests or erroring: the next cycle waits it out.
