@@ -79,6 +79,8 @@ interface Opts {
   /** An EA error a bid reports (before its signed answer). */
   bidEaError?: Omit<AdapterEaError, 'seenAt'>;
   credits?: () => number | null;
+  /** A card's market price (the `estimateSellPrice` dep). Default: none known. */
+  estimateSellPrice?: (resourceId: number) => Promise<number | null>;
   /** No Bid mode calls at all (an adapter built without them). */
   noBidding?: boolean;
   /** EA's answer to a Clear expired. Default: the finished auctions it did
@@ -255,7 +257,7 @@ function setup(opts: Opts = {}): Harness {
   const deps: SniperDeps = {
     adapter,
     getFilters: () => [{ id: 'f1', name: 'Target', filter: opts.filter ?? { resourceId: 100, maxPrice: 12_500 } }],
-    estimateSellPrice: async () => null,
+    estimateSellPrice: opts.estimateSellPrice ?? (async () => null),
     credits: opts.credits,
     killSwitch: () => ({ active: opts.killSwitch?.active ?? false }),
     exclusive: opts.exclusive,
@@ -1266,6 +1268,27 @@ describe('Bid mode — an open bid obeys the CURRENT max, not the one it was pla
     expect(h.buys).toEqual([]);
     expect(h.bids.every(([, price]) => price <= 34_000)).toBe(true);
     expect(h.log().some((m) => m.startsWith('Max bid reached'))).toBe(true);
+  });
+
+  it('does not bid above the card market price, even under the max', async () => {
+    // Regression: with no minimum profit set the bot never looked up the market
+    // price, so it bid up to the max and won cards for far more than they were
+    // worth (production: Weah ~37k at a 26k max, Carreras ~2.5k at 2k). A placed
+    // bid cannot be recalled from EA, so a bid over market is a locked-in loss.
+    const h = setup({
+      // Max well above market, so only the market ceiling can stop the bid.
+      filter: { resourceId: 100, maxPrice: 36_000 },
+      estimateSellPrice: async () => 22_000, // ceiling = 22,000 + 5% = 23,100
+      // Buy-now above the max (so it bids); current bid already over the ceiling.
+      results: (n) => (n === 1 ? [auction('a', 180, { buyNow: 40_000, currentBid: 25_000 })] : []),
+      stopWhen: (x) => x.bids.length > 0 || x.log().some((m) => m.includes('market price')),
+    });
+    h.sniper.start();
+    await h.done();
+    // The next bid (25,250) is over the 23,100 market ceiling: it must not go.
+    expect(h.bids).toEqual([]);
+    expect(h.buys).toEqual([]);
+    expect(h.log().some((m) => m.includes("over the card's market price"))).toBe(true);
   });
 
   it('stops buying an already-open bid once the trader switches to another player', async () => {

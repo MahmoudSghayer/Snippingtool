@@ -54,6 +54,9 @@ interface Opts {
   results?: (n: number, filter: FilterCriteria) => TrimmedAuction[];
   /** Market prices by resourceId. Default: 4,000 on FUTBIN. */
   market?: (resourceId: number) => number | null;
+  /** The sell-price estimate (`estimateSellPrice` dep, wired to the market
+   * price in production). Default: none known (no over-market ceiling). */
+  estimateSellPrice?: (resourceId: number) => Promise<number | null>;
   buyResult?: (tradeId: string) => ActionOutcome;
   clubResult?: () => ActionOutcome;
   moveResult?: () => ActionOutcome;
@@ -165,7 +168,7 @@ function setup(opts: Opts = {}) {
   const deps: SniperDeps = {
     adapter,
     getFilters: () => [],
-    estimateSellPrice: async () => null,
+    estimateSellPrice: opts.estimateSellPrice ?? (async () => null),
     marketPrice: async (resourceId) => {
       h.prices.push(resourceId);
       const price = opts.market ? opts.market(resourceId) : 4_000;
@@ -234,6 +237,24 @@ describe('Gallery mode — buying and listing', () => {
     expect(h.buys.map(([id, price]) => [id, price])).toEqual([['t1', 5_000]]);
     expect(h.gallery().cards[0]).toMatchObject({ status: 'listed', price: 5_000, listPrice: 5_100 });
     expect(h.sniper.state.stopReason).toBe('gallery_done');
+  });
+
+  it('does not buy a set card far above its market price, whatever the budget', async () => {
+    // Regression: Gallery had no price guard — only its budget — so a set
+    // bought a holographic Lamine Camara for 70,000 when it was worth ~54,000.
+    // It must skip a card listed well over market (here 70,000 vs a 64,800
+    // ceiling: 54,000 + Gallery's 20% margin), not drain the budget on it.
+    const h = setup({
+      gallery: { budget: 1_000_000, spent: 0, cards: [card({ key: '300:88', playerId: 300, resourceId: 300, rating: 88, name: 'Lamine Camara' })] },
+      market: () => 100_000, // the search looks high enough to find the listing
+      estimateSellPrice: async () => 54_000, // the card's real market price
+      results: () => [listing('holo', 70_000, { resourceId: 300, rating: 88 })],
+      maxSearches: 3,
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.buys).toEqual([]);
+    expect(h.log().some((m) => m.includes("over the card's market price"))).toBe(true);
   });
 
   it('puts a card none of is listed at the end of the list, and buys the next one first', async () => {
