@@ -959,6 +959,15 @@ async function main(): Promise<void> {
       if (!sniper?.isRunning() && !autobuyerRunning) return;
       void checkAccount().then((check) => {
         if (check.kind === 'unconfirmed') return; // the next check decides
+        if (check.kind === 'signed_out_grace') {
+          // Login dropped, but keep the bot running a short grace so an active
+          // bid in its final seconds still resolves instead of being dropped
+          // the instant the session blips. `accountIssue`/`features` are left
+          // as they are (the bot keeps running); the stop, with its reason,
+          // comes on `signed_out` once the grace is spent (account-check.ts).
+          logger.warn(`signed out — keeping the bot going briefly so active bids finish: ${check.detail}`, 'autobuyer');
+          return;
+        }
         if (check.kind === 'entitled') {
           accountIssue = null;
           features = check.bootstrap.features;
