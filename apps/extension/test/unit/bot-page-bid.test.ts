@@ -168,6 +168,22 @@ it('locks the choice while the bot runs, and shows its open bids', async () => {
   for (const b of root.querySelectorAll<HTMLButtonElement>('.modes .mode')) expect(b.disabled).toBe(true);
 });
 
+it('disables the search Reset while the bot runs, and never wipes the Max then', async () => {
+  // The search Reset empties the form, Max included — doing that mid-session
+  // drops the running search's price cap (a blanked Max once let the bot buy
+  // uncapped). It is disabled while running, and its handler no-ops too.
+  const { sniper, refresh, $, click, type } = mount({ ...DEFAULT_BOT_MODE_SETTINGS, mode: 'bid' });
+  type('nf-maxBuy', '2000');
+  expect($('nf-reset')!.disabled).toBe(false);
+  vi.spyOn(sniper, 'isRunning').mockReturnValue(true);
+  vi.spyOn(sniper, 'getStats').mockReturnValue({ ...sniper.getStats(), startedAt: Date.now() });
+  await refresh();
+  expect($('nf-reset')!.disabled).toBe(true);
+  const before = $('nf-maxBuy')!.value;
+  click('#nf-reset');
+  expect($('nf-maxBuy')!.value).toBe(before);
+});
+
 it('names a paused bid limit in the header chip', async () => {
   const { sniper, refresh, $ } = mount({ ...DEFAULT_BOT_MODE_SETTINGS, mode: 'bid' });
   vi.spyOn(sniper, 'isRunning').mockReturnValue(true);
