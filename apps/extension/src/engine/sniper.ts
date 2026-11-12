@@ -276,17 +276,14 @@ const PRICE_STALE_MS = 10 * 60_000;
 const MAX_CACHED_PRICES = 500;
 const MAX_SKIPS_REMEMBERED = 500;
 
-/** The most the bot pays over a card's known market price, buying or bidding —
- * a hard, mode-wide ceiling so a loose cap, a max lowered after a bid is
- * placed, or Gallery's budget-only limit can never turn into a gross overpay
- * (production on 0.1.0.202611091339: Weah bought ~37k at a 26k max, Carreras
- * ~2.5k at 2k, a Gallery holo 70k at a 54k market). With no known market price
- * the ceiling does not apply and the user's max price still governs. */
-const MAX_FRACTION_OVER_MARKET = 0.05;
-/** Gallery mode has no max price and legitimately pays a premium to finish a
- * set, so its ceiling is looser than Snipe/Bid's — enough to stop a gross
- * overpay (the 70k-at-54k holo) without leaving sets unfinished over a card
- * listed a little above market. */
+/** GALLERY ONLY: the most Gallery pays over a card's known market price. Snipe
+ * and Bid never consult the market — by the trader's instruction their only
+ * ceiling is the per-search Max price, and a buy or bid over it (or with no max
+ * set) is refused, never silently re-capped to the market. Gallery has no max
+ * price (it buys at the market to finish a Set), so it alone keeps a
+ * market-value ceiling, loose enough to pay a small premium to complete a set
+ * without a gross overpay (a 70k holo at a 54k market). With no known market
+ * price the ceiling does not apply. */
 const MAX_FRACTION_OVER_MARKET_GALLERY = 0.2;
 
 /** A listing's estimated sell price and profit after EA's tax (null: unknown). */
@@ -2021,27 +2018,30 @@ export class Sniper {
       if (signal.aborted) return 'stopped';
       tried.add(m.tradeId);
 
-      // Hard cap: never buy above the user's max price, whatever a search,
-      // re-bid or EA answer produced. The match lists already apply the cap,
-      // so this is a last line of defence — and when it fires it is logged,
-      // never a silent over-max buy.
-      if (cap != null && m.buyNow > cap) {
-        this.logSkip(m, `its price of ${amount(m.buyNow)} is over your max price of ${amount(cap)}`);
-        continue;
-      }
-
-      // Hard ceiling: never buy above the card's market price (plus a margin),
-      // whatever the cap. Gallery has no max price, so this is its only guard
-      // against overpaying for a set card; it waits for the price lookup
-      // (filling a set is not a race to the millisecond) and allows a wider
-      // margin. The snipe/bid path uses the price already looked up, never
-      // waiting on the hot path.
       const gallery = this.runMode === 'gallery';
-      const marketMax = gallery ? await this.sellPrice(m.resourceId) : this.knownSellPrice(m.resourceId);
-      const overPct = gallery ? MAX_FRACTION_OVER_MARKET_GALLERY : MAX_FRACTION_OVER_MARKET;
-      if (marketMax != null && marketMax > 0 && m.buyNow > Math.floor(marketMax * (1 + overPct))) {
-        this.logSkip(m, `its price of ${amount(m.buyNow)} is over the card's market price of ${amount(marketMax)}`);
-        continue;
+      // Hard cap: in Snipe/Bid the user's per-search max price is the ONLY
+      // ceiling, and with NO cap (null) the bot does not buy at all — it never
+      // falls back to the card's market price or the coin budget. That fallback
+      // is exactly what bought cards over the max (Carreras ~2.5-2.7k at a 2,000
+      // max, Joan Garcia 11-18k at 9,750): the per-search max was missing from
+      // the search, so an older market-price ceiling let buys land at ~market.
+      // Snipe/Bid never consult the market now — by the trader's instruction,
+      // their max is the only thing that authorises a buy.
+      if (!gallery) {
+        if (cap == null || m.buyNow > cap) {
+          if (cap != null) this.logSkip(m, `its price of ${amount(m.buyNow)} is over your max price of ${amount(cap)}`);
+          continue;
+        }
+      } else {
+        // Gallery alone has no user max (it buys at the market to finish a Set):
+        // its only guard is this market-value ceiling. It waits for the price
+        // lookup (filling a set is not a race to the millisecond) and allows a
+        // wider margin.
+        const marketMax = await this.sellPrice(m.resourceId);
+        if (marketMax != null && marketMax > 0 && m.buyNow > Math.floor(marketMax * (1 + MAX_FRACTION_OVER_MARKET_GALLERY))) {
+          this.logSkip(m, `its price of ${amount(m.buyNow)} is over the card's market price of ${amount(marketMax)}`);
+          continue;
+        }
       }
 
       if (t.sessionCoinBudget > 0 && this.runTotals.coinsSpent + m.buyNow > t.sessionCoinBudget) {
@@ -3405,14 +3405,9 @@ export class Sniper {
     // A re-bid on a read gone stale waits for the next read (`fresh`: the
     // price comes from EA's refusal just now, not from the read).
     if (rebid && !fresh && this.now() - this.watch.doneAt > REBID_FRESH_MS) return { end: 'dropped' };
-    // Hard ceiling: never bid above the card's market price (plus a small
-    // margin). A placed bid cannot be recalled from EA — it can still win after
-    // the trader lowers the max or stops — so one over market only ever wins
-    // them a loss. Bids are not a race, so this waits for the price lookup
-    // (cached after the first, so a re-bid does not stall).
-    const marketMax = await this.sellPrice(t.resourceId);
-    if (marketMax != null && marketMax > 0 && bid > Math.floor(marketMax * (1 + MAX_FRACTION_OVER_MARKET)))
-      return { end: 'skipped', why: `the ${amount(bid)} bid is over the card's market price of ${amount(marketMax)}` };
+    // No market-price ceiling here: by the trader's instruction the per-search
+    // max price (checked just above) is the only ceiling on a bid. The bot
+    // never consults the card's market price to decide a bid.
     this.setState({ phase: 'bidding', phaseEndsAt: null, stopReason: null, stopDetail: null });
     if (this.applyKillSwitch() || this.applyEntitlement() || this.applyExclusive()) return { end: 'stopped' };
     // EA is limiting requests or erroring: the next cycle waits it out.
@@ -3835,11 +3830,19 @@ export class Sniper {
    * (Snipe and Bid mode: Gallery mode's only limit is its budget, so a card
    * is never left out for its price). */
   private priceCap(filter: FilterCriteria): number | null {
-    const maxBuy = this.runMode === 'gallery' ? undefined : this.settings.thresholds.maxBuyPrice || undefined;
-    const caps = [filter.maxPrice, maxBuy].filter(
-      (n): n is number => n != null && n > 0,
-    );
-    return caps.length > 0 ? Math.min(...caps) : null;
+    // Gallery has no user max price: it buys at the market to finish a Set and
+    // carries its own market-based cap in filter.maxPrice.
+    if (this.runMode === 'gallery') return filter.maxPrice != null && filter.maxPrice > 0 ? filter.maxPrice : null;
+    // Snipe and Bid: the per-search Max price is the ONLY ceiling that
+    // authorises a buy or bid. With NO per-search max the bot returns null and
+    // start() stops it ('no_max_bid' / 'no_max_price') — it never falls back to
+    // the global "most you'll pay" and buys up to that. That fallback bought
+    // Carreras ~2.5-2.7k at a 2,000 max and Joan Garcia 11-18k at 9,750, by
+    // letting the global stand in when the per-search max was missing.
+    if (filter.maxPrice == null || filter.maxPrice <= 0) return null;
+    // The global "most you'll pay" only ever tightens the per-search max.
+    const globalMax = this.settings.thresholds.maxBuyPrice || undefined;
+    return globalMax != null && globalMax > 0 ? Math.min(filter.maxPrice, globalMax) : filter.maxPrice;
   }
 
   /** Whether an open bid's card is one a search is for (Snipe mode's own

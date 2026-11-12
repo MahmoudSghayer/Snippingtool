@@ -566,6 +566,23 @@ describe('Sniper — stops', () => {
     expect(h.buys).toEqual([]);
   });
 
+  it('refuses to snipe with no per-search max even when a global budget is set (the global is not a fallback cap)', async () => {
+    // The overpay bug: a missing per-search max fell back to the global "most
+    // you'll pay" and the bot bought up to it (at ~market via an old ceiling).
+    // The per-search max is the ONLY ceiling now — a missing one stops the bot,
+    // whatever the global budget. It must NOT search or buy at 50,000.
+    const h = setup({
+      filters: [{ id: 'f1', name: 'No max', filter: { resourceId: 100 } }],
+      settings: { thresholds: { ...DEFAULT_BOT_SETTINGS.thresholds, maxBuyPrice: 50_000 } },
+      results: [[auction('t-dear', 40_000)]],
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.sniper.isRunning()).toBe(false);
+    expect(h.sniper.state.stopReason).toBe('no_max_price');
+    expect(h.buys).toEqual([]);
+  });
+
   it('never buys above the max price, even a dearer listing EA returns alongside', async () => {
     const h = setup({
       filters: [{ id: 'f1', name: 'Capped', filter: { resourceId: 100, maxPrice: 2_000 } }],

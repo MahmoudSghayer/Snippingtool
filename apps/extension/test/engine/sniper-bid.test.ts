@@ -1057,6 +1057,22 @@ describe('Bid mode — fails closed', () => {
     });
   });
 
+  it('with no per-search max but a global budget set, still refuses to bid (the global is not a fallback cap)', () => {
+    // The overpay bug: when the per-search max was missing, the cap fell back to
+    // the global "most you'll pay" and the bot bid/bought up to that (landing at
+    // ~market via an old market ceiling — Carreras ~2.5k at a 2k max, Joan
+    // Garcia 11-18k at 9,750). The per-search max is the ONLY ceiling now: a
+    // missing one stops the bot, whatever the global budget.
+    const h = setup({
+      filter: { resourceId: 100 }, // no per-search max
+      settings: { thresholds: { ...DEFAULT_BOT_SETTINGS.thresholds, minProfit: 0, maxBuyPrice: 50_000 } },
+    });
+    h.sniper.start();
+    expect(h.sniper.state.stopReason).toBe('no_max_bid');
+    expect(h.bids).toHaveLength(0);
+    expect(h.buys).toHaveLength(0);
+  });
+
   it('stops when EA’s watch list is full and none of its bids is left to follow', async () => {
     const full = Array.from({ length: 50 }, (_, i) => auction(`x${i}`, 3_000));
     const h = setup({
@@ -1295,25 +1311,26 @@ describe('Bid mode — an open bid obeys the CURRENT max, not the one it was pla
     expect(h.bids.every(([, price]) => price <= 26_000)).toBe(true);
   });
 
-  it('does not bid above the card market price, even under the max', async () => {
-    // Regression: with no minimum profit set the bot never looked up the market
-    // price, so it bid up to the max and won cards for far more than they were
-    // worth (production: Weah ~37k at a 26k max, Carreras ~2.5k at 2k). A placed
-    // bid cannot be recalled from EA, so a bid over market is a locked-in loss.
+  it('bids up to the max even above the card market price (the max is the only ceiling)', async () => {
+    // By the trader's instruction the bot never consults the market: the only
+    // ceiling on a bid is the per-search max price. A bid under the max goes
+    // even when it is over the card's market value — the trader set that max on
+    // purpose. (Earlier builds blocked a bid at ~market and overpaid the other
+    // way: when the per-search max was missing they fell back to the global
+    // budget and bought at ~market, over the max the trader meant — Carreras
+    // ~2.5k at a 2k max, Joan Garcia 11-18k at 9,750.)
     const h = setup({
-      // Max well above market, so only the market ceiling can stop the bid.
       filter: { resourceId: 100, maxPrice: 36_000 },
-      estimateSellPrice: async () => 22_000, // ceiling = 22,000 + 5% = 23,100
-      // Buy-now above the max (so it bids); current bid already over the ceiling.
+      estimateSellPrice: async () => 22_000, // market well under the max; must NOT block the bid
+      // Buy-now above the max (so it bids); current bid 25,000 -> next step 25,250.
       results: (n) => (n === 1 ? [auction('a', 180, { buyNow: 40_000, currentBid: 25_000 })] : []),
-      stopWhen: (x) => x.bids.length > 0 || x.log().some((m) => m.includes('market price')),
+      stopWhen: (x) => x.bids.length > 0,
     });
     h.sniper.start();
     await h.done();
-    // The next bid (25,250) is over the 23,100 market ceiling: it must not go.
-    expect(h.bids).toEqual([]);
-    expect(h.buys).toEqual([]);
-    expect(h.log().some((m) => m.includes("over the card's market price"))).toBe(true);
+    // 25,250 is over the 22,000 market but under the 36,000 max: it must go.
+    expect(h.bids.map(([id, p]) => [id, p])).toEqual([['a', 25_250]]);
+    expect(h.log().some((m) => m.includes('market price'))).toBe(false);
   });
 
   it('stops buying an already-open bid once the trader switches to another player', async () => {
