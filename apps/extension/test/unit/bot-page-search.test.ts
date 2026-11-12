@@ -51,20 +51,28 @@ describe('buildFilterFromForm', () => {
   });
 });
 
-describe('pickPlayerForm — a new player never inherits the last one’s max', () => {
+describe('pickPlayerForm — picking a player never erases the price you typed', () => {
   const first = { id: 50573144, name: 'First', rating: 85 };
   const second = { id: 243404, name: 'Second', rating: 85 };
 
-  it('clears the price range when switching to a different player', () => {
-    // Regression: picking a new player kept the old max in the box, so a
-    // 26,000 max left from one player bid an 11,000-max player up to ~12,500.
+  it('keeps the max you set before picking the player', () => {
+    // Regression: picking a player used to clear the box, so a user who types
+    // the max (and sell) first and picks the player last lost the max — and a
+    // blank max lets the bot buy with no ceiling. The typed max must survive.
+    const form = { ...blankForm(), minBuy: null, maxBuy: 2_000 };
+    const next = pickPlayerForm(form, second);
+    expect(next.player).toEqual(second);
+    expect(next.maxBuy).toBe(2_000);
+    // The search handed to the bot carries the user's cap, not a blank one.
+    expect(buildFilterFromForm(next)).toEqual({ filter: { resourceId: 243404, maxPrice: 2_000 } });
+  });
+
+  it('keeps the price range when switching from one player to another', () => {
     const form = { ...blankForm(), player: first, minBuy: 5_000, maxBuy: 26_000 };
     const next = pickPlayerForm(form, second);
     expect(next.player).toEqual(second);
-    expect(next.maxBuy).toBeNull();
-    expect(next.minBuy).toBeNull();
-    // The search handed to the bot carries no stale cap.
-    expect(buildFilterFromForm(next)).toEqual({ filter: { resourceId: 243404 } });
+    expect(next.maxBuy).toBe(26_000);
+    expect(next.minBuy).toBe(5_000);
   });
 
   it('keeps the price range when re-picking the same player', () => {
