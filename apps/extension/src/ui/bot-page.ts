@@ -304,7 +304,15 @@ export function buildFilterFromForm(form: TargetForm): { filter: FilterCriteria 
  * to set and change; picking a player only sets the player and drops the
  * half-typed query, leaving every price exactly as typed. */
 export function pickPlayerForm(form: TargetForm, player: CatalogPlayer): TargetForm {
-  return { ...form, player, playerQuery: '' };
+  // Keep the price range the trader typed BEFORE picking a player (the vanish
+  // fix: form.player was null, so they set the max for THIS search and then
+  // named the player). But switching to a DIFFERENT player must NOT inherit the
+  // last one's max — that once ran the new player up to the old, higher max and
+  // bought over the price the trader meant for them (e.g. Mariona bought at
+  // Joan Garcia's 9,750 cap). Clear the range so they set it fresh per player;
+  // with no max the bot then refuses to start rather than run on a stale cap.
+  const switching = form.player != null && form.player.id !== player.id;
+  return switching ? { ...form, player, playerQuery: '', minBuy: null, maxBuy: null } : { ...form, player, playerQuery: '' };
 }
 
 /** A card sold at `sell`: EA's 5% tax, what the trader keeps, and the profit
@@ -3935,6 +3943,9 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     phase.className = `chip ${running ? 'running' : state?.phase === 'stopped' ? 'stopped' : ''}`;
     renderRunbar();
     $<HTMLButtonElement>('reset').disabled = !sniper || running;
+    // The search Reset wipes the Max; it must not fire mid-session, so disable
+    // it while the bot runs (its click handler guards this too).
+    $<HTMLButtonElement>('nf-reset').disabled = running;
     const notice = $('notice');
     notice.hidden = !!sniper;
     notice.textContent = deps.getUnavailableReason() ?? '';
@@ -4054,8 +4065,12 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     }
     refreshLive();
   });
-  // EA's Reset, beside the Start button: empties the whole search.
+  // EA's Reset, beside the Start button: empties the whole search. Never while
+  // the bot runs — wiping the Max mid-session would drop the running search's
+  // price cap. The button is also disabled when running (renderRunbar), so this
+  // is the belt to that suspenders.
   onTrusted($('nf-reset'), 'click', () => {
+    if (deps.getSniper()?.isRunning()) return;
     form = blankForm();
     openDd = null;
     showTab('search');

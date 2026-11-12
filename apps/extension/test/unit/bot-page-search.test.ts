@@ -51,7 +51,7 @@ describe('buildFilterFromForm', () => {
   });
 });
 
-describe('pickPlayerForm — picking a player never erases the price you typed', () => {
+describe('pickPlayerForm — keeps the price you set, but a different player starts fresh', () => {
   const first = { id: 50573144, name: 'First', rating: 85 };
   const second = { id: 243404, name: 'Second', rating: 85 };
 
@@ -67,12 +67,19 @@ describe('pickPlayerForm — picking a player never erases the price you typed',
     expect(buildFilterFromForm(next)).toEqual({ filter: { resourceId: 243404, maxPrice: 2_000 } });
   });
 
-  it('keeps the price range when switching from one player to another', () => {
+  it('clears the price range when switching to a DIFFERENT player (never inherits the last one’s max)', () => {
+    // The overpay: switching players used to carry the last player's max, so the
+    // new player ran up to that higher cap and bought over the price the trader
+    // meant for them (Mariona bought at Joan Garcia's 9,750 cap). A different
+    // player must start with a blank range, set fresh.
     const form = { ...blankForm(), player: first, minBuy: 5_000, maxBuy: 26_000 };
     const next = pickPlayerForm(form, second);
     expect(next.player).toEqual(second);
-    expect(next.maxBuy).toBe(26_000);
-    expect(next.minBuy).toBe(5_000);
+    expect(next.maxBuy).toBeNull();
+    expect(next.minBuy).toBeNull();
+    // With no max the search is incomplete, so the bot refuses to start rather
+    // than run the new player on the old player's stale cap.
+    expect(buildFilterFromForm(next)).toEqual({ filter: { resourceId: 243404 } });
   });
 
   it('keeps the price range when re-picking the same player', () => {
