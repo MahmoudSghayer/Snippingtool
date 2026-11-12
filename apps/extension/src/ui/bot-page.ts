@@ -297,19 +297,14 @@ export function buildFilterFromForm(form: TargetForm): { filter: FilterCriteria 
   return { filter };
 }
 
-/** Picking a player into the form. Switching to a DIFFERENT player clears the
- * price range: the max price is per player, so a previous player's (higher)
- * max must never silently carry over to cap — or overpay — the new one.
- * (Production: a 26,000 max left in the box from one player bid an 11,000-max
- * player up to ~12,500, because picking the new player did not reset it.) */
+/** Picking a player into the form. This NEVER clears the price range. The user
+ * types the max (and sell) price first and picks the player last, so wiping the
+ * box here would erase the max they just set — and a blank max lets the bot buy
+ * with no ceiling, the one thing that must never happen. The max is the user's
+ * to set and change; picking a player only sets the player and drops the
+ * half-typed query, leaving every price exactly as typed. */
 export function pickPlayerForm(form: TargetForm, player: CatalogPlayer): TargetForm {
-  const differentPlayer = form.player?.id !== player.id;
-  return {
-    ...form,
-    player,
-    playerQuery: '',
-    ...(differentPlayer ? { minBuy: null, maxBuy: null } : {}),
-  };
+  return { ...form, player, playerQuery: '' };
 }
 
 /** A card sold at `sell`: EA's 5% tax, what the trader keeps, and the profit
@@ -2797,8 +2792,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     } else if (el.dataset.pick) {
       const p = suggestions[Number(el.dataset.pick)];
       if (!p) return;
-      // A different player resets the price range, so last player's max never
-      // carries over; sync so the live search drops the stale cap too.
+      // Picking a player keeps the price range exactly as typed (the user sets
+      // the max before picking the player); sync hands that same max to the bot.
       form = pickPlayerForm(form, p);
       suggestions = [];
       renderTargets();
