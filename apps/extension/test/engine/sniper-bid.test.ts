@@ -464,7 +464,7 @@ describe('Bid mode — pace', () => {
     });
     h.sniper.start();
     await h.done();
-    expect(h.log()).toContain('Searching and bidding at half your normal speed for the next 15 minutes so EA\'s limit can reset');
+    expect(h.log()).toContain('Searching and bidding at half your normal speed for the next 5 minutes so EA\'s limit can reset');
     expect(h.log()).toContain(
       'EA limited your searches and bids 3 times in 10 minutes (error 512): resting 15 min to protect your account, then searching and bidding at a third of your normal speed',
     );
