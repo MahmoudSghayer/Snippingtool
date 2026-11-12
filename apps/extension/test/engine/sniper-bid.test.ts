@@ -1270,6 +1270,31 @@ describe('Bid mode — an open bid obeys the CURRENT max, not the one it was pla
     expect(h.log().some((m) => m.startsWith('Max bid reached'))).toBe(true);
   });
 
+  it('never bids or buys a card over the max — flat max, one search row (the trader’s 26k report)', async () => {
+    // The trader's exact setup: a single search row, max price 26,000, never
+    // changed. The bot must buy a listing at or under the max and leave one
+    // over it entirely alone — no bid, no buy. The only way a card ever goes
+    // for more than the max is a bid placed earlier at a higher max, which EA
+    // will not let the bot recall; with a flat 26k and one row, there is none.
+    const h = setup({
+      filter: { resourceId: 100, maxPrice: 26_000 },
+      results: (n) =>
+        n === 1
+          ? [
+              auction('cheap', 1_200, { buyNow: 25_000 }), // at/under the max -> bought
+              auction('dear', 180, { buyNow: 30_000, currentBid: 29_000 }), // over the max -> left alone
+            ]
+          : [],
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.buys).toEqual([['cheap', 25_000]]);
+    expect(h.bids).toEqual([]);
+    // Belt and braces: nothing the bot ever sent to EA went over the max.
+    expect(h.buys.every(([, price]) => price <= 26_000)).toBe(true);
+    expect(h.bids.every(([, price]) => price <= 26_000)).toBe(true);
+  });
+
   it('does not bid above the card market price, even under the max', async () => {
     // Regression: with no minimum profit set the bot never looked up the market
     // price, so it bid up to the max and won cards for far more than they were

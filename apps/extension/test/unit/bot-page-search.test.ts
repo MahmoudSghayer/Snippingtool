@@ -12,6 +12,7 @@ import {
   blankForm,
   buildFilterFromForm,
   createBotPage,
+  pickPlayerForm,
   type LiveSearch,
 } from '../../src/ui/bot-page.js';
 
@@ -47,6 +48,35 @@ describe('buildFilterFromForm', () => {
     expect(buildFilterFromForm({ ...blankForm(), minBuy: 20_000, maxBuy: 10_000 })).toEqual({
       error: 'Min price is above max price',
     });
+  });
+});
+
+describe('pickPlayerForm — a new player never inherits the last one’s max', () => {
+  const first = { id: 50573144, name: 'First', rating: 85 };
+  const second = { id: 243404, name: 'Second', rating: 85 };
+
+  it('clears the price range when switching to a different player', () => {
+    // Regression: picking a new player kept the old max in the box, so a
+    // 26,000 max left from one player bid an 11,000-max player up to ~12,500.
+    const form = { ...blankForm(), player: first, minBuy: 5_000, maxBuy: 26_000 };
+    const next = pickPlayerForm(form, second);
+    expect(next.player).toEqual(second);
+    expect(next.maxBuy).toBeNull();
+    expect(next.minBuy).toBeNull();
+    // The search handed to the bot carries no stale cap.
+    expect(buildFilterFromForm(next)).toEqual({ filter: { resourceId: 243404 } });
+  });
+
+  it('keeps the price range when re-picking the same player', () => {
+    const form = { ...blankForm(), player: second, maxBuy: 11_000 };
+    const next = pickPlayerForm(form, { ...second });
+    expect(next.maxBuy).toBe(11_000);
+  });
+
+  it('sets the player and clears any half-typed query', () => {
+    const next = pickPlayerForm({ ...blankForm(), playerQuery: 'seco' }, second);
+    expect(next.player).toEqual(second);
+    expect(next.playerQuery).toBe('');
   });
 });
 

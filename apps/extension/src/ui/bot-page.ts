@@ -297,6 +297,21 @@ export function buildFilterFromForm(form: TargetForm): { filter: FilterCriteria 
   return { filter };
 }
 
+/** Picking a player into the form. Switching to a DIFFERENT player clears the
+ * price range: the max price is per player, so a previous player's (higher)
+ * max must never silently carry over to cap — or overpay — the new one.
+ * (Production: a 26,000 max left in the box from one player bid an 11,000-max
+ * player up to ~12,500, because picking the new player did not reset it.) */
+export function pickPlayerForm(form: TargetForm, player: CatalogPlayer): TargetForm {
+  const differentPlayer = form.player?.id !== player.id;
+  return {
+    ...form,
+    player,
+    playerQuery: '',
+    ...(differentPlayer ? { minBuy: null, maxBuy: null } : {}),
+  };
+}
+
 /** A card sold at `sell`: EA's 5% tax, what the trader keeps, and the profit
  * over `buy` (null without a buy price). The same formula as every other
  * profit in the app (`computeTradeProfit`). */
@@ -2114,7 +2129,10 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
   /** Whether the search has a price Bid mode can bid up to: its max price,
    * or "Most you'll pay". */
   function hasMaxBid(filter: FilterCriteria): boolean {
-    return (filter.maxPrice ?? 0) > 0 || shown().thresholds.maxBuyPrice > 0;
+    // Bid mode's cap must be the search's own max price — never the global
+    // "Most you'll pay" alone, which can be a stale, higher value left from
+    // another player and would let a bid go above this search's intended max.
+    return (filter.maxPrice ?? 0) > 0 || (!bidMode() && shown().thresholds.maxBuyPrice > 0);
   }
 
   /** Reads Bid mode's fields; null (and the bad one marked) if one is invalid. */
@@ -2779,10 +2797,12 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     } else if (el.dataset.pick) {
       const p = suggestions[Number(el.dataset.pick)];
       if (!p) return;
-      form.player = p;
-      form.playerQuery = '';
+      // A different player resets the price range, so last player's max never
+      // carries over; sync so the live search drops the stale cap too.
+      form = pickPlayerForm(form, p);
       suggestions = [];
       renderTargets();
+      syncSearch();
     } else if (el.id === 'nf-unpick') {
       form.player = null;
       renderTargets();
