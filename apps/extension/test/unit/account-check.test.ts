@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { createAccountCheck, signedOutMessage, type AccountStatus } from '../../src/content/account-check.js';
+import { ACCOUNT_SIGNED_OUT_GRACE_CHECKS, createAccountCheck, signedOutMessage, type AccountStatus } from '../../src/content/account-check.js';
 
 import type { BackgroundAnswer } from '../../src/content/background-request.js';
 import type { BootstrapResponse } from '@sl/shared';
@@ -44,17 +44,39 @@ describe('content/account-check.ts', () => {
     expect(await check()).toEqual({ kind: 'entitled', bootstrap: boot([]) });
   });
 
-  it('a sign-out stops at once and says so, never as a plan problem', async () => {
-    const check = createAccountCheck(background([null], [{ ok: true, data: { hasAccount: false, signedOutReason: 'session_ended' } }]));
-    const result = await check();
-    expect(result).toEqual({ kind: 'signed_out', detail: 'signed out of Nova Trade — sign in again to restart' });
-    expect(JSON.stringify(result)).not.toContain('plan');
+  it('a sign-out keeps the bot running a short grace, then stops — never as a plan problem', async () => {
+    // Login dropped but still signed out each check: a grace (the bot keeps
+    // running so an active bid finishes), then a stop once the grace is spent.
+    const signedOut = { ok: true as const, data: { hasAccount: false, signedOutReason: 'session_ended' } };
+    const check = createAccountCheck({ ...background([null], [signedOut]), signedOutGraceChecks: 2 });
+    const detail = 'signed out of Nova Trade — sign in again to restart';
+    expect(await check()).toEqual({ kind: 'signed_out_grace', detail });
+    const stop = await check();
+    expect(stop).toEqual({ kind: 'signed_out', detail });
+    expect(JSON.stringify(stop)).not.toContain('plan');
+  });
+
+  it('uses a multi-check grace by default, not an instant stop', async () => {
+    const check = createAccountCheck(background([null], [{ ok: true, data: { hasAccount: false } }]));
+    expect((await check()).kind).toBe('signed_out_grace');
+    expect(ACCOUNT_SIGNED_OUT_GRACE_CHECKS).toBeGreaterThan(1);
+  });
+
+  it('a login that comes back inside the grace resumes with no stop', async () => {
+    const signedOut = { ok: true as const, data: { hasAccount: false } };
+    const check = createAccountCheck({
+      ...background([null, boot(['automation.autobuyer']), null], [signedOut]),
+      signedOutGraceChecks: 2,
+    });
+    expect((await check()).kind).toBe('signed_out_grace'); // signed out: grace
+    expect((await check()).kind).toBe('entitled'); // login back: resumes
+    expect((await check()).kind).toBe('signed_out_grace'); // signed out again: grace afresh, not a stop
   });
 
   it('says when the password change is why', async () => {
     const check = createAccountCheck(background([null], [{ ok: true, data: { hasAccount: false, signedOutReason: 'password_changed' } }]));
     expect(await check()).toEqual({
-      kind: 'signed_out',
+      kind: 'signed_out_grace',
       detail: 'signed out of Nova Trade because the password changed — sign in again to restart',
     });
     expect(signedOutMessage(undefined)).toBe('signed out of Nova Trade — sign in again to restart');
@@ -94,6 +116,14 @@ describe('content/index.ts: the bot’s stop reasons', () => {
     expect(entitled).toContain("if (!features.includes('automation.autobuyer')) stopAutomation('not_entitled'");
     expect(check.match(/'not_entitled'/g)).toHaveLength(2); // the type, and that one call
     expect(check).toContain("if (check.kind === 'unconfirmed') return;");
+  });
+
+  it('keeps the bot running through a short sign-out grace instead of stopping at once', () => {
+    expect(check).toContain("if (check.kind === 'signed_out_grace') {");
+    // the grace branch keeps the bot running: it returns without stopping.
+    const grace = /if \(check\.kind === 'signed_out_grace'\) \{([\s\S]*?)\n {8}\}/.exec(check)?.[1] ?? '';
+    expect(grace).not.toContain('stopAutomation');
+    expect(grace).toContain('return;');
   });
 
   it('hands the account issue to the bot, which checks it ahead of the plan', () => {
