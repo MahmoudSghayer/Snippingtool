@@ -937,8 +937,10 @@ const EA_BACKOFF_MAX_MS = 120_000;
  * times after a protective rest in the last `EA_REST_WINDOW_MS`. A clean
  * answer no longer puts it straight back to full speed — that is how it kept
  * running into EA's limit (Oct 18: 512 / 521 / 429 over and over at ~960
- * searches an hour). */
-const EA_SLOW_MS = 15 * 60_000;
+ * searches an hour). Kept short so a one-off limit costs minutes, not a
+ * quarter hour, of half speed: the `EA_LIMITS_BEFORE_REST` rest still catches
+ * a limit that keeps coming back, so this need not idle the bot out of it. */
+const EA_SLOW_MS = 5 * 60_000;
 /** This many limits within `EA_LIMIT_WINDOW_MS` and the bot rests (the
  * waits in `EA_REST_MS`, one per rest so far); the rest after those, within
  * `EA_REST_WINDOW_MS` of the first, stops it (`ea_rate_limited`): EA's next

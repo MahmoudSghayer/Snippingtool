@@ -8,7 +8,7 @@
 // the trade pile stops or slows it.
 //
 // A rate limit (429 / 512 / 521) backs off the same way, then slows the bot
-// down for 15 minutes; three in 10 minutes make it rest (15 min, then 30),
+// down for 5 minutes; three in 10 minutes make it rest (15 min, then 30),
 // and a third round within two hours stops it. Production, Oct 18: the bot
 // went back to full speed after every clean search, ran into EA's limit
 // again and again at ~960 searches an hour, and EA blocked the account's
@@ -176,24 +176,25 @@ describe('Sniper — EA errors', () => {
     expect(h.log()).toEqual(
       expect.arrayContaining([
         'EA says too many requests (error 429): waiting 5 s before the next search',
-        "Searching at half your normal speed for the next 15 minutes so EA's limit can reset",
+        "Searching at half your normal speed for the next 5 minutes so EA's limit can reset",
         'EA limited your searches 3 times in 10 minutes (error 429): resting 15 min to protect your account, then searching at a third of your normal speed',
         'EA limited your searches 3 times in 10 minutes (error 429): resting 30 min to protect your account, then searching at a third of your normal speed',
       ]),
     );
   });
 
-  it('searches twice as slow for 15 minutes after a rate limit, then at full speed again', async () => {
+  it('searches twice as slow for 5 minutes after a rate limit, then at full speed again', async () => {
     // Search 1 is limited at 0 s: a 5 s wait, then 2 s instead of 1 s
-    // between searches until 15 minutes after the wait (905 s, search 452).
-    // Search 453 is limited again: EA was quiet for long enough, so the wait
-    // starts over at 5 s and no rest is due.
-    const h = setup((n) => (n === 1 || n === 453 ? { eaErrors: [RATE_LIMITED], outcome: FAILED } : {}), { maxSearches: 455 });
+    // between searches until 5 minutes after the wait (305 s, search 152).
+    // Search 153 is limited again: the slow window is over, so it is back to
+    // full speed, the wait starts over at 5 s, and only two limits (< the
+    // rest threshold) have landed, so no rest is due.
+    const h = setup((n) => (n === 1 || n === 153 ? { eaErrors: [RATE_LIMITED], outcome: FAILED } : {}), { maxSearches: 155 });
     h.sniper.start();
     await h.done();
     const gaps = h.gaps();
     expect(gaps.slice(0, 3)).toEqual([5, 2, 2]);
-    expect(gaps.slice(449, 454)).toEqual([2, 2, 1, 5, 2]);
+    expect(gaps.slice(149, 154)).toEqual([2, 2, 1, 5, 2]);
     expect(h.sniper.state.stopReason).toBe('manual');
   });
 
