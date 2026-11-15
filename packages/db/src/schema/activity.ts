@@ -108,6 +108,10 @@ export const snipingActivity = pgTable(
     tradeId: text('trade_id'),
     targetPrice: integer('target_price').notNull(),
     listedPrice: integer('listed_price'),
+    // The per-search Max price in force for this attempt (0045), so reports
+    // can show bought/bid vs the cap and surface overpays. NULL from older
+    // extensions, the assist overlay and the autobuyer (no per-search max).
+    capPrice: integer('cap_price'),
     outcome: snipingOutcomeEnum('outcome').notNull(),
     latencyMs: integer('latency_ms'),
     errorCode: text('error_code'),

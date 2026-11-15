@@ -62,6 +62,9 @@ export default fp(
           tradeId: a.tradeId ?? null,
           targetPrice: a.targetPrice,
           listedPrice: a.listedPrice,
+          // The per-search Max in force for this attempt; NULL from older
+          // extensions and engines that carry no cap (assist/autobuyer).
+          capPrice: a.capPrice ?? null,
           outcome: a.outcome,
           latencyMs: a.latencyMs,
           searchMs: a.searchMs ?? null,

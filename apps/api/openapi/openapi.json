@@ -20201,6 +20201,18 @@
                             }
                           ]
                         },
+                        "capPrice": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 15000000
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
                         "outcome": {
                           "type": "string",
                           "enum": [

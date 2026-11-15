@@ -272,7 +272,8 @@ SELECT outcome, count(*) AS n,
        percentile_cont(0.5) WITHIN GROUP (ORDER BY latency_ms)::int AS p50_ms,
        percentile_cont(0.9) WITHIN GROUP (ORDER BY latency_ms)::int AS p90_ms,
        min(latency_ms) AS min_ms, max(latency_ms) AS max_ms,
-       round(avg(target_price)) AS avg_target, round(avg(listed_price)) AS avg_listed
+       round(avg(target_price)) AS avg_target, round(avg(listed_price)) AS avg_listed,
+       round(avg(cap_price)) AS avg_cap
   FROM sa GROUP BY 1 ORDER BY 2 DESC;
 \echo '== where the time went before each buy, ms (Nova AI bot builds that report it)'
 \echo '   search = search sent -> listing arrived; react = listing arrived -> buy sent; buy = buy round trip'
@@ -374,7 +375,8 @@ SELECT type, left(metadata::text, 160) AS what, count(*) AS n,
 \echo '== buy attempts per resource, by outcome and error code'
 SELECT s.resource_id, s.outcome, coalesce(s.error_code, '-') AS error_code, count(*) AS n,
        percentile_cont(0.5) WITHIN GROUP (ORDER BY s.latency_ms)::int AS p50_ms,
-       round(avg(s.target_price)) AS avg_target, round(avg(s.listed_price)) AS avg_listed
+       round(avg(s.target_price)) AS avg_target, round(avg(s.listed_price)) AS avg_listed,
+       round(avg(s.cap_price)) AS avg_cap
   FROM sniping_activity s
  WHERE s.user_id = :'uid' AND s.occurred_at > now() - make_interval(hours => :hours)
  GROUP BY 1, 2, 3 ORDER BY 4 DESC LIMIT 25;
@@ -754,7 +756,7 @@ SELECT n.player, s.error_code AS reason, count(*) AS n,
 
 \echo '## recent_races'
 SELECT to_char(s.occurred_at AT TIME ZONE :'tz', 'MM-DD HH24:MI') AS at_local, n.player, s.outcome,
-       s.listed_price, s.search_ms, s.reaction_ms, s.latency_ms,
+       s.listed_price, s.cap_price, s.search_ms, s.reaction_ms, s.latency_ms,
        coalesce(substring(s.error_code from 'status ([0-9]{3})'), s.error_code) AS code
   FROM sa s JOIN names n USING (resource_id) WHERE s.outcome <> 'blocked'
  ORDER BY s.occurred_at DESC LIMIT 60;
