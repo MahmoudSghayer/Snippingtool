@@ -2100,10 +2100,10 @@ describe('Sniper — how a missed buy is reported', () => {
     expect(missOutcome('bid reported success: false (status 461)')).toBe('too_slow');
     expect(missOutcome('bid reported success: false (status 478)')).toBe('too_slow');
     expect(missOutcome('bid reported success: false (status 429)')).toBe('error');
+    expect(missOutcome('bid reported success: false (status 426)')).toBe('error');
     expect(missOutcome('bid reported success: false (status 521)')).toBe('error');
     expect(missOutcome('bid reported success: false (status 500)')).toBe('error');
     expect(missOutcome('bid reported success: false (status 470)')).toBe('failed');
-    expect(missOutcome('bid reported success: false (status 426)')).toBe('failed');
     expect(missOutcome(ACT_ERROR.priceMismatch)).toBe('failed');
     expect(missOutcome(undefined)).toBe('failed');
     expect(attemptErrorCode('')).toBe('unknown_error');

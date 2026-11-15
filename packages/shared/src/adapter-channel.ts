@@ -67,12 +67,15 @@ export type EaErrorEndpoint = (typeof EA_ERROR_ENDPOINTS)[number];
 
 /** The category of an EA HTTP error status (`EA_ERROR_CATEGORIES`). EA's own
  * codes, as traders report them: 401 an expired session, 458 a verification
- * (captcha), 429 / 512 / 521 too many requests — 512 and 521 sit in the 5xx
- * range but are rate limits, not outages. */
+ * (captcha), 426 / 429 / 512 / 521 too many requests — 512 and 521 sit in the
+ * 5xx range and 426 ("Upgrade Required") in the 4xx range, but all four are
+ * rate limits, not outages or refusals. Nov 15: EA answered a burst of bids
+ * 426 alongside 429 / 512 / 521 while limiting the account, and 426 counted as
+ * a plain rejection slipped past the bot's rate-limit backoff. */
 export function eaErrorCategory(status: number): EaErrorCategory {
   if (status === 401) return 'session_ended';
   if (status === 458) return 'verification';
-  if (status === 429 || status === 512 || status === 521) return 'rate_limited';
+  if (status === 426 || status === 429 || status === 512 || status === 521) return 'rate_limited';
   if (status >= 500 && status <= 599) return 'server_error';
   if (status >= 400 && status <= 499) return 'rejected';
   return 'other';

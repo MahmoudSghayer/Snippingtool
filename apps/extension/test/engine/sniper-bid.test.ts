@@ -1197,7 +1197,8 @@ describe('Bid mode — the same rails as Snipe mode', () => {
     h.sniper.start();
     await h.done();
     const gaps = h.searchTimes.slice(1).map((t, i) => (t - h.searchTimes[i]!) / SEC);
-    expect(gaps).toEqual([5, 10, 900, 5, 10, 1800, 5, 10]);
+    // One protective rest (900 s), then a stop on the second round of limits.
+    expect(gaps).toEqual([5, 10, 900, 5, 10]);
     expect(h.sniper.state.stopReason).toBe('ea_rate_limited');
   });
 

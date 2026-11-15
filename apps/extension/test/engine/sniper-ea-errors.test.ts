@@ -164,11 +164,13 @@ describe('Sniper — EA errors', () => {
     expect(h.gaps()).toEqual([5, 10, 20, 1, 5, 10]);
   });
 
-  it('rests after three rate limits in 10 minutes (15 min, then 30), and stops at the third round', async () => {
+  it('rests once after three rate limits in 10 minutes (15 min), then stops if EA keeps limiting', async () => {
     const h = setup(() => ({ eaErrors: [RATE_LIMITED], outcome: FAILED }), { maxSearches: 20 });
     h.sniper.start();
     await h.done();
-    expect(h.gaps()).toEqual([5, 10, 900, 5, 10, 1800, 5, 10]);
+    // One protective rest, then a stop: a second 30-minute rest used to let the
+    // bot keep bidding into a live limit (Nov 15, ~93 limits in half an hour).
+    expect(h.gaps()).toEqual([5, 10, 900, 5, 10]);
     expect(h.sniper.state).toMatchObject({
       stopReason: 'ea_rate_limited',
       stopDetail: expect.stringContaining('your account is likely soft banned'),
@@ -178,9 +180,26 @@ describe('Sniper — EA errors', () => {
         'EA says too many requests (error 429): waiting 5 s before the next search',
         "Searching at half your normal speed for the next 5 minutes so EA's limit can reset",
         'EA limited your searches 3 times in 10 minutes (error 429): resting 15 min to protect your account, then searching at a third of your normal speed',
-        'EA limited your searches 3 times in 10 minutes (error 429): resting 30 min to protect your account, then searching at a third of your normal speed',
       ]),
     );
+    // No second rest line: the bot stops instead of resting a second time.
+    expect(h.log()).not.toContain(
+      'EA limited your searches 3 times in 10 minutes (error 429): resting 30 min to protect your account, then searching at a third of your normal speed',
+    );
+  });
+
+  it('treats a 426 (EA upgrade-required throttle) as a rate limit, not a plain refusal', async () => {
+    // Nov 15: EA answered a burst of bids 426 while limiting the account; 426
+    // counted as a refusal slipped past the rate-limit backoff. The first
+    // search is a 426: the bot backs off (5 s, not the 1 s normal delay) and
+    // says EA is limiting it, instead of ignoring it like a lost race.
+    const h = setup((n) => (n === 1 ? { outcome: { ok: false, error: 'search reported success: false (status 426)', latencyMs: 5 } } : {}), {
+      maxSearches: 3,
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.gaps()[0]).toBe(5);
+    expect(h.log()).toContain('EA is temporarily limiting your searches (error 426): waiting 5 s before the next search');
   });
 
   it('searches twice as slow for 5 minutes after a rate limit, then at full speed again', async () => {
@@ -235,11 +254,15 @@ describe('Sniper — EA errors', () => {
   });
 
   it("backs off on EA's status in a failed search's error when no ea_error came", async () => {
-    const h = setup(() => ({ outcome: { ok: false, error: 'search reported success: false (status 521)', latencyMs: 5 } }), { maxSearches: 7 });
+    const h = setup(() => ({ outcome: { ok: false, error: 'search reported success: false (status 521)', latencyMs: 5 } }), { maxSearches: 20 });
     h.sniper.start();
     await h.done();
-    expect(h.searchTimes).toHaveLength(7);
-    expect(h.gaps()).toEqual([5, 10, 900, 5, 10, 1800]);
+    // One protective rest (900 s), then a clean stop on the second round of
+    // limits — the same stop the direct ea_error path makes, now that the
+    // failed-search handler returns once eaExcused has stopped the bot.
+    expect(h.searchTimes).toHaveLength(6);
+    expect(h.gaps()).toEqual([5, 10, 900, 5, 10]);
+    expect(h.sniper.state.stopReason).toBe('ea_rate_limited');
     expect(h.log()).toContain('EA is temporarily limiting your searches (error 521): waiting 5 s before the next search');
   });
 
