@@ -354,10 +354,10 @@ describe('EA errors on the adapter channel', () => {
     );
   });
 
-  it("files EA's statuses: session, captcha, rate limits (512 and 521 too), outages, refusals", () => {
+  it("files EA's statuses: session, captcha, rate limits (426, 512 and 521 too), outages, refusals", () => {
     expect(eaErrorCategory(401)).toBe('session_ended');
     expect(eaErrorCategory(458)).toBe('verification');
-    for (const s of [429, 512, 521]) expect(eaErrorCategory(s)).toBe('rate_limited');
+    for (const s of [426, 429, 512, 521]) expect(eaErrorCategory(s)).toBe('rate_limited');
     for (const s of [500, 502, 503, 599]) expect(eaErrorCategory(s)).toBe('server_error');
     for (const s of [400, 403, 404, 461, 470, 478]) expect(eaErrorCategory(s)).toBe('rejected');
     for (const s of [0, 200, 204, 304]) expect(eaErrorCategory(s)).toBe('other');

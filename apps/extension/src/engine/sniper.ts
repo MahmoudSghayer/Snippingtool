@@ -159,7 +159,7 @@ export function missReason(error: string | undefined): string {
     if (status === '458') return 'EA wants a verification: solve it in the web app';
     if (status === '401') return 'your EA session ended: reload the web app';
     if (status === '429') return 'EA says too many requests (error 429): slow the bot down';
-    if (status === '512' || status === '521') return `EA is temporarily limiting your account (error ${status}): slow the bot down`;
+    if (status === '512' || status === '521' || status === '426') return `EA is temporarily limiting your account (error ${status}): slow the bot down`;
     return `EA refused it (error ${status})`;
   }
   if (error === ACT_ERROR.priceMismatch) return 'the price changed';
@@ -208,7 +208,7 @@ export function moveMissReason(error: string | undefined): string {
 export function eaErrorText(status: number | string): string {
   const code = String(status);
   if (code === '429') return 'EA says too many requests (error 429)';
-  if (code === '512' || code === '521') return `EA is temporarily limiting your searches (error ${code})`;
+  if (code === '512' || code === '521' || code === '426') return `EA is temporarily limiting your searches (error ${code})`;
   return `EA's servers had a problem (error ${code})`;
 }
 
@@ -221,7 +221,7 @@ export function eaErrorText(status: number | string): string {
 export function missOutcome(error: string | undefined): Extract<SnipeOutcome, 'too_slow' | 'error' | 'failed'> {
   const status = error ? /status (\d{3})/.exec(error)?.[1] : undefined;
   if (status === '403' || status === '461' || status === '478' || error === ACT_ERROR.listingUnknown) return 'too_slow';
-  if (status === '429' || status?.startsWith('5')) return 'error';
+  if (status === '429' || status === '426' || status?.startsWith('5')) return 'error';
   return 'failed';
 }
 
@@ -938,13 +938,16 @@ const EA_BACKOFF_MAX_MS = 120_000;
  * quarter hour, of half speed: the `EA_LIMITS_BEFORE_REST` rest still catches
  * a limit that keeps coming back, so this need not idle the bot out of it. */
 const EA_SLOW_MS = 5 * 60_000;
-/** This many limits within `EA_LIMIT_WINDOW_MS` and the bot rests (the
- * waits in `EA_REST_MS`, one per rest so far); the rest after those, within
- * `EA_REST_WINDOW_MS` of the first, stops it (`ea_rate_limited`): EA's next
- * step is usually a transfer market ban. */
+/** This many limits within `EA_LIMIT_WINDOW_MS` and the bot takes one
+ * protective rest (`EA_REST_MS`). If EA is still limiting after it — another
+ * `EA_LIMITS_BEFORE_REST` within `EA_REST_WINDOW_MS` of the first — the bot
+ * stops (`ea_rate_limited`) rather than resting again and bidding back into a
+ * live limit, whose next step is usually a transfer market ban. One rest, not
+ * two: Nov 15 a second 30-minute rest let the bot keep nibbling at an active
+ * limit for half an hour and EA limited the account. */
 const EA_LIMITS_BEFORE_REST = 3;
 const EA_LIMIT_WINDOW_MS = 10 * 60_000;
-const EA_REST_MS = [15 * 60_000, 30 * 60_000];
+const EA_REST_MS = [15 * 60_000];
 const EA_REST_WINDOW_MS = 2 * 60 * 60_000;
 
 function copyGallery(g: GalleryState): GalleryState {
@@ -1674,6 +1677,9 @@ export class Sniper {
       if (!found.ok) {
         if (!this.eaExcused(found.error, startedAt)) failuresInRow++;
         this.addLog({ kind: 'failed', message: `Search "${target.name}" failed: ${found.error}` });
+        // eaExcused may have stopped the bot (ea_rate_limited): don't fall
+        // through to another search, as the direct ea_error path does not.
+        if (signal.aborted) return;
         if (failuresInRow >= MAX_SEARCH_FAILURES_IN_A_ROW) return this.stop('search_failing');
       } else {
         failuresInRow = 0;
@@ -2334,6 +2340,7 @@ export class Sniper {
       if (!found.ok) {
         if (!this.eaExcused(found.error, startedAt)) failuresInRow++;
         this.addLog({ kind: 'failed', message: `Search "${plan.target.name}" failed: ${found.error}` });
+        if (signal.aborted) return; // eaExcused may have stopped the bot (ea_rate_limited)
         if (failuresInRow >= MAX_SEARCH_FAILURES_IN_A_ROW) return this.stop('search_failing');
       } else {
         failuresInRow = 0;
@@ -2980,6 +2987,7 @@ export class Sniper {
             this.pace.failed++;
             if (!this.eaExcused(found.error, startedAt)) failuresInRow++;
             this.addLog({ kind: 'failed', message: `Search "${target.name}" failed: ${found.error}` });
+            if (signal.aborted) return; // eaExcused may have stopped the bot (ea_rate_limited)
             if (failuresInRow >= MAX_SEARCH_FAILURES_IN_A_ROW) return this.stop('search_failing');
           } else {
             failuresInRow = 0;
@@ -4166,7 +4174,7 @@ const STOP_MESSAGES: Record<SniperStopReason, string> = {
   ea_session_ended: 'Your EA session ended — log in to the web app again',
   ea_verification: 'EA wants a verification (captcha) — solve it in the web app, then Start again',
   ea_rate_limited:
-    'EA kept limiting your searches after two rests: your account is likely soft banned (EA has blocked transfer market searches for a while). Do not search for a few hours, then Start again with a longer search delay',
+    'EA kept limiting your searches after a protective rest: your account is likely soft banned (EA has blocked transfer market searches for a while). Do not search for a few hours, then Start again with a longer search delay',
   no_max_bid: 'set a max price in Search first: in Bid mode it is the most Nova AI bids for a player',
   no_max_price: 'set a max price in Search first, so Nova AI never buys above it',
   bid_unavailable:
