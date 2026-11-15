@@ -7733,6 +7733,7 @@ export interface paths {
                             tradeId?: string;
                             targetPrice: number;
                             listedPrice: number | null;
+                            capPrice?: number | null;
                             /** @enum {string} */
                             outcome: "attempted" | "success" | "failed" | "too_slow" | "blocked" | "error";
                             latencyMs: number | null;

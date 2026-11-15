@@ -1787,6 +1787,10 @@ describe('Sniper — the hourly budgets count buys that bought', () => {
       // After the pause: one more buy fit, then the next did not.
       ['t-d', 'coin_flow'],
     ]);
+    // A blocked attempt still records the per-search Max it was held under
+    // (the default filter's 10,000), so the report shows the cap even when no
+    // buy was made.
+    expect(blocked.map((a) => a.capPrice)).toEqual([10_000, 10_000]);
     expect(risk).toEqual([
       { kind: 'coin_flow', value: 27_000, threshold: 20_000 },
       { kind: 'coin_flow', value: 27_000, threshold: 20_000 },
@@ -1807,6 +1811,25 @@ describe('Sniper — the hourly budgets count buys that bought', () => {
     for (const w of paused) expect(w.notice).toBe(message);
     expect(h.sniper.getLog().filter((e) => e.message.startsWith('Buying resumed'))).toHaveLength(1);
     expect(h.sniper.state.notice).toBeNull();
+  });
+
+  it('records the per-search Max (cap) on a successful buy, for the overpay report', async () => {
+    // The report exists to show what was bought against the cap the trader
+    // set: a buy at 1,000 under a 3,000 Max must carry capPrice 3,000, so an
+    // overpay (a buy above the cap) is visible in the data.
+    const attempts: AttemptInput[] = [];
+    const h = setup({
+      filters: [{ id: 'f1', name: 'Capped', filter: { resourceId: 100, maxPrice: 3_000 } }],
+      results: [[auction('t-1', 1_000)]],
+      maxSearches: 1,
+      onAttempt: (a) => void attempts.push(a),
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.buys).toEqual(['t-1']);
+    const success = attempts.filter((a) => a.outcome === 'success');
+    expect(success).toHaveLength(1);
+    expect(success[0]!).toMatchObject({ targetPrice: 1_000, listedPrice: 1_000, capPrice: 3_000 });
   });
 
   it('buys per hour running out mid-search: one blocked attempt, one risk event, and the rest of that search left', async () => {

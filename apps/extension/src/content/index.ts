@@ -554,6 +554,10 @@ async function main(): Promise<void> {
       tradeId: input.tradeId,
       targetPrice: input.targetPrice,
       listedPrice: input.listedPrice,
+      // The per-search Max in force for this attempt (null for engines with
+      // no cap: the assist overlay, the autobuyer), so the report can show
+      // bought/bid vs the cap and surface an overpay.
+      capPrice: input.capPrice ?? null,
       outcome: input.outcome,
       latencyMs: input.latencyMs,
       searchMs: attemptTiming(input.searchMs),

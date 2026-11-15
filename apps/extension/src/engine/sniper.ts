@@ -1798,7 +1798,7 @@ export class Sniper {
    * takes over) that is one log line and one risk event; while it lasts the
    * page shows its message, and a search whose match it refused reports one
    * blocked attempt, never one per listing. */
-  private noteBlock(block: BuyBlock, m: SniperMatch | null): void {
+  private noteBlock(block: BuyBlock, m: SniperMatch | null, cap: number | null = null): void {
     const starts = this.buyBlock?.code !== block.code;
     this.buyBlock = block;
     if (starts) {
@@ -1807,7 +1807,7 @@ export class Sniper {
     }
     if (m && this.blockedAttemptSeq !== this.searchSeq) {
       this.blockedAttemptSeq = this.searchSeq;
-      this.deps.onAttempt?.({ ...this.attemptBase(m), outcome: 'blocked', latencyMs: null, errorCode: block.code });
+      this.deps.onAttempt?.({ ...this.attemptBase(m, cap), outcome: 'blocked', latencyMs: null, errorCode: block.code });
     }
     this.stateValue = { ...this.stateValue, notice: block.message };
     this.deps.onChange();
@@ -2080,7 +2080,7 @@ export class Sniper {
       if (this.eaBackoff.until > this.now()) return 'dropped';
       const buyWait = this.windowWait(this.buyTimes, this.settings.safety.maxBuysPerHour);
       if (buyWait > 0) {
-        this.noteBlock(this.buysPerHourBlock(buyWait), m);
+        this.noteBlock(this.buysPerHourBlock(buyWait), m, cap);
         return 'dropped';
       }
       const decision = this.governor!.allow({ kind: 'buy', coins: m.buyNow });
@@ -2091,7 +2091,7 @@ export class Sniper {
           return 'stopped';
         }
         const block = this.governorBlock(decision, m);
-        if (block) this.noteBlock(block, m);
+        if (block) this.noteBlock(block, m, cap);
         else this.logSkip(m, `it costs more than your coins per hour (${coins(this.settings.safety.maxCoinFlowPerHour)})`);
         // Every listing after this one costs at least as much.
         return 'dropped';
@@ -2132,7 +2132,7 @@ export class Sniper {
           message: 'no answer from EA in time — it may still have bought; waiting for its answer',
         });
         this.deps.onAttempt?.({
-          ...this.attemptBase(m),
+          ...this.attemptBase(m, cap),
           ...timings,
           outcome: 'attempted',
           latencyMs: result.latencyMs,
@@ -2148,7 +2148,7 @@ export class Sniper {
             }
             return;
           }
-          this.recordBought(m, late.latencyMs, estimate, timings);
+          this.recordBought(m, late.latencyMs, estimate, timings, cap);
           if (galleryKey !== undefined) this.galleryBought(m, galleryKey);
           else this.autoSellInBackground(m);
           // Shown now, not at the next search (the bot may have stopped).
@@ -2175,7 +2175,7 @@ export class Sniper {
         // EA's listing call) runs on its own, while the bot goes straight
         // on to the next listing and search. Only the user's own pause
         // after a buy, when they set one, waits.
-        this.recordBought(m, result.latencyMs, estimate, timings);
+        this.recordBought(m, result.latencyMs, estimate, timings, cap);
         if (galleryKey !== undefined) this.galleryBought(m, galleryKey);
         else this.autoSellInBackground(m);
         if (galleryKey === undefined && t.stopAfterPurchases > 0 && this.runTotals.purchases >= t.stopAfterPurchases) {
@@ -2218,7 +2218,7 @@ export class Sniper {
           message: missReason(result.error),
         });
         this.deps.onAttempt?.({
-          ...this.attemptBase(m),
+          ...this.attemptBase(m, cap),
           ...timings,
           outcome: missOutcome(result.error),
           latencyMs: result.latencyMs,
@@ -3522,6 +3522,8 @@ export class Sniper {
       tradeId: t.tradeId,
       targetPrice: bid,
       listedPrice: t.currentBid || t.startingBid || null,
+      // The per-search max bid in force for this auction.
+      capPrice: t.maxBid,
       outcome: missOutcome(result.error),
       latencyMs: result.latencyMs,
       errorCode: attemptErrorCode(result.error),
@@ -3536,7 +3538,7 @@ export class Sniper {
    * coin flow. */
   private onWon(b: TrackedBid, price: number): void {
     const m = bidMatch(b, price > 0 ? price : b.amount);
-    this.recordBought(m, null, this.knownEstimate(m), {}, { itemId: b.itemId });
+    this.recordBought(m, null, this.knownEstimate(m), {}, b.maxBid, { itemId: b.itemId });
     // Moved (and listed) one step at a time, each waiting its turn like any
     // other request: three wins in one read must not become six requests at
     // once.
@@ -3616,6 +3618,8 @@ export class Sniper {
         tradeId: b.tradeId,
         targetPrice: b.amount,
         listedPrice: b.currentBid || null,
+        // The per-search max bid this auction was held to.
+        capPrice: b.maxBid,
         outcome: o.outcome ?? 'failed',
         latencyMs: null,
         errorCode: o.errorCode,
@@ -3767,6 +3771,7 @@ export class Sniper {
     latencyMs: number | null,
     known: Estimate | null,
     timings: Timings = {},
+    cap: number | null = null,
     won?: { itemId: string | null },
   ): void {
     this.stats.purchases++;
@@ -3797,7 +3802,7 @@ export class Sniper {
         this.deps.onChange();
       });
     this.deps.onAttempt?.({
-      ...this.attemptBase(m),
+      ...this.attemptBase(m, cap),
       ...timings,
       outcome: 'success',
       latencyMs,
@@ -3817,12 +3822,15 @@ export class Sniper {
 
   private attemptBase(
     m: SniperMatch,
-  ): Pick<AttemptInput, 'resourceId' | 'tradeId' | 'targetPrice' | 'listedPrice'> {
+    cap: number | null,
+  ): Pick<AttemptInput, 'resourceId' | 'tradeId' | 'targetPrice' | 'listedPrice' | 'capPrice'> {
     return {
       resourceId: m.resourceId,
       tradeId: m.tradeId,
       targetPrice: m.buyNow,
       listedPrice: m.buyNow,
+      // The per-search max in force for this buy, for the telemetry/report.
+      capPrice: cap,
     };
   }
 

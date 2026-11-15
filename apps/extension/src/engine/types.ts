@@ -37,6 +37,10 @@ export interface AttemptInput {
   tradeId?: string;
   targetPrice: number;
   listedPrice: number | null;
+  /** The per-search Max price in force for this attempt (Snipe/Bid: the only
+   * buy/bid ceiling). Left out by engines with no per-search max (the assist
+   * overlay, the autobuyer), so the report stores NULL for those. */
+  capPrice?: number | null;
   outcome: SnipeOutcome;
   latencyMs: number | null;
   errorCode: string | null;

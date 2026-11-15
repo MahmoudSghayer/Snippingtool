@@ -496,7 +496,9 @@ describe('Bid mode — what it wins', () => {
     expect(h.sniper.getStats()).toMatchObject({ purchases: 1, coinsSpent: 10_000, profit: 4_250 });
     expect(h.sniper.getStats().topSnipes).toEqual([expect.objectContaining({ kind: 'won', price: 10_000, sellPrice: 15_000, profit: 4_250 })]);
     // A purchase like a snipe: the attempt, and the trade the sale tracking follows.
-    expect(h.attempts.find((a) => a.outcome === 'success')).toMatchObject({ tradeId: 'w', targetPrice: 10_000 });
+    // Records the per-search max bid (the default 12,500) it won under, so a
+    // won card too shows in the report against the cap the trader set.
+    expect(h.attempts.find((a) => a.outcome === 'success')).toMatchObject({ tradeId: 'w', targetPrice: 10_000, capPrice: 12_500 });
     expect(h.trades).toEqual([{ tradeId: 'w', resourceId: 100, buyPrice: 10_000, itemId: 'item-w', assetId: 100, rating: 85, mode: 'bid' }]);
     // Its coins stay spent.
     expect(h.sniper.getGovernor()!.snapshot().coinFlowLastHour).toBe(10_000);

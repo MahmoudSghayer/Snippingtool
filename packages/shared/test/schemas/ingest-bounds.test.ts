@@ -83,6 +83,19 @@ describe('ingest bounds', () => {
     }
   });
 
+  it('sniping: capPrice is an optional whole-coin cap up to 15,000,000, or null', () => {
+    // Absent (older extensions), null (no cap: the assist overlay, the
+    // autobuyer) and a real cap all parse; a cap over the coin ceiling or a
+    // fractional one does not.
+    expect(snipingAttemptSchema.safeParse(attempt()).success).toBe(true);
+    expect(snipingAttemptSchema.safeParse(attempt({ capPrice: null })).success).toBe(true);
+    expect(snipingAttemptSchema.safeParse(attempt({ capPrice: 40_000 })).success).toBe(true);
+    expect(snipingAttemptSchema.safeParse(attempt({ capPrice: 15_000_000 })).success).toBe(true);
+    for (const bad of [-1, 15_000_001, 1.5]) {
+      expect(snipingAttemptSchema.safeParse(attempt({ capPrice: bad })).success).toBe(false);
+    }
+  });
+
   it('sniping: occurredAt must be within 7 days back and 5 minutes ahead', () => {
     expect(snipingAttemptSchema.safeParse(attempt({ occurredAt: iso(4 * MINUTE) })).success).toBe(
       true,

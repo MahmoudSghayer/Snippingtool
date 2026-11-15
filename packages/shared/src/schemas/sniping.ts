@@ -41,6 +41,13 @@ export const snipingAttemptSchema = z
     tradeId: z.string().min(1).max(64).optional(), // absent when blocked pre-attempt
     targetPrice: coinPriceSchema,
     listedPrice: coinPriceSchema.nullable(),
+    /** The per-search Max price (the only buy/bid ceiling in Snipe/Bid) in
+     * force when this attempt was made, so a report can show what was
+     * bought/bid against the cap the trader set and surface any overpay.
+     * Null when there was no cap (the assist overlay and the autobuyer, which
+     * carry no per-search max). Optional so older extensions keep working;
+     * their attempts store NULL. */
+    capPrice: coinPriceSchema.nullable().optional(),
     outcome: z.enum(SNIPE_OUTCOMES),
     latencyMs: z.number().int().min(0).nullable(),
     /** Nova AI bot only, where the time before the buy went: from sending
