@@ -3211,6 +3211,15 @@ export class Sniper {
     for (const b of this.book.bids()) {
       const cap = this.currentBidCap(b);
       if (cap == null) this.dropBid(b, { message: 'Stopped following {card}: it is not in your current search' });
+      // The trader's max is now below a bid already standing with EA (they
+      // lowered it, or it was placed under an earlier higher max). EA will not
+      // cancel it, but the bot abandons the auction: never re-bid, never
+      // collected — if still outbid it is simply left for someone else, never
+      // chased or kept over the trader's current max.
+      else if (b.amount > cap) {
+        b.maxBid = cap; // so the recorded attempt carries the current max, not the old one
+        this.dropBid(b, { message: `Dropped {card}: your ${amount(b.amount)} bid is over your max of ${amount(cap)}`, errorCode: 'bid_over_max' });
+      }
       else if (cap < b.maxBid) b.maxBid = cap;
     }
     // Ended while the trader was outbid: lost, whatever the next read says,
@@ -3537,7 +3546,38 @@ export class Sniper {
    * then off the watch list (`collectWon`). Its coins stay spent in the
    * coin flow. */
   private onWon(b: TrackedBid, price: number): void {
-    const m = bidMatch(b, price > 0 ? price : b.amount);
+    const won = price > 0 ? price : b.amount;
+    // Never keep a win above the trader's CURRENT max price — their rule is
+    // never over the max in any situation, else discard. EA awards a placed
+    // bid even after the max is lowered below it (or when it was placed under
+    // an earlier, higher max), and the bot cannot un-bid it; but it refuses to
+    // adopt, list or count the card, and records the overpay so a report shows
+    // it instead of it passing silently.
+    const cap = this.currentBidCap(b);
+    if (cap != null && won > cap) {
+      this.book.close(b.tradeId);
+      this.addLog({
+        kind: 'blocked',
+        resourceId: b.resourceId,
+        assetId: b.assetId,
+        rating: b.rating,
+        price: won,
+        message: `Won {card} at ${amount(won)} — over your max of ${amount(cap)}; discarded, not listed`,
+      });
+      this.deps.onAttempt?.({
+        resourceId: b.resourceId,
+        tradeId: b.tradeId,
+        targetPrice: won,
+        listedPrice: won,
+        capPrice: cap,
+        outcome: 'failed',
+        latencyMs: null,
+        errorCode: 'won_over_max',
+      });
+      this.deps.onChange();
+      return;
+    }
+    const m = bidMatch(b, won);
     this.recordBought(m, null, this.knownEstimate(m), {}, b.maxBid, { itemId: b.itemId });
     // Moved (and listed) one step at a time, each waiting its turn like any
     // other request: three wins in one read must not become six requests at

@@ -343,6 +343,68 @@ describe('Bid mode — bidding', () => {
     expect(h.attempts.at(-1)).toMatchObject({ tradeId: 'a', outcome: 'failed', errorCode: 'max_bid_reached' });
   });
 
+  it('drops an open bid when the max is lowered below the bid already placed (never kept over max)', async () => {
+    // The trader's rule: never over the max, in any situation. A bid placed
+    // under a higher max, then the max lowered below it, is abandoned — not
+    // clamped-and-kept — so it is never chased or collected over the new max.
+    const filter: FilterCriteria = { resourceId: 100, maxPrice: 12_500 };
+    const h = setup({
+      filter,
+      results: (n) => (n === 1 ? [auction('a', 80, { currentBid: 11_750 })] : []),
+      beforeRead: (n) => {
+        if (n >= 2) filter.maxPrice = 10_000;
+      },
+      stopWhen: (x) => x.log().some((m) => m.startsWith('Dropped {card}')),
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.bids.map(([id, p]) => [id, p])).toEqual([['a', 12_000]]);
+    expect(h.log()).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('Dropped {card}: your 12,000 bid is over your max of 10,000'),
+      ]),
+    );
+    expect(h.attempts.at(-1)).toMatchObject({
+      tradeId: 'a',
+      outcome: 'failed',
+      errorCode: 'bid_over_max',
+      capPrice: 10_000,
+    });
+  });
+
+  it('discards a win above the current max instead of collecting it', async () => {
+    // EA awards a bid placed under an earlier higher max even after the trader
+    // lowers it; the bot cannot un-bid it, but it refuses to adopt, list or
+    // count the card, and records the overpay so the report shows it.
+    const filter: FilterCriteria = { resourceId: 100, maxPrice: 30_000 };
+    const h = setup({
+      filter,
+      results: (n) => (n === 1 ? [auction('w', 60, { currentBid: 28_000, buyNow: 0 })] : []),
+      beforeRead: (n, ea) => {
+        if (n >= 2) filter.maxPrice = 27_000;
+        const a = ea.get('w');
+        if (a && n === 2) Object.assign(a, { tradeState: 'closed', bidState: 'highest' });
+      },
+      stopWhen: (x) => x.log().some((m) => m.includes('discarded, not listed')),
+    });
+    h.sniper.start();
+    await h.done();
+    expect(h.bids.map(([id, p]) => [id, p])).toEqual([['w', 28_250]]);
+    expect(h.log()).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('over your max of 27,000; discarded, not listed'),
+      ]),
+    );
+    expect(h.trades).toEqual([]);
+    expect(h.sniper.getStats().purchases).toBe(0);
+    expect(h.attempts.at(-1)).toMatchObject({
+      tradeId: 'w',
+      outcome: 'failed',
+      errorCode: 'won_over_max',
+      capPrice: 27_000,
+    });
+  });
+
   it('buys with Buy Now when the buy-now price is at or under the max, instead of bidding', async () => {
     const h = setup({ results: () => [auction('cheap', 1_200, { buyNow: 12_000 })] });
     h.sniper.start();
