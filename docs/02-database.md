@@ -555,6 +555,7 @@ One row per snipe attempt outcome, computed by the extension.
 | `user_id`, `device_id`         | —                 | CASCADE / SET NULL                                                               |
 | `resource_id`, `trade_id`      | text              | `trade_id` correlates to `trades.trade_id` on success                            |
 | `target_price`, `listed_price` | integer, ≥ 0      |                                                                                  |
+| `cap_price`                    | integer, nullable | Nova AI bot (0045): the per-search Max in force for this attempt (the only buy/bid ceiling in Snipe/Bid); NULL for assist/autobuyer/Gallery and older extensions |
 | `outcome`                      | `sniping_outcome` | attempted/success/failed/too_slow/blocked/error — `blocked` = governor denied it |
 | `latency_ms`, `error_code`     | —                 | `latency_ms`: the buy's round trip to EA                                         |
 | `search_ms`, `reaction_ms`     | integer, nullable | Nova AI bot (0038): search sent → listing arrived; listing arrived → buy sent    |
