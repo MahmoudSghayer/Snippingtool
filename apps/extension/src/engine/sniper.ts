@@ -3419,6 +3419,16 @@ export class Sniper {
     // silent over-max bid.
     if (t.maxBid > 0 && bid > t.maxBid)
       return { end: 'skipped', why: `the ${amount(bid)} bid is over your max price of ${amount(t.maxBid)}` };
+    // The trader's CURRENT max, re-read now — at the moment coins would be
+    // committed — not the max frozen into this bid when it was first placed. The
+    // bid book outlives a stop and start, so a bid placed under an earlier,
+    // higher max can still be here after the trader lowered it, and EA cannot
+    // un-bid a placed bid. A bid above the current max must never leave here,
+    // even when the frozen max is higher. (Null: the card is no longer in the
+    // live search; the frozen max checked just above then stands.)
+    const liveCap = this.currentBidCap(t);
+    if (liveCap != null && bid > liveCap)
+      return { end: 'skipped', why: `the ${amount(bid)} bid is over your current max of ${amount(liveCap)}` };
     // A re-bid on a read gone stale waits for the next read (`fresh`: the
     // price comes from EA's refusal just now, not from the read).
     if (rebid && !fresh && this.now() - this.watch.doneAt > REBID_FRESH_MS) return { end: 'dropped' };
@@ -3903,7 +3913,7 @@ export class Sniper {
 
   /** Whether an open bid's card is one a search is for (Snipe mode's own
    * target check, by id and rating band). */
-  private bidInFilter(bid: TrackedBid, f: FilterCriteria): boolean {
+  private bidInFilter(bid: { resourceId: number; assetId: number; rating: number }, f: FilterCriteria): boolean {
     if (f.resourceId != null && bid.resourceId !== f.resourceId && bid.assetId !== f.resourceId) return false;
     if (f.minRating != null && bid.rating < f.minRating) return false;
     if (f.maxRating != null && bid.rating > f.maxRating) return false;
@@ -3915,7 +3925,7 @@ export class Sniper {
    * switched to another player). Keeps an already-placed bid under the trader's
    * CURRENT max — the one it was placed with can be higher after the trader
    * lowers it or moves on. */
-  private currentBidCap(bid: TrackedBid): number | null {
+  private currentBidCap(bid: { resourceId: number; assetId: number; rating: number }): number | null {
     for (const f of this.deps.getFilters()) {
       if (this.bidInFilter(bid, f.filter)) {
         const cap = this.priceCap(f.filter);

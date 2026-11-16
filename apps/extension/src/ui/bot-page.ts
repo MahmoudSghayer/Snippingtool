@@ -2715,8 +2715,31 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     syncSearch();
   }
 
-  /** The form as the search the bot runs, or what is wrong with it. */
+  /** Brings `form`'s price range in line with the Max/Min boxes as they stand
+   * on the page right now. The boxes are the search the trader sees, and the Max
+   * is the one hard ceiling on a bid, so what the bot runs must be what the box
+   * shows — never a `form.maxBuy` an input event failed to record. `priceHtml`
+   * fills the boxes from `form`, so this only ever corrects `form` back to the
+   * box, never adopts a value the trader did not set. A box not on the page
+   * (another tab) leaves `form` as it is; an empty box is no max. */
+  function syncPricesFromBoxes(): void {
+    const read = (id: string): number | null | undefined => {
+      const el = root.getElementById(id) as HTMLInputElement | null;
+      if (!el) return undefined; // not rendered: keep whatever form holds
+      return el.value.trim() === '' ? null : parsePrice(el.value);
+    };
+    const max = read('nf-maxBuy');
+    if (max !== undefined) form.maxBuy = max;
+    const min = read('nf-minBuy');
+    if (min !== undefined) form.minBuy = min;
+  }
+
+  /** The form as the search the bot runs, or what is wrong with it. The price
+   * boxes the trader sees are read as the source of truth (`syncPricesFromBoxes`)
+   * so the ceiling the engine enforces is always the number in the Max box, even
+   * if an input event once left `form.maxBuy` above it. */
   function currentSearch(): { search: LiveSearch } | { error: string } {
+    syncPricesFromBoxes();
     const built = buildFilterFromForm(form);
     if ('error' in built) return built;
     const name = describeFilter(built.filter).join(', ').slice(0, 80);
