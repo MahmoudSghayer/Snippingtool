@@ -224,6 +224,23 @@ describe('bot page — Start runs the search on the page', () => {
     expect(live()).toMatchObject({ filter: { resourceId: 20801, maxPrice: 2_000 } });
   });
 
+  it('runs the Max the box shows, not a form value an input event missed', () => {
+    // Regression (real money lost on Karchaoui): form.maxBuy once held a higher
+    // value than the Max box displayed — an edit the box showed but whose input
+    // event never reached form — and Start built the search from form, so the bot
+    // bid over the trader's max. The box the trader sees is the one hard ceiling:
+    // Start must run exactly that number.
+    const { $, start, live, typePlayer, setPrice } = mount();
+    typePlayer('20801');
+    setPrice('maxBuy', '30750'); // a real edit lands: form.maxBuy = 30,750, box = 30,750
+    const max = $<HTMLInputElement>('nf-maxBuy')!;
+    max.value = '23000'; // the trader lowers it to 23k and the box shows 23k...
+    // ...but no input/change event reaches form (the bug). Start must still use 23k.
+    $('start')!.click();
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(live()).toMatchObject({ filter: { resourceId: 20801, maxPrice: 23_000 } });
+  });
+
   it('refuses to start a snipe with no Max price, the way Bid mode already does', () => {
     const { $, start, typePlayer } = mount();
     typePlayer('20801'); // a player, but no Max price
