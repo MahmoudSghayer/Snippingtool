@@ -457,8 +457,13 @@ describe('Bid mode settings (kept out of the account-synced bot settings)', () =
     expect(botModeSettingsSchema.parse({}).automationEnabled).toBe(false);
     expect(botModeSettingsSchema.parse({ automationEnabled: true }).automationEnabled).toBe(true);
     // A non-boolean value falls back to off, never on.
-    expect(botModeSettingsSchema.parse({ automationEnabled: 'yes' as never }).automationEnabled).toBe(false);
-    expect(clampBotModeSettings({ ...DEFAULT_BOT_MODE_SETTINGS, automationEnabled: true }).automationEnabled).toBe(true);
+    expect(
+      botModeSettingsSchema.parse({ automationEnabled: 'yes' as never }).automationEnabled,
+    ).toBe(false);
+    expect(
+      clampBotModeSettings({ ...DEFAULT_BOT_MODE_SETTINGS, automationEnabled: true })
+        .automationEnabled,
+    ).toBe(true);
   });
 
   it('reads a missing or unknown mode as Snipe, so no bot changes what it does on its own', () => {
