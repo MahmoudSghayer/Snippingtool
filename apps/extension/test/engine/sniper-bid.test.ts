@@ -785,8 +785,13 @@ describe('Bid mode — guards the bids it holds first', () => {
     expect(h.sniper.getActiveBids().bids[0]).toMatchObject({ state: 'leading', amount: 11_500, currentBid: 11_500 });
   });
 
-  // Live: "you can't give up on any bid unless it went above the maximum price".
-  it('never gives up on a beaten re-bid while the auction runs and the max allows', async () => {
+  // Live: "you can't give up on any bid unless it went above the maximum price"
+  // — and, each time it is beaten, it must climb ONE step higher than the last
+  // bid it lost, never drop back to one it already lost (the trader's report:
+  // 4,700 -> 4,800 (fails) -> 4,900 (fails) must go 5,000, 5,100 ... to the max,
+  // not back to 4,800). EA's watch read lags at 11,000, but the bot remembers
+  // the real floor it has climbed to.
+  it('climbs a beaten re-bid one EA step each time, up to the max, then drops it', async () => {
     const h = setup({
       results: (n) => (n === 1 ? [auction('a', 200)] : []),
       bidResult: (_id, price) =>
@@ -794,18 +799,18 @@ describe('Bid mode — guards the bids it holds first', () => {
       beforeRead: (n, ea) => {
         if (n === 2) Object.assign(ea.get('a')!, { bidState: 'outbid', currentBid: 11_000 });
       },
-      stopWhen: (x) => x.clock.t > START + 2 * MIN,
+      stopWhen: (x) => x.log().some((m) => m.startsWith('Max bid reached')),
     });
     h.sniper.start();
     await h.done();
-    // Each read: one step over its 11,000, then (refused) one more at once.
-    const rebids = h.bids.slice(1).map(([, p]) => p);
-    expect(rebids.length).toBeGreaterThanOrEqual(8);
-    expect(new Set(rebids)).toEqual(new Set([11_250, 11_500]));
-    expect(h.log().filter((m) => m.startsWith('Re-bid') && m.includes('not accepted'))).toHaveLength(rebids.length);
-    expect(h.sniper.getLog().some((e) => e.kind === 'dropped')).toBe(false);
-    expect(h.attempts).toEqual([]);
-    expect(h.statuses.at(-1)).toMatchObject({ active: 1 });
+    // Climbs one EA grid step at a time (250 in this band) and never repeats a
+    // beaten bid, until the next step (12,750) would pass the 12,500 max.
+    expect(h.bids.map(([, p]) => p)).toEqual([10_000, 11_250, 11_500, 11_750, 12_000, 12_250, 12_500]);
+    expect(h.log()).toEqual(
+      expect.arrayContaining(['Max bid reached on {card} — dropping it | the next bid would be 12,750, your max is 12,500']),
+    );
+    // Given up only because the next step passed the max, never below it.
+    expect(h.attempts.at(-1)).toMatchObject({ tradeId: 'a', outcome: 'failed', errorCode: 'max_bid_reached' });
   });
 
   // Live: eight bids outbid at once were re-bid 4 to 5 s apart, and the last
@@ -1285,8 +1290,10 @@ describe('Bid mode — the open bids, for the page', () => {
     expect(view.max).toBe(4);
     expect(view.checkedAt).toEqual(expect.any(Number));
     expect(view.bids).toEqual([
-      // 11,250 was refused, so someone's bid is at least that; 11,500 too.
-      expect.objectContaining({ tradeId: 'a', rating: 85, amount: 10_000, currentBid: 11_250, maxBid: 12_500, state: 'outbid', nextBid: 11_500, overMax: false }),
+      // 11,250 and 11,500 were both refused, so someone's bid is at least
+      // 11,500: the bot holds that as the floor (amount stays its last placed
+      // 10,000) and its next re-bid climbs one step higher, to 11,750.
+      expect.objectContaining({ tradeId: 'a', rating: 85, amount: 10_000, currentBid: 11_500, maxBid: 12_500, state: 'outbid', nextBid: 11_750, overMax: false }),
     ]);
   });
 

@@ -3537,6 +3537,12 @@ export class Sniper {
     // over at once). It lets an auction go only when the next bid would pass
     // the max.
     if (rebid && rebidBeaten(result.error) && rebid.expiresAt > this.now()) {
+      // EA refused this bid: someone's bid is at least this much, so the
+      // auction's current bid is now at least `bid`. Remember that floor (it
+      // only ever rises) so the next re-bid goes one step ABOVE it, climbing
+      // toward the max, instead of repeating an amount already lost. `bid` has
+      // passed the max check above, so this stays at or under the max.
+      rebid.currentBid = Math.max(rebid.currentBid, bid);
       this.addLog({ kind: 'failed', ...card, message: `Re-bid ${amount(bid)} on {card} not accepted: ${bidMissReason(result.error)}` });
       this.deps.onChange();
       return signal.aborted ? { end: 'stopped' } : { end: 'beaten' };
