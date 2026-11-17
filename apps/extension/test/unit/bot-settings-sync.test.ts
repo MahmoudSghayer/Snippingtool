@@ -160,7 +160,7 @@ describe('background/bot.ts: Snipe or Bid stays in this browser', () => {
   it('starts on Snipe, keeps what is saved, and sends nothing to the account', async () => {
     expect(await handleBotModeGet()).toEqual(DEFAULT_BOT_MODE_SETTINGS);
     await setSession('sl.accessToken', 'access-token');
-    const bid = { mode: 'bid' as const, bidding: { windowMinutes: 3, maxActiveBids: 8, maxBidsPerHour: 40 } };
+    const bid = { mode: 'bid' as const, automationEnabled: false, bidding: { windowMinutes: 3, maxActiveBids: 8, maxBidsPerHour: 40 } };
     await handleBotModeSet(bid);
     expect(await handleBotModeGet()).toEqual(bid);
     expect(globalThis.fetch).not.toHaveBeenCalled();

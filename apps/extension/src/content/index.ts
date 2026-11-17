@@ -605,6 +605,15 @@ async function main(): Promise<void> {
   // (live settings, below).
   let filters = (await send<SavedFilter[]>('filters.list')) ?? [];
   let autobuyer: Autobuyer | null = null;
+  // The market-buy automation runs only when the trader has turned it on, and
+  // only up to the max of their live Nova AI search (no live max → it buys
+  // nothing). The engine tick reads this each pass; it is rebound below, inside
+  // the bot-page wiring, where the mode settings and the live search are in
+  // scope. Default: off with no ceiling — so nothing is ever bought unasked.
+  let automationGate: () => { enabled: boolean; maxPrice: number | null } = () => ({
+    enabled: false,
+    maxPrice: null,
+  });
 
   await ensureGovernor();
 
@@ -729,6 +738,16 @@ async function main(): Promise<void> {
     // The search filled in on the bot page: the only one the bot runs. Never
     // written to the saved filters (assist and the dashboard use those).
     let liveSearch: LiveSearch | null = null;
+
+    // Now that the mode settings and the live search are in scope, let the
+    // engine tick read them: the market-buy automation runs only when the
+    // trader turned it on, capped at the live search's max (no live max →
+    // nothing). Read fresh each tick — `botMode` is replaced on save,
+    // `liveSearch` on edit.
+    automationGate = () => {
+      const max = liveSearch?.filter.maxPrice ?? 0;
+      return { enabled: botMode.automationEnabled === true, maxPrice: max > 0 ? max : null };
+    };
 
     // Called at load and whenever the page opens: a user who signs in from
     // the account view after the page loaded gets the bot without a reload.
@@ -1126,8 +1145,9 @@ async function main(): Promise<void> {
 
     // The Sniping Bot buys on its own; never let two engines buy at once —
     // nor two tabs: only the engine lease holder runs the autobuyer.
-    if (lease?.isHeld() && autobuyer && !autobuyer.isStopped() && !sniper?.isRunning()) {
-      await autobuyer.runCycle(rankedCandidates.slice(0, 5));
+    const gate = automationGate();
+    if (gate.enabled && lease?.isHeld() && autobuyer && !autobuyer.isStopped() && !sniper?.isRunning()) {
+      await autobuyer.runCycle(rankedCandidates.slice(0, 5), gate.maxPrice);
       const stop = autobuyer.getStopReason();
       if (stop) reportAutobuyerStop(stop.reason, stop.detail);
     }

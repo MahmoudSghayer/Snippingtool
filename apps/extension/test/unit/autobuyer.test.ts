@@ -34,6 +34,10 @@ function opportunity(overrides: Partial<ScoredOpportunity> = {}): ScoredOpportun
   };
 }
 
+/** The suites below are not about the live-max cap, so they pass one well above
+ * every candidate's price; the cap's own behaviour has its own describe. */
+const CAP = 1_000_000;
+
 interface FakeAdapterHandle {
   adapter: AdapterClient;
   emitShape: (reason: string, endpoint?: 'market' | 'pile') => void;
@@ -113,7 +117,7 @@ describe('Autobuyer: stops on shape mismatch', () => {
     });
 
     const autobuyer = new Autobuyer({ governor, adapter, onAttempt, onTrade });
-    const successes = await autobuyer.runCycle(candidates);
+    const successes = await autobuyer.runCycle(candidates, CAP);
 
     expect(autobuyer.isStopped()).toBe(true);
     expect(autobuyer.getStopReason()).toEqual({ reason: 'shape_mismatch', detail: 'unexpected field on auction response' });
@@ -133,7 +137,7 @@ describe('Autobuyer: stops on shape mismatch', () => {
     const autobuyer = new Autobuyer({ governor, adapter, onAttempt, onTrade });
     emitProbe({ ok: false, reason: 'bundle probe failed at load', checkedAt: Date.now() });
 
-    const successes = await autobuyer.runCycle(candidates);
+    const successes = await autobuyer.runCycle(candidates, CAP);
     expect(successes).toBe(0);
     expect(autobuyer.isStopped()).toBe(true);
     expect(autobuyer.getStopReason()?.reason).toBe('probe_failure');
@@ -148,7 +152,7 @@ describe('Autobuyer: stops on shape mismatch', () => {
     emitShape('boom');
     expect(autobuyer.isStopped()).toBe(true);
 
-    const successes = await autobuyer.runCycle([opportunity()]);
+    const successes = await autobuyer.runCycle([opportunity()], CAP);
     expect(successes).toBe(0);
     expect(autobuyer.isRunning()).toBe(false);
   });
@@ -172,7 +176,7 @@ describe('Autobuyer: respects governor denial', () => {
     const { adapter } = fakeAdapter(buy);
 
     const autobuyer = new Autobuyer({ governor, adapter, onAttempt, onTrade });
-    const successes = await autobuyer.runCycle([opportunity({ tradeId: 't-1' }), opportunity({ tradeId: 't-2' })]);
+    const successes = await autobuyer.runCycle([opportunity({ tradeId: 't-1' }), opportunity({ tradeId: 't-2' })], CAP);
 
     expect(successes).toBe(0);
     expect(buy).not.toHaveBeenCalled();
@@ -190,7 +194,7 @@ describe('Autobuyer: respects governor denial', () => {
     const { adapter } = fakeAdapter(buy);
 
     const autobuyer = new Autobuyer({ governor, adapter, onAttempt, onTrade });
-    const successes = await autobuyer.runCycle([opportunity({ tradeId: 't-1' }), opportunity({ tradeId: 't-2' })]);
+    const successes = await autobuyer.runCycle([opportunity({ tradeId: 't-1' }), opportunity({ tradeId: 't-2' })], CAP);
 
     // Both candidates denied (soft deny, cycle continues rather than breaking), buy() never called, 0 successes.
     expect(successes).toBe(0);
@@ -205,7 +209,7 @@ describe('Autobuyer: respects governor denial', () => {
     const { adapter } = fakeAdapter(buy);
 
     const autobuyer = new Autobuyer({ governor, adapter, onAttempt: vi.fn(), onTrade: vi.fn(), sessionCoinBudget: 1000 });
-    const successes = await autobuyer.runCycle([opportunity({ tradeId: 't-1', price: 800 }), opportunity({ tradeId: 't-2', price: 800 })]);
+    const successes = await autobuyer.runCycle([opportunity({ tradeId: 't-1', price: 800 }), opportunity({ tradeId: 't-2', price: 800 })], CAP);
 
     // First buy (800) fits under the 1000 budget; the second (would bring total to 1600) is skipped.
     expect(successes).toBe(1);
@@ -224,7 +228,7 @@ describe('Autobuyer: adapter refusals are failed attempts, not retries (defect C
       const { adapter } = fakeAdapter(buy);
 
       const autobuyer = new Autobuyer({ governor, adapter, onAttempt, onTrade, maxRetriesPerCandidate: 2 });
-      const successes = await autobuyer.runCycle([opportunity({ tradeId: 't-1' })]);
+      const successes = await autobuyer.runCycle([opportunity({ tradeId: 't-1' })], CAP);
 
       expect(successes).toBe(0);
       expect(buy).toHaveBeenCalledTimes(1);
@@ -241,7 +245,7 @@ describe('Autobuyer: what reaches EA, and what the governor charges', () => {
     governor.allow({ kind: 'search' });
     const before = governor.snapshot();
     const { adapter } = fakeAdapter(vi.fn(async () => ({ ok: false, error: 'price_mismatch', latencyMs: 1, signed: true as const })));
-    await new Autobuyer({ governor, adapter, onAttempt: vi.fn(), onTrade: vi.fn() }).runCycle([opportunity()]);
+    await new Autobuyer({ governor, adapter, onAttempt: vi.fn(), onTrade: vi.fn() }).runCycle([opportunity()], CAP);
     expect(governor.snapshot()).toEqual(before);
   });
 
@@ -249,7 +253,7 @@ describe('Autobuyer: what reaches EA, and what the governor charges', () => {
     const governor = new Governor(SETTINGS, { now: () => 0 });
     governor.allow({ kind: 'search' });
     const { adapter } = fakeAdapter(vi.fn(async () => ({ ok: false, error: 'adapter_unauthenticated', latencyMs: 15_000 })));
-    await new Autobuyer({ governor, adapter, onAttempt: vi.fn(), onTrade: vi.fn() }).runCycle([opportunity()]);
+    await new Autobuyer({ governor, adapter, onAttempt: vi.fn(), onTrade: vi.fn() }).runCycle([opportunity()], CAP);
     expect(governor.serialize().buyCount).toBe(1);
     expect(governor.snapshot().coinFlowLastHour).toBe(1000);
   });
@@ -259,7 +263,7 @@ describe('Autobuyer: what reaches EA, and what the governor charges', () => {
     const { adapter } = fakeAdapter(buy);
     const onAttempt = vi.fn();
     const governor = new Governor(SETTINGS, { now: () => 0 });
-    await new Autobuyer({ governor, adapter, onAttempt, onTrade: vi.fn() }).runCycle([opportunity({ tradeId: 'x', buyable: false })]);
+    await new Autobuyer({ governor, adapter, onAttempt, onTrade: vi.fn() }).runCycle([opportunity({ tradeId: 'x', buyable: false })], CAP);
     expect(buy).not.toHaveBeenCalled();
     expect(onAttempt).not.toHaveBeenCalled();
     expect(governor.serialize().buyCount).toBe(0);
@@ -274,7 +278,7 @@ describe('Autobuyer: what reaches EA, and what the governor charges', () => {
     const onTrade = vi.fn();
     const governor = new Governor(SETTINGS, { now: () => 0 });
     const autobuyer = new Autobuyer({ governor, adapter, onAttempt, onTrade, maxRetriesPerCandidate: 2, sessionCoinBudget: 1500 });
-    expect(await autobuyer.runCycle([opportunity({ price: 1000 })])).toBe(0);
+    expect(await autobuyer.runCycle([opportunity({ price: 1000 })], CAP)).toBe(0);
     expect(buy).toHaveBeenCalledTimes(1);
     expect(onAttempt).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'attempted', errorCode: 'timeout_unknown' }));
 
@@ -283,7 +287,53 @@ describe('Autobuyer: what reaches EA, and what the governor charges', () => {
     // The late buy counts against the session budget: a second 1000 no longer fits.
     const buy2 = vi.fn(async () => ({ ok: true, latencyMs: 1 }));
     (adapter as { buy: unknown }).buy = buy2;
-    await autobuyer.runCycle([opportunity({ tradeId: 't-2', price: 1000 })]);
+    await autobuyer.runCycle([opportunity({ tradeId: 't-2', price: 1000 })], CAP);
     expect(buy2).not.toHaveBeenCalled();
+  });
+});
+
+describe('Autobuyer: never buys over the live Nova AI max (the Selma Bacha overpay)', () => {
+  it('skips a candidate priced over the cap, buys one at or under it', async () => {
+    const buy = vi.fn(async () => ({ ok: true, latencyMs: 5 }));
+    const onTrade = vi.fn();
+    const governor = new Governor(SETTINGS, { now: () => 0 });
+    const { adapter } = fakeAdapter(buy);
+    const autobuyer = new Autobuyer({ governor, adapter, onAttempt: vi.fn(), onTrade });
+
+    const successes = await autobuyer.runCycle(
+      [opportunity({ tradeId: 'under', price: 5000 }), opportunity({ tradeId: 'over', price: 6000 })],
+      5200,
+    );
+
+    expect(successes).toBe(1);
+    expect(buy.mock.calls.map((c) => (c as unknown[])[0])).toEqual(['under']); // the 6000 one is never attempted
+    expect(onTrade).toHaveBeenCalledTimes(1);
+  });
+
+  it('a candidate exactly at the cap is bought (at or under the max, never over)', async () => {
+    const buy = vi.fn(async () => ({ ok: true, latencyMs: 5 }));
+    const governor = new Governor(SETTINGS, { now: () => 0 });
+    const { adapter } = fakeAdapter(buy);
+    const autobuyer = new Autobuyer({ governor, adapter, onAttempt: vi.fn(), onTrade: vi.fn() });
+
+    expect(await autobuyer.runCycle([opportunity({ price: 5200 })], 5200)).toBe(1);
+    expect(buy).toHaveBeenCalledTimes(1);
+  });
+
+  it('buys nothing when there is no live max (null): fail closed', async () => {
+    const buy = vi.fn(async () => ({ ok: true, latencyMs: 5 }));
+    const onTrade = vi.fn();
+    const governor = new Governor(SETTINGS, { now: () => 0 });
+    const { adapter } = fakeAdapter(buy);
+    const autobuyer = new Autobuyer({ governor, adapter, onAttempt: vi.fn(), onTrade });
+
+    const successes = await autobuyer.runCycle(
+      [opportunity({ price: 1000 }), opportunity({ tradeId: 't-2', price: 2000 })],
+      null,
+    );
+
+    expect(successes).toBe(0);
+    expect(buy).not.toHaveBeenCalled();
+    expect(onTrade).not.toHaveBeenCalled();
   });
 });

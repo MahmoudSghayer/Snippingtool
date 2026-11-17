@@ -134,6 +134,7 @@ function setup(opts: Opts = {}): Harness {
   };
   const modeSettings: BotModeSettings = {
     mode: opts.mode ?? 'bid',
+    automationEnabled: false,
     bidding: { ...DEFAULT_BOT_MODE_SETTINGS.bidding, ...opts.bidding },
   };
   const clock = { t: START };
