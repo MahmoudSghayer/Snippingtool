@@ -2129,6 +2129,16 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     );
   }
 
+  /** The market-buy automation toggle (a separate engine from Snipe/Bid). It
+   * finds underpriced listings and buys them to flip, never above the Search
+   * max and only while the bot is not running. OFF unless the trader turns it
+   * on — it never buys unasked. */
+  function automationSection(): string {
+    const on = modeSettings.automationEnabled;
+    const body = `<div class="hint">Finds underpriced cards on the market and buys them to flip. It never buys above your Search max price, and never runs while the bot is running. Off unless you turn it on.</div>`;
+    return section('Auto-buy', body, `&nbsp;${toggle('ab-on', on, 'Auto-buy')}`, on);
+  }
+
   /** Whether the search has a price Bid mode can bid up to: its max price,
    * or "Most you'll pay". */
   function hasMaxBid(filter: FilterCriteria): boolean {
@@ -2150,6 +2160,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
     const ids = { windowMinutes: 'bd-window', maxActiveBids: 'bd-active', maxBidsPerHour: 'bd-bph' } as const;
     const next = {
       mode: modeSettings.mode,
+      // Preserve the auto-buy toggle: reading the Bid fields must not reset it.
+      automationEnabled: modeSettings.automationEnabled,
       bidding: {
         windowMinutes: num(ids.windowMinutes, b.windowMinutes),
         maxActiveBids: num(ids.maxActiveBids, b.maxActiveBids),
@@ -2307,6 +2319,7 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
         false,
       ) +
       autoSellSection(s) +
+      automationSection() +
       section(
         'Safety limits',
         field(
@@ -3166,6 +3179,8 @@ export function createBotPage(deps: BotPageDeps, doc: Document = document): BotP
       const s = shown();
       const a = s.autoSell;
       commit({ ...s, autoSell: el.id === 'as-on' ? { ...a, enabled: !a.enabled } : { ...a, noLoss: !a.noLoss } }, true);
+    } else if (el.id === 'ab-on') {
+      commitMode({ ...modeSettings, automationEnabled: !modeSettings.automationEnabled }, true);
     } else if (el.dataset.delay) {
       const min = Number(el.dataset.min);
       const max = Number(el.dataset.max);

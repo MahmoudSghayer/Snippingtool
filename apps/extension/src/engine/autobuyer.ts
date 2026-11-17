@@ -102,8 +102,15 @@ export class Autobuyer {
 
   /** Runs one pass over the given (already-ranked) candidates, attempting
    * each until the list is exhausted, the session budget runs out, or a
-   * stop condition fires. Returns the number of successful buys. */
-  async runCycle(candidates: ScoredOpportunity[]): Promise<number> {
+   * stop condition fires. Returns the number of successful buys.
+   *
+   * `maxPrice` is the trader's live ceiling (the max of their current Nova AI
+   * search). This engine buys ranked MARKET listings and has no per-search max
+   * of its own, so the ceiling is passed in each cycle: nothing over it is ever
+   * bought, and with no ceiling (`null`) nothing is bought at all — the same
+   * "the trader's max is the only thing that authorises a buy" rule Snipe/Bid
+   * follow. The caller also decides whether this engine runs at all. */
+  async runCycle(candidates: ScoredOpportunity[], maxPrice: number | null): Promise<number> {
     if (this.stopped) return 0;
     this.running = true;
     let successes = 0;
@@ -113,6 +120,9 @@ export class Autobuyer {
       // Never attempt what the adapter already said it cannot buy (the
       // ranker drops these too): no governor charge, no failed attempt.
       if (candidate.buyable === false) continue;
+
+      // Fail closed: with no live max, buy nothing; never buy over it.
+      if (maxPrice == null || candidate.price > maxPrice) continue;
 
       if (this.sessionCoinBudget != null && this.coinsSpent + candidate.price > this.sessionCoinBudget) {
         continue; // try a cheaper candidate rather than stopping the whole cycle

@@ -445,11 +445,25 @@ describe('Bid mode settings (kept out of the account-synced bot settings)', () =
   it('defaults to Snipe, and to bids in the last 5 minutes, 10 at once, 60 an hour', () => {
     expect(DEFAULT_BOT_MODE_SETTINGS).toEqual({
       mode: 'snipe',
+      automationEnabled: false,
       bidding: { windowMinutes: 5, maxActiveBids: 10, maxBidsPerHour: 60 },
     });
     expect(botModeSettingsSchema.parse({ mode: 'bid' }).bidding).toEqual(
       DEFAULT_BOT_MODE_SETTINGS.bidding,
     );
+  });
+
+  it('keeps the market-buy automation OFF by default, and accepts only an explicit opt-in', () => {
+    expect(botModeSettingsSchema.parse({}).automationEnabled).toBe(false);
+    expect(botModeSettingsSchema.parse({ automationEnabled: true }).automationEnabled).toBe(true);
+    // A non-boolean value falls back to off, never on.
+    expect(
+      botModeSettingsSchema.parse({ automationEnabled: 'yes' as never }).automationEnabled,
+    ).toBe(false);
+    expect(
+      clampBotModeSettings({ ...DEFAULT_BOT_MODE_SETTINGS, automationEnabled: true })
+        .automationEnabled,
+    ).toBe(true);
   });
 
   it('reads a missing or unknown mode as Snipe, so no bot changes what it does on its own', () => {
@@ -478,6 +492,7 @@ describe('Bid mode settings (kept out of the account-synced bot settings)', () =
     } as never;
     expect(clampBotModeSettings(wild)).toEqual({
       mode: 'bid',
+      automationEnabled: false,
       bidding: {
         windowMinutes: BID_LIMITS.windowMinutes.min,
         maxActiveBids: BID_LIMITS.maxActiveBids.max,

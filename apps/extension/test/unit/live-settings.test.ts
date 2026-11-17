@@ -84,7 +84,7 @@ describe('applySettingsToEngine', () => {
     applySettingsToEngine({ governor, automation: autobuyer }, { ...settings, budgets: { maxCoinsPerSnipe: 200_000, sessionCoinBudget: 1_500 } });
     for (let i = 0; i < 5; i++) governor.allow({ kind: 'search' });
     const listing = (tradeId: string) => ({ resourceId: 1, tradeId, price: 1_000, summary: {} as never, ev: 1, netAtMedian: 1, probabilityOfSale: 1 });
-    await autobuyer.runCycle([listing('a'), listing('b')]);
+    await autobuyer.runCycle([listing('a'), listing('b')], 1_000_000);
     expect(buy).toHaveBeenCalledTimes(1);
   });
 });

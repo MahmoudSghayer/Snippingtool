@@ -668,6 +668,11 @@ export const botModeSettingsSchema = z
       })
       .strict()
       .prefault({}),
+    /** The market-buy automation (ranker-driven, with no per-search max of its
+     * own) is OFF unless the trader turns it on: unlike Snipe/Bid it never runs
+     * unasked, and even when on it never buys above the live search's max. Kept
+     * here (browser-local), not in the API-validated bot settings. */
+    automationEnabled: z.boolean().default(false).catch(false),
   })
   .strict();
 export type BotModeSettings = z.infer<typeof botModeSettingsSchema>;
@@ -683,6 +688,8 @@ export function clampBotModeSettings(m: BotModeSettings): BotModeSettings {
     Math.round(clampTo(bound, value, fallback));
   return {
     mode: m?.mode === 'bid' || m?.mode === 'gallery' ? m.mode : 'snipe',
+    // Strict boolean: anything but an explicit `true` leaves the automation off.
+    automationEnabled: m?.automationEnabled === true,
     bidding: {
       windowMinutes: whole(BID_LIMITS.windowMinutes, b.windowMinutes, d.windowMinutes),
       maxActiveBids: whole(BID_LIMITS.maxActiveBids, b.maxActiveBids, d.maxActiveBids),
