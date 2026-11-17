@@ -268,4 +268,19 @@ describe('BidBook', () => {
     expect(book.reconcile([watched('a', { tradeState: 'active', bidState: 'highest', expires: 0 })], NOW)).toEqual([]);
     expect(book.size()).toBe(1);
   });
+
+  it('never lets a stale (cached) watch read drag the current bid back down — the ratchet only climbs', () => {
+    const book = new BidBook();
+    // The bot has already been outbid up at 4,900 on this auction.
+    book.place(tracked('a', { state: 'outbid', amount: 4_900, currentBid: 4_900, maxBid: 6_000 }));
+    // EA's next watch list read lags and reports a LOWER current bid (its
+    // cache). A live auction's current bid only ever rises, so this must not
+    // drag the tracked bid back to 4,700 — doing so would make the bot re-bid
+    // 4,800 again instead of climbing one step past where it already is.
+    book.reconcile([watched('a', { bidState: 'outbid', currentBid: 4_700, expires: 60 })], NOW);
+    const bid = book.get('a')!;
+    expect(bid.currentBid).toBe(4_900);
+    // So the next bid goes one step ABOVE 4,900 (to 5,000), never back to 4,800.
+    expect(nextBid(bid)).toBe(5_000);
+  });
 });
