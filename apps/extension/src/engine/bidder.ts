@@ -225,7 +225,12 @@ export class BidBook {
       }
       bid.missing = 0;
       bid.startingBid = w.startingBid;
-      bid.currentBid = w.currentBid;
+      // An auction's current bid only ever rises. A read showing it lower is
+      // EA answering from its cache (lagging), and must never drag the bot's
+      // view back down: that would make a re-bid climb (one step past the last
+      // bid it lost), then the next read reset it, so the bot re-bids an amount
+      // it has already lost instead of going one step higher toward the max.
+      bid.currentBid = Math.max(bid.currentBid, w.currentBid);
       bid.buyNow = w.buyNowPrice;
       if (w.expires != null) {
         if (w.tradeState === 'active') {
