@@ -82,6 +82,7 @@ import {
   MIN_START_PRICE,
   botGovernorSettings,
   botRiskLevel,
+  breakEvenSalePrice,
   clampBotModeSettings,
   clampBotSettings,
   eaErrorCategory,
@@ -3790,10 +3791,20 @@ export class Sniper {
       basis = 'your fixed price';
     } else {
       const market = (await this.deps.marketPrice?.(m.resourceId, a.platform).catch(() => null)) ?? null;
-      if (!market) return notListed('no market price for this card (FUTBIN and Nova have none)');
-      price = plannedSalePrice(a, market.price)!;
-      const steps = a.steps === 0 ? '' : `, ${a.steps > 0 ? '+' : ''}${a.steps} step${Math.abs(a.steps) === 1 ? '' : 's'}`;
-      basis = `${market.source === 'futbin' ? 'FUTBIN' : 'Nova market'} price ${coins(market.price)}${steps}`;
+      if (market) {
+        price = plannedSalePrice(a, market.price)!;
+        const steps = a.steps === 0 ? '' : `, ${a.steps > 0 ? '+' : ''}${a.steps} step${Math.abs(a.steps) === 1 ? '' : 's'}`;
+        basis = `${market.source === 'futbin' ? 'FUTBIN' : 'Nova market'} price ${coins(market.price)}${steps}`;
+      } else if (m.buyNow > 0) {
+        // No market price anywhere (FUTBIN and Nova have none): rather than
+        // leave the won card unlisted, price it at the lowest grid price that
+        // still clears EA's tax over what it cost, so a thin-market card
+        // always goes up for sale and never sells for less than it cost.
+        price = breakEvenSalePrice(m.buyNow, EA_TAX);
+        basis = `no published market; priced to clear the ${coins(m.buyNow)} paid after tax`;
+      } else {
+        return notListed('no market price for this card (FUTBIN and Nova have none)');
+      }
     }
     if (a.noLoss && profitAfterTax(price, m.buyNow) < 0) {
       return notListed(`${coins(price)} would lose money after EA's 5% tax (bought for ${coins(m.buyNow)})`);

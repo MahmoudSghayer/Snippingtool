@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  breakEvenSalePrice,
   isHeavyLoss,
   MIN_SALE_PRICE,
   MIN_START_PRICE,
@@ -79,6 +80,35 @@ describe('parseSalePrice', () => {
     const result = parseSalePrice('lots');
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toBe('Enter a price like 60k, 1.2m or 60,000.');
+  });
+});
+
+describe('breakEvenSalePrice', () => {
+  it.each([
+    // buy -> break-even on EA's grid (after-tax proceeds cover the buy)
+    [250, 300], // 250/0.95 = 263 -> grid 250 nets 237 (short) -> 300 nets 285
+    [8_000, 8_500], // 8000/0.95 = 8421 -> grid 8400 nets 7980 (short) -> 8500 nets 8075
+    [20_000, 21_250], // 20000/0.95 = 21052 -> grid 21000 nets 19950 (short) -> 21250
+    [100_000, 106_000], // 100000/0.95 = 105263 -> grid 105000 nets 99750 (short) -> 106000
+  ])('the break-even sale over %i coins is %i', (buy, expected) => {
+    expect(breakEvenSalePrice(buy, 0.05)).toBe(expected);
+  });
+
+  it('never falls below the 200-coin minimum sale price', () => {
+    // 180/0.95 = 189, under EA's floor: the 200-coin minimum nets 190 >= 180.
+    expect(breakEvenSalePrice(180, 0.05)).toBe(MIN_SALE_PRICE);
+    expect(breakEvenSalePrice(1, 0.05)).toBe(MIN_SALE_PRICE);
+  });
+
+  it('always nets at least the buy price, and is the lowest grid price that does', () => {
+    for (const buy of [200, 500, 950, 1_000, 3_333, 9_990, 10_000, 49_750, 50_000, 123_456]) {
+      const price = breakEvenSalePrice(buy, 0.05);
+      expect(Math.floor(price * 0.95)).toBeGreaterThanOrEqual(buy);
+      if (price > MIN_SALE_PRICE) {
+        // one grid step lower would no longer cover the cost after tax
+        expect(Math.floor(stepPrice(price, -1) * 0.95)).toBeLessThan(buy);
+      }
+    }
   });
 });
 

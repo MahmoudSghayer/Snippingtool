@@ -1531,7 +1531,7 @@ describe('Sniper — auto-sell after a buy', () => {
     expect(listedLog(h)?.price).toBe(19_500);
   });
 
-  it('keeps the card when there is no market price for it', async () => {
+  it('lists at a break-even price when there is no market price for it', async () => {
     const h = setup({
       settings: autoSell({}),
       results: [[auction('t-a', 8_000)]],
@@ -1541,8 +1541,26 @@ describe('Sniper — auto-sell after a buy', () => {
     h.sniper.start();
     await h.done();
     await settled();
-    expect(h.lists).toEqual([]);
-    expect(notListed(h)?.message).toBe('not listed: no market price for this card (FUTBIN and Nova have none)');
+    // 8,000 / 0.95 climbs the grid to 8,500 (nets 8,075 after tax), bid one
+    // step under: the won card always goes up, never under what it cost.
+    expect(h.lists).toEqual([['t-a', 8_400, 8_500]]);
+    expect(listedLog(h)?.message).toBe('no published market; priced to clear the 8,000 coins paid after tax');
+  });
+
+  it('still lists the break-even price when "never sell at a loss" is on and no market is known', async () => {
+    const h = setup({
+      settings: autoSell({ noLoss: true }),
+      results: [[auction('t-a', 8_000)]],
+      marketPrice: async () => null,
+      maxSearches: 1,
+    });
+    h.sniper.start();
+    await h.done();
+    await settled();
+    // Break-even clears the tax over the 8,000 paid, so the no-loss guard
+    // never trips on it: the card lists rather than being held back.
+    expect(h.lists).toEqual([['t-a', 8_400, 8_500]]);
+    expect(notListed(h)).toBeUndefined();
   });
 
   it('never lists at a loss after EA\'s tax, unless told to', async () => {

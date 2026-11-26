@@ -88,6 +88,21 @@ export function stepPrice(price: number, steps: number): number {
   return p;
 }
 
+/** The lowest price on EA's grid whose proceeds, after EA's `tax` (0.05 is
+ * EA's cut), still cover `buyPrice` — so a card the bot won can always be
+ * listed, even when no market price is published for it, without ever selling
+ * for less than it cost. Climbs the grid a step at a time because rounding to
+ * the grid and EA flooring the tax can leave the first guess a hair short. */
+export function breakEvenSalePrice(buyPrice: number, tax: number): number {
+  let price = Math.max(MIN_SALE_PRICE, roundToPriceStep(buyPrice / (1 - tax)));
+  while (Math.floor(price * (1 - tax)) < buyPrice) {
+    const next = stepPrice(price, 1);
+    if (next === price) break; // at EA's price ceiling: can climb no further
+    price = next;
+  }
+  return price;
+}
+
 /** A sale that loses more than half of what the card cost: worth a second
  * look before recording, since it's usually a missing digit. */
 export function isHeavyLoss(buyPrice: number, netProfit: number): boolean {
